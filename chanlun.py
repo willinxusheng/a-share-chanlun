@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """缠论分析流水线：包含处理 → 分型 → 笔 → 中枢 → 背驰 → 买卖点 → 分类推演"""
 import json
+import os
 
 MIN_BI_PCT = 0.018       # 日线单笔最小幅度过滤
 MIN_BI_PCT_WEEK = 0.04   # 周线单笔最小幅度过滤
@@ -329,8 +330,9 @@ KNOWN_PIVOTS = {
 
 def known_pivot_capture(r):
     captured = []
-    bottom_dates = {r["merged"][b["end"]]["date"] for b in r["bis"] if b["dir"] == 1}
-    top_dates = {r["merged"][b["end"]]["date"] for b in r["bis"] if b["dir"] == -1}
+    # dir==1 的笔为 底->顶，终点落在“顶”；dir==-1 为 顶->底，终点落在“底”
+    top_dates = {r["merged"][b["end"]]["date"] for b in r["bis"] if b["dir"] == 1}
+    bottom_dates = {r["merged"][b["end"]]["date"] for b in r["bis"] if b["dir"] == -1}
     for d, (label, direction) in KNOWN_PIVOTS.items():
         pool = top_dates if direction == "top" else bottom_dates
         for pd in pool:
@@ -481,7 +483,8 @@ def backtest_signals(klines, result, horizons=(5, 10, 20)):
 
 
 if __name__ == "__main__":
-    with open("chanlun/data.json", encoding="utf-8") as f:
+    _base = os.path.dirname(os.path.abspath(__file__))
+    with open(os.path.join(_base, "data.json"), encoding="utf-8") as f:
         data = json.load(f)
     for sym, d in data.items():
         r = analyze(d["klines"])

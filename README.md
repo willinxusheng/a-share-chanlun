@@ -43,6 +43,8 @@ python fetch_data.py && python report.py   # 本地重建数据+报告
 
 仓库已配置 `.github/workflows/deploy.yml`：每次推送 `main` 分支，GitHub Actions 会自动拉取最新行情、生成报告并发布到 Pages。
 
+**每日自动更新**：workflow 另配置了定时任务，每个交易日**北京时间 16:00**（周一~周六，含调休补班交易日）自动重新抓取当日收盘行情、生成报告并发布——无需手动推代码，看板始终是最新一个交易日的数据。
+
 启用一次（仓库拥有者操作）：
 
 1. 打开 `https://github.com/willinxusheng/a-share-chanlun/settings/pages`

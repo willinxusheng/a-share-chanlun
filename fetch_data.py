@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
 """拉取 A 股主要指数日线+周线数据，含完整性校验与新浪交叉验证"""
 import json
+import os
 import urllib.request
+from datetime import datetime, timedelta
 
 SYMBOLS = {
     "sh000001": "上证指数",
@@ -11,9 +13,12 @@ SYMBOLS = {
     "sh000905": "中证500",
 }
 
-TX_URL = "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=%s,%s,2021-01-01,2026-12-31,1600,qfq"
+_END = (datetime.now() + timedelta(days=400)).strftime("%Y-%m-%d")
+TX_URL = ("https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=%s,%s,2021-01-01,"
+          + _END + ",1600,qfq")
 SINA_URL = "https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData?symbol=%s&scale=240&ma=no&datalen=5"
 UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+_BASE = os.path.dirname(os.path.abspath(__file__))
 
 
 def _get(url):
@@ -138,7 +143,7 @@ def main():
             name, len(day), day[0]["date"], day[-1]["date"], len(week),
             len(issues), ("%.3f%%" % dev) if dev is not None else "N/A",
             cc["n"], ("%.3f%%" % cc["max_dev"]) if cc["max_dev"] is not None else "N/A"))
-    with open("chanlun/data.json", "w", encoding="utf-8") as f:
+    with open(os.path.join(_BASE, "data.json"), "w", encoding="utf-8") as f:
         json.dump(result, f, ensure_ascii=False)
     print("saved -> chanlun/data.json")
 

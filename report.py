@@ -2,6 +2,7 @@
 """生成自包含 HTML 缠论分析报告（内嵌 SVG，浅色主题，涨红跌绿）v6
 新增：成交量面板、双法一致性、结构健康度、推演置信度、已知拐点捕捉、原则化推演"""
 import json
+import os
 from datetime import datetime
 from chanlun import analyze, backtest_signals, MIN_BI_PCT_WEEK, health_score, forecast_confidence, forward_vol
 
@@ -196,8 +197,8 @@ def navigator_svg(klines, sym):
   <rect id="sl-{sym}" x="0" y="0" width="0" height="{NAV_H}" fill="#cbd5e1" fill-opacity="0.55"/>
   <rect id="sr-{sym}" x="{W}" y="0" width="0" height="{NAV_H}" fill="#cbd5e1" fill-opacity="0.55"/>
   <rect id="wb-{sym}" x="0" y="0" width="{W}" height="{NAV_H}" fill="{BLUE}" fill-opacity="0.08" stroke="{BLUE}" stroke-width="1" style="cursor:grab"/>
-  <rect id="hl-{sym}" x="-4" y="0" width="8" height="{NAV_H}" fill="{BLUE}" rx="2" style="cursor:ew-resize"/>
-  <rect id="hr-{sym}" x="{W - 4}" y="0" width="8" height="{NAV_H}" fill="{BLUE}" rx="2" style="cursor:ew-resize"/>
+  <rect id="hl-{sym}" x="-7" y="0" width="14" height="{NAV_H}" fill="{BLUE}" rx="3" style="cursor:ew-resize"/>
+  <rect id="hr-{sym}" x="{W - 7}" y="0" width="14" height="{NAV_H}" fill="{BLUE}" rx="3" style="cursor:ew-resize"/>
 </svg>'''
 
 
@@ -212,7 +213,7 @@ function initNav(sym, W, H){
     sl.setAttribute('width',s*W);
     sr.setAttribute('x',e*W); sr.setAttribute('width',(1-e)*W);
     wb.setAttribute('x',s*W); wb.setAttribute('width',(e-s)*W);
-    hl.setAttribute('x',s*W-4); hr.setAttribute('x',e*W-4);
+    hl.setAttribute('x',s*W-7); hr.setAttribute('x',e*W-7);
   }
   function px(ev){ return ev.touches ? ev.touches[0].clientX : ev.clientX; }
   function down(m){ return function(ev){ mode=m; sx=px(ev); ss=s; se=e; ev.preventDefault(); }; }
@@ -291,9 +292,18 @@ def forecast_svg(klines, r, wcls, conf, sigma):
         alt_p = [(0, last), (0.25, mid), (0.5, zd * 1.01), (0.8, mid), (1.0, mid)]
         risk_p = [(0, last), (0.25, zd), (0.55, zd * 0.98), (1.0, zd * 0.94)]
 
-    # ---- 概率（基于级别共振 + 推演置信度）----
-    top_bc = any(b["type"] == "top" for b in r["beichi"] if b["bi_index"] >= len(r["bis"]) - 3)
-    p_main = 0.42 + (conf - 50) / 100 * 0.6 + (0.08 if aligned else -0.08) + (-0.18 if top_bc else 0)
+    # ---- 概率（以日线结构分类为锚 + 推演置信度 + 结论稳定性微调）----
+    # 先按结构分类给基准概率，再叠加置信度偏离与稳定性；避免对“背离/背驰”重复惩罚导致全部贴地板。
+    _base_p = {
+        "多头延续": 0.58,
+        "中枢震荡偏多": 0.50, "高位整理未破前高": 0.50,
+        "背驰见顶风险": 0.40, "中枢震荡偏空": 0.40, "弱势反弹": 0.36, "空头延续": 0.34,
+    }
+    p_main = _base_p.get(sc, 0.45)
+    p_main += (conf - 50) / 100 * 0.30
+    stab = (r.get("stability") or {}).get("stable", True)
+    if not stab:  # 结论对近 1 个月价格敏感 → 主路径概率下调、风险概率上升
+        p_main -= 0.04
     p_main = max(0.30, min(0.72, round(p_main, 2)))
     p_alt = 0.30
     p_risk = max(0.05, round(1 - p_main - p_alt, 2))
@@ -362,8 +372,9 @@ def forecast_svg(klines, r, wcls, conf, sigma):
     draw_path(main_p, RED, "none")
     draw_path(alt_p, "#94a3b8", "6,4")
     draw_path(risk_p, GREEN, "2,3")
-    # 图例（右下角投影区内，避开路径）
+    # 图例（投影区内，加半透明白底衬保证可读、不被路径压住）
     lx, ly = PAD_L + hist_w + 10, H - 70
+    p.append(f'<rect x="{lx - 4}" y="{ly - 20}" width="300" height="82" rx="6" fill="#ffffff" fill-opacity="0.82" stroke="#e2e8f0"/>')
     p.append(f'<text x="{lx}" y="{ly - 14}" font-size="11" font-weight="700" fill="{INK}">路径概率 / 置信带</text>')
     p.append(f'<polygon points="{lx},{ly - 3} {lx + 16},{ly - 3} {lx + 16},{ly + 9} {lx},{ly + 9}" fill="{RED}" fill-opacity="0.13" stroke="none"/>')
     p.append(f'<text x="{lx + 22}" y="{ly + 4}" font-size="11" fill="{INK}">置信锥 ±1σ/±2σ（σ={sigma*100:.1f}%）</text>')
@@ -663,7 +674,8 @@ def annual_table(data):
 
 
 def main():
-    with open("chanlun/data.json", encoding="utf-8") as f:
+    _base = os.path.dirname(os.path.abspath(__file__))
+    with open(os.path.join(_base, "data.json"), encoding="utf-8") as f:
         data = json.load(f)
 
     results = {sym: analyze(d["klines"]) for sym, d in data.items()}
@@ -945,7 +957,7 @@ function initTip(sym){{
 </body>
 </html>"""
 
-    with open("chanlun/report.html", "w", encoding="utf-8") as f:
+    with open(os.path.join(_base, "report.html"), "w", encoding="utf-8") as f:
         f.write(html)
     print("saved -> chanlun/report.html")
 
