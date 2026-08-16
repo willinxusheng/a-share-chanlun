@@ -1,0 +1,15 @@
+# ===== 生成产物：各机器本地重建，不入库（避免多机冲突）=====
+data.json
+report.html
+
+# ===== Python 缓存 =====
+__pycache__/
+*.pyc
+*.pyo
+
+# ===== 编辑器/系统 =====
+.DS_Store
+Thumbs.db
+
+# ===== WorkBuddy 工作区元数据（不入仓）=====
+.workbuddy/
