@@ -39,6 +39,21 @@ python fetch_data.py && python report.py   # 本地重建数据+报告
 - 报告内容每台电脑用各自最新行情生成，**互不覆盖、互不影响**。
 - 唯一可能的冲突只发生在多人同时改 `.py` 源码时，正常 `pull` 后再改即可规避。
 
+## 在线网页版（GitHub Pages，无需跑脚本）
+
+仓库已配置 `.github/workflows/deploy.yml`：每次推送 `main` 分支，GitHub Actions 会自动拉取最新行情、生成报告并发布到 Pages。
+
+启用一次（仓库拥有者操作）：
+
+1. 打开 `https://github.com/willinxusheng/a-share-chanlun/settings/pages`
+2. Source 选择 **Deploy from a branch** → 分支选 **gh-pages**（Actions 会自动建）→ Save
+   - 或 Source 选 **GitHub Actions**（推荐，与本 workflow 的 `deploy-pages` 动作配套）
+3. 稍等 1~2 分钟，访问 `https://willinxusheng.github.io/a-share-chanlun/`
+
+此后：在任一电脑改完 `.py` 并 `git push`，网页版会自动更新，手机直接看。
+
+> 注意：CI 在境外 runner 上运行，主数据源为腾讯公开行情接口（通常可达）；若某次构建因网络失败变红，可先在能联网的电脑本地生成 `report.html`，再手动提交到 `gh-pages` 分支兜底。
+
 ## 文件说明
 
 | 文件 | 作用 | 是否入库 |
