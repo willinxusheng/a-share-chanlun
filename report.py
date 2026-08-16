@@ -692,7 +692,7 @@ def _interp(path, f):
     return path[-1][1]
 
 
-def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_paths=None):
+def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_paths=None, breadth_score=None):
     closes = [k["close"] for k in klines]
     n = len(closes)
     tail = closes[-120:]
@@ -715,28 +715,42 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
     comp = r["bis"][-2] if len(r["bis"]) >= 2 else r["bis"][-1]
     move = max(abs(comp["end_price"] / comp["start_price"] - 1), 0.03)
 
-    # ---- 趋势外推（独立交叉验证方法）：对最近 min(horizon,90) 日收盘做对数线性回归，
-    #      外推 horizon 日得到趋势目标位。它与结构主路径是否吻合，本身是预测可信度的硬证据。----
+    # ---- 趋势外推（独立交叉验证·多窗口 #预测优化·A）：对 20/60/120 日三窗口各做对数线性回归，
+    #      以「多窗口斜率方向一致性」判定趋势是否确立（单一窗口易被近期急拉带偏）；主窗口(≤90日)
+    #      外推终点仍用于推演图叠加。并以主窗口「前/后半段斜率差」近似加速度衰减（背驰量化佐证）。----
+    def _loglin(window):
+        n = len(window)
+        if n < 10:
+            return 0.0, 0.0, None
+        xs = list(range(n))
+        ys = [math.log(c) for c in window]
+        mx = sum(xs) / n; my = sum(ys) / n
+        sxx = sum((x - mx) ** 2 for x in xs)
+        sxy = sum((x - mx) * (y - my) for x, y in zip(xs, ys))
+        slope = sxy / sxx if sxx else 0.0
+        yhat = [my + slope * (x - mx) for x in xs]
+        ss_res = sum((y - yh) ** 2 for y, yh in zip(ys, yhat))
+        ss_tot = sum((y - my) ** 2 for y in ys)
+        r2 = 1 - ss_res / ss_tot if ss_tot else 0.0
+        return slope, r2, math.exp(slope * horizon)
+    _win_sizes = [20, 60, 120]
+    _wins = [closes[-w:] for w in _win_sizes if len(closes) >= w]
+    _slopes = []
+    for w in _wins:
+        sl, _r2w, _ = _loglin(w)
+        _slopes.append(sl)
+    # 主窗口（保持推演图视觉连续）：最近 min(horizon,90) 日
     _tw = closes[-min(horizon, 90):]
-    _n = len(_tw)
-    _r2 = 0.0
-    if _n >= 10:
-        _xs = list(range(_n))
-        _ys = [math.log(c) for c in _tw]
-        _mx = sum(_xs) / _n
-        _my = sum(_ys) / _n
-        _sxx = sum((x - _mx) ** 2 for x in _xs)
-        _sxy = sum((x - _mx) * (y - _my) for x, y in zip(_xs, _ys))
-        _slope = _sxy / _sxx if _sxx else 0.0
-        # R²：对数线性回归对近 horizon 日收盘的解释力，是"独立验证法"自身可靠度的硬指标
-        _yhat = [_my + _slope * (x - _mx) for x in _xs]
-        _ss_res = sum((y - yh) ** 2 for y, yh in zip(_ys, _yhat))
-        _ss_tot = sum((y - _my) ** 2 for y in _ys)
-        _r2 = 1 - _ss_res / _ss_tot if _ss_tot else 0.0
-        trend_end = last * math.exp(_slope * horizon)
-    else:
-        _slope = 0.0
-        trend_end = last * (1 + move)
+    _main_slope, _r2, trend_end = _loglin(_tw)
+    # 多窗口方向共识：所有可用窗口斜率同号（全上行/全下行）
+    _agree_dir = (len(_slopes) >= 2) and (all(s > 0 for s in _slopes) or all(s < 0 for s in _slopes))
+    # 加速度衰减（主窗口前/后半段斜率差）：上行情景后半段斜率明显低于前半段 → 涨速衰减（背驰信号）
+    _decay = 0.0
+    if len(_tw) >= 12:
+        _h = len(_tw) // 2
+        _sla, _, _ = _loglin(_tw[:_h])
+        _slb, _, _ = _loglin(_tw[_h:])
+        _decay = _slb - _sla
 
     # ---- 三路径端点（锚定 ZG/ZD/现价/实测幅度）----
     if sc == "多头延续":
@@ -768,11 +782,16 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
         risk_p = [(0, last), (0.3, zd * 1.01), (1.0, zd * 0.99)]
 
     # 趋势外推与主路径（中点）吻合度：两独立方法指向同一区间 → 预测可信度更高。
-    # 关键约束：拟合优度 R² 必须达标（≥0.15）才授予共振增益——否则低拟合度下"吻合"纯属
-    # 巧合，据此 +2% 概率属虚增置信度（如上证 R²≈0.08 时趋势线几乎是噪声，不应被当作验证）。
+    # 关键约束：拟合优度 R² 须达标（≥0.25，已收紧 #预测优化·A）且多窗口方向共识，才授予共振增益——
+    # 否则低拟合度或方向分歧下"吻合"纯属巧合，据此 +2% 概率属虚增置信度。
     _main_mid = (main_p[0][1] + main_p[-1][1]) / 2
-    trend_agree = bool(_main_mid and abs(trend_end - _main_mid) / _main_mid < 0.06 and _r2 >= 0.15)
-    trend_weak = _r2 < 0.15
+    _R2_TH = 0.25
+    trend_agree = bool(_main_mid and abs(trend_end - _main_mid) / _main_mid < 0.06
+                       and _r2 >= _R2_TH and _agree_dir)
+    trend_weak = _r2 < _R2_TH
+    # 趋势衰减提示（多窗口上行共识但主窗口加速度衰减）：背驰可能的量化信号，
+    # 共振增益不额外授予（不直接改结构路径几何）
+    _trend_decaying = bool(_agree_dir and _main_slope > 0 and _decay < -1e-5 and _r2 > 0.3)
 
     # 结构存续概率（锥模型）：用与置信锥同款 σ（horizon 日前向收益波动）推导
     # 「期末价 ≥ ZD」的概率 = Φ(ln(现价/ZD) / σ)，μ 取 0（随机游走中性假设）。
@@ -822,7 +841,7 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
     _w = emp_n / (emp_n + 12.0) if (emp_wr is not None and emp_n >= 5) else 0.0
     _dir = (bt_paths or {}).get("by_dir", {}).get(_main_dir) if _main_dir != 0 else None
     _dir_n = _dir.get("n", 0.0) if _dir else 0.0
-    _w_dir = _dir_n / (_dir_n + 12.0) if _dir_n >= 8 else 0.0
+    _w_dir = min(0.85, _dir_n / (_dir_n + 12.0) * 1.6) if _dir_n >= 8 else 0.0  # 提高命中率锚权重(#预测优化·B)
     _base = _base_p.get(sc, 0.45)
     if _w_dir > 0:
         _dir_main = _dir["main"] / _dir_n
@@ -847,7 +866,7 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
     elif _level == "边缘":
         p_main -= 0.02
     # 共振增益：多种独立方法指向同一结论 → 显式提升主路径概率（仍在夹逼范围内）
-    if trend_agree:                              # 趋势外推（对数回归）与主路径吻合
+    if trend_agree and not _trend_decaying:     # 趋势外推吻合且未现加速度衰减
         p_main += 0.02
     if r["classify"].get("interval_nesting"):    # 日×周区间套共振（已修复生效）
         p_main += 0.03
@@ -896,6 +915,19 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
             p_main -= 0.01
         elif _bear and _min_ar >= 0.92:
             p_main += 0.01
+    # 量能量化强度（#预测优化·F）：背驰段量能较前段中位数萎缩(vol_ratio<1)→背离更可信；
+    # 量增(vol_ratio>1.15)→背离可能不成立（或中继），反向弱化。仅小幅修正。
+    _vr = [b.get("vol_ratio") for b in r.get("beichi", []) if b.get("vol_ratio") is not None]
+    if _vr:
+        _med_vr = sorted(_vr)[len(_vr) // 2]
+        if _bull and _med_vr < 0.85:
+            p_main += 0.01
+        elif _bear and _med_vr < 0.85:
+            p_main -= 0.01
+        elif _bull and _med_vr > 1.15:
+            p_main -= 0.01
+        elif _bear and _med_vr > 1.15:
+            p_main += 0.01
     # 乖离率（均值回归）微调（#22·提升预测准确性）：现价相对 MA20 乖离过大 → 短线均值回归压力。
     # 超买(涨多了)：多头情景主路径回落概率上升(-0.03)、空头情景反抽/反弹更易(+0.03)；
     # 超卖(跌多了)：反向。与缠论本级别转折信号互为印证，仅在夹逼[0.30,0.72]内小幅修正。
@@ -912,6 +944,20 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
                 p_main += 0.03
             elif _bear:
                 p_main -= 0.03
+    # 命中率校准门控（#预测优化·B·去硬编码核心）：以上「结构微调」均为二阶修正，最终主路径概率
+    # 被路径历史命中率(_dir_main)夹逼——命中率低的情景不允许被微调抬到高位，命中率高的允许上探，
+    # 使概率由经验真值主导而非拍脑袋微调。
+    if _w_dir > 0:
+        _cap = min(0.72, 0.42 + _dir_main * 0.42)
+        _floor = max(0.30, _dir_main * 0.55)
+        p_main = max(_floor, min(p_main, _cap))
+    # 市场广度方向门控（#预测优化·D）：系统性环境真正约束结构推演，不止装饰性微调。
+    # 高层级(月/周加权)明确偏空时，买点主路径上限压 0.50；偏多反向放开（不重复增益，避免双计）。
+    if breadth_score is not None:
+        if _bull and breadth_score <= -0.20:
+            p_main = min(p_main, 0.50)
+        elif _bear and breadth_score >= 0.20:
+            p_main = min(p_main, 0.50)
     p_main = max(0.30, min(0.72, round(p_main, 2)))
     # 概率归一化（修复口径错误）：此前 p_alt 写死 0.30、p_risk 触底 0.05，主路径被夹逼到
     # 高位时三者之和会 >100%（如上证强多头+高置信时 SUM=101%）。现改为从「主路径之外余量」
@@ -1075,7 +1121,7 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
     # 图例改为图表下方的 HTML 图例条（不再压住推演路径与时间轴）
     legend_html = (
         f'<div class="fc-legend">'
-        f'<span><i class="ln" style="background:{RED}"></i>主路径：{main_lab} ≈ {p_main * 100:.0f}%</span>'
+        f'<span><i class="ln" style="background:{RED}"></i>{main_lab} ≈ {p_main * 100:.0f}%</span>'
         f'<span><i class="ln ln-dash" style="background:#94a3b8"></i>次路径：中枢内震荡 ≈ {p_alt * 100:.0f}%</span>'
         f'<span><i class="ln ln-dot" style="background:{GREEN}"></i>风险路径：跌破ZD转空 ≈ {p_risk * 100:.0f}%</span>'
         f'<span><i class="ln ln-band"></i>置信锥 ±1σ/±2σ（σ={sigma * 100:.1f}%）</span>'
@@ -1126,7 +1172,7 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
         b1l = med - med * sigma * math.sqrt(f) * 1
         b2u = med + med * sigma * math.sqrt(f) * 2
         b2l = med - med * sigma * math.sqrt(f) * 2
-        trend = round(last * math.exp(_slope * kk), 2)
+        trend = round(last * math.exp(_main_slope * kk), 2)
         proj.append({"f": round(f, 3), "tplus": kk, "date": dt,
                      "main": round(med, 2), "alt": round(alt, 2), "risk": round(risk, 2),
                      "trend": trend,
@@ -1507,7 +1553,10 @@ def robustness_table(robust, data):
     rows = []
     for sym, rb in robust.items():
         name = data[sym]["name"]
-        early, recent, split = rb["early"], rb["recent"], rb["split"]
+        early, recent, _split_t = rb["early"], rb["recent"], rb["split"]
+        split = "多切分(" + "/".join(str(s[:4]) for s in _split_t) + ")" if isinstance(_split_t, (tuple, list)) else _split_t
+        wf = rb.get("walk_forward", {})
+        wf_decay = "%+.0fpt" % (wf.get("decay", 0) * 100) if wf else "—"
 
         def _pick(d, h=20):
             st = d.get("一类买", {}).get(h) or d.get("三类买", {}).get(h)
@@ -1536,12 +1585,13 @@ def robustness_table(robust, data):
           <td class="tac">{_fmt(em)}</td>
           <td class="tac">{_fmt(rm)}</td>
           <td class="tac">{diff_txt}</td>
+          <td class="tac">{wf_decay}</td>
           <td>{verdict}</td>
         </tr>""")
     _tbl = """<table class="tbl">
-      <thead><tr><th>指数</th><th>早年买方信号胜率(均收益) h=20</th><th>近两年买方信号胜率(均收益) h=20</th><th>变化</th><th>样本外稳健性</th></tr></thead>
+      <thead><tr><th>指数</th><th>早年买方信号胜率(均收益) h=20</th><th>近两年买方信号胜率(均收益) h=20</th><th>变化</th><th>滚动窗口衰减*</th><th>样本外稳健性</th></tr></thead>
       <tbody>%s</tbody></table>
-      <p style="font-size:12px;color:#64748b;margin-top:8px">按 {SPLIT} 切分「早年 / 近两年」买方信号（一类买·三类买，持有 20 日）胜率与均收益对比。近两年显著下滑(≥15pt)提示过拟合风险；持平/更高则样本外稳定。不构成投资建议。</p>""".replace("{SPLIT}", split)
+      <p style="font-size:12px;color:#64748b;margin-top:8px">按 {SPLIT} 切分「早年 / 近两年」买方信号（一类买·三类买，持有 20 日）胜率与均收益对比。近两年显著下滑(≥15pt)提示过拟合风险；持平/更高则样本外稳定。*「滚动窗口衰减」=多个切分点(2022/2023/2024)聚合的两年 vs 早年胜率差均值，比单一切分更稳，刻画样本外稳健性。不构成投资建议。</p>""".replace("{SPLIT}", split)
     return _tbl % "".join(rows)
 
 
@@ -1620,7 +1670,9 @@ def main():
     results_month = {sym: analyze(d["month_klines"], MIN_BI_PCT_MONTH) for sym, d in data.items()}
     backtests = {sym: backtest_signals(d["klines"], results[sym], exclude_last=True) for sym, d in data.items()}
     # 样本外稳健性检验：按 2024-01-01 切分早年/近两年，检测校准过拟合
-    robust = {sym: backtest_robustness(d["klines"], results[sym], split="2024-01-01") for sym, d in data.items()}
+    robust = {sym: backtest_robustness(d["klines"], results[sym],
+                                        splits=("2022-01-01", "2023-01-01", "2024-01-01"))
+              for sym, d in data.items()}
     # 跨指数市场广度（系统性环境）：日/周/月三级聚合，作为全市场对齐度反馈进推演置信度
     _daily_sc = [results[s]["classify"]["scenario"] for s in data]
     _week_sc = [results_week[s]["classify"]["scenario"] for s in data]
@@ -1715,7 +1767,7 @@ def main():
         cls = r["classify"]
         sc_color = SCENARIO_COLOR.get(cls["scenario"], BLUE)
         w_color = SCENARIO_COLOR.get(wcls["scenario"], BLUE)
-        fs_svg, fs_note, fs_probs, fs_legend, fc_data = forecast_svg(d["klines"], r, wcls, conf, sigma, sym, horizon, backtests[sym], paths_bt[sym])
+        fs_svg, fs_note, fs_probs, fs_legend, fc_data = forecast_svg(d["klines"], r, wcls, conf, sigma, sym, horizon, backtests[sym], paths_bt[sym], breadth_score=bd["composite"]["score"])
         div_txt = ('⚠️ 周线向下笔运行中，以上路径的兑现以周线底分型确认为前提；若周线续创新低，风险路径概率上升。'
                    if cls.get("last_bi_dir") != wcls.get("last_bi_dir")
                    else "日周级别共振，主路径置信度较高。")

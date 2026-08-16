@@ -340,7 +340,7 @@ def find_gaps(klines, min_gap=0.003):
 
 
 # ---------- 6. 买卖点 ----------
-def find_signals(bis, zss, beichis):
+def find_signals(bis, zss, beichis, klines=None, merged=None):
     """买卖点体系（缠论标准定义）：
     一类：背驰拐点（底背驰=买，顶背驰=卖）。
     二类：一类之后的次低点/次高点折返——二类买=一类买之后向下折返笔末端价 > 一类买价
@@ -443,10 +443,14 @@ def find_signals(bis, zss, beichis):
             else:
                 stop = prev_lo * 0.99 if prev_lo < price else price * 0.97
             # 目标：近程摆动高点优先；仅当最近中枢上沿 ZG 在合理距离内(≤现价20%)才纳入，
-            # 避免锚到多年极值高位。再对风险做 ≤6 倍封顶，保证 R:R 落在可信区间。
+            # 避免锚到多年极值高位；再叠加「中枢高度×0.618」斐波扩展作更高目标候选（#预测优化·C），
+            # 最终受 ≤6 倍 R:R 封顶约束。
             tgt = max(price * 1.06, prev_hi)
             if z_prev and z_prev["zg"] <= price * 1.20:
                 tgt = max(tgt, z_prev["zg"])
+            if z_prev:
+                _zh = z_prev["zg"] - z_prev["zd"]
+                tgt = max(tgt, z_prev["zg"] + _zh * 0.618 * 0.9)
             target = tgt
         else:  # 卖点
             if "三类" in s["kind"] and z_prev:
@@ -456,7 +460,25 @@ def find_signals(bis, zss, beichis):
             tgt = min(price * 0.94, prev_lo)
             if z_prev and z_prev["zd"] >= price * 0.80:
                 tgt = min(tgt, z_prev["zd"])
+            if z_prev:
+                _zh = z_prev["zg"] - z_prev["zd"]
+                tgt = min(tgt, z_prev["zd"] - _zh * 0.618 * 0.9)
             target = tgt
+        # 波动率自适应止损（#预测优化·C）：叠加 1.5×ATR(14) 缓冲，避免窄幅震荡被毛刺扫损。
+        # 仅当 klines/merged 传入且笔末索引足够才启用，否则退回结构止损。买点取更靠下(更宽松)、
+        # 卖点取更靠上(更宽松)，使止损不被近期噪声击穿却不过度远离现价。
+        if klines is not None and merged is not None:
+            _e = merged[bj["end"]]["idx_end"]
+            if _e >= 13:
+                _trs = []
+                for _j in range(_e - 13, _e + 1):
+                    _h, _l, _c0 = klines[_j]["high"], klines[_j]["low"], klines[_j - 1]["close"]
+                    _trs.append(max(_h - _l, abs(_h - _c0), abs(_l - _c0)))
+                _atr = sum(_trs) / 14.0
+                if s["dir"] == 1:
+                    stop = min(stop, price - 1.5 * _atr)
+                else:
+                    stop = max(stop, price + 1.5 * _atr)
         risk = abs(price - stop)
         # R:R 封顶（#29·修复失真）：折算目标不得使风险收益比超过 _RR_CAP，
         # 超出部分为多年极值噪声，对交易计划无意义且严重误导（此前 16~31 倍）。
@@ -1218,8 +1240,12 @@ def analyze(klines, min_bi_pct=MIN_BI_PCT, with_stability=True):
         i = bc["bi_index"]
         d = bis[i]["dir"]
         med = _vol_med.get(d, 0)
-        bc["vol_confirm"] = bool(med > 0 and _bi_vol(bis[i]) < med * 0.92)
-    signals = find_signals(bis_done, zss, beichis)
+        _v = _bi_vol(bis[i])
+        bc["vol_confirm"] = bool(med > 0 and _v < med * 0.92)
+        # 量能量化（#预测优化·F）：背驰段量能较前段中位数萎缩百分比的倒数——量缩(比值<1)背驰更可信、
+        # 量增(比值>1)提示背离可能不成立（或为中继）。反馈进概率合成的背驰强度修正。
+        bc["vol_ratio"] = round(_v / med, 3) if med > 0 else None
+    signals = find_signals(bis_done, zss, beichis, klines, merged)
     segments = build_segments(bis, zss)
     seg_beichi = find_beichi_segment(segments, hist, merged)
     ma = ma_alignment(closes) if len(closes) >= 260 else None
@@ -1288,11 +1314,14 @@ def backtest_signals(klines, result, horizons=(5, 10, 20, 60), exclude_last=Fals
 
 
 # ---------- 8b. 样本外稳健性检验 ----------
-def backtest_robustness(klines, result, split="2024-01-01", horizons=(10, 20, 60), exclude_last=True):
-    """样本外稳健性检验：把买卖点信号按 split 日期分为「早年(2021~split前)」与
-    「近两年(split起)」两段，分别统计买方信号（一类买/三类买）的胜负率与平均收益，
-    对比衰减程度。若近两年胜率显著低于早年，提示校准可能过拟合历史样本；
-    若持平或更高，提示样本外稳定。返回 {"early": {...}, "recent": {...}, "split": ...}。"""
+def backtest_robustness(klines, result, splits=("2022-01-01", "2023-01-01", "2024-01-01"),
+                        horizons=(10, 20, 60), exclude_last=True):
+    """样本外稳健性检验（滚动 walk-forward）：用多个切分点分别把买卖点信号分为「早年」与
+    「近两年」两段，各自统计买方信号（一类买/三类买）的胜负率与平均收益，再跨切分点聚合取均值，
+    降低单一切分偶然性导致的方差。若近两年平均胜率显著低于早年，提示校准可能过拟合历史样本；
+    若持平或更高，提示样本外稳定。
+    返回 {"early": {...}, "recent": {...}, "split": splits, "walk_forward": {splits, early_rate, recent_rate, decay}}。
+    early/recent 结构与原单切分兼容（供 robustness_table 直接渲染）。"""
     merged, bis = result["merged"], result["bis"]
     n = len(klines)
     by_kind = {}
@@ -1319,18 +1348,40 @@ def backtest_robustness(klines, result, split="2024-01-01", horizons=(10, 20, 60
                 st["n"] += 1
                 st["win"] += 1 if win else 0
                 st["sum"] += ret
+        # 返回累加结构 {n, win, sum}，由 _finalize 在跨切分聚合后统一折算 win_rate/avg_ret，
+        # 使多切分聚合时按样本量正确加权（而非对单 split 的胜率做简单平均）。
+        return agg
+
+    def _merge(dst, src):
+        for k, hs in src.items():
+            for h, st in hs.items():
+                d = dst.setdefault(k, {}).setdefault(h, {"n": 0, "win": 0, "sum": 0.0})
+                d["n"] += st["n"]; d["win"] += st["win"]; d["sum"] += st["sum"]
+
+    early_acc, recent_acc = {}, {}
+    for split in splits:
+        samples_all = [(k, i, d, dt) for k in by_kind for (i, d, dt) in by_kind[k]]
+        _merge(early_acc, calc([s for s in samples_all if s[3] < split]))
+        _merge(recent_acc, calc([s for s in samples_all if s[3] >= split]))
+
+    def _finalize(acc):
         out = {}
-        for k, hs in agg.items():
+        for k, hs in acc.items():
             out[k] = {h: {"n": st["n"],
                           "win_rate": st["win"] / st["n"] if st["n"] else 0,
                           "avg_ret": st["sum"] / st["n"] if st["n"] else 0}
                       for h, st in hs.items()}
         return out
+    early = _finalize(early_acc)
+    recent = _finalize(recent_acc)
 
-    samples_all = [(k, i, d, dt) for k in by_kind for (i, d, dt) in by_kind[k]]
-    early = calc([s for s in samples_all if s[3] < split])
-    recent = calc([s for s in samples_all if s[3] >= split])
-    return {"early": early, "recent": recent, "split": split}
+    def _rate(d):
+        rs = [st["win_rate"] for k, hs in d.items() for h, st in hs.items() if st["n"] > 0]
+        return sum(rs) / len(rs) if rs else 0.0
+    _er, _rr = _rate(early), _rate(recent)
+    wf = {"splits": list(splits), "early_rate": round(_er, 3),
+          "recent_rate": round(_rr, 3), "decay": round(_rr - _er, 3)}
+    return {"early": early, "recent": recent, "split": splits, "walk_forward": wf}
 
 
 if __name__ == "__main__":
