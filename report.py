@@ -1836,8 +1836,8 @@ def main():
   .legend span {{ margin-right: 16px; white-space: nowrap; }}
   i.dot {{ display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }}
   h2.sec {{ font-size: 19px; margin: 26px 0 12px; padding-left: 12px; border-left: 4px solid {BLUE}; line-height: 1.3; }}
-  nav.toc {{ position: sticky; top: 8px; z-index: 50; background: rgba(255,255,255,0.98); backdrop-filter: blur(8px); border: 1px solid #e2e8f0; border-radius: 999px; padding: 6px 10px; margin: 18px auto 24px; display: flex; flex-wrap: wrap; justify-content: center; gap: 4px; font-size: 13px; box-shadow: 0 4px 14px rgba(15,23,42,0.06); width: fit-content; max-width: min(720px, calc(100% - 24px)); }}
-  nav.toc a {{ color: #475569; text-decoration: none; padding: 6px 12px; border-radius: 999px; font-weight: 500; transition: all .15s ease; white-space: nowrap; display: inline-flex; align-items: center; }}
+  nav.toc {{ position: sticky; top: 8px; z-index: 50; background: rgba(255,255,255,0.98); backdrop-filter: blur(8px); border: 1px solid #e2e8f0; border-radius: 999px; padding: 6px 10px; margin: 18px 0 24px; display: flex; flex-wrap: wrap; justify-content: center; gap: 4px; font-size: 13px; box-shadow: 0 4px 14px rgba(15,23,42,0.06); width: 100%; max-width: 100%; }}
+  nav.toc a {{ color: #475569; text-decoration: none; padding: 6px 12px; border-radius: 999px; font-weight: 500; transition: all .15s ease; white-space: nowrap; display: inline-flex; align-items: center; flex: 1; justify-content: center; }}
   nav.toc a:hover {{ background: #f1f5f9; color: #1e293b; }}
   nav.toc a.active {{ background: {BLUE}; color: #fff; box-shadow: 0 2px 8px rgba(43,108,176,0.25); }}
   nav.toc a .num {{ display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 50%; background: rgba(0,0,0,0.05); font-size: 11px; font-weight: 600; margin-right: 7px; color: #64748b; transition: all .15s ease; }}
@@ -1907,7 +1907,7 @@ def main():
     h2.sec, .panel h2 {{ font-size: 16px; }}
     .tbl {{ font-size: 12px; min-width: 640px; }}
     .tbl th, .tbl td {{ padding: 7px 8px; }}
-    nav.toc {{ font-size: 12px; padding: 5px 7px; gap: 3px; border-radius: 14px; margin: 12px auto 18px; }}
+    nav.toc {{ font-size: 12px; padding: 5px 7px; gap: 3px; border-radius: 14px; margin: 12px 0 18px; }}
     nav.toc a {{ padding: 5px 8px; }}
     nav.toc a .num {{ width: 16px; height: 16px; font-size: 10px; margin-right: 4px; }}
     .legend {{ font-size: 11px; }}
