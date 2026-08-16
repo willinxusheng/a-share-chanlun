@@ -111,6 +111,13 @@ def chart_svg(klines, r, sym):
         color = RED if b["dir"] == 1 else GREEN
         p.append(f'<line x1="{x0:.1f}" y1="{y(b["start_price"]):.1f}" x2="{x1:.1f}" y2="{y(b["end_price"]):.1f}" stroke="{color}" stroke-width="1.8"/>')
 
+    # 笔端点（分型转折点）圆点，便于核对结构
+    for b in bis:
+        xxe = x(merged[b["end"]]["idx_end"])
+        yye = y(b["end_price"])
+        col = RED if b["dir"] == 1 else GREEN
+        p.append(f'<circle cx="{xxe:.1f}" cy="{yye:.1f}" r="2.6" fill="{col}" stroke="#ffffff" stroke-width="0.8"/>')
+
     # 买卖点信号（近 3 年内的才标，避免过密）
     cutoff = n - 750
     for s in r["signals"]:
@@ -131,8 +138,8 @@ def chart_svg(klines, r, sym):
     yy = y(last_c)
     lcolor = RED if closes[-1] >= closes[-2] else GREEN
     p.append(f'<line x1="{PAD_L}" y1="{yy:.1f}" x2="{W - PAD_R}" y2="{yy:.1f}" stroke="{lcolor}" stroke-width="1" stroke-dasharray="2,3" stroke-opacity="0.8"/>')
-    p.append(f'<rect x="{W - PAD_R + 2}" y="{yy - 9:.1f}" width="72" height="16" rx="3" fill="{lcolor}"/>')
-    p.append(f'<text x="{W - PAD_R + 38}" y="{yy + 3:.1f}" font-size="11" fill="#ffffff" text-anchor="middle">{last_c:.2f}</text>')
+    p.append(f'<rect x="{PAD_L + plot_w - 74}" y="{yy - 9:.1f}" width="72" height="16" rx="3" fill="{lcolor}" stroke="#ffffff" stroke-width="0.8"/>')
+    p.append(f'<text x="{PAD_L + plot_w - 38}" y="{yy + 3:.1f}" font-size="11" fill="#ffffff" text-anchor="middle">{last_c:.2f}</text>')
 
     # ===== 成交量副图 =====
     vmax = max((k["volume"] for k in klines), default=1) or 1
@@ -252,7 +259,7 @@ def _interp(path, f):
     return path[-1][1]
 
 
-def forecast_svg(klines, r, wcls, conf, sigma):
+def forecast_svg(klines, r, wcls, conf, sigma, sym):
     closes = [k["close"] for k in klines]
     n = len(closes)
     tail = closes[-120:]
@@ -281,16 +288,22 @@ def forecast_svg(klines, r, wcls, conf, sigma):
         main_lab = "主路径：震荡偏多（试ZG-回落-突破）"
         alt_p = [(0, last), (0.25, mid), (0.5, zd * 1.01), (0.8, mid), (1.0, mid)]
         risk_p = [(0, last), (0.25, zd), (0.55, zd * 0.98), (1.0, zd * 0.94)]
+    elif sc == "背驰见底机会":
+        main_p = [(0, last), (0.2, mid), (0.5, zg * 0.99), (1.0, zg * 1.02)]
+        main_lab = "主路径：底背驰反弹（向中枢上沿回升）"
+        alt_p = [(0, last), (0.3, mid), (1.0, mid)]
+        risk_p = [(0, last), (0.25, zd * 0.99), (1.0, zd * 0.93)]
     elif sc in ("背驰见顶风险", "中枢震荡偏空", "弱势反弹", "空头延续"):
         main_p = [(0, last), (0.2, zg), (0.5, mid), (1.0, mid * 0.99)]
         main_lab = "主路径：回落中枢震荡"
         alt_p = [(0, last), (0.3, zd * 1.01), (1.0, zd * 0.98)]
         risk_p = [(0, last), (0.25, zd * 0.99), (1.0, zd * 0.92)]
     else:
-        main_p = [(0, last), (0.2, zg * 1.004), (0.45, mid), (0.7, zg), (1.0, zg * 1.03)]
-        main_lab = "主路径：震荡偏多（试ZG-回落-突破）"
-        alt_p = [(0, last), (0.25, mid), (0.5, zd * 1.01), (0.8, mid), (1.0, mid)]
-        risk_p = [(0, last), (0.25, zd), (0.55, zd * 0.98), (1.0, zd * 0.94)]
+        # 数据不足或其余情形：中性中枢震荡（不默认看多）
+        main_p = [(0, last), (0.25, mid), (0.5, mid), (1.0, mid)]
+        main_lab = "主路径：中枢内中性震荡"
+        alt_p = [(0, last), (0.3, zg * 0.99), (1.0, zg * 0.97)]
+        risk_p = [(0, last), (0.3, zd * 1.01), (1.0, zd * 0.99)]
 
     # ---- 概率（以日线结构分类为锚 + 推演置信度 + 结论稳定性微调）----
     # 先按结构分类给基准概率，再叠加置信度偏离与稳定性；避免对“背离/背驰”重复惩罚导致全部贴地板。
@@ -330,7 +343,8 @@ def forecast_svg(klines, r, wcls, conf, sigma):
         return PAD_L + hist_w + proj_w * f
 
     p = [f'<svg viewBox="0 0 {W} {H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto;display:block">',
-         f'<rect width="{W}" height="{H}" fill="#ffffff"/>']
+         f'<rect width="{W}" height="{H}" fill="#ffffff"/>',
+         f'<clipPath id="fc-{sym}"><rect x="{PAD_L}" y="{PAD_T3}" width="{plot_w}" height="{H - PAD_T3 - PAD_B3}"/></clipPath>']
     p.append(f'<rect x="{PAD_L + hist_w:.1f}" y="{PAD_T3}" width="{proj_w:.1f}" height="{H - PAD_T3 - PAD_B3}" fill="#f8fafc"/>')
     for i in range(4):
         v = lo + span * i / 3
@@ -366,8 +380,11 @@ def forecast_svg(klines, r, wcls, conf, sigma):
             lo.append((xp(f), y(med - half)))
         return " ".join(f"{a:.1f},{b:.1f}" for a, b in up + lo[::-1])
 
+    # 置信锥裁剪到绘图区，避免 ±2σ 带超出图表边框被截断
+    p.append(f'<g clip-path="url(#fc-{sym})">')
     p.append(f'<polygon points="{band_poly(2)}" fill="{RED}" fill-opacity="0.06" stroke="none"/>')
     p.append(f'<polygon points="{band_poly(1)}" fill="{RED}" fill-opacity="0.12" stroke="none"/>')
+    p.append('</g>')
 
     draw_path(main_p, RED, "none")
     draw_path(alt_p, "#94a3b8", "6,4")
@@ -714,7 +731,7 @@ def main():
         cls = r["classify"]
         sc_color = SCENARIO_COLOR.get(cls["scenario"], BLUE)
         w_color = SCENARIO_COLOR.get(wcls["scenario"], BLUE)
-        fs_svg, fs_note, fs_probs = forecast_svg(d["klines"], r, wcls, conf, sigma)
+        fs_svg, fs_note, fs_probs = forecast_svg(d["klines"], r, wcls, conf, sigma, sym)
         div_txt = ('⚠️ 周线向下笔运行中，以上路径的兑现以周线底分型确认为前提；若周线续创新低，风险路径概率上升。'
                    if cls.get("last_bi_dir") != wcls.get("last_bi_dir")
                    else "日周级别共振，主路径置信度较高。")
@@ -754,11 +771,30 @@ def main():
     avg_agree2 = avg_agree
     worst_cc = max((d["meta"].get("cross_check", {}).get("max_dev") or 0) for d in data.values())
     avg_stable = sum(1 for s in data if results[s]["stability"]["stable"]) / len(data) * 100
+
+    # 数据驱动的市场格局描述（不写死，随每日自动刷新保持准确）
+    n_daily_up = sum(1 for s in data if results[s]["classify"]["last_bi_dir"] == 1)
+    n_week_up = sum(1 for s in data if results_week[s]["classify"]["last_bi_dir"] == 1)
+    n_div = len(divergent)
+    total = len(data)
+    if n_div == total:
+        pat = (f"全部 {total} 个指数日线向上笔、周线向下笔（日强周弱背离），当前上涨在更大级别上属"
+               f"<b>反弹中的强势段</b>，而非主升浪")
+    elif n_div == 0:
+        pat = f"{total} 个指数日线与周线同向（日周共振），结构方向一致性较高"
+    else:
+        pat = f"{n_div}/{total} 个指数日强周弱背离、{total - n_div} 个日周共振"
+    if n_daily_up >= total * 0.6 and n_week_up <= total * 0.4:
+        stance = "；仓位与预期应低于\"日周共振多头\"的情形"
+    else:
+        stance = ""
+    n_above = sum(1 for s in data if results[s]["classify"].get("position") == "中枢上方")
+    n_inside = sum(1 for s in data if results[s]["classify"].get("position") == "中枢内部")
     exec_summary = f"""
     <div class="panel exec">
       <h4>一句话结论（Executive Summary）</h4>
       <ul>
-        <li><b>市场格局：</b>5 大指数日线均处向上笔、但周线仍向下笔（日强周弱背离），当前上涨在更大级别上属<b>反弹中的强势段</b>，而非主升浪；仓位与预期应低于"日周共振多头"。</li>
+        <li><b>市场格局：</b>{pat}{stance}。</li>
         <li><b>数据可信度：</b>腾讯↔新浪双源<b>全序列抽样最大偏差 {worst_cc:.3f}%</b>，K线校验 0 问题，笔双法一致率均值 {avg_agree2:.0f}%，已知拐点捕捉率均值 {avg_cap:.0f}%——历史划分具备较高稳健性。</li>
         <li><b>推演结论：</b>各指数主路径概率最高（约 {int(min((forecast_info[s]['p_main'] for s in data))*100)}%~{int(max((forecast_info[s]['p_main'] for s in data))*100)}%），但均以<b>周线底分型确认</b>为兑现前提；结论稳定性 {avg_stable:.0f}%（标"敏感"者需随近 1 个月价格更新）。跌破各自中枢 ZD 即主路径失效、风险路径概率上升。</li>
       </ul>
@@ -887,8 +923,9 @@ def main():
     <ul>{"".join(conclusions)}</ul>
     {diverge_note}
     <p style="margin-top:10px;color:#475569;font-size:14px;line-height:1.8">
-    缠论不预测点位，只给出分类应对：<b>不跌破各自最后中枢 ZG（上证、中证500）或 ZD（300/深成指/创业板），结构仍按多头处理；
-    跌回中枢内部则降级为震荡；出现"顶背驰 + 跌破 ZD"组合才确认转空。</b>
+    缠论不预测点位，只给出分类应对：<b>不跌破各自最后中枢上沿 ZG / 下沿 ZD，结构仍按多头处理；
+    其中 {n_above} 个指数运行于中枢上方（多头延续）、{n_inside} 个在中枢内部震荡。跌回中枢内部则降级为震荡；
+    出现"顶背驰 + 跌破 ZD"组合才确认转空。</b>
     回测显示（见第四节）：一类买点后 5 日平均收益为正且胜率多在 60% 以上，一类卖点后下跌概率更高——信号具备统计意义上的参考价值，但样本有限，需结合仓位管理使用。
     </p>
   </div>
