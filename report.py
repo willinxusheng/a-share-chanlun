@@ -5,7 +5,7 @@ import json
 import os
 import math
 from datetime import datetime, timedelta
-from chanlun import analyze, backtest_signals, MIN_BI_PCT_WEEK, health_score, forecast_confidence, forward_vol, adaptive_horizon, classify, realized_vol_annualized, KNOWN_PIVOTS, _date_diff, MIN_BI_PCT_MONTH, backtest_robustness, backtest_paths, _path_targets
+from chanlun import analyze, backtest_signals, MIN_BI_PCT_WEEK, health_score, forecast_confidence, forward_vol, adaptive_horizon, classify, realized_vol_annualized, KNOWN_PIVOTS, _date_diff, MIN_BI_PCT_MONTH, backtest_robustness, backtest_paths, _path_targets, market_breadth
 
 W, H_PRICE, H_VOL, H_MACD = 1060, 360, 64, 110
 PAD_L, PAD_R, PAD_T, PAD_B = 12, 78, 24, 26
@@ -1620,36 +1620,47 @@ def main():
     backtests = {sym: backtest_signals(d["klines"], results[sym], exclude_last=True) for sym, d in data.items()}
     # 样本外稳健性检验：按 2024-01-01 切分早年/近两年，检测校准过拟合
     robust = {sym: backtest_robustness(d["klines"], results[sym], split="2024-01-01") for sym, d in data.items()}
-    # 跨指数市场宽度（系统性环境）：统计牛/熊情景数，作为全市场对齐度反馈进推演置信度
+    # 跨指数市场广度（系统性环境）：日/周/月三级聚合，作为全市场对齐度反馈进推演置信度
+    _daily_sc = [results[s]["classify"]["scenario"] for s in data]
+    _week_sc = [results_week[s]["classify"]["scenario"] for s in data]
+    _month_sc = [results_month[s]["classify"]["scenario"] for s in data]
+    bd = market_breadth(_daily_sc, _week_sc, _month_sc)
     _bull_cnt = sum(1 for s in data if results[s]["classify"]["scenario"] in SC_BULL)
     _bear_cnt = sum(1 for s in data if results[s]["classify"]["scenario"] in SC_BEAR)
     _total = len(data)
+    last_date = next(iter(data.values()))["meta"]["last_date"]
     _breadth_bias = (_bull_cnt / _total - 0.5) * 2 * 8  # 全看多 +8 / 全看空 -8（0-100 置信度刻度）
     scores = {sym: (health_score(d["klines"], results[sym], results_week[sym]["classify"]),
                     forecast_confidence(results[sym], results_week[sym]["classify"], backtests[sym], breadth_bias=_breadth_bias))
               for sym, d in data.items()}
 
-    # 系统性环境横幅文案（随每日自动刷新，不写死）
-    if _bull_cnt == _total:
-        _blabel, _bcolor = "系统性多头环境", RED
-    elif _bull_cnt >= _total * 0.6:
-        _blabel, _bcolor = "整体偏多", RED
-    elif _bull_cnt >= _total * 0.4:
-        _blabel, _bcolor = "分化震荡", GOLD
-    else:
-        _blabel, _bcolor = "整体偏空 / 防御", GREEN
-    _bstance = "支撑" if _bull_cnt >= _total * 0.6 else ("压制" if _bull_cnt < _total * 0.4 else "中性")
-    breadth_banner = (f'<div style="border-left:4px solid {_bcolor};background:#fff;border:1px solid #e5e9f0;'
-                      f'border-radius:10px;padding:12px 16px;margin:4px 0 16px;display:flex;align-items:center;'
-                      f'gap:14px;flex-wrap:wrap">'
-                      f'<span style="font-size:15px;font-weight:800;color:{_bcolor}">市场宽度：{_blabel}</span>'
-                      f'<span style="font-size:13px;color:#475569">5 大指数中 '
-                      f'<b style="color:{RED}">{_bull_cnt}</b> 个多头情景、'
-                      f'<b style="color:{GREEN}">{_bear_cnt}</b> 个空头情景 —— '
-                      f'系统性环境对个股指推演的基准方向形成<b>{_bstance}</b>；该宽度已折算为「全市场对齐度」'
-                      f'反馈进各指数推演置信度（±8 内）。</span></div>')
+    _bcolor = {"多头主导": RED, "偏多（高层级有分歧）": GOLD, "分歧震荡": GOLD,
+               "偏空": GREEN, "空头主导": GREEN}.get(bd["composite"]["label"], GOLD)
+    _rows = ""
+    for _lvl, _c in (("日线", bd["daily"]), ("周线", bd["week"]), ("月线", bd["month"])):
+        _t = _c["total"]
+        _wb = _c["bull"] / _t * 100
+        _wn = _c["neutral"] / _t * 100
+        _wr = _c["bear"] / _t * 100
+        _rows += (f'<div style="display:flex;align-items:center;gap:10px;margin:6px 0;font-size:13px">'
+                  f'<span style="width:34px;color:#475569;font-weight:600">{_lvl}</span>'
+                  f'<div style="flex:1;height:12px;border-radius:6px;overflow:hidden;display:flex;background:#eef2f7">'
+                  f'<i style="width:{_wb:.0f}%;background:{RED}"></i>'
+                  f'<i style="width:{_wn:.0f}%;background:#94a3b8"></i>'
+                  f'<i style="width:{_wr:.0f}%;background:{GREEN}"></i></div>'
+                  f'<span style="width:150px;text-align:right;color:#475569;font-variant-numeric:tabular-nums">'
+                  f'{_c["bull"]} 多 / {_c["bear"]} 空 / {_c["neutral"]} 中</span></div>')
+    breadth_banner = (f'<div class="panel" style="border-left:4px solid {_bcolor};margin:4px 0 16px">'
+                      f'<h4 style="font-size:15px;color:#1e40af;margin-bottom:10px">跨指数市场广度综合研判 '
+                      f'<span style="font-size:12px;color:#64748b;font-weight:400">日 / 周 / 月三级区间套（数据截至 {last_date}）</span></h4>'
+                      f'{_rows}'
+                      f'<p style="font-size:13px;color:#334155;line-height:1.75;margin-top:10px;background:#f8fafc;'
+                      f'border-radius:6px;padding:8px 12px">{bd["conclusion"]}</p>'
+                      f'<p style="font-size:12px;color:#64748b;margin-top:6px">综合广度评分 '
+                      f'<b style="color:{_bcolor}">{bd["composite"]["score"]:+.2f}</b>（{bd["composite"]["label"]}）· '
+                      f'日线 {_bull_cnt}/{_total} 多头已折算为「全市场对齐度」±8 反馈进各指数推演置信度。</p>'
+                      f'</div>')
 
-    last_date = next(iter(data.values()))["meta"]["last_date"]
     gen_time = datetime.now().strftime("%Y-%m-%d %H:%M")
 
     # 日周背离检测（用于结论）
@@ -1907,7 +1918,7 @@ def main():
 <div class="wrap">
   <header>
     <h1>A股主要指数缠论结构分析报告</h1>
-    <p>数据区间：2021-01-04 ~ {last_date}（日线+周线+月线，前复权） · 生成时间：{gen_time}<br>
+    <p>数据区间：2021-01-04 ~ {last_date}（日线+周线+月线，前复权，<b>最新交易日</b>） · 生成时间：{gen_time}<br>
     方法：K线包含处理 → 顶底分型 → 笔（日线≥1.8% / 周线≥4% / 月线≥8% 幅度过滤）→ 笔中枢 → MACD 背驰 → 买卖点 → 日周月三级别区间套分类推演 → 信号回测验证</p>
   </header>
   <nav class="toc">

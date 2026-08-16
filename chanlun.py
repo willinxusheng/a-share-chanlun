@@ -816,6 +816,65 @@ def classification_stability(klines, min_bi_pct=MIN_BI_PCT):
     return out
 
 
+# ---------- 8h. 跨指数市场广度综合研判（日/周/月三级） ----------
+def market_breadth(daily_sc, week_sc, month_sc):
+    """把 5 个独立指数的情景聚合成市场级结论，避免「只看日线」掩盖更高级别背离。
+
+    输入三个列表，各含 N 个指数的 scenario 字符串（顺序对应同一组指数）。
+    返回 {daily:{bull,bear,neutral,total}, week:{...}, month:{...},
+          composite:{score, label}, conclusion}。
+    composite.score 为加权多空极性（月线 0.4 / 周线 0.4 / 日线 0.2，周线定节奏故提高权重），
+    落在 [-1,1]；conclusion 显式识别「月多·日反弹·周偏空」类跨级别背离，
+    而非单一分数，避免误导。"""
+
+    def _cnt(sc_list):
+        bull = sum(1 for x in sc_list if x in _SC_BULL)
+        bear = sum(1 for x in sc_list if x in _SC_BEAR)
+        return {"bull": bull, "bear": bear, "neutral": len(sc_list) - bull - bear, "total": len(sc_list)}
+
+    def _pol(sc_list):
+        s = 0
+        for x in sc_list:
+            if x in _SC_BULL:
+                s += 1
+            elif x in _SC_BEAR:
+                s -= 1
+        return s / len(sc_list) if sc_list else 0
+
+    d_cnt, w_cnt, m_cnt = _cnt(daily_sc), _cnt(week_sc), _cnt(month_sc)
+    score = 0.2 * _pol(daily_sc) + 0.4 * _pol(week_sc) + 0.4 * _pol(month_sc)
+    if score >= 0.5:
+        label = "多头主导"
+    elif score >= 0.2:
+        label = "偏多（高层级有分歧）"
+    elif score > -0.2:
+        label = "分歧震荡"
+    elif score > -0.5:
+        label = "偏空"
+    else:
+        label = "空头主导"
+    # 跨级别背离识别（结论比单一分数更诚实）
+    m_bull = m_cnt["bull"] >= m_cnt["total"] * 0.6
+    w_bear = w_cnt["bear"] >= w_cnt["total"] * 0.6
+    d_bull = d_cnt["bull"] >= d_cnt["total"] * 0.6
+    if m_bull and w_bear and d_bull:
+        conclusion = ("月线多头 + 周线偏空 + 日线反弹 → 当前日线上涨在更大级别上属<b>反弹而非主升浪</b>；"
+                      "周线 4/5 偏空显示周线级调整尚未结束，反弹需<b>周线底分型确认</b>才能升级为反转，"
+                      "仓位与预期应低于「日周共振多头」情形。")
+    elif m_bull and w_bear:
+        conclusion = ("月线多头背景下周线偏空，日线反弹更可能是周线调整中的修复段；"
+                      "关注周线能否出现底分型，作为反转确认信号。")
+    elif w_bear and not m_bull:
+        conclusion = "周线与月线同步偏空，系统性环境压制，反弹持续性弱，防御为主。"
+    elif d_bull and not w_bear and not m_bull:
+        conclusion = "日线偏多但周/月均偏空，短线反弹难改更大级别弱势。"
+    else:
+        conclusion = ("日/周/月三级别方向大体一致，结构共识度较高，系统性环境对推演方向形成支撑。"
+                      if score >= 0 else "日/周/月三级别方向大体一致偏空，系统性环境压制。")
+    return {"daily": d_cnt, "week": w_cnt, "month": m_cnt,
+            "composite": {"score": round(score, 3), "label": label}, "conclusion": conclusion}
+
+
 def _last_two(res, close):
     return res["bis"], res["zhongshu"], res["beichi"], close
 
