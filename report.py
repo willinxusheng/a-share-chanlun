@@ -1469,7 +1469,7 @@ def backtest_table(backtests):
     return """<table class="tbl">
       <thead><tr><th>信号类型</th><th>后 5 个交易日</th><th>后 10 个交易日</th><th>后 20 个交易日</th><th>后 60 个交易日</th></tr></thead>
       <tbody>%s</tbody></table>
-      <p style="font-size:12px;color:#64748b;margin-top:8px">统计范围：5 大指数 2021-01 至今全部已识别信号；买点胜=之后上涨，卖点胜=之后下跌。买卖点体系按缠论标准定义：一类=背驰拐点；二类=一类之后次低/次高折返（不破前低/前高）；三类=中枢离去后回抽/反抽不进中枢（低点不破 ZD / 高点不破 ZG）。样本有限，仅为历史统计特征，不代表未来胜率，亦非投资建议。</p>""" % "".join(rows)
+      <p style="font-size:12px;color:#64748b;margin-top:8px">统计 5 大指数 2021-01 至今全部信号（买点胜=之后涨，卖点胜=之后跌）。买卖点按缠论标准：一类=背驰拐点，二类=次低/次高折返，三类=回抽不进中枢。样本有限，历史特征，非投资建议。</p>""" % "".join(rows)
 
 
 def rr_table(data, results, recent_n=8):
@@ -1499,9 +1499,7 @@ def rr_table(data, results, recent_n=8):
       <table class="tbl">
       <thead><tr><th>指数</th><th>买卖点</th><th>日期</th><th>触发价</th><th>止损位</th><th>目标位</th><th>R:R</th><th>值博率</th><th>量✓</th></tr></thead>
       <tbody>%s</tbody></table>
-      <p style="font-size:12px;color:#64748b;margin-top:8px">R:R = (目标位 − 触发价) / (触发价 − 止损位)；值博率阈值：优(RR≥2.5) / 良(≥1.5) / 中(≥1.0) / 差(&lt;1.0)。
-      止损取局部前低（一类/二类买）或中枢下沿 ZD（三类买）；目标取近程摆动极值（最近 30 笔真实高低点），仅当最近中枢边界在合理距离内(≤20%%)才纳入，并对 R:R 封顶 6 倍，避免多年极值中枢污染导致 16~31 倍失真比值（#29 修复）。
-      本表为结构分析参考，非交易建议。</p>""" % "".join(rows)
+      <p style="font-size:12px;color:#64748b;margin-top:8px">R:R = (目标−触发) / (触发−止损)；值博率：优(RR≥2.5)/良(≥1.5)/中(≥1.0)/差(&lt;1)。止损取局部前低或中枢下沿 ZD，目标取近程摆动极值并封顶 6 倍防失真。结构参考，非交易建议。</p>""" % "".join(rows)
 
 
 def robustness_table(robust, data):
@@ -1543,7 +1541,7 @@ def robustness_table(robust, data):
     _tbl = """<table class="tbl">
       <thead><tr><th>指数</th><th>早年买方信号胜率(均收益) h=20</th><th>近两年买方信号胜率(均收益) h=20</th><th>变化</th><th>样本外稳健性</th></tr></thead>
       <tbody>%s</tbody></table>
-      <p style="font-size:12px;color:#64748b;margin-top:8px">将 2021 年至今的买卖点信号按 {SPLIT} 为界分为「早年」与「近两年」两段，分别统计买方信号（一类买/三类买）持有 20 个交易日的胜率与平均收益。若近两年胜率较早年显著下滑（≥15 个百分点），提示历史校准可能过拟合早期样本、对近期市场有效性下降，应降低对经验胜率的依赖；若持平或更高，提示样本外稳定。本检验为方法论透明度的一部分，不构成投资建议。</p>""".replace("{SPLIT}", split)
+      <p style="font-size:12px;color:#64748b;margin-top:8px">按 {SPLIT} 切分「早年 / 近两年」买方信号（一类买·三类买，持有 20 日）胜率与均收益对比。近两年显著下滑(≥15pt)提示过拟合风险；持平/更高则样本外稳定。不构成投资建议。</p>""".replace("{SPLIT}", split)
     return _tbl % "".join(rows)
 
 
@@ -1581,7 +1579,7 @@ def forecast_summary_table(data, results, results_week, results_month, forecast_
     return f"""<table class="tbl">
       <thead><tr><th>指数</th><th>日线分类</th><th>月线背景</th><th>级别联立</th><th>主路径概率</th><th>次路径概率</th><th>风险概率</th><th>结构存续(锥)</th><th>失效位 ZD</th><th>结论稳定性</th></tr></thead>
       <tbody>{"".join(rows)}</tbody></table>
-      <p style="font-size:12px;color:#64748b;margin-top:8px">概率为基于「级别共振 + 推演置信度 + 回测胜率」的启发式估算，非统计定价模型；主/次/风险三概率已严格归一（合计 100%），风险概率为「主/次之外」的余量，结构存续(锥)为独立统计参照、不计入三者之和。结论稳健度（三级）：<b style="color:{GREEN}">稳健</b>=极性+趋势在 20 日扰动下均不变；<b style="color:#d97706">边缘</b>=趋势守住但最后笔年轻；<b style="color:{RED}">敏感·待确认</b>=多空极性翻转（当前方向结论依赖最近一波年轻笔，已相应下调主路径概率）。最后笔仅 ~7 根 K 线的指数，属"信号年轻·待确认"，宜轻仓等待周线确认。</p>"""
+      <p style="font-size:12px;color:#64748b;margin-top:8px">概率为「级别共振+置信度+回测胜率」启发式估算，主/次/风险已归一(合计100%)，结构存续(锥)为独立参照不计入。稳健度三级：<b style="color:{GREEN}">稳健</b>=极性趋势 20 日内不变；<b style="color:#d97706">边缘</b>=趋势守住但末笔年轻；<b style="color:{RED}">敏感·待确认</b>=极性翻转、已下调主路径概率。末笔仅~7根K线者宜轻仓等周线确认。</p>"""
 
 
 def data_quality_strip(data, results):
@@ -1661,7 +1659,7 @@ def main():
                       f'border-radius:6px;padding:8px 12px">{bd["conclusion"]}</p>'
                       f'<p style="font-size:12px;color:#64748b;margin-top:6px">综合广度评分 '
                       f'<b style="color:{_bcolor}">{bd["composite"]["score"]:+.2f}</b>（{bd["composite"]["label"]}）· '
-                      f'日线 {_bull_cnt}/{_total} 多头已折算为「全市场对齐度」±8 反馈进各指数推演置信度。</p>'
+                      f'已折算为「全市场对齐度」±8 反馈进各指数推演置信度。</p>'
                       f'</div>')
 
     gen_time = datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -1729,7 +1727,7 @@ def main():
     <section class="panel" id="sec-{sym}">
       <h2>{d["name"]}（{sym}）<span class="badge" style="background:{sc_color}">日线：{cls["scenario"]}</span><span class="badge" style="background:{w_color}">周线：{wcls["scenario"]}</span><span class="badge" style="background:{m_color}">月线：{mcls["scenario"]}</span><span class="chip" style="background:{RED}1a;color:{RED}">健康 {health}</span><span class="chip" style="background:{BLUE}1a;color:{BLUE}">置信 {conf}</span></h2>
       <div class="chartbox">
-        <div class="toolbar">🔍 拖动下方导航条缩放/平移（双击复位）· 移动鼠标查看每日 OHLC/成交量 · 上图含成交量柱（红涨绿跌）· <b style="color:{GOLD}">◆✓</b>/<b style="color:#94a3b8">◇</b> 菱形=历史拐点(捕获/未捕获) · <b style="color:{RED}">▼</b>/<b style="color:{GREEN}">▲</b> 实心三角=笔级背驰：<b style="color:{GOLD}">金粗边</b>=趋势背驰·量能确认 / <b style="color:#b45309">橙粗边</b>=趋势背驰 / <b style="color:#94a3b8">灰细边</b>=盘整背驰 · <b style="color:{RED}">▽</b>/<b style="color:{GREEN}">△</b> 空心三角=线段级背驰 · <b style="color:{RED}">■</b>/<b style="color:{GREEN}">■</b> 横带=未补跳空缺口(红支撑/绿压力) · MACD副图 ▲/▼=金叉/死叉 · <b style="color:#2563eb">■</b> 蓝柱=放量突破 · 虚线方框=未确认分型</div>
+        <div class="toolbar">🔍 拖导航条缩放/平移·双击复位　|　悬停看 OHLC/量能　|　图例：◆✓拐点 ▼▲背驰 ■缺口·MACD，详见底部「术语与方法论速查」</div>
         {chart_svg(d["klines"], r, sym, r["captured"])}
         <div class="xh-tip" id="tip-{sym}"></div>
         {navigator_svg(d["klines"], sym)}
@@ -1792,8 +1790,8 @@ def main():
       <h4>一句话结论（Executive Summary）</h4>
       <ul>
         <li><b>市场格局：</b>{pat}{stance}。</li>
-        <li><b>数据可信度：</b>腾讯(qfq)↔新浪(裸价)双源<b>全序列比值最大偏离 {worst_rel*100:.2f}%</b>，K线校验 0 问题，笔双法一致率均值 {avg_agree2:.0f}%，已知拐点捕捉率均值 {avg_cap:.0f}%——历史划分具备较高稳健性。</li>
-        <li><b>推演结论：</b>各指数主路径概率最高（约 {int(min((forecast_info[s]['p_main'] for s in data))*100)}%~{int(max((forecast_info[s]['p_main'] for s in data))*100)}%），但均以<b>周线底分型确认</b>为兑现前提；结论稳健度：{n_mature}/{total} 个指数信号成熟（最后笔≥12 交易日）、{total - n_mature} 个信号年轻·待确认（最后笔仅 ~7 根 K 线，结论对近 1~2 周价格敏感，已相应下调主路径概率 ±0.02~0.04）。跌破各自中枢 ZD 即主路径失效、风险路径概率上升。具体指数推演见<a href="#s6">第六节</a>，关键位与策略见<a href="#s3">第三节</a>。</li>
+        <li><b>数据可信度：</b>双源(qfq↔裸价)全序列比值最大偏离 {worst_rel*100:.2f}%，笔双法一致率 {avg_agree2:.0f}%，拐点捕捉率 {avg_cap:.0f}%——划分稳健。</li>
+        <li><b>推演结论：</b>各指数主路径概率约 {int(min((forecast_info[s]['p_main'] for s in data))*100)}%~{int(max((forecast_info[s]['p_main'] for s in data))*100)}%，均以<b>周线底分型确认</b>为兑现前提；稳健度 {n_mature}/{total} 成熟、{total - n_mature} 年轻·待确认（末笔仅~7根，已下调主路径概率）。跌破中枢 ZD 即主路径失效。详见<a href="#s6">第六节</a>·<a href="#s3">第三节</a>。</li>
       </ul>
     </div>"""
 
@@ -1992,7 +1990,6 @@ def main():
     缠论不预测点位，只给出分类应对：<b>不跌破各自最后中枢上沿 ZG / 下沿 ZD，结构仍按多头处理；
     其中 {n_above} 个指数运行于中枢上方（多头延续）、{n_inside} 个在中枢内部震荡。跌回中枢内部则降级为震荡；
     出现"顶背驰 + 跌破 ZD"组合才确认转空。</b>
-    回测显示（见第四节）：一类买点后 5 日平均收益为正且胜率多在 60% 以上，一类卖点后下跌概率更高——信号具备统计意义上的参考价值，但样本有限，需结合仓位管理使用。
     </p>
   </div>
   <details class="panel method">
@@ -2014,7 +2011,6 @@ def main():
     <p>主路径概率优先采用<b>历史同类信号的经验同向胜率</b>校准（见第四节回测），样本不足时回退启发式；校准锚<b>严格按情景方向选取</b>（牛市只锚买点类、熊市只锚卖点类信号），杜绝「多头指数却被卖点胜率校准」的方向错配。推演 horizon 按最近笔<b>真实持续交易日</b>（已修正为原始日线索引，非合并 K 线索引）自适应（30~90 日），置信锥宽度按近 20 日波动率相对长期水平条件化（震荡市收窄、动荡市放大），且带宽按<b>随机游走的 √t 口径</b>扩张（近端的不确定性即已显著，避免线性外推把近月压成针状、低估真实风险）。当<b>趋势外推与主路径吻合且 R²≥0.15</b>或<b>日周区间套共振</b>时，主路径概率分别额外 +2% / +3%，把多种独立方法的共识显式转化为概率增益（弱拟合下不授予增益，防止虚增置信度）。推演另给出<b>结构存续概率（锥模型）</b>：用与置信锥同款 σ 计算「期末价 ≥ ZD」的概率 Φ(ln(现价/ZD)/σ)（随机游走中性假设），作为与情景概率互补、且与置信锥内部自洽的「结构是否守住失效位」的纯统计参照——它衡量「不破 ZD」，与情景概率衡量「方向性演绎」口径不同，两者并列呈现而非相互替代。</p>
     <p>经验胜率进一步做<b>贝叶斯收缩</b>：样本越少、二项 95% 置信区间越宽，经验锚越向启发式基准回归，并在校准说明中标注该置信区间，避免小样本（如 n=5、CI 横跨 50%）噪声被过度外推、误导概率。报告顶部另给出<b>跨指数市场广度综合研判</b>（日/周/月三级），把全市场对齐度与跨级别背离显式呈现，并折算为 ±8 的「全市场对齐度」反馈进各指数推演置信度，使个股指推演的基准方向与市场系统性环境一致。</p>
     <p>为提升预测可信度，推演图额外叠加一条<b>趋势外推线</b>：对最近 min(horizon,90) 日收盘做<b>对数线性回归</b>外推 horizon 日，作为与缠论结构路径相互独立的验证方法。该独立验证的<b>拟合优度 R² 一并展示</b>：R²≥0.15 且终点与主路径吻合（误差&lt;6%）才算「共振」、相互印证、可信度更高；R² 过低（如≈0.1，趋势线近乎噪声）时明确标注「弱拟合」，<b>不授予共振概率增益</b>、亦不建议据此增减仓位；显著偏离时提示两种视角对后市节奏判断不一致，应结合仓位管理。缠论是概率性结构分类框架，推演为目的而非点位预测。</p>
-    <p>报告顶部给出<b>跨指数市场广度综合研判</b>（日/周/月三级），把全市场对齐度与跨级别背离显式呈现，并折算为「全市场对齐度」反馈进各指数推演置信度，避免单一周期宽度掩盖高层级分歧。</p>
     <h4>准确度校验</h4>
     <p>① 腾讯(qfq)↔新浪(裸价) 全序列<b>比值一致性</b>比对（前复权=裸价×常数调整因子，两源比值应恒定，漂移过大即异常）；② 标准严格笔与振幅过滤笔交叉一致率；③ 8 个已知历史拐点的捕捉率；④ 砍掉末 5/10/20 根 K 线重算分类的稳定性；⑤ 交易日连续性 / 缺失检测（相邻间隔与总数 vs 首末日期应有多少交易日）。结果见第一节与推演汇总表。</p>
   </details>
