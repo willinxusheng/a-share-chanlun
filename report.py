@@ -39,7 +39,7 @@ def _fmt(v, nd=2):
     return ("%%.%df" % nd) % v
 
 
-def _smooth(pts, tension=1.0, nd=2):
+def _smooth(pts, tension=1.0, nd=3):
     """Catmull-Rom 样条 -> 三次贝塞尔路径，穿过所有数据点（细腻且不丢精度）。"""
     if len(pts) < 3:
         return "M" + " L".join(f"{x:.{nd}f} {y:.{nd}f}" for x, y in pts)
@@ -178,7 +178,7 @@ def chart_svg(klines, r, sym, captured=None):
     _gaps_view.sort(key=lambda g: g["idx"])
     for g in _gaps_view[-5:]:
         _yt, _yb = y(g["top"]), y(g["bottom"])
-        _col = "#dc2626" if g["type"] == "up" else "#16a34a"  # 涨红跌绿
+        _col = RED if g["type"] == "up" else GREEN  # 涨红跌绿
         _h = max(_yb - _yt, 2.5)
         pg.append(f'<rect x="{PAD_L:.1f}" y="{_yt:.1f}" width="{plot_w:.1f}" height="{_h:.1f}" fill="{_col}" fill-opacity="0.07" stroke="{_col}" stroke-opacity="0.30" stroke-width="0.6"/>')
         _lab = ("▲缺" if g["type"] == "up" else "▼缺") + g["date"][5:]
@@ -576,7 +576,9 @@ def chart_svg(klines, r, sym, captured=None):
 
     p = [f'<svg id="main-{sym}" viewBox="0 0 {W} {CHART_TOTAL}" preserveAspectRatio="xMidYMid meet" data-n="{n}" data-lo="{lo:.4f}" data-span="{span:.4f}" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto;display:block;text-rendering:geometricPrecision;shape-rendering:geometricPrecision">']
     p += base
-    p.append(f'<g clip-path="url(#clip-{sym})"><g id="plot-{sym}" class="plot">')
+    # vector-effect 保证 dataZoom 横向放大时，线的粗细不会被同步拉粗（只拉伸几何、不拉伸 stroke），
+    # 从而避免放大后红绿笔/均线/MACD 线出现横向变粗的“失真”感。
+    p.append(f'<g clip-path="url(#clip-{sym})"><g id="plot-{sym}" class="plot" vector-effect="non-scaling-stroke">')
     p += pg
     p.append('</g></g>')
     p.append(f'<g id="lbl-{sym}" class="lbl">')
@@ -592,7 +594,7 @@ def chart_svg(klines, r, sym, captured=None):
 
 
 # ================= 区间导航条（缩略图 + 可拖窗口） =================
-NAV_H = 36
+NAV_H = 24
 
 def navigator_svg(klines, sym):
     closes = [k["close"] for k in klines]
@@ -603,8 +605,9 @@ def navigator_svg(klines, sym):
     def x(i):
         return W * i / (n - 1)
 
+    # 上下各留 2px，缩略曲线在 2..18 之间，手柄高度与槽等齐，整体更窄更精致。
     def y(v):
-        return 8 + (NAV_H - 20) * (1 - (v - lo) / span)
+        return 2 + (NAV_H - 6) * (1 - (v - lo) / span)
 
     pts = [(x(i), y(c)) for i, c in enumerate(closes)]
     nav_d = _smooth(pts, tension=0.8)
@@ -1477,7 +1480,7 @@ def rr_table(data, results, recent_n=8):
         r = results[sym]
         for s in r["signals"][-recent_n:]:
             _q = s.get("quality", "—")
-            _qc = {"优": "#7c3aed", "良": "#16a34a", "中": "#64748b", "差": "#b45309", "—": "#94a3b8"}.get(_q, "#94a3b8")
+            _qc = {"优": "#7c3aed", "良": GREEN, "中": "#64748b", "差": "#b45309", "—": "#94a3b8"}.get(_q, "#94a3b8")
             _dir_col = RED if s["dir"] == 1 else GREEN
             _vc = "✓" if s.get("vol_confirm") else "—"
             _rr = ("%.1f" % s["rr"]) if s.get("rr") else "—"
@@ -1560,7 +1563,7 @@ def forecast_summary_table(data, results, results_week, results_month, forecast_
         else:
             syn = '<span style="color:#d97706;font-weight:700">日强周弱背离</span>' if cls["last_bi_dir"] == 1 else '<span style="color:#d97706;font-weight:700">日弱周强背离</span>'
         _lv = fi.get("level", "稳健")
-        _lv_c = {"稳健": "#18a058", "边缘": "#d97706", "敏感·待确认": "#dc2626"}.get(_lv, "#18a058")
+        _lv_c = {"稳健": GREEN, "边缘": "#d97706", "敏感·待确认": RED}.get(_lv, GREEN)
         stab = _lv
         stab_c = _lv_c
         rows.append(f"""<tr>
@@ -1575,10 +1578,10 @@ def forecast_summary_table(data, results, results_week, results_month, forecast_
           <td class="tac">{fi["zd"]:.0f}</td>
           <td class="tac" style="color:{stab_c};font-weight:600">{stab}</td>
         </tr>""")
-    return """<table class="tbl">
+    return f"""<table class="tbl">
       <thead><tr><th>指数</th><th>日线分类</th><th>月线背景</th><th>级别联立</th><th>主路径概率</th><th>次路径概率</th><th>风险概率</th><th>结构存续(锥)</th><th>失效位 ZD</th><th>结论稳定性</th></tr></thead>
-      <tbody>%s</tbody></table>
-      <p style="font-size:12px;color:#64748b;margin-top:8px">概率为基于「级别共振 + 推演置信度 + 回测胜率」的启发式估算，非统计定价模型；主/次/风险三概率已严格归一（合计 100%%），风险概率为「主/次之外」的余量，结构存续(锥)为独立统计参照、不计入三者之和。结论稳健度（三级）：<b style="color:#18a058">稳健</b>=极性+趋势在 20 日扰动下均不变；<b style="color:#d97706">边缘</b>=趋势守住但最后笔年轻；<b style="color:#dc2626">敏感·待确认</b>=多空极性翻转（当前方向结论依赖最近一波年轻笔，已相应下调主路径概率）。最后笔仅 ~7 根 K 线的指数，属"信号年轻·待确认"，宜轻仓等待周线确认。</p>""" % "".join(rows)
+      <tbody>{"".join(rows)}</tbody></table>
+      <p style="font-size:12px;color:#64748b;margin-top:8px">概率为基于「级别共振 + 推演置信度 + 回测胜率」的启发式估算，非统计定价模型；主/次/风险三概率已严格归一（合计 100%），风险概率为「主/次之外」的余量，结构存续(锥)为独立统计参照、不计入三者之和。结论稳健度（三级）：<b style="color:{GREEN}">稳健</b>=极性+趋势在 20 日扰动下均不变；<b style="color:#d97706">边缘</b>=趋势守住但最后笔年轻；<b style="color:{RED}">敏感·待确认</b>=多空极性翻转（当前方向结论依赖最近一波年轻笔，已相应下调主路径概率）。最后笔仅 ~7 根 K 线的指数，属"信号年轻·待确认"，宜轻仓等待周线确认。</p>"""
 
 
 def data_quality_strip(data, results):
@@ -2009,8 +2012,9 @@ def main():
     </ul>
     <h4>概率与推演</h4>
     <p>主路径概率优先采用<b>历史同类信号的经验同向胜率</b>校准（见第四节回测），样本不足时回退启发式；校准锚<b>严格按情景方向选取</b>（牛市只锚买点类、熊市只锚卖点类信号），杜绝「多头指数却被卖点胜率校准」的方向错配。推演 horizon 按最近笔<b>真实持续交易日</b>（已修正为原始日线索引，非合并 K 线索引）自适应（30~90 日），置信锥宽度按近 20 日波动率相对长期水平条件化（震荡市收窄、动荡市放大），且带宽按<b>随机游走的 √t 口径</b>扩张（近端的不确定性即已显著，避免线性外推把近月压成针状、低估真实风险）。当<b>趋势外推与主路径吻合且 R²≥0.15</b>或<b>日周区间套共振</b>时，主路径概率分别额外 +2% / +3%，把多种独立方法的共识显式转化为概率增益（弱拟合下不授予增益，防止虚增置信度）。推演另给出<b>结构存续概率（锥模型）</b>：用与置信锥同款 σ 计算「期末价 ≥ ZD」的概率 Φ(ln(现价/ZD)/σ)（随机游走中性假设），作为与情景概率互补、且与置信锥内部自洽的「结构是否守住失效位」的纯统计参照——它衡量「不破 ZD」，与情景概率衡量「方向性演绎」口径不同，两者并列呈现而非相互替代。</p>
-    <p>经验胜率进一步做<b>贝叶斯收缩</b>：样本越少、二项 95% 置信区间越宽，经验锚越向启发式基准回归，并在校准说明中标注该置信区间，避免小样本（如 n=5、CI 横跨 50%）噪声被过度外推、误导概率。报告顶部另给出<b>跨指数市场宽度</b>横幅（5 指数牛/熊情景数），把全市场对齐度折算为 ±8 的「全市场对齐度」反馈进各指数推演置信度，使个股指推演的基准方向与市场系统性环境一致。</p>
+    <p>经验胜率进一步做<b>贝叶斯收缩</b>：样本越少、二项 95% 置信区间越宽，经验锚越向启发式基准回归，并在校准说明中标注该置信区间，避免小样本（如 n=5、CI 横跨 50%）噪声被过度外推、误导概率。报告顶部另给出<b>跨指数市场广度综合研判</b>（日/周/月三级），把全市场对齐度与跨级别背离显式呈现，并折算为 ±8 的「全市场对齐度」反馈进各指数推演置信度，使个股指推演的基准方向与市场系统性环境一致。</p>
     <p>为提升预测可信度，推演图额外叠加一条<b>趋势外推线</b>：对最近 min(horizon,90) 日收盘做<b>对数线性回归</b>外推 horizon 日，作为与缠论结构路径相互独立的验证方法。该独立验证的<b>拟合优度 R² 一并展示</b>：R²≥0.15 且终点与主路径吻合（误差&lt;6%）才算「共振」、相互印证、可信度更高；R² 过低（如≈0.1，趋势线近乎噪声）时明确标注「弱拟合」，<b>不授予共振概率增益</b>、亦不建议据此增减仓位；显著偏离时提示两种视角对后市节奏判断不一致，应结合仓位管理。缠论是概率性结构分类框架，推演为目的而非点位预测。</p>
+    <p>报告顶部给出<b>跨指数市场广度综合研判</b>（日/周/月三级），把全市场对齐度与跨级别背离显式呈现，并折算为「全市场对齐度」反馈进各指数推演置信度，避免单一周期宽度掩盖高层级分歧。</p>
     <h4>准确度校验</h4>
     <p>① 腾讯(qfq)↔新浪(裸价) 全序列<b>比值一致性</b>比对（前复权=裸价×常数调整因子，两源比值应恒定，漂移过大即异常）；② 标准严格笔与振幅过滤笔交叉一致率；③ 8 个已知历史拐点的捕捉率；④ 砍掉末 5/10/20 根 K 线重算分类的稳定性；⑤ 交易日连续性 / 缺失检测（相邻间隔与总数 vs 首末日期应有多少交易日）。结果见第一节与推演汇总表。</p>
   </details>
