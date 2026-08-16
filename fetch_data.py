@@ -29,7 +29,7 @@ def _get(url):
 
 def fetch_tx(symbol, period):
     data = json.loads(_get(TX_URL % (symbol, period)))["data"][symbol]
-    klines = data.get("qfqday") or data.get("qfqweek") or data.get("day") or data.get("week") or []
+    klines = data.get("qfqday") or data.get("qfqweek") or data.get("qfqmonth") or data.get("day") or data.get("week") or data.get("month") or []
     out = []
     for row in klines:
         # [日期, 开, 收, 高, 低, 量]
@@ -148,6 +148,7 @@ def main():
     for sym, name in SYMBOLS.items():
         day = fetch_tx(sym, "day")
         week = fetch_tx(sym, "week")
+        month = fetch_tx(sym, "month")
         issues = validate(day)
         # 全序列抽样比值一致性校验（腾讯 qfq ↔ 新浪 裸价）
         sina_series = fetch_sina_series(sym)
@@ -156,9 +157,11 @@ def main():
             "name": name,
             "klines": day,
             "week_klines": week,
+            "month_klines": month,
             "meta": {
                 "count": len(day),
                 "week_count": len(week),
+                "month_count": len(month),
                 "first_date": day[0]["date"],
                 "last_date": day[-1]["date"],
                 "issues": issues,

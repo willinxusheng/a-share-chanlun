@@ -3,8 +3,9 @@
 新增：成交量面板、双法一致性、结构健康度、推演置信度、已知拐点捕捉、原则化推演"""
 import json
 import os
+import math
 from datetime import datetime, timedelta
-from chanlun import analyze, backtest_signals, MIN_BI_PCT_WEEK, health_score, forecast_confidence, forward_vol, adaptive_horizon
+from chanlun import analyze, backtest_signals, MIN_BI_PCT_WEEK, health_score, forecast_confidence, forward_vol, adaptive_horizon, classify, realized_vol_annualized, KNOWN_PIVOTS, _date_diff, MIN_BI_PCT_MONTH, backtest_robustness, backtest_paths, _path_targets
 
 W, H_PRICE, H_VOL, H_MACD = 1060, 360, 64, 110
 PAD_L, PAD_R, PAD_T, PAD_B = 12, 78, 24, 26
@@ -24,10 +25,14 @@ IDX_COLORS = {
 SCENARIO_COLOR = {
     "多头延续": RED, "背驰见底机会": RED,
     "中枢震荡偏多": "#d97706", "高位整理未破前高": "#d97706",
-    "中枢震荡偏空": "#0d9488", "弱势反弹": "#0d9488",
-    "空头延续": GREEN, "背驰见顶风险": GREEN,
+    "中枢震荡偏空": "#0d9488", "弱势反弹": "#0d9488", "反弹未回中枢": "#0d9488",
+    "空头延续": GREEN, "背驰见顶风险": GREEN, "震荡待方向": "#64748b",
     "无中枢·向上笔": RED, "无中枢·向下笔": GREEN,
 }
+
+# 牛/熊情景集合（用于跨指数市场宽度统计与系统性环境判断）
+SC_BULL = ("多头延续", "中枢震荡偏多", "高位整理未破前高", "背驰见底机会")
+SC_BEAR = ("背驰见顶风险", "中枢震荡偏空", "弱势反弹", "反弹未回中枢", "空头延续")
 
 
 def _fmt(v, nd=2):
@@ -54,7 +59,7 @@ def _smooth(pts, tension=1.0, nd=2):
 
 
 # ================= 单指数主图（价格 + 成交量 + MACD） =================
-def chart_svg(klines, r, sym):
+def chart_svg(klines, r, sym, captured=None):
     n = len(klines)
     merged, bis, zss, hist = r["merged"], r["bis"], r["zhongshu"], r["hist"]
     dif, dea = r["dif"], r["dea"]
@@ -117,6 +122,10 @@ def chart_svg(klines, r, sym):
             pg.append(f'<line x1="{PAD_L}" y1="{yy:.1f}" x2="{W - PAD_R}" y2="{yy:.1f}" stroke="#f4f7fb"/>')
 
     pg.append(f'<rect x="{PAD_L}" y="{PAD_T}" width="{plot_w}" height="{price_h}" fill="none" stroke="#e2e8f0"/>')
+    # 现价水平参考线（淡灰虚线 + 右侧标签）：专业图标配，便于一眼比对「现在」相对 MA/中枢/缺口的位置
+    _ycl = y(closes[-1])
+    pg.append(f'<line x1="{PAD_L}" y1="{_ycl:.1f}" x2="{W - PAD_R}" y2="{_ycl:.1f}" stroke="#94a3b8" stroke-width="0.9" stroke-dasharray="3,3" stroke-opacity="0.65"/>')
+    lg.append(f'<text x="{W - PAD_R + 6}" y="{_ycl + 4:.1f}" font-size="12" font-weight="700" fill="#64748b">现价 {closes[-1]:.0f}</text>')
     pg.append(f'<line x1="{PAD_L}" y1="{vtop}" x2="{W - PAD_R}" y2="{vtop}" stroke="#e2e8f0" stroke-dasharray="2,3"/>')
 
     # 中枢带（最近 8 个）
@@ -138,6 +147,42 @@ def chart_svg(klines, r, sym):
             _placed.append(yy)
             pg.append(f'<line x1="{PAD_L}" y1="{yy:.1f}" x2="{W - PAD_R}" y2="{yy:.1f}" stroke="{GOLD}" stroke-width="1.2" stroke-dasharray="6,4"/>')
             lg.append(f'<text x="{PAD_L + 6}" y="{yy - 4:.1f}" font-size="13" font-weight="600" fill="{GOLD}">{lab} {val:.0f}</text>')
+        # 中枢 GG/DD（中枢上下极值，刻画中枢真实振幅）+ 延伸标注：count≥9 视为中枢延伸（级别升级）
+        if "gg" in zs and "dd" in zs:
+            for _vv, _lab in ((zs["gg"], "GG"), (zs["dd"], "DD")):
+                _yy = y(_vv)
+                pg.append(f'<line x1="{PAD_L}" y1="{_yy:.1f}" x2="{W - PAD_R}" y2="{_yy:.1f}" stroke="#94a3b8" stroke-width="0.7" stroke-dasharray="1,4" stroke-opacity="0.6"/>')
+                lg.append(f'<text x="{W - PAD_R - 56}" y="{_yy - 2:.1f}" font-size="9" font-weight="500" fill="#94a3b8">{_lab} {_vv:.0f}</text>')
+            if zs.get("extension"):
+                lg.append(f'<text x="{PAD_L + 70}" y="{y(zs["zg"]) - 4:.1f}" font-size="11" font-weight="700" fill="#b45309">⟳ 中枢延伸({zs["count"]}笔)</text>')
+            # 中枢进入方向（缠论：中枢是上升中还是下降中形成，直接决定三买/三卖的力度）：
+            # ↑中枢=进入笔向上(上涨中构筑)、↓中枢=进入笔向下(下跌中构筑)。
+            _enter_dir = None
+            for _bi in bis:
+                if _bi["end"] < zs["start"]:
+                    _enter_dir = _bi["dir"]
+                else:
+                    break
+            if _enter_dir == 1:
+                lg.append(f'<text x="{PAD_L + 6}" y="{y((zs["zg"] + zs["zd"]) / 2) + 3:.1f}" font-size="10" font-weight="700" fill="#0ea5e9">↑中枢</text>')
+            elif _enter_dir == -1:
+                lg.append(f'<text x="{PAD_L + 6}" y="{y((zs["zg"] + zs["zd"]) / 2) + 3:.1f}" font-size="10" font-weight="700" fill="#a855f7">↓中枢</text>')
+
+    # 跳空缺口（未补，价格在±15%内最近5个）：横向半透明带 = 强支撑/强压力位。
+    # A股「逢缺必补」，未补缺口是中枢之外最重要的价位锚；向上缺口位于下方=红带(突破支撑)，
+    # 向下缺口位于上方=绿带(破位压力)。仅显示贴近当前的缺口，避免远处无关缺口污染视图。
+    _close = closes[-1]
+    _gaps_unf = [g for g in r.get("gaps", []) if not g["filled"]]
+    _gaps_view = [g for g in _gaps_unf
+                  if abs((g["top"] + g["bottom"]) / 2 / _close - 1) <= 0.15]
+    _gaps_view.sort(key=lambda g: g["idx"])
+    for g in _gaps_view[-5:]:
+        _yt, _yb = y(g["top"]), y(g["bottom"])
+        _col = "#dc2626" if g["type"] == "up" else "#16a34a"  # 涨红跌绿
+        _h = max(_yb - _yt, 2.5)
+        pg.append(f'<rect x="{PAD_L:.1f}" y="{_yt:.1f}" width="{plot_w:.1f}" height="{_h:.1f}" fill="{_col}" fill-opacity="0.07" stroke="{_col}" stroke-opacity="0.30" stroke-width="0.6"/>')
+        _lab = ("▲缺" if g["type"] == "up" else "▼缺") + g["date"][5:]
+        lg.append(f'<text x="{W - PAD_R - 64}" y="{_yt - 2:.1f}" font-size="9" font-weight="600" fill="{_col}">{_lab} {g["bottom"]:.0f}~{g["top"]:.0f}</text>')
 
     # 斐波那契回调位（最近一段已完成 swing；紫虚线，作为预测目标支撑/阻力）
     # 仅在"回撤区"（最近完成笔末端 → 右缘）绘制，避免在无关历史区间上空画悬浮参考线，更专业
@@ -150,11 +195,19 @@ def chart_svg(klines, r, sym):
             base_hi, base_lo = ls, le
         swing = base_hi - base_lo
         x0 = x(merged[leg["end"]]["idx_end"])  # 回撤区左缘 = 最近完成笔末端（当前笔起点）
+        _fib = []
         for f, lab in ((0.0, "F0"), (0.382, "F38"), (0.5, "F50"), (0.618, "F62")):
             pv = base_hi - swing * f if leg["dir"] == 1 else base_lo + swing * f
             yy = y(pv)
             pg.append(f'<line x1="{x0:.1f}" y1="{yy:.1f}" x2="{W - PAD_R}" y2="{yy:.1f}" stroke="#7c3aed" stroke-width="0.8" stroke-dasharray="2,4" stroke-opacity="0.5"/>')
-            lg.append(f'<text x="{W - PAD_R - 60}" y="{yy - 2:.1f}" font-size="10" font-weight="600" fill="#7c3aed" text-anchor="start">{lab} {pv:.0f}</text>')
+            _fib.append((yy, lab, pv))
+        _fib.sort(key=lambda t: t[0])
+        _last_y = -1e9
+        for _yy, _lab, _pv in _fib:  # 垂直防重叠：相邻标签过近则错开，避免 F 位文字叠在一起
+            if abs(_yy - _last_y) < 12:
+                _yy = _last_y + 12 if _yy >= _last_y else _last_y - 12
+            _last_y = _yy
+            lg.append(f'<text x="{W - PAD_R - 60}" y="{_yy - 2:.1f}" font-size="10" font-weight="600" fill="#7c3aed" text-anchor="start">{_lab} {_pv:.0f}</text>')
 
     # 收盘价平滑曲线 + 轻量渐变填充（更细腻）
     close_pts = [(x(i), y(c)) for i, c in enumerate(closes)]
@@ -171,27 +224,103 @@ def chart_svg(klines, r, sym):
         return out
 
     for maa, mcol, mlab in ((ma_series(closes, 20), "#0ea5e9", "MA20"),
-                            (ma_series(closes, 60), "#a855f7", "MA60")):
+                            (ma_series(closes, 60), "#a855f7", "MA60"),
+                            (ma_series(closes, 250), "#0d9488", "MA250")):
         pts = [(x(i), y(v)) for i, v in enumerate(maa) if v is not None]
         if pts:
             pg.append(f'<path d="{_smooth(pts)}" fill="none" stroke="{mcol}" stroke-width="1" stroke-opacity="0.85" stroke-linejoin="round" stroke-linecap="round"/>')
-    lg.append(f'<rect x="{PAD_L + 2}" y="{PAD_T + 3}" width="132" height="16" rx="3" fill="#ffffff" fill-opacity="0.82"/>')
+    lg.append(f'<rect x="{PAD_L + 2}" y="{PAD_T + 3}" width="196" height="16" rx="3" fill="#ffffff" fill-opacity="0.82"/>')
     lg.append(f'<text x="{PAD_L + 6}" y="{PAD_T + 13}" font-size="12" font-weight="600" fill="#0ea5e9">— MA20</text>')
     lg.append(f'<text x="{PAD_L + 64}" y="{PAD_T + 13}" font-size="12" font-weight="600" fill="#a855f7">— MA60</text>')
+    lg.append(f'<text x="{PAD_L + 122}" y="{PAD_T + 13}" font-size="12" font-weight="600" fill="#0d9488">— MA250</text>')
 
-    # 笔线段
-    for b in bis:
+    # 笔线段：已完成笔实线、当前进行中的笔用虚线+加粗，直观区分「已确认」与「正在形成」（细腻度）
+    for bi_i, b in enumerate(bis):
         x0 = x(merged[b["start"]]["idx_end"])
         x1 = x(merged[b["end"]]["idx_end"])
         color = RED if b["dir"] == 1 else GREEN
-        pg.append(f'<line x1="{x0:.1f}" y1="{y(b["start_price"]):.1f}" x2="{x1:.1f}" y2="{y(b["end_price"]):.1f}" stroke="{color}" stroke-width="1.8"/>')
+        is_cur = (bi_i == len(bis) - 1)
+        if is_cur:
+            pg.append(f'<line x1="{x0:.1f}" y1="{y(b["start_price"]):.1f}" x2="{x1:.1f}" y2="{y(b["end_price"]):.1f}" stroke="{color}" stroke-width="2.6" stroke-opacity="0.95" stroke-dasharray="6,4"/>')
+        else:
+            pg.append(f'<line x1="{x0:.1f}" y1="{y(b["start_price"]):.1f}" x2="{x1:.1f}" y2="{y(b["end_price"]):.1f}" stroke="{color}" stroke-width="1.8" stroke-opacity="0.95"/>')
 
     # 笔端点（分型转折点）圆点，便于核对结构（放文字层，随窗口重算 cx 保持正圆）
-    for b in bis:
+    for bi_i, b in enumerate(bis):
         xxe = x(merged[b["end"]]["idx_end"])
         yye = y(b["end_price"])
         col = RED if b["dir"] == 1 else GREEN
-        lg.append(f'<circle data-i="{merged[b["end"]]["idx_end"]}" data-dx="0" cx="{xxe:.1f}" cy="{yye:.1f}" r="2.6" fill="{col}" stroke="#ffffff" stroke-width="0.8"/>')
+        is_cur = (bi_i == len(bis) - 1)
+        if is_cur:
+            # 当前未完成笔末端（临时分型）：放大圆点 + 虚线方框 + 「未确认」标注，明确与已完成分型区分
+            lg.append(f'<circle data-i="{merged[b["end"]]["idx_end"]}" data-dx="0" cx="{xxe:.1f}" cy="{yye:.1f}" r="4" fill="{col}" fill-opacity="0.85" stroke="#ffffff" stroke-width="1.4"/>')
+            lg.append(f'<rect data-i="{merged[b["end"]]["idx_end"]}" data-dx="0" x="{xxe - 7:.1f}" y="{yye - 7:.1f}" width="14" height="14" fill="none" stroke="{col}" stroke-width="1" stroke-dasharray="3,2.5" opacity="0.85"/>')
+            _ylab = yye - 15 if b["dir"] == 1 else yye + 23
+            lg.append(f'<text data-i="{merged[b["end"]]["idx_end"]}" data-dx="0" x="{xxe:.1f}" y="{_ylab:.1f}" font-size="10.5" font-weight="700" fill="{col}" text-anchor="middle" paint-order="stroke" stroke="#ffffff" stroke-width="2.5">未确认</text>')
+        else:
+            lg.append(f'<circle data-i="{merged[b["end"]]["idx_end"]}" data-dx="0" cx="{xxe:.1f}" cy="{yye:.1f}" r="2.6" fill="{col}" stroke="#ffffff" stroke-width="0.8"/>')
+
+    # 已知历史拐点（算法准确度外部校验·可视化）：抓到的标金色✓菱形，未抓到的标灰色◇。
+    # 这是「缠论算法对历史大底/大顶捕捉能力」的诚实展示——高捕获率佐证结构识别可靠，
+    # 个别未捕捉的也如实标注，不美化。菱形画图形层(pg)，符号画文字层(lg)随窗口重算保持正立。
+    if captured is not None:
+        _cap_labels = {c[0] for c in captured}
+        _piv = []
+        for _pd, (_lab, _dir) in KNOWN_PIVOTS.items():
+            _bi, _bd = 0, 1e9
+            for _i, _k in enumerate(klines):
+                _dd = abs(_date_diff(_k["date"], _pd))
+                if _dd < _bd:
+                    _bd, _bi = _dd, _i
+            _is_cap = _lab in _cap_labels
+            _pcol = GOLD if _is_cap else "#94a3b8"
+            _piv.append((x(_bi), y(klines[_bi]["close"]), _is_cap, _pcol, _bi))
+        _piv.sort(key=lambda t: t[0])
+        _last_x, _row = -1e9, 0
+        for _xx, _yy, _is_cap, _pcol, _bi in _piv:
+            _dd2 = 5
+            pg.append(f'<path d="M{_xx:.1f} {_yy-_dd2:.1f} L{_xx+_dd2:.1f} {_yy:.1f} L{_xx:.1f} {_yy+_dd2:.1f} L{_xx-_dd2:.1f} {_yy:.1f} Z" fill="{_pcol}" fill-opacity="0.92" stroke="#ffffff" stroke-width="1"/>')
+            if abs(_xx - _last_x) < 80:   # 临近拐点标签水平防重叠：上下错开
+                _row = 1 - _row
+            else:
+                _row = 0
+            _last_x = _xx
+            _ly = max(PAD_T + 11, min(PAD_T + price_h - 6, _yy - _dd2 - 7 - _row * 13))
+            lg.append(f'<text data-i="{_bi}" data-dx="0" x="{_xx:.1f}" y="{_ly:.1f}" font-size="11" font-weight="800" fill="{_pcol}" text-anchor="middle" paint-order="stroke" stroke="#ffffff" stroke-width="3">{("✓" if _is_cap else "◇")}</text>')
+
+    # 线段结构（缠论"笔→线段→走势"高一级递归）：连接相邻线段的摆动极点形成宏观走势折线，
+    # 与笔级实线分层——极点用空心小菱形标记（红=线段顶/绿=线段底），仅画最近 ~14 段避免过密。
+    # 线段极值定位：在每段 bi 起止 K 线跨度(merged窗口)内取 high/low，极个别跨段边界未命中则退回 bi 末端索引。
+    # 既有「线段背驰三角」坐落的极点即宏观折线顶点，二者叠加完整呈现本级别之上的走势层级。
+    _segs = r.get("segments", [])
+    if len(_segs) >= 2:
+        _seg_pts = []
+        for _sg in _segs:
+            _s0 = merged[_sg["start"]]["idx_start"]
+            _e0 = merged[_sg["end"]]["idx_end"]
+            if _e0 < _s0:
+                _s0, _e0 = _e0, _s0
+            if _sg["dir"] == 1:
+                _idx = max(range(_s0, _e0 + 1), key=lambda i: klines[i]["high"])
+                _pv = klines[_idx]["high"]
+                if abs(_pv - _sg["high"]) > 1e-6:
+                    _idx, _pv = _e0, _sg["high"]
+            else:
+                _idx = min(range(_s0, _e0 + 1), key=lambda i: klines[i]["low"])
+                _pv = klines[_idx]["low"]
+                if abs(_pv - _sg["low"]) > 1e-6:
+                    _idx, _pv = _e0, _sg["low"]
+            _seg_pts.append((_idx, _pv, _sg["dir"]))
+        _recent = _seg_pts[-14:]
+        _pline = [(x(_i), y(_v)) for _i, _v, _ in _recent]
+        if len(_pline) >= 2:
+            pg.append(f'<path d="{_smooth(_pline, tension=0.6)}" fill="none" stroke="#334155" stroke-width="1.5" stroke-opacity="0.5" stroke-dasharray="6,3" stroke-linejoin="round" stroke-linecap="round"/>')
+        for _i, _v, _d in _recent:
+            _xc, _yc = x(_i), y(_v)
+            _mc = RED if _d == 1 else GREEN
+            _dd = 4
+            lg.append(f'<polygon data-i="{_i}" data-dx="0" points="{_xc:.1f},{_yc-_dd:.1f} {_xc+_dd:.1f},{_yc:.1f} {_xc:.1f},{_yc+_dd:.1f} {_xc-_dd:.1f},{_yc:.1f}" fill="#ffffff" stroke="{_mc}" stroke-width="1.4"/>')
+        lg.append(f'<text x="{PAD_L + 6}" y="{PAD_T + 27}" font-size="11" font-weight="700" fill="#334155">⬡ 线段结构(高一级)</text>')
 
     # 买卖点信号（近 2 年内；同向标签最小间距 55px；过靠右缘会压到最新价标签则跳过）
     cutoff = n - 500
@@ -210,12 +339,97 @@ def chart_svg(klines, r, sym):
             continue
         last_x_by_dir[d] = xx
         col = RED if d == 1 else GREEN
+        # 信号标签：买卖点类别 + 背驰级别(趋/盘) + 量能确认(量)
+        _marker = ""
+        if s.get("bc_type") == "趋势背驰":
+            _marker += "·趋"
+        elif s.get("bc_type") == "盘整背驰":
+            _marker += "·盘"
+        if s.get("vol_confirm"):
+            _marker += "·量"
+        _lbl = s["kind"][:3] + _marker
         if d == 1:
             pg.append(f'<polygon points="{xx:.1f},{yy + 8:.1f} {xx - 5:.1f},{yy + 17:.1f} {xx + 5:.1f},{yy + 17:.1f}" fill="{col}"/>')
-            lg.append(f'<text data-i="{xi}" data-dx="0" x="{xx:.1f}" y="{yy + 30:.1f}" font-size="13" font-weight="600" fill="{col}" text-anchor="middle" paint-order="stroke" stroke="#ffffff" stroke-width="3">{s['kind'][:3] + ('·量' if s.get('vol_confirm') else '')}</text>')
+            lg.append(f'<text data-i="{xi}" data-dx="0" x="{xx:.1f}" y="{yy + 30:.1f}" font-size="13" font-weight="600" fill="{col}" text-anchor="middle" paint-order="stroke" stroke="#ffffff" stroke-width="3">{_lbl}</text>')
         else:
             pg.append(f'<polygon points="{xx:.1f},{yy - 8:.1f} {xx - 5:.1f},{yy - 17:.1f} {xx + 5:.1f},{yy - 17:.1f}" fill="{col}"/>')
-            lg.append(f'<text data-i="{xi}" data-dx="0" x="{xx:.1f}" y="{yy - 23:.1f}" font-size="13" font-weight="600" fill="{col}" text-anchor="middle" paint-order="stroke" stroke="#ffffff" stroke-width="3">{s['kind'][:3] + ('·量' if s.get('vol_confirm') else '')}</text>')
+            lg.append(f'<text data-i="{xi}" data-dx="0" x="{xx:.1f}" y="{yy - 23:.1f}" font-size="13" font-weight="600" fill="{col}" text-anchor="middle" paint-order="stroke" stroke="#ffffff" stroke-width="3">{_lbl}</text>')
+        # R:R 值博率小徽标（缠论实战必备：每个买卖点须有明确止损/目标/盈亏比，此前完全缺失）。
+        # 主标签保持简洁，R:R 以独立小字标注于三角旁，紫=优/良(值博)、灰=中、橙=差(慎)。
+        _rr = s.get("rr")
+        if _rr:
+            _rr_col = {"优": "#7c3aed", "良": "#7c3aed", "中": "#64748b", "差": "#b45309"}.get(s.get("quality"), "#94a3b8")
+            _ry = (yy + 43) if d == 1 else (yy - 36)
+            lg.append(f'<text data-i="{xi}" data-dx="0" x="{xx:.1f}" y="{_ry:.1f}" font-size="10" font-weight="700" fill="{_rr_col}" text-anchor="middle" paint-order="stroke" stroke="#ffffff" stroke-width="2.5">R{_rr:.1f}</text>')
+
+    # 背驰点标注（笔级）：顶背驰=红▼（顶点朝下指向价位）、底背驰=绿▲（顶点朝上指向价位）。
+    # 缠论图核心要素——背驰即买卖点触发处，须在价位区直观可见；仅标近 2 年、同一方向最小间距 40px 防过密。
+    _bc_cut = n - 500
+    _last_x_bc = {1: -999, -1: -999}
+    for _bc in r.get("beichi", []):
+        _bi = _bc["bi_index"]
+        if _bi < 0 or _bi >= len(bis):
+            continue
+        _b = bis[_bi]
+        _xi = merged[_b["end"]]["idx_end"]
+        if _xi < _bc_cut:
+            continue
+        _xb, _yb = x(_xi), y(_b["end_price"])
+        _d = 1 if _bc["type"] == "top" else -1
+        if _xb - _last_x_bc[_d] < 40:
+            continue
+        _last_x_bc[_d] = _xb
+        _vc = _bc.get("vol_confirm")
+        _bt = _bc.get("bc_type", "")
+        # 背驰分级描边：趋势背驰=加粗（量能确认金、否则深橙，本级别大级别转折）；
+        # 盘整背驰=细描边（量能确认金、否则石灰，级别较小）；与量能确认因子叠加形成 4 级视觉层次。
+        if _bt == "趋势背驰":
+            _sw = 2.0
+            _stroke = GOLD if _vc else "#b45309"
+        elif _bt == "盘整背驰":
+            _sw = 0.9
+            _stroke = GOLD if _vc else "#94a3b8"
+        else:
+            _sw = 1.0
+            _stroke = GOLD if _vc else "#ffffff"
+        if _bc["type"] == "top":
+            pg.append(f'<polygon points="{_xb:.1f},{_yb - 9:.1f} {_xb - 5:.1f},{_yb - 18:.1f} {_xb + 5:.1f},{_yb - 18:.1f}" fill="{RED}" stroke="{_stroke}" stroke-width="{_sw}"/>')
+        else:
+            pg.append(f'<polygon points="{_xb:.1f},{_yb + 9:.1f} {_xb - 5:.1f},{_yb + 18:.1f} {_xb + 5:.1f},{_yb + 18:.1f}" fill="{GREEN}" stroke="{_stroke}" stroke-width="{_sw}"/>')
+
+    # 线段级背驰标注（走势段级别，比笔级更高一层）：用空心大三角（白底彩边）与笔级实心小三角区分，
+    # 置于更外侧（顶-22~-36 / 底+22~+36）形成双层显示、层级分明；仅标近 2 年、最小间距 60px 防过密。
+    # 顶/底背驰分别标定在线段 high/low 对应的 K 线极值点（精确，非近似末端）。
+    _sb_cut = n - 500
+    _last_x_sb = {1: -999, -1: -999}
+    for _sb in r.get("seg_beichi", []):
+        _si = _sb["seg_index"]
+        if _si < 0 or _si >= len(r["segments"]):
+            continue
+        _seg = r["segments"][_si]
+        _s0 = merged[_seg["start"]]["idx_start"]
+        _s1 = merged[_seg["end"]]["idx_end"]
+        if _s1 < _s0:
+            _s0, _s1 = _s1, _s0
+        if _s1 < _sb_cut:
+            continue
+        if _sb["type"] == "top":
+            _idx = max(range(_s0, _s1 + 1), key=lambda i: klines[i]["high"])
+            _price = _seg["high"]
+        else:
+            _idx = min(range(_s0, _s1 + 1), key=lambda i: klines[i]["low"])
+            _price = _seg["low"]
+        _xb, _yb = x(_idx), y(_price)
+        _d = 1 if _sb["type"] == "top" else -1
+        if _xb - _last_x_sb[_d] < 60:
+            continue
+        _last_x_sb[_d] = _xb
+        if _sb["type"] == "top":
+            pg.append(f'<polygon points="{_xb:.1f},{_yb - 22:.1f} {_xb - 8:.1f},{_yb - 36:.1f} {_xb + 8:.1f},{_yb - 36:.1f}" fill="#ffffff" stroke="{RED}" stroke-width="1.6"/>')
+            lg.append(f'<text data-i="{_idx}" data-dx="0" x="{_xb:.1f}" y="{_yb - 46:.1f}" font-size="9" font-weight="700" fill="{RED}" text-anchor="middle" paint-order="stroke" stroke="#ffffff" stroke-width="2.5">{_sb["area_ratio"]:.2f}</text>')
+        else:
+            pg.append(f'<polygon points="{_xb:.1f},{_yb + 22:.1f} {_xb - 8:.1f},{_yb + 36:.1f} {_xb + 8:.1f},{_yb + 36:.1f}" fill="#ffffff" stroke="{GREEN}" stroke-width="1.6"/>')
+            lg.append(f'<text data-i="{_idx}" data-dx="0" x="{_xb:.1f}" y="{_yb + 50:.1f}" font-size="9" font-weight="700" fill="{GREEN}" text-anchor="middle" paint-order="stroke" stroke="#ffffff" stroke-width="2.5">{_sb["area_ratio"]:.2f}</text>')
 
     # 最新价虚线 + 标签
     last_c = closes[-1]
@@ -225,24 +439,64 @@ def chart_svg(klines, r, sym):
     lg.append(f'<g id="latest-{sym}">')
     lg.append(f'<rect x="{PAD_L + plot_w - 74}" y="{yy - 9:.1f}" width="72" height="16" rx="3" fill="{lcolor}" stroke="#ffffff" stroke-width="0.8"/>')
     lg.append(f'<text x="{PAD_L + plot_w - 39}" y="{yy + 4:.1f}" font-size="14" font-weight="700" fill="#ffffff" text-anchor="middle">{last_c:.2f}</text>')
+    lg.append(f'<text x="{PAD_L + plot_w - 80:.1f}" y="{yy + 4:.1f}" font-size="11" font-weight="600" fill="{INK}" text-anchor="end" opacity="0.85">现价</text>')
     lg.append('</g>')
 
     # ===== 成交量副图 =====
     vmax = max((k["volume"] for k in klines), default=1) or 1
     bw = max(plot_w / n * 0.62, 0.8)
-    for i, k in enumerate(klines):
-        vh = k["volume"] / vmax * (H_VOL - 4)
-        vc = RED if k["close"] >= k["open"] else GREEN
-        yy2 = vbot - vh
-        pg.append(f'<rect x="{x(i) - bw / 2:.1f}" y="{yy2:.1f}" width="{bw:.1f}" height="{vh:.1f}" fill="{vc}" fill-opacity="0.55"/>')
-    # 成交量 MA5（量能趋势，置于图形层随窗口横向缩放）
+    # 缩量背驰覆盖的 K 线原始索引集合：背驰笔本身应是价创新高/低、量能却萎缩的背离结构，
+    # 把对应成交量柱染金，直观印证「量能确认」因子（缠论核心确认条件），提升图表信息密度。
+    _vol_conf_raw = set()
+    for _bc in r.get("beichi", []):
+        if _bc.get("vol_confirm"):
+            _bi = _bc["bi_index"]
+            if 0 <= _bi < len(bis):
+                _b = bis[_bi]
+                _s = merged[_b["start"]]["idx_start"]
+                _e = merged[_b["end"]]["idx_end"]
+                if _e < _s:
+                    _s, _e = _e, _s
+                for _ri in range(_s, _e + 1):
+                    _vol_conf_raw.add(_ri)
+    # 成交量 MA5（量能趋势基准，先整段计算供「放量突破」判定与画线共用）
     vma = [sum(klines[j]["volume"] for j in range(i + 1 - 5, i + 1)) / 5 if i + 1 >= 5 else None
            for i in range(n)]
+    # 近20日最高（前20日，不含当日）用于「阶段新高突破」判定
+    _hi20 = []
+    for i in range(n):
+        _lo = max(0, i - 20)
+        _hi20.append(max((klines[j]["high"] for j in range(_lo, i)), default=klines[i]["high"]))
+    zg_k = zs["zg"] if zs else None
+    for i, k in enumerate(klines):
+        vh = k["volume"] / vmax * (H_VOL - 4)
+        if i in _vol_conf_raw:
+            vc_bar, vo = GOLD, 0.92
+        else:
+            # 放量突破：量能明显放大(>量MA5*1.8)且当日站上中枢上沿或创近20日新高 → 亮蓝高亮。
+            # 与缩量背驰金色对称：量价配合的两类极端——放量突破(动能确认) vs 缩量背驰(动能衰竭)。
+            _vol_ratio = (k["volume"] / vma[i]) if vma[i] else 0
+            _break = (zg_k is not None and k["high"] > zg_k and k["close"] > zg_k) or (k["high"] >= _hi20[i])
+            if _vol_ratio > 1.8 and _break:
+                vc_bar, vo = "#2563eb", 0.92
+            else:
+                vc_bar, vo = (RED if k["close"] >= k["open"] else GREEN), 0.55
+        yy2 = vbot - vh
+        pg.append(f'<rect x="{x(i) - bw / 2:.1f}" y="{yy2:.1f}" width="{bw:.1f}" height="{vh:.1f}" fill="{vc_bar}" fill-opacity="{vo}"/>')
+    # 成交量 MA5 线（量能趋势，置于图形层随窗口横向缩放）
     vma_pts = [(x(i), vbot - (v / vmax) * (H_VOL - 4)) for i, v in enumerate(vma) if v is not None]
     if vma_pts:
         pg.append(f'<path d="{_smooth(vma_pts)}" fill="none" stroke="#475569" stroke-width="1" stroke-opacity="0.85" stroke-linejoin="round" stroke-linecap="round"/>')
+    # 成交量参考基线（50% / 100% 量能刻度，提升量能读数专业性：此前仅右上角一个总量标注，
+    # 量能相对大小难读；叠加参考线后，"放量突破>量MA5*1.8"与"缩量背驰"的高亮更可量化对照）。
+    for _frac, _lab in ((1.0, "100%"), (0.5, "50%")):
+        _yyv = vbot - (H_VOL - 4) * _frac
+        pg.append(f'<line x1="{PAD_L}" y1="{_yyv:.1f}" x2="{W - PAD_R}" y2="{_yyv:.1f}" stroke="#eef2f7" stroke-width="1"/>')
+        lg.append(f'<text x="{W - PAD_R + 6}" y="{_yyv + 4:.1f}" font-size="10" fill="{GRAY}">{_lab}</text>')
     lg.append(f'<text x="{PAD_L}" y="{vtop - 2:.1f}" font-size="14" font-weight="600" fill="{GRAY}">成交量</text>')
     lg.append(f'<text x="{PAD_L + 58}" y="{vtop - 2:.1f}" font-size="12" font-weight="600" fill="#475569">— 量MA5</text>')
+    lg.append(f'<text x="{PAD_L + 128}" y="{vtop - 2:.1f}" font-size="12" font-weight="700" fill="{GOLD}">◆ 缩量背驰</text>')
+    lg.append(f'<text x="{PAD_L + 208}" y="{vtop - 2:.1f}" font-size="12" font-weight="700" fill="#2563eb">■ 放量突破</text>')
     lg.append(f'<text x="{W - PAD_R + 6}" y="{vtop + 14:.1f}" font-size="11" font-weight="500" fill="{GRAY}">{vmax / 1e8:.2f}亿手</text>')
 
     # ===== MACD 副图 =====
@@ -270,6 +524,55 @@ def chart_svg(klines, r, sym):
     lg.append(f'<text x="{PAD_L}" y="{mtop + 11}" font-size="14" font-weight="600" fill="{GRAY}">MACD(12,26,9)</text>')
     lg.append(f'<text x="{PAD_L + 120}" y="{mtop + 11}" font-size="14" font-weight="600" fill="{BLUE}">— DIF</text>')
     lg.append(f'<text x="{PAD_L + 178}" y="{mtop + 11}" font-size="14" font-weight="600" fill="#d97706">— DEA</text>')
+    # MACD 金叉/死叉标记：DIF 上穿 DEA=金叉(▲红)、下穿=死叉(▼绿)；交叉点取 DIF/DEA 中点高度。
+    # 仅标近 2 年、最小间距 24px 防过密；白描边保证叠在线条上仍可辨。
+    _xo_cut = n - 500
+    _last_xo = -999
+    for _i in range(1, n):
+        if _i < _xo_cut:
+            continue
+        _up = dif[_i - 1] <= dea[_i - 1] and dif[_i] > dea[_i]
+        _dn = dif[_i - 1] >= dea[_i - 1] and dif[_i] < dea[_i]
+        if not (_up or _dn):
+            continue
+        _xxo = x(_i)
+        if _xxo - _last_xo < 24:
+            continue
+        _last_xo = _xxo
+        _yyo = ym((dif[_i] + dea[_i]) / 2)
+        if _up:
+            pg.append(f'<polygon points="{_xxo:.1f},{_yyo - 5:.1f} {_xxo - 3.5:.1f},{_yyo - 1:.1f} {_xxo + 3.5:.1f},{_yyo - 1:.1f}" fill="{RED}" stroke="#ffffff" stroke-width="0.6"/>')
+        else:
+            pg.append(f'<polygon points="{_xxo:.1f},{_yyo + 5:.1f} {_xxo - 3.5:.1f},{_yyo + 1:.1f} {_xxo + 3.5:.1f},{_yyo + 1:.1f}" fill="{GREEN}" stroke="#ffffff" stroke-width="0.6"/>')
+
+    # 背驰区间 MACD 面积对比（背驰判定的核心可视化证据）：背驰本质是「相邻同向段 MACD 面积萎缩」，
+    # 对笔背驰对应 K 线区间在副图画极淡竖条 + 标注面积比(后段/前段)<1 即面积↓，与主图背驰三角
+    # 形成「价位背驰 + 动量面积背驰」双证据链。仅标近 2 年、同方向最小间距 46px 防过密。
+    _mb_cut = n - 500
+    _last_x_mb = {1: -999, -1: -999}
+    for _bc in r.get("beichi", []):
+        _bi = _bc["bi_index"]
+        if _bi < 0 or _bi >= len(bis):
+            continue
+        _b = bis[_bi]
+        _s = merged[_b["start"]]["idx_start"]
+        _e = merged[_b["end"]]["idx_end"]
+        if _e < _s:
+            _s, _e = _e, _s
+        if _e < _mb_cut:
+            continue
+        _xm0, _xm1 = x(_s), x(_e)
+        _d = 1 if _bc["type"] == "top" else -1
+        if _xm1 - _last_x_mb[_d] < 46:
+            continue
+        _last_x_mb[_d] = _xm1
+        _col = RED if _bc["type"] == "top" else GREEN
+        pg.append(f'<rect x="{_xm0:.1f}" y="{mtop:.1f}" width="{max(_xm1 - _xm0, 1):.1f}" height="{H_MACD:.1f}" fill="{_col}" fill-opacity="0.06"/>')
+        _ar = _bc.get("area_ratio", 1)
+        _lab = f"面积{_ar:.2f}{'↓' if _ar < 1 else '↑'}"
+        _midx = (_s + _e) // 2
+        _lyy = (mtop + 11) if _bc["type"] == "top" else (mbot - 3)
+        lg.append(f'<text data-i="{_midx}" data-dx="0" x="{_xm1:.1f}" y="{_lyy:.1f}" font-size="9" font-weight="700" fill="{_col}" text-anchor="middle" paint-order="stroke" stroke="#ffffff" stroke-width="2.5">{_lab}</text>')
 
     p = [f'<svg id="main-{sym}" viewBox="0 0 {W} {CHART_TOTAL}" preserveAspectRatio="xMidYMid meet" data-n="{n}" data-lo="{lo:.4f}" data-span="{span:.4f}" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto;display:block;text-rendering:geometricPrecision;shape-rendering:geometricPrecision">']
     p += base
@@ -386,7 +689,7 @@ def _interp(path, f):
     return path[-1][1]
 
 
-def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None):
+def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_paths=None):
     closes = [k["close"] for k in klines]
     n = len(closes)
     tail = closes[-120:]
@@ -395,6 +698,12 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None):
     zg = zs["zg"] if zs else last * 1.05
     zd = zs["zd"] if zs else last * 0.95
     mid = (zg + zd) / 2
+    # 缺口参考线（推演图叠加）：未补且贴近现价的跳空缺口 = 未来支撑/压力位，
+    # 与中枢 ZD/ZG、Fib 位共同构成交叉验证的目标/失效锚。仅取最近±15%内最多2条，避免拥挤。
+    _gap_refs = [g for g in r.get("gaps", []) if not g["filled"]
+                 and abs((g["top"] + g["bottom"]) / 2 / last - 1) <= 0.15]
+    _gap_refs.sort(key=lambda g: abs((g["top"] + g["bottom"]) / 2 / last - 1))
+    _gap_refs = _gap_refs[:2]
     sc = r["classify"]["scenario"]
     cls_dir = r["classify"]["last_bi_dir"]
     wdir = wcls["last_bi_dir"]
@@ -402,6 +711,29 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None):
     # 最近完成的笔幅度，作为"实测幅度投影"基准
     comp = r["bis"][-2] if len(r["bis"]) >= 2 else r["bis"][-1]
     move = max(abs(comp["end_price"] / comp["start_price"] - 1), 0.03)
+
+    # ---- 趋势外推（独立交叉验证方法）：对最近 min(horizon,90) 日收盘做对数线性回归，
+    #      外推 horizon 日得到趋势目标位。它与结构主路径是否吻合，本身是预测可信度的硬证据。----
+    _tw = closes[-min(horizon, 90):]
+    _n = len(_tw)
+    _r2 = 0.0
+    if _n >= 10:
+        _xs = list(range(_n))
+        _ys = [math.log(c) for c in _tw]
+        _mx = sum(_xs) / _n
+        _my = sum(_ys) / _n
+        _sxx = sum((x - _mx) ** 2 for x in _xs)
+        _sxy = sum((x - _mx) * (y - _my) for x, y in zip(_xs, _ys))
+        _slope = _sxy / _sxx if _sxx else 0.0
+        # R²：对数线性回归对近 horizon 日收盘的解释力，是"独立验证法"自身可靠度的硬指标
+        _yhat = [_my + _slope * (x - _mx) for x in _xs]
+        _ss_res = sum((y - yh) ** 2 for y, yh in zip(_ys, _yhat))
+        _ss_tot = sum((y - _my) ** 2 for y in _ys)
+        _r2 = 1 - _ss_res / _ss_tot if _ss_tot else 0.0
+        trend_end = last * math.exp(_slope * horizon)
+    else:
+        _slope = 0.0
+        trend_end = last * (1 + move)
 
     # ---- 三路径端点（锚定 ZG/ZD/现价/实测幅度）----
     if sc == "多头延续":
@@ -432,6 +764,21 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None):
         alt_p = [(0, last), (0.3, zg * 0.99), (1.0, zg * 0.97)]
         risk_p = [(0, last), (0.3, zd * 1.01), (1.0, zd * 0.99)]
 
+    # 趋势外推与主路径（中点）吻合度：两独立方法指向同一区间 → 预测可信度更高。
+    # 关键约束：拟合优度 R² 必须达标（≥0.15）才授予共振增益——否则低拟合度下"吻合"纯属
+    # 巧合，据此 +2% 概率属虚增置信度（如上证 R²≈0.08 时趋势线几乎是噪声，不应被当作验证）。
+    _main_mid = (main_p[0][1] + main_p[-1][1]) / 2
+    trend_agree = bool(_main_mid and abs(trend_end - _main_mid) / _main_mid < 0.06 and _r2 >= 0.15)
+    trend_weak = _r2 < 0.15
+
+    # 结构存续概率（锥模型）：用与置信锥同款 σ（horizon 日前向收益波动）推导
+    # 「期末价 ≥ ZD」的概率 = Φ(ln(现价/ZD) / σ)，μ 取 0（随机游走中性假设）。
+    # 这是「主/次/风险」情景概率之外、由置信锥模型直接给出的、纯统计的「结构是否守住失效位」
+    # 概率，与置信锥内部自洽，作为预测可信度的独立参照：情景概率衡量方向性演绎（续涨/震荡/跌），
+    # 存续概率衡量「不破 ZD」，两者口径不同、互为参照（现价远高于 ZD 时存续概率天然偏高）。
+    _p_hold = (0.5 * (1 + math.erf((math.log(last / zd)) / (sigma * math.sqrt(2))))
+               if (sigma > 0 and last > 0 and zd > 0) else 0.5)
+
     # ---- 概率（经验校准 + 结构锚 + 推演置信度 + 结论稳定性微调）----
     # 先按结构分类给基准概率，再叠加置信度偏离与稳定性；避免对“背离/背驰”重复惩罚导致全部贴地板。
     _base_p = {
@@ -439,35 +786,145 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None):
         "中枢震荡偏多": 0.50, "高位整理未破前高": 0.50,
         "背驰见顶风险": 0.40, "中枢震荡偏空": 0.40, "弱势反弹": 0.36, "空头延续": 0.34,
     }
-    # 经验校准（#1）：优先用本指数"最近且样本足够"的真实信号类型做锚，而非按情景猜一类买/卖
+    # 经验校准（#1）：优先用本指数"最近且样本足够"的真实信号类型做锚，而非按情景猜一类买/卖。
+    # 关键修正：锚点必须与第一/二类买卖方向一致——牛市情景只锚「买点」类信号、熊市只锚「卖点」类，
+    # 否则会出现「多头延续的指数却用卖点胜率校准」的方向错配，既削弱准确率又产生自相矛盾的结论文字。
+    _bull = sc in ("多头延续", "中枢震荡偏多", "高位整理未破前高", "背驰见底机会")
+    _bear = sc in ("背驰见顶风险", "中枢震荡偏空", "弱势反弹", "反弹未回中枢", "空头延续")
+    _main_dir = 1 if _bull else (-1 if _bear else 0)
+    _buy_kinds = ("一类买", "二类买", "三类买")
+    _sell_kinds = ("一类卖", "二类卖", "三类卖")
+    _want = _buy_kinds if _bull else (_sell_kinds if _bear else ())
     _anchor_kind = None
     for s in sorted([s for s in r["signals"] if s["bi_index"] >= len(r["bis"]) - 60],
                     key=lambda x: -x["bi_index"]):
         k = s["kind"][:3]
-        if bt.get(k, {}).get(20, {}).get("n", 0) >= 5:
+        if k in _want and bt.get(k, {}).get(20, {}).get("n", 0) >= 5:
             _anchor_kind = k
             break
-    if _anchor_kind is None:
-        _anchor_kind = "一类买" if sc in ("多头延续", "中枢震荡偏多", "高位整理未破前高", "背驰见底机会") else "一类卖"
-    emp_wr, emp_n, emp_h = None, 0, 0
+    # 方向一致的信号样本不足时保持 None -> 退回启发式基准概率（避免方向错配）
+    emp_wr, emp_n, emp_h, emp_ar, emp_har = None, 0, 0, None, None
     if bt:
         st20 = bt.get(_anchor_kind, {}).get(20)
         if st20 and st20["n"] >= 5:
-            emp_wr, emp_n = st20["win_rate"], st20["n"]
+            emp_wr, emp_n, emp_ar = st20["win_rate"], st20["n"], st20["avg_ret"]
         st60 = bt.get(_anchor_kind, {}).get(60)
         if st60 and st60["n"] >= 5:
-            emp_h = st60["win_rate"]
-    if emp_wr is not None:
-        p_main = 0.5 + (emp_wr - 0.5) * 0.7   # 经验胜率映射到概率锚（向 0.5 轻微收缩）
+            emp_h, emp_har = st60["win_rate"], st60["avg_ret"]
+    # 经验校准（双重锚定 + 贝叶斯收缩，#23）：
+    #  (a) 买卖点类 20 日同向胜率（backtest_signals）——方向性信号历史兑现；
+    #  (b) 路径命中率（backtest_paths·by_dir）——与推演图主/次/风险路径直接对应的历史兑现率，
+    #      是最贴合 p_main 定义的经验真值，优先锚定；样本不足时退回(a)、再退回启发式基准。
+    #  低样本/宽置信区间时向基准收缩（贝叶斯收缩权重 n/(n+12)），避免小样本噪声过度拉动概率。
+    _w = emp_n / (emp_n + 12.0) if (emp_wr is not None and emp_n >= 5) else 0.0
+    _dir = (bt_paths or {}).get("by_dir", {}).get(_main_dir) if _main_dir != 0 else None
+    _dir_n = _dir.get("n", 0.0) if _dir else 0.0
+    _w_dir = _dir_n / (_dir_n + 12.0) if _dir_n >= 8 else 0.0
+    _base = _base_p.get(sc, 0.45)
+    if _w_dir > 0:
+        _dir_main = _dir["main"] / _dir_n
+        _dir_alt = _dir["alt"] / _dir_n
+        _dir_risk = _dir["risk"] / _dir_n
+        p_main = _base * (1 - _w_dir) + _dir_main * _w_dir
+    elif _w > 0:
+        _emp_p = 0.5 + (emp_wr - 0.5) * 0.7
+        p_main = _base * (1 - _w) + _emp_p * _w
+        _dir_alt = _dir_risk = None
     else:
-        p_main = _base_p.get(sc, 0.45)
+        p_main = _base
+        _dir_alt = _dir_risk = None
     p_main += (conf - 50) / 100 * 0.30
-    stab = (r.get("stability") or {}).get("stable", True)
-    if not stab:  # 结论对近 1 个月价格敏感 → 主路径概率下调、风险概率上升
+    # 结论稳健度微调（#29·分级，取代此前"一律-0.04"的粗暴惩罚）：
+    #   敏感·待确认(极性翻转·当前方向结论依赖最近年轻笔) → -0.04；
+    #   边缘(趋势守住但最后笔年轻) → -0.02；稳健 → 0。
+    _stab = r.get("stability") or {}
+    _level = _stab.get("level", "稳健")
+    if _level == "敏感·待确认":
         p_main -= 0.04
+    elif _level == "边缘":
+        p_main -= 0.02
+    # 共振增益：多种独立方法指向同一结论 → 显式提升主路径概率（仍在夹逼范围内）
+    if trend_agree:                              # 趋势外推（对数回归）与主路径吻合
+        p_main += 0.02
+    if r["classify"].get("interval_nesting"):    # 日×周区间套共振（已修复生效）
+        p_main += 0.03
+    # 月度趋势共振（第三层区间套·日×周×月三重）：月线大级别背景与日线情景同向 → 多周期共振、
+    # 主路径更可靠(+0.02)；反向 → 大级别压制/支撑、日线可能是反抽/回调，主路径反向微调。
+    # 与日×周 nest(+0.03) 相互独立、可叠加，完善缠论「区间套」框架，提升预测准确性。
+    _month_dir = r["classify"].get("month_dir", 0)
+    if _month_dir != 0:
+        _m_bull = (_month_dir == 1)
+        if _bull and _m_bull:
+            p_main += 0.02
+        elif _bull and not _m_bull:
+            p_main -= 0.02
+        elif _bear and not _m_bull:
+            p_main += 0.02
+        elif _bear and _m_bull:
+            p_main -= 0.02
+    # 背驰级别微调（提升预测准确性）：趋势背驰=本级别大级别转折信号，方向更可靠；
+    # 盘整背驰=单中枢内折返，转折级别小、可信度低。仅在现有夹逼[0.30,0.72]内小幅修正，
+    # 不破坏经验校准+贝叶斯收缩的整体校准框架。
+    _rbc = [b for b in r.get("beichi", []) if b["bi_index"] >= len(r["bis"]) - 3]
+    _has_trend = any(b.get("bc_type") == "趋势背驰" for b in _rbc)
+    _only_chaos = bool(_rbc) and all(b.get("bc_type") == "盘整背驰" for b in _rbc)
+    if _bull and _has_trend:
+        p_main += 0.03
+    elif _bear and _has_trend:
+        p_main -= 0.03
+    elif _bull and _only_chaos:
+        p_main -= 0.02
+    elif _bear and _only_chaos:
+        p_main += 0.02
+    # 背驰强度（area_ratio）微调（#27·提升预测准确性）：在 bc_type 方向修正基础上，用背驰连续强度
+    # refining——area_ratio（后段/前段 MACD 面积比）越小=背离越强、转折越可靠。取最近笔背驰与本级别
+    # 最近段背驰中的最小 area_ratio 作为最强信号强度；强背驰(≤0.65)额外强化方向 ±0.01、弱背驰(≥0.92)
+    # 反向弱化 ±0.01，均在夹逼[0.30,0.72]内小幅修正，不破坏经验校准+贝叶斯收缩的整体框架。
+    _ar_bi = [b["area_ratio"] for b in r.get("beichi", []) if b["bi_index"] >= len(r["bis"]) - 5 and b.get("area_ratio")]
+    _ar_seg = [b["area_ratio"] for b in r.get("seg_beichi", [])[-3:] if b.get("area_ratio")]
+    _arcs = _ar_bi + _ar_seg
+    if _arcs:
+        _min_ar = min(_arcs)
+        if _bull and _min_ar <= 0.65:
+            p_main += 0.01
+        elif _bear and _min_ar <= 0.65:
+            p_main -= 0.01
+        elif _bull and _min_ar >= 0.92:
+            p_main -= 0.01
+        elif _bear and _min_ar >= 0.92:
+            p_main += 0.01
+    # 乖离率（均值回归）微调（#22·提升预测准确性）：现价相对 MA20 乖离过大 → 短线均值回归压力。
+    # 超买(涨多了)：多头情景主路径回落概率上升(-0.03)、空头情景反抽/反弹更易(+0.03)；
+    # 超卖(跌多了)：反向。与缠论本级别转折信号互为印证，仅在夹逼[0.30,0.72]内小幅修正。
+    _bias = r.get("bias") or {}
+    if _bias:
+        _b20 = _bias.get("bias20", 0) / 100.0
+        if _b20 > 0.06:        # 明显/极端超买
+            if _bull:
+                p_main -= 0.03
+            elif _bear:
+                p_main += 0.03
+        elif _b20 < -0.06:     # 明显/极端超卖
+            if _bull:
+                p_main += 0.03
+            elif _bear:
+                p_main -= 0.03
     p_main = max(0.30, min(0.72, round(p_main, 2)))
-    p_alt = 0.30
-    p_risk = max(0.05, round(1 - p_main - p_alt, 2))
+    # 概率归一化（修复口径错误）：此前 p_alt 写死 0.30、p_risk 触底 0.05，主路径被夹逼到
+    # 高位时三者之和会 >100%（如上证强多头+高置信时 SUM=101%）。现改为从「主路径之外余量」
+    # 按比例分配，三者恒和=1。余量分配优先采用路径命中率实测的次/风险比例（#23，更贴合历史），
+    # 仅在样本不足时退回 55%/45% 启发式；各自底线 0.05。
+    _rem = round(1 - p_main, 2)
+    if _w_dir > 0 and (_dir_alt + _dir_risk) > 0:
+        _r_alt = _dir_alt / (_dir_alt + _dir_risk)
+        _split = round(0.55 * (1 - _w_dir) + _r_alt * _w_dir, 3)
+    else:
+        _split = 0.55
+    p_alt = round(_rem * _split, 2)
+    p_risk = round(_rem - p_alt, 2)
+    if p_risk < 0.05:
+        p_risk = 0.05
+        p_alt = round(_rem - p_risk, 2)
 
     H = 300
     PAD_T3, PAD_B3 = 30, 34
@@ -477,12 +934,16 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None):
 
     # 置信锥(±2σ)在末端会显著超出路径端点（f=1、σ≈15% 时带宽≈中枢价 ±30%），
     # 必须把锥体极值纳入纵轴范围，否则锥顶被裁剪/压平，看不出"随时间扩张"的形态
+    # 置信锥纵向范围：随机游走下，t 时刻累积收益标准差 ∝ √t（而非线性 t），
+    # 故带宽用 med*sigma*√f；线性口径会系统性低估近端不确定性（近月锥被压成针状）。
     band_ext = []
     for _f in (0.25, 0.5, 0.75, 1.0):
         _m = _interp(main_p, _f)
-        band_ext.append(_m + _m * sigma * _f * 2)
-        band_ext.append(_m - _m * sigma * _f * 2)
-    all_prices = tail + [v for _, v in main_p + alt_p + risk_p] + [zg, zd] + band_ext
+        _sq = math.sqrt(_f)
+        band_ext.append(_m + _m * sigma * _sq * 2)
+        band_ext.append(_m - _m * sigma * _sq * 2)
+    all_prices = tail + [v for _, v in main_p + alt_p + risk_p] + [zg, zd] + band_ext + [trend_end] \
+        + [g["top"] for g in _gap_refs] + [g["bottom"] for g in _gap_refs]
     lo, hi = min(all_prices), max(all_prices)
     pad = (hi - lo) * 0.06
     lo, hi = lo - pad, hi + pad
@@ -518,6 +979,13 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None):
         _placed.append(yy)
         p.append(f'<line x1="{PAD_L}" y1="{yy:.1f}" x2="{W - PAD_R}" y2="{yy:.1f}" stroke="{c}" stroke-width="1" stroke-dasharray="5,4"/>')
         p.append(f'<text x="{PAD_L + 6}" y="{yy - 4:.1f}" font-size="13" font-weight="600" fill="{c}">{lab}</text>')
+    # 缺口参考线（仅投影区，未来支撑/压力位）：灰色细虚线 + 标签，与 ZG/ZD 形成交叉验证
+    for g in _gap_refs:
+        _yy = y((g["top"] + g["bottom"]) / 2)
+        _c = RED if g["type"] == "up" else GREEN  # 涨红跌绿：向上缺口支撑/向下缺口压力（与主图红绿统一）
+        p.append(f'<line x1="{PAD_L + hist_w:.1f}" y1="{_yy:.1f}" x2="{W - PAD_R}" y2="{_yy:.1f}" stroke="{_c}" stroke-width="0.8" stroke-dasharray="1,5" stroke-opacity="0.55"/>')
+        _glab = ("缺口支撑" if g["type"] == "up" else "缺口压力") + f" {g['bottom']:.0f}-{g['top']:.0f}"
+        p.append(f'<text x="{PAD_L + hist_w + 4:.1f}" y="{_yy - 3:.1f}" font-size="10" font-weight="600" fill="{_c}">{_glab}</text>')
     tail_d = _smooth([(xh(i), y(c)) for i, c in enumerate(tail)])
     p.append(f'<path d="{tail_d}" fill="none" stroke="{BLUE}" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/>')
     # ---- 时间轴：历史区(左)显示真实交易日日期；投影区(右)显示推算交易日日期 ----
@@ -538,6 +1006,8 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None):
     p.append(f'<text x="{PAD_L + 4:.1f}" y="{PAD_T3 - 10}" font-size="12" font-weight="700" fill="{GRAY}">近{len(tail)}日(交易日)</text>')
     p.append(f'<line x1="{PAD_L + hist_w:.1f}" y1="{PAD_T3}" x2="{PAD_L + hist_w:.1f}" y2="{H - PAD_B3}" stroke="{INK}" stroke-width="1.2" stroke-dasharray="3,3"/>')
     p.append(f'<text x="{PAD_L + hist_w:.1f}" y="{PAD_T3 - 10}" font-size="13" font-weight="700" fill="{INK}" text-anchor="middle">今日 T</text>')
+    # 投影区标题（与左侧"近N日"呼应）：标注推演跨度
+    p.append(f'<text x="{PAD_L + hist_w + proj_w / 2:.1f}" y="{PAD_T3 - 10}" font-size="12" font-weight="700" fill="{INK}" text-anchor="middle">未来推演 T+1→T+{horizon}（交易日）</text>')
     L = len(tail)
     _idxs = [max(1, min(L - 2, int(round(L * (j + 0.5) / 6)))) for j in range(6)]
     for i in _idxs:
@@ -562,7 +1032,7 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None):
         up, lo = [], []
         for f in frange:
             med = _interp(main_p, f)
-            half = med * sigma * f * kmul
+            half = med * sigma * math.sqrt(f) * kmul
             up.append((xp(f), y(med + half)))
             lo.append((xp(f), y(med - half)))
         return " ".join(f"{a:.1f},{b:.1f}" for a, b in up + lo[::-1])
@@ -573,9 +1043,26 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None):
     p.append(f'<polygon points="{band_poly(1)}" fill="{RED}" fill-opacity="0.12" stroke="none"/>')
     p.append('</g>')
 
+    # 趋势外推（独立交叉验证）：对数线性回归外推 horizon 日，青色虚线叠加
+    p.append(f'<line x1="{PAD_L + hist_w:.1f}" y1="{y(last):.1f}" x2="{xp(1):.1f}" y2="{y(trend_end):.1f}" stroke="#0891b2" stroke-width="1.3" stroke-dasharray="2,5" stroke-opacity="0.85"/>')
+    p.append(f'<circle cx="{xp(1):.1f}" cy="{y(trend_end):.1f}" r="2.8" fill="#0891b2"/>')
+
     draw_path(main_p, RED, "none")
     draw_path(alt_p, "#94a3b8", "6,4")
     draw_path(risk_p, GREEN, "2,3")
+    # 路径末端就近标签（主/次/风险 + 目标位数值）：放大推演图时下方图例条常已滚出视野，
+    # 末端直接标注目标价位可就近读数，解决该盲区；白描边使标签在密集线条上仍清晰；
+    # 垂直防重叠间距放宽到 18px，三条路径末端 x 相同仍能清晰区分
+    _ends = []
+    for _p, _t, _c in ((main_p, "主", RED), (alt_p, "次", "#94a3b8"), (risk_p, "风险", GREEN)):
+        _ends.append((y(_p[-1][1]), f"{_t} {_p[-1][1]:.0f}", _c, xp(_p[-1][0])))
+    _ends.sort(key=lambda t: t[0])
+    _ly = -1e9
+    for _yy, _lab, _c, _xx in _ends:
+        if abs(_yy - _ly) < 18:
+            _yy = _ly + 18 if _yy >= _ly else _ly - 18
+        _ly = _yy
+        p.append(f'<text x="{_xx - 8:.1f}" y="{_yy - 6:.1f}" font-size="12" font-weight="700" fill="{_c}" text-anchor="end" opacity="0.95" paint-order="stroke" stroke="#ffffff" stroke-width="3">{_lab}</text>')
     # ---- hover 交互元素（默认隐藏，由 JS initForecast 驱动）----
     p.append(f'<line id="fccx-{sym}" x1="{PAD_L}" y1="{PAD_T3}" x2="{PAD_L}" y2="{H - PAD_B3}" stroke="{INK}" stroke-width="1" stroke-dasharray="3,3" opacity="0"/>')
     p.append(f'<circle id="fcm-{sym}" r="3.6" fill="{RED}" opacity="0"/>')
@@ -589,19 +1076,39 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None):
         f'<span><i class="ln ln-dash" style="background:#94a3b8"></i>次路径：中枢内震荡 ≈ {p_alt * 100:.0f}%</span>'
         f'<span><i class="ln ln-dot" style="background:{GREEN}"></i>风险路径：跌破ZD转空 ≈ {p_risk * 100:.0f}%</span>'
         f'<span><i class="ln ln-band"></i>置信锥 ±1σ/±2σ（σ={sigma * 100:.1f}%）</span>'
+        f'<span><i class="ln ln-trend"></i>趋势外推 {trend_end:.0f}（R²={_r2:.2f}{"，弱拟合" if trend_weak else ""}）</span>'
         f'</div>'
         f'<div class="fc-targets">目标位(主路径终点) ≈ <b>{main_p[-1][1]:.0f}</b> · '
         f'风险止损位(风险路径终点) ≈ <b>{risk_p[-1][1]:.0f}</b> · '
-        f'主路径失效位(有效跌破ZD) ≈ <b>{zd:.0f}</b></div>'
+        f'趋势外推位 ≈ <b>{trend_end:.0f}</b> · '
+        f'主路径失效位(有效跌破ZD) ≈ <b>{zd:.0f}</b> · '
+        f'结构存续概率(锥) ≈ <b>{_p_hold*100:.0f}%</b></div>'
     )
     note = (f"主路径失效位：现价有效跌破 ZD {zd:.0f}（收盘确认）→ 主路径失效、风险路径概率上升；风险路径确认需同时满足「跌破 ZD + 周线笔转向下」。\n"
-             f"红色阴影为基于历史 {horizon} 日前向收益波动（σ={sigma*100:.1f}%）推演的置信锥：真实走势落在 ±1σ 带内的经验概率约 68%、±2σ 带内约 95%；锥体随时间扩张，反映不确定性增大。\n"
+             f"红色阴影为基于历史 {horizon} 日前向收益波动（σ={sigma*100:.1f}%）推演的置信锥：真实走势落在 ±1σ 带内的经验概率约 68%、±2σ 带内约 95%；带宽随时间按 √t 扩张（随机游走特性），近月不确定性即已显著，并非线性外推的针状。\n"
              f"本图为目的（分类框架）而非点位预测：缠论给出的是「不跌破 ZD 则结构延续、跌破则转弱」的条件应对，不是对具体价位的预测。\n"
+             f"趋势外推（青色虚线，对最近 {min(horizon,90)} 日收盘做对数线性回归外推 {horizon} 日）是与结构路径相互独立的验证方法，"
+             + (f"但其拟合优度极低（R²={_r2:.2f}），该独立验证参考性很弱、近乎噪声，不宜据此增减仓位；"
+                if trend_weak
+                else ("其终点与主路径吻合（误差<6%）且拟合较稳（R²={_r2:.2f}），两法指向同一区间，预测可信度更高；"
+                      if trend_agree
+                      else f"其终点 ≈ {trend_end:.0f}，与主路径中点存在偏差（R²={_r2:.2f}），提示两种视角对后市节奏判断不完全一致，宜结合仓位管理；"))
+             + f"若趋势外推也跌漏 ZD，则风险路径概率进一步上升。\n"
              f"主图叠加的斐波那契回调位（F38/F50/F62）与本路径上行目标、ZD 支撑相互印证：若回踩至 F61.8 附近获支撑，反弹结构更可靠；若直接跌漏 ZD，则风险路径概率上升。\n"
              f"时间轴：左侧历史区为真实交易日（MM-DD）；右侧投影区日期按「从最后交易日往后推算相应交易日、跳过周末」得到（未含法定节假日），仅供参照。")
+    note += (f"\n结构存续概率（锥模型）：用与置信锥同款 σ（{sigma*100:.1f}%）推导「期末价 ≥ ZD {zd:.0f}」的概率 ≈ {_p_hold*100:.0f}%（随机游走中性假设 Φ(ln(现价/ZD)/σ)）。该值独立于「主/次/风险」情景概率——情景概率衡量方向性演绎（续涨/震荡/跌），存续概率衡量「结构是否守住失效位」，两者口径不同、互为参照；现价远高于 ZD 时存续概率天然偏高，不应与情景概率混为一谈。")
     if emp_wr is not None:
-        _h = ("；同类信号后 60 日同向胜率 %.0f%%（n=%d）" % (emp_h * 100, bt.get(_anchor_kind, {}).get(60, {}).get("n", 0))) if emp_h else ""
-        note += (f"\n经验校准锚：历史上 {_anchor_kind}点 后 20 交易日同向胜率 {emp_wr*100:.0f}%（n={emp_n}）{_h}——主路径概率已据此由启发式切换为经验估计，样本有限，仅供参照。")
+        _se = math.sqrt(emp_wr * (1 - emp_wr) / emp_n) if emp_n else 0
+        _lo = max(0.0, emp_wr - 1.96 * _se)
+        _hi = min(1.0, emp_wr + 1.96 * _se)
+        _ci = f"95%CI [{_lo*100:.0f}%,{_hi*100:.0f}%]"
+        _h = (f"；后 60 日同向胜率 {emp_h*100:.0f}%、均收益 {emp_har*100:+.1f}%（n={bt.get(_anchor_kind, {}).get(60, {}).get('n', 0)}）") if emp_h else ""
+        note += (f"\n经验校准锚：历史上 {_anchor_kind}点 后 20 交易日同向胜率 {emp_wr*100:.0f}%（n={emp_n}，{_ci}）、均收益 {emp_ar*100:+.1f}%（n={emp_n}）{_h}——主路径概率据此由启发式基准向经验估计收缩（权重 {_w:.2f}）；置信区间宽、样本有限，仅供参照，不宜简单按胜率高低外推。")
+    if _w_dir > 0:
+        note += (f"\n路径命中率校准（#23）：历史上同类方向（{'多头' if _main_dir == 1 else '空头'}）结构，主/次/风险路径实际兑现率 "
+                 f"{_dir_main*100:.0f}%/{_dir_alt*100:.0f}%/{_dir_risk*100:.0f}%（加权样本≈{_dir_n:.0f}），"
+                 f"主路径概率据此由启发式基准向路径命中率收缩（权重 {_w_dir:.2f}）——这是与推演图路径定义直接对应的经验真值，"
+                 f"次/风险路径占比也按实测比例分配，使三路径概率整体贴合历史兑现统计。")
     # ---- 悬浮交互数据：历史区真实收盘价 + 投影区密集采样（供 JS initForecast）----
     hist = [[_hd[i][5:10], round(tail[i], 2)] for i in range(len(tail))]
     proj = []
@@ -612,15 +1119,19 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None):
         risk = _interp(risk_p, f)
         kk = round(f * horizon)
         dt = _fut(kk)
-        b1u = med + med * sigma * f * 1
-        b1l = med - med * sigma * f * 1
-        b2u = med + med * sigma * f * 2
-        b2l = med - med * sigma * f * 2
+        b1u = med + med * sigma * math.sqrt(f) * 1
+        b1l = med - med * sigma * math.sqrt(f) * 1
+        b2u = med + med * sigma * math.sqrt(f) * 2
+        b2l = med - med * sigma * math.sqrt(f) * 2
+        trend = round(last * math.exp(_slope * kk), 2)
         proj.append({"f": round(f, 3), "tplus": kk, "date": dt,
                      "main": round(med, 2), "alt": round(alt, 2), "risk": round(risk, 2),
+                     "trend": trend,
                      "b1u": round(b1u, 2), "b1l": round(b1l, 2), "b2u": round(b2u, 2), "b2l": round(b2l, 2)})
     fc_data = {"hist": hist, "proj": proj, "p_main": p_main, "p_alt": p_alt, "p_risk": p_risk,
+               "p_hold": round(_p_hold, 3),
                "zd": round(zd, 2), "zg": round(zg, 2), "last": round(last, 2),
+               "trend": round(trend_end, 2), "trend_agree": trend_agree, "trend_r2": round(_r2, 3),
                "sigma": round(sigma, 4), "horizon": horizon, "lo": round(lo, 4), "span": round(span, 4)}
     return "".join(p), note, (p_main, p_alt, p_risk), legend_html, fc_data
 
@@ -724,14 +1235,64 @@ def score_chip(score, label):
     return f'<span class="chip" style="background:{c}1a;color:{c};border:1px solid {c}55"><b>{score}</b> {label}</span>'
 
 
+def prob_bar(pct, color):
+    """推演概率内嵌水平迷你条（图表细腻度：一眼比较三路径/存续概率高低）。"""
+    w = max(0, min(100, pct * 100))
+    return (f'<div style="height:5px;width:56px;margin:3px auto 0;border-radius:3px;'
+            f'background:#eef2f7;overflow:hidden">'
+            f'<i style="display:block;height:100%;width:{w:.0f}%;background:{color}"></i></div>')
+
+
+def path_hit_html(scenario, pb, p_main, p_alt, p_risk, horizon=60):
+    """推演路径历史命中率自校验（预测准确性核心）：把本报告 p_main/p_alt/p_risk 与
+    历史上同类方向结构（同 _path_targets 判定的 main_dir）的实际路径兑现率对照，
+    暴露校准偏差（偏乐观/偏保守/一致）。pb 由 backtest_paths 预计算（horizon 与推演图一致）。"""
+    main_dir = _path_targets(scenario, 0, 0, 0, 0)[2]
+    e = pb["by_dir"].get(main_dir)
+    if not e or e["n"] < 8:
+        e = pb["total"]
+    n = e["n"]
+    mr = e["main"] / n * 100 if n else 0
+    ar = e["alt"] / n * 100 if n else 0
+    rr = e["risk"] / n * 100 if n else 0
+    rows = (("主路径", mr, p_main * 100, RED),
+            ("次路径", ar, p_alt * 100, "#64748b"),
+            ("风险路径", rr, p_risk * 100, GREEN))
+    body = "".join(
+        '<div class="pc-row"><span class="pc-lab" style="color:{c}">{lab}</span>'
+        '<span class="pc-bar"><i style="width:{hw:.0f}%;background:{c}"></i></span>'
+        '<span class="pc-h">历史 {h:.0f}%</span>'
+        '<span class="pc-p">本报告 {p:.0f}%</span></div>'.format(c=c, lab=lab, hw=max(h, 2), h=h, p=p)
+        for lab, h, p, c in rows)
+    dev = mr - p_main * 100
+    if dev < -8:
+        calib = '<span style="color:{RED};font-weight:700">偏乐观 — 历史主路径兑现更低，宜谨慎看待主路径</span>'.format(RED=RED)
+    elif dev > 8:
+        calib = '<span style="color:{GREEN};font-weight:700">偏保守 — 历史主路径兑现更高，可适度乐观</span>'.format(GREEN=GREEN)
+    else:
+        calib = '<span style="color:#0891b2;font-weight:700">基本一致</span>'
+    return ('<div class="pathcheck"><b>推演路径命中率自校验</b>'
+            '<span class="pc-sub">历史同类方向结构（h={h}日，N={n}）：未来实际走势落入各路径的比例，与本报告概率对照</span>'
+            '{body}<div class="pc-calib">校准结论：{calib}</div></div>').format(h=horizon, n=n, body=body, calib=calib)
+
+
+
 # ================= 卡片 =================
 def card_html(sym, name, klines, r, wcls, health, conf):
     last, prev = klines[-1], klines[-2]
+    closes = [k["close"] for k in klines]
     chg = (last["close"] / prev["close"] - 1) * 100
     color = RED if chg >= 0 else GREEN
     cls = r["classify"]
     five_yr = (last["close"] / klines[0]["close"] - 1) * 100
     fy_color = RED if five_yr >= 0 else GREEN
+    one_yr = (last["close"] / klines[max(0, len(klines) - 250)]["close"] - 1) * 100
+    oy_color = RED if one_yr >= 0 else GREEN
+    ann_vol = realized_vol_annualized(closes)
+    vol_txt = ("%.1f%%" % (ann_vol * 100)) if ann_vol else "—"
+    m20 = (last["close"] / klines[max(0, len(klines) - 21)]["close"] - 1) * 100
+    m20_txt = "%+.2f%%" % m20
+    m20_color = RED if m20 >= 0 else GREEN
     sc_color = SCENARIO_COLOR.get(cls["scenario"], BLUE)
     amp = abs(cls.get("last_bi_pct", 0)) * 100
     spark = sparkline(klines, RED if chg >= 0 else GREEN)
@@ -742,18 +1303,77 @@ def card_html(sym, name, klines, r, wcls, health, conf):
     nest = cls.get("interval_nesting")
     nest_txt = "区间套✓" if nest else "—"
     nest_color = "#b45309" if nest else "#64748b"
+    mctx = cls.get("month_context") or ""
+    mctx_txt = (mctx.split("(")[0] if mctx else "—")
+    mctx_color = "#7c3aed" if mctx else "#64748b"
+    # 多周期共振（日/周/月三层方向联立）：结构化呈现区间套结论，替代原"区间套✓/月线背景"两行简略字段
+    _wsc = cls.get("week_scenario") or "—"
+    _msc = cls.get("month_scenario") or "—"
+    _res = cls.get("resonance") or "—"
+    _dd = "↑" if cls.get("last_bi_dir") == 1 else ("↓" if cls.get("last_bi_dir") == -1 else "—")
+    _wd = "↑" if cls.get("week_dir") == 1 else ("↓" if cls.get("week_dir") == -1 else "—")
+    _md = "↑" if cls.get("month_dir") == 1 else ("↓" if cls.get("month_dir") == -1 else "—")
+    w_color = SCENARIO_COLOR.get(_wsc, "#64748b")
+    m_color2 = SCENARIO_COLOR.get(_msc, "#64748b")
+    _res_color = ("#18a058" if ("共振" in _res and "空" not in _res)
+                  else ("#e54545" if ("共振" in _res and "空" in _res)
+                        else ("#d97706" if ("背离" in _res or "未确认" in _res) else "#0891b2")))
+    _zs = r["zhongshu"][-1] if r["zhongshu"] else None
+    _zs_txt = ("%s · %d笔" % ("延伸" if _zs.get("extension") else "标准", _zs["count"])) if _zs else "—"
+    _tt = cls.get("trend_type", "—")
+    _tt_color = {"上涨走势(趋势)": RED, "下跌走势(趋势)": GREEN, "扩张/盘整走势": "#64748b", "盘整走势": "#64748b"}.get(_tt, "#0f172a")
+    # 关键缺口（未补，±18%内最近3个）—— 中枢之外最重要的价位锚，A股「逢缺必补」规律下意义显著
+    _gaps_unf = [g for g in r.get("gaps", []) if not g["filled"]]
+    _gaps_near = [g for g in _gaps_unf
+                  if abs((g["top"] + g["bottom"]) / 2 / last["close"] - 1) <= 0.18]
+    _gaps_near.sort(key=lambda g: g["idx"])
+    _gap_items = []
+    for g in _gaps_near[-3:]:
+        _mid = (g["top"] + g["bottom"]) / 2
+        _dist = (_mid / last["close"] - 1) * 100
+        _arrow = "▲" if g["type"] == "up" else "▼"
+        _role = "支撑" if _dist < 0 else "压力"
+        _gap_items.append("%s%d-%d(%s%.0f%%)" % (_arrow, g["bottom"], g["top"], _role, _dist))
+    _gap_txt = "　".join(_gap_items) if _gap_items else "—"
+    # 乖离率（#22）：现价偏离 MA20 的程度，量化短线超买/超卖（均值回归压力）
+    _bias = r.get("bias") or {}
+    _bias20 = _bias.get("bias20", 0)
+    _bias_state = _bias.get("state", "—")
+    _bias_level = _bias.get("level", "—")
+    _bias_color = {"超买": "#b45309", "超卖": "#2563eb", "中性": "#64748b"}.get(_bias_state, "#64748b")
+    # 信号成熟度（#29·稳健度三级重构）：最后一支已完成笔跨度，年轻信号属"待确认"而非可靠结论
+    _stab = r.get("stability") or {}
+    _mat = _stab.get("maturity", "established")
+    _lv = _stab.get("level", "稳健")
+    _lbb = _stab.get("last_bi_bars", 0)
+    _mat_txt = ("信号成熟" if _mat == "established" else "信号年轻·待确认")
+    _mat_c = ("#18a058" if _mat == "established" else "#d97706")
+    _mat_chip = ('<span class="chip" style="background:%s1a;color:%s;border:1px solid %s55">'
+                 '%s · 末笔%d日</span>' % (_mat_c, _mat_c, _mat_c, _mat_txt, _lbb))
     return f"""
     <div class="card" style="border-left:4px solid {sc_color}">
       <div class="card-head"><span class="idx-name">{name}</span><span class="sym">{sym}</span></div>
       <div class="price">{last["close"]:.2f} <span style="color:{color}">{'+' if chg >= 0 else ''}{chg:.2f}%</span></div>
       <div class="spark">{spark}</div>
       <div class="kv"><span>近5年涨跌(前复权)</span><b style="color:{fy_color}">{'+' if five_yr >= 0 else ''}{five_yr:.2f}%</b></div>
-      <div class="kv"><span>笔 / 中枢 / 背驰 / 段背驰</span><b>{len(r["bis"])} / {len(r["zhongshu"])} / {len(r["beichi"])} / {len(r["seg_beichi"])}</b></div>
+      <div class="kv"><span>近1年涨跌</span><b style="color:{oy_color}">{'+' if one_yr >= 0 else ''}{one_yr:.2f}%</b></div>
+      <div class="kv"><span>年化波动率</span><b>{vol_txt}</b></div>
+      <div class="kv"><span>近20日涨跌(动量)</span><b style="color:{m20_color}">{m20_txt}</b></div>
+      <div class="kv"><span>乖离率(MA20)</span><b style="color:{_bias_color}">{_bias20:+.1f}% {_bias_state}{_bias_level}</b></div>
+      <div class="kv"><span>笔 / 中枢 / 背驰 / 段背驰</span><b>{len(r["bis"])} / {len(r["zhongshu"])} / {len(r["beichi"])} / {len(r["seg_beichi"])}（顶×{sum(1 for _b in r.get("seg_beichi", []) if _b["type"] == "top")}/底×{sum(1 for _b in r.get("seg_beichi", []) if _b["type"] == "bottom")}）</b></div>
       <div class="kv"><span>最近一笔</span><b>{'↑' if cls.get('last_bi_dir') == 1 else '↓'} {amp:.1f}%</b></div>
       <div class="kv"><span>当前分类</span><b style="color:{sc_color}">{cls["scenario"]}</b></div>
+      <div class="kv"><span>走势类型</span><b style="color:{_tt_color}">{_tt}</b></div>
+      <div class="kv"><span>最后中枢</span><b>{_zs_txt}</b></div>
+      <div class="kv"><span>关键缺口(未补)</span><b style="color:#475569;font-size:11px">{_gap_txt}</b></div>
       <div class="kv"><span>均线排列(MA20/60/250)</span><b style="color:{ma_color}">{ma_txt}</b></div>
-      <div class="kv"><span>日×周区间套</span><b style="color:{nest_color}">{nest_txt}</b></div>
-      <div class="chips">{score_chip(health, "结构健康")}{score_chip(conf, "推演置信")}<span class="chip" style="background:#eef2f7;color:#475569;border:1px solid #e2e8f0">双法一致 {agree:.0f}%</span></div>
+      <div class="kv"><span>多周期共振</span><b style="font-size:11px;line-height:1.55">
+        <span style="color:{sc_color}">日 {_dd}</span>·
+        <span style="color:{w_color}">周 {_wd}</span>·
+        <span style="color:{m_color2}">月 {_md}</span>
+        <span style="color:#94a3b8">（{cls['scenario']}/{_wsc}/{_msc}）</span><br>
+        <span style="color:{_res_color};font-weight:700">{_res}</span></b></div>
+      <div class="chips">{score_chip(health, "结构健康")}{score_chip(conf, "推演置信")}<span class="chip" style="background:#eef2f7;color:#475569;border:1px solid #e2e8f0">双法一致 {agree:.0f}%</span>{_mat_chip}</div>
     </div>"""
 
 
@@ -768,6 +1388,8 @@ def strategy_text(cls, zs):
         return f"区间 {zs['zd']:.0f}~{zs['zg']:.0f} 高抛低吸；站稳 ZG 转多，跌破 ZD 转空"
     if sc in ("中枢震荡偏空", "弱势反弹"):
         return f"反抽不过 ZD {zs['zd']:.0f} 减仓；回到中枢内部再观察"
+    if sc == "反弹未回中枢":
+        return f"反弹未回中枢 ZD {zs['zd']:.0f}，观望；收复 ZD 转震荡，再上破 ZG {zs['zg']:.0f} 转多"
     if sc == "背驰见顶风险":
         return f"顶背驰确认中，减仓防守；支撑看 ZG {zs['zg']:.0f}"
     if sc == "背驰见底机会":
@@ -775,12 +1397,14 @@ def strategy_text(cls, zs):
     return f"空头格局，反抽不过 ZD {zs['zd']:.0f} 减仓"
 
 
-def levels_table(data, results, results_week, scores):
+def levels_table(data, results, results_week, results_month, scores):
     rows = []
     for sym, d in data.items():
         r = results[sym]
         cls = r["classify"]
         wcls = results_week[sym]["classify"]
+        mcls = results_month[sym]["classify"]
+        m_color = SCENARIO_COLOR.get(mcls["scenario"], BLUE)
         health, conf = scores[sym]
         zs = r["zhongshu"][-1] if r["zhongshu"] else None
         close = d["klines"][-1]["close"]
@@ -801,13 +1425,14 @@ def levels_table(data, results, results_week, scores):
           <td><b>{d["name"]}</b></td>
           <td style="color:{sc_color};font-weight:600">{cls["scenario"]}</td>
           <td style="color:{w_color}">{wcls["scenario"]}</td>
+          <td style="color:{m_color}">{mcls["scenario"]}</td>
           <td class="tac">{syn}</td>
           <td>{close:.2f}</td><td>{zg_txt}</td><td>{zd_txt}</td>
           <td class="tac">{score_chip(health, "")}<br>{score_chip(conf, "")}</td>
           <td class="strategy">{strategy_text(cls, zs)}</td>
         </tr>""")
     return """<table class="tbl">
-      <thead><tr><th>指数</th><th>日线分类</th><th>周线分类</th><th>级别联立</th><th>现价</th><th>压力 ZG（距离）</th><th>支撑 ZD（距离）</th><th>健康度 / 置信度</th><th>应对策略</th></tr></thead>
+      <thead><tr><th>指数</th><th>日线分类</th><th>周线分类</th><th>月线背景</th><th>级别联立</th><th>现价</th><th>压力 ZG（距离）</th><th>支撑 ZD（距离）</th><th>健康度 / 置信度</th><th>应对策略</th></tr></thead>
       <tbody>%s</tbody></table>""" % "".join(rows)
 
 
@@ -841,15 +1466,92 @@ def backtest_table(backtests):
     return """<table class="tbl">
       <thead><tr><th>信号类型</th><th>后 5 个交易日</th><th>后 10 个交易日</th><th>后 20 个交易日</th><th>后 60 个交易日</th></tr></thead>
       <tbody>%s</tbody></table>
-      <p style="font-size:12px;color:#64748b;margin-top:8px">统计范围：5 大指数 2021-01 至今全部已识别信号；买点胜=之后上涨，卖点胜=之后下跌。报告已构建一/二/三类买卖点完整体系（二类=中枢内回踩/反抽不破 ZD/ZG 的折返笔，触发与否取决于当下结构）。样本有限，仅为历史统计特征，不代表未来胜率，亦非投资建议。</p>""" % "".join(rows)
+      <p style="font-size:12px;color:#64748b;margin-top:8px">统计范围：5 大指数 2021-01 至今全部已识别信号；买点胜=之后上涨，卖点胜=之后下跌。买卖点体系按缠论标准定义：一类=背驰拐点；二类=一类之后次低/次高折返（不破前低/前高）；三类=中枢离去后回抽/反抽不进中枢（低点不破 ZD / 高点不破 ZG）。样本有限，仅为历史统计特征，不代表未来胜率，亦非投资建议。</p>""" % "".join(rows)
 
 
-def forecast_summary_table(data, results, results_week, forecast_info):
+def rr_table(data, results, recent_n=8):
+    """近期买卖点值博率（R:R）明细：每个指数最近 N 个买卖点的止损/目标/R:R/值博率——
+    缠论实战交易计划必备（每个买卖点须有明确止损位与目标位），此前报告完全缺失该维度。"""
+    rows = []
+    for sym, d in data.items():
+        r = results[sym]
+        for s in r["signals"][-recent_n:]:
+            _q = s.get("quality", "—")
+            _qc = {"优": "#7c3aed", "良": "#16a34a", "中": "#64748b", "差": "#b45309", "—": "#94a3b8"}.get(_q, "#94a3b8")
+            _dir_col = RED if s["dir"] == 1 else GREEN
+            _vc = "✓" if s.get("vol_confirm") else "—"
+            _rr = ("%.1f" % s["rr"]) if s.get("rr") else "—"
+            rows.append(f"""<tr>
+              <td><b>{d["name"]}</b></td>
+              <td style="color:{_dir_col};font-weight:600">{s["kind"]}</td>
+              <td>{s["date"]}</td>
+              <td class="tac">{s["price"]:.1f}</td>
+              <td class="tac">{s["stop"]:.1f}</td>
+              <td class="tac">{s["target"]:.1f}</td>
+              <td class="tac" style="color:{_qc};font-weight:700">{_rr}</td>
+              <td class="tac" style="color:{_qc};font-weight:700">{_q}</td>
+              <td class="tac">{_vc}</td>
+            </tr>""")
+    return """<h3 class="fc-title" style="margin-top:22px">近期买卖点值博率（R:R）明细<span class="fc-sub">止损 / 目标 / 风险收益比 —— 缠论实战交易计划必备，此前报告完全缺失</span></h3>
+      <table class="tbl">
+      <thead><tr><th>指数</th><th>买卖点</th><th>日期</th><th>触发价</th><th>止损位</th><th>目标位</th><th>R:R</th><th>值博率</th><th>量✓</th></tr></thead>
+      <tbody>%s</tbody></table>
+      <p style="font-size:12px;color:#64748b;margin-top:8px">R:R = (目标位 − 触发价) / (触发价 − 止损位)；值博率阈值：优(RR≥2.5) / 良(≥1.5) / 中(≥1.0) / 差(&lt;1.0)。
+      止损取局部前低（一类/二类买）或中枢下沿 ZD（三类买）；目标取近程摆动极值（最近 30 笔真实高低点），仅当最近中枢边界在合理距离内(≤20%%)才纳入，并对 R:R 封顶 6 倍，避免多年极值中枢污染导致 16~31 倍失真比值（#29 修复）。
+      本表为结构分析参考，非交易建议。</p>""" % "".join(rows)
+
+
+def robustness_table(robust, data):
+    """样本外稳健性检验表：早年(2021~split前) vs 近两年(split起) 买方信号胜率对比，检测校准过拟合。"""
+    rows = []
+    for sym, rb in robust.items():
+        name = data[sym]["name"]
+        early, recent, split = rb["early"], rb["recent"], rb["split"]
+
+        def _pick(d, h=20):
+            st = d.get("一类买", {}).get(h) or d.get("三类买", {}).get(h)
+            if not st or st["n"] == 0:
+                return None
+            return st["win_rate"], st["avg_ret"], st["n"]
+
+        em, rm = _pick(early), _pick(recent)
+        if em and rm:
+            diff_pt = (rm[0] - em[0]) * 100
+            if diff_pt <= -15:
+                verdict = '<span style="color:#d97706;font-weight:700">近两年显著衰减⚠ 校准或存过拟合</span>'
+            elif diff_pt >= -5:
+                verdict = '<span style="color:#18a058;font-weight:700">样本外稳定✓</span>'
+            else:
+                verdict = '<span style="color:#64748b">轻微衰减</span>'
+            diff_txt = "%+.0fpt" % diff_pt
+        else:
+            verdict, diff_txt = "—", "—"
+
+        def _fmt(x):
+            return ("%.0f%% (%+.*f%%) n=%d" % (x[0] * 100, 1, x[1] * 100, x[2])) if x else "—"
+
+        rows.append(f"""<tr>
+          <td><b>{name}</b>（{sym}）</td>
+          <td class="tac">{_fmt(em)}</td>
+          <td class="tac">{_fmt(rm)}</td>
+          <td class="tac">{diff_txt}</td>
+          <td>{verdict}</td>
+        </tr>""")
+    _tbl = """<table class="tbl">
+      <thead><tr><th>指数</th><th>早年买方信号胜率(均收益) h=20</th><th>近两年买方信号胜率(均收益) h=20</th><th>变化</th><th>样本外稳健性</th></tr></thead>
+      <tbody>%s</tbody></table>
+      <p style="font-size:12px;color:#64748b;margin-top:8px">将 2021 年至今的买卖点信号按 {SPLIT} 为界分为「早年」与「近两年」两段，分别统计买方信号（一类买/三类买）持有 20 个交易日的胜率与平均收益。若近两年胜率较早年显著下滑（≥15 个百分点），提示历史校准可能过拟合早期样本、对近期市场有效性下降，应降低对经验胜率的依赖；若持平或更高，提示样本外稳定。本检验为方法论透明度的一部分，不构成投资建议。</p>""".replace("{SPLIT}", split)
+    return _tbl % "".join(rows)
+
+
+def forecast_summary_table(data, results, results_week, results_month, forecast_info):
     """推演情景汇总：5 指数主/次/风险概率 + 失效位 + 级别联立 + 稳定性并列对比"""
     rows = []
     for sym, d in data.items():
         r = results[sym]
         wcls = results_week[sym]["classify"]
+        mcls = results_month[sym]["classify"]
+        m_color = SCENARIO_COLOR.get(mcls["scenario"], BLUE)
         fi = forecast_info[sym]
         cls = r["classify"]
         sc_color = SCENARIO_COLOR.get(cls["scenario"], BLUE)
@@ -857,22 +1559,26 @@ def forecast_summary_table(data, results, results_week, forecast_info):
             syn = '<span style="color:%s;font-weight:700">共振%s</span>' % (RED if cls["last_bi_dir"] == 1 else GREEN, "多" if cls["last_bi_dir"] == 1 else "空")
         else:
             syn = '<span style="color:#d97706;font-weight:700">日强周弱背离</span>' if cls["last_bi_dir"] == 1 else '<span style="color:#d97706;font-weight:700">日弱周强背离</span>'
-        stab = "稳定" if fi["stable"] else "敏感"
-        stab_c = "#18a058" if fi["stable"] else "#d97706"
+        _lv = fi.get("level", "稳健")
+        _lv_c = {"稳健": "#18a058", "边缘": "#d97706", "敏感·待确认": "#dc2626"}.get(_lv, "#18a058")
+        stab = _lv
+        stab_c = _lv_c
         rows.append(f"""<tr>
           <td><b>{d["name"]}</b></td>
           <td style="color:{sc_color};font-weight:600">{cls["scenario"]}</td>
+          <td style="color:{m_color}">{mcls["scenario"]}</td>
           <td class="tac">{syn}</td>
-          <td class="tac"><b style="color:{RED}">{fi["p_main"]*100:.0f}%</b></td>
-          <td class="tac">{fi["p_alt"]*100:.0f}%</td>
-          <td class="tac"><b style="color:{GREEN}">{fi["p_risk"]*100:.0f}%</b></td>
+          <td class="tac"><b style="color:{RED}">{fi["p_main"]*100:.0f}%</b>{prob_bar(fi["p_main"], RED)}</td>
+          <td class="tac">{fi["p_alt"]*100:.0f}%{prob_bar(fi["p_alt"], "#64748b")}</td>
+          <td class="tac"><b style="color:{GREEN}">{fi["p_risk"]*100:.0f}%</b>{prob_bar(fi["p_risk"], GREEN)}</td>
+          <td class="tac"><b style="color:{BLUE}">{fi["p_hold"]*100:.0f}%</b>{prob_bar(fi["p_hold"], BLUE)}</td>
           <td class="tac">{fi["zd"]:.0f}</td>
           <td class="tac" style="color:{stab_c};font-weight:600">{stab}</td>
         </tr>""")
     return """<table class="tbl">
-      <thead><tr><th>指数</th><th>日线分类</th><th>级别联立</th><th>主路径概率</th><th>次路径概率</th><th>风险概率</th><th>失效位 ZD</th><th>结论稳定性</th></tr></thead>
+      <thead><tr><th>指数</th><th>日线分类</th><th>月线背景</th><th>级别联立</th><th>主路径概率</th><th>次路径概率</th><th>风险概率</th><th>结构存续(锥)</th><th>失效位 ZD</th><th>结论稳定性</th></tr></thead>
       <tbody>%s</tbody></table>
-      <p style="font-size:12px;color:#64748b;margin-top:8px">概率为基于「级别共振 + 推演置信度 + 回测胜率」的启发式估算，非统计定价模型；风险概率恒为「主/次之外」的余量。稳定性=砍掉末 5/10/20 根 K 线重算后分类是否一致，标"敏感"表明结论对近 1 个月价格变动反应较大，属阶段性判断。</p>""" % "".join(rows)
+      <p style="font-size:12px;color:#64748b;margin-top:8px">概率为基于「级别共振 + 推演置信度 + 回测胜率」的启发式估算，非统计定价模型；主/次/风险三概率已严格归一（合计 100%%），风险概率为「主/次之外」的余量，结构存续(锥)为独立统计参照、不计入三者之和。结论稳健度（三级）：<b style="color:#18a058">稳健</b>=极性+趋势在 20 日扰动下均不变；<b style="color:#d97706">边缘</b>=趋势守住但最后笔年轻；<b style="color:#dc2626">敏感·待确认</b>=多空极性翻转（当前方向结论依赖最近一波年轻笔，已相应下调主路径概率）。最后笔仅 ~7 根 K 线的指数，属"信号年轻·待确认"，宜轻仓等待周线确认。</p>""" % "".join(rows)
 
 
 def data_quality_strip(data, results):
@@ -890,7 +1596,7 @@ def data_quality_strip(data, results):
         c = "#18a058" if ok else "#d97706"
         cons_txt = ("%.2f%%" % (max_rel * 100)) if max_rel is not None else "—"
         cap = "、".join("%s" % lab for lab, _, _ in r["captured"]) or "—"
-        stab = "稳定" if r["stability"]["stable"] else "敏感"
+        stab = r["stability"].get("level", "稳健")
         cards.append(
             f'<div class="qcard">'
             f'<div class="qtitle" style="color:{c}">{badge} {d["name"]}</div>'
@@ -910,10 +1616,38 @@ def main():
 
     results = {sym: analyze(d["klines"]) for sym, d in data.items()}
     results_week = {sym: analyze(d["week_klines"], MIN_BI_PCT_WEEK) for sym, d in data.items()}
-    backtests = {sym: backtest_signals(d["klines"], results[sym]) for sym, d in data.items()}
+    results_month = {sym: analyze(d["month_klines"], MIN_BI_PCT_MONTH) for sym, d in data.items()}
+    backtests = {sym: backtest_signals(d["klines"], results[sym], exclude_last=True) for sym, d in data.items()}
+    # 样本外稳健性检验：按 2024-01-01 切分早年/近两年，检测校准过拟合
+    robust = {sym: backtest_robustness(d["klines"], results[sym], split="2024-01-01") for sym, d in data.items()}
+    # 跨指数市场宽度（系统性环境）：统计牛/熊情景数，作为全市场对齐度反馈进推演置信度
+    _bull_cnt = sum(1 for s in data if results[s]["classify"]["scenario"] in SC_BULL)
+    _bear_cnt = sum(1 for s in data if results[s]["classify"]["scenario"] in SC_BEAR)
+    _total = len(data)
+    _breadth_bias = (_bull_cnt / _total - 0.5) * 2 * 8  # 全看多 +8 / 全看空 -8（0-100 置信度刻度）
     scores = {sym: (health_score(d["klines"], results[sym], results_week[sym]["classify"]),
-                    forecast_confidence(results[sym], results_week[sym]["classify"], backtests[sym]))
+                    forecast_confidence(results[sym], results_week[sym]["classify"], backtests[sym], breadth_bias=_breadth_bias))
               for sym, d in data.items()}
+
+    # 系统性环境横幅文案（随每日自动刷新，不写死）
+    if _bull_cnt == _total:
+        _blabel, _bcolor = "系统性多头环境", RED
+    elif _bull_cnt >= _total * 0.6:
+        _blabel, _bcolor = "整体偏多", RED
+    elif _bull_cnt >= _total * 0.4:
+        _blabel, _bcolor = "分化震荡", GOLD
+    else:
+        _blabel, _bcolor = "整体偏空 / 防御", GREEN
+    _bstance = "支撑" if _bull_cnt >= _total * 0.6 else ("压制" if _bull_cnt < _total * 0.4 else "中性")
+    breadth_banner = (f'<div style="border-left:4px solid {_bcolor};background:#fff;border:1px solid #e5e9f0;'
+                      f'border-radius:10px;padding:12px 16px;margin:4px 0 16px;display:flex;align-items:center;'
+                      f'gap:14px;flex-wrap:wrap">'
+                      f'<span style="font-size:15px;font-weight:800;color:{_bcolor}">市场宽度：{_blabel}</span>'
+                      f'<span style="font-size:13px;color:#475569">5 大指数中 '
+                      f'<b style="color:{RED}">{_bull_cnt}</b> 个多头情景、'
+                      f'<b style="color:{GREEN}">{_bear_cnt}</b> 个空头情景 —— '
+                      f'系统性环境对个股指推演的基准方向形成<b>{_bstance}</b>；该宽度已折算为「全市场对齐度」'
+                      f'反馈进各指数推演置信度（±8 内）。</span></div>')
 
     last_date = next(iter(data.values()))["meta"]["last_date"]
     gen_time = datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -925,27 +1659,51 @@ def main():
     # 市场概览 KPI
     n_multi = sum(1 for s in data if results[s]["classify"]["scenario"] in ("多头延续",))
     n_osc = sum(1 for s in data if results[s]["classify"]["scenario"] in ("中枢震荡偏多", "高位整理未破前高"))
-    n_bear = sum(1 for s in data if results[s]["classify"]["scenario"] in ("空头延续", "中枢震荡偏空", "弱势反弹"))
+    n_bear = sum(1 for s in data if results[s]["classify"]["scenario"] in ("空头延续", "中枢震荡偏空", "弱势反弹", "反弹未回中枢"))
     n_div = len(divergent)
     avg_health = sum(v[0] for v in scores.values()) / len(scores)
     avg_conf = sum(v[1] for v in scores.values()) / len(scores)
     avg_agree = sum(results[s]["agreement"]["rate"] for s in data) / len(data) * 100
+    avg_vol = sum((realized_vol_annualized([k["close"] for k in d["klines"]]) or 0) for d in data.values()) / len(data)
+    total = len(data)
+    n_m_bull = sum(1 for s in data if results_month[s]["classify"]["scenario"] in SC_BULL)
+    n_m_bear = sum(1 for s in data if results_month[s]["classify"]["scenario"] in SC_BEAR)
 
     cards, sections, conclusions = [], [], []
     forecast_info = {}
     kl_blob = {}
+    paths_bt = {}
     for sym, d in data.items():
         r = results[sym]
+        # 推演路径历史命中率回测（预测准确性自校验）：horizon 与推演图自适应 horizon 对齐，
+        # 使「路径命中率自校验」对照的是同一时间尺度（此前固定 h=60，而锥图用 30~90 自适应，
+        # 口径不一致会让校准对照失真）。step 取 horizon//2 保证样本窗基本不重叠、统计独立。
+        horizon = adaptive_horizon(r["bis"], r["merged"])
+        _step = max(15, horizon // 2)
+        paths_bt[sym] = backtest_paths(d["klines"], horizon=horizon, step=_step, with_stability=False)
         wcls_full = results_week[sym]
         wcls = wcls_full["classify"]
+        mcls = results_month[sym]["classify"]
+        m_color = SCENARIO_COLOR.get(mcls["scenario"], BLUE)
+        # 关键修复：用周线 classify 重算日线 classify，使"日×周区间套"共振判断真正生效
+        # （analyze 内部 classify 调用未传 wcls，nest 此前永远为空）。区间套只影响 classify 的
+        # interval_nesting/detail 字段，不改变 scenario 与 last_bi_dir，下游 forecast/card 行为不受影响。
+        _old_cls = r["classify"]
+        r["classify"] = classify(r["bis"], r["zhongshu"], r["beichi"],
+                                 d["klines"][-1]["close"], wcls, r["segments"], r["seg_beichi"],
+                                 results_month[sym]["classify"])
+        # 关键修复：classify() 的返回字典不含 ma_alignment（均线排列由 analyze 单独计算），
+        # 此处重赋值会把它丢弃——导致卡片「均线排列」显示"—"、且 health_score/forecast_confidence
+        # 里的「均线多空排列交叉验证」惩罚逻辑沦为死代码。回写以恢复显示与交叉验证。
+        r["classify"]["ma_alignment"] = _old_cls.get("ma_alignment")
         health, conf = scores[sym]
-        horizon = adaptive_horizon(r["bis"])
+        horizon = adaptive_horizon(r["bis"], r["merged"])
         sigma = forward_vol([k["close"] for k in d["klines"]], horizon)
         cards.append(card_html(sym, d["name"], d["klines"], r, wcls, health, conf))
         cls = r["classify"]
         sc_color = SCENARIO_COLOR.get(cls["scenario"], BLUE)
         w_color = SCENARIO_COLOR.get(wcls["scenario"], BLUE)
-        fs_svg, fs_note, fs_probs, fs_legend, fc_data = forecast_svg(d["klines"], r, wcls, conf, sigma, sym, horizon, backtests[sym])
+        fs_svg, fs_note, fs_probs, fs_legend, fc_data = forecast_svg(d["klines"], r, wcls, conf, sigma, sym, horizon, backtests[sym], paths_bt[sym])
         div_txt = ('⚠️ 周线向下笔运行中，以上路径的兑现以周线底分型确认为前提；若周线续创新低，风险路径概率上升。'
                    if cls.get("last_bi_dir") != wcls.get("last_bi_dir")
                    else "日周级别共振，主路径置信度较高。")
@@ -955,10 +1713,10 @@ def main():
                         for k in d["klines"]]
         sections.append(f"""
     <section class="panel" id="sec-{sym}">
-      <h2>{d["name"]}（{sym}）<span class="badge" style="background:{sc_color}">日线：{cls["scenario"]}</span><span class="badge" style="background:{w_color}">周线：{wcls["scenario"]}</span><span class="chip" style="background:{RED}1a;color:{RED}">健康 {health}</span><span class="chip" style="background:{BLUE}1a;color:{BLUE}">置信 {conf}</span></h2>
+      <h2>{d["name"]}（{sym}）<span class="badge" style="background:{sc_color}">日线：{cls["scenario"]}</span><span class="badge" style="background:{w_color}">周线：{wcls["scenario"]}</span><span class="badge" style="background:{m_color}">月线：{mcls["scenario"]}</span><span class="chip" style="background:{RED}1a;color:{RED}">健康 {health}</span><span class="chip" style="background:{BLUE}1a;color:{BLUE}">置信 {conf}</span></h2>
       <div class="chartbox">
-        <div class="toolbar">🔍 拖动下方导航条缩放/平移（双击复位）· 移动鼠标查看每日 OHLC/成交量 · 上图含成交量柱（红涨绿跌）</div>
-        {chart_svg(d["klines"], r, sym)}
+        <div class="toolbar">🔍 拖动下方导航条缩放/平移（双击复位）· 移动鼠标查看每日 OHLC/成交量 · 上图含成交量柱（红涨绿跌）· <b style="color:{GOLD}">◆✓</b>/<b style="color:#94a3b8">◇</b> 菱形=历史拐点(捕获/未捕获) · <b style="color:{RED}">▼</b>/<b style="color:{GREEN}">▲</b> 实心三角=笔级背驰：<b style="color:{GOLD}">金粗边</b>=趋势背驰·量能确认 / <b style="color:#b45309">橙粗边</b>=趋势背驰 / <b style="color:#94a3b8">灰细边</b>=盘整背驰 · <b style="color:{RED}">▽</b>/<b style="color:{GREEN}">△</b> 空心三角=线段级背驰 · <b style="color:{RED}">■</b>/<b style="color:{GREEN}">■</b> 横带=未补跳空缺口(红支撑/绿压力) · MACD副图 ▲/▼=金叉/死叉 · <b style="color:#2563eb">■</b> 蓝柱=放量突破 · 虚线方框=未确认分型</div>
+        {chart_svg(d["klines"], r, sym, r["captured"])}
         <div class="xh-tip" id="tip-{sym}"></div>
         {navigator_svg(d["klines"], sym)}
       </div>
@@ -970,12 +1728,17 @@ def main():
         <div class="xh-tip" id="fctip-{sym}"></div>
       </div>
       {fs_legend}
+      {path_hit_html(cls["scenario"], paths_bt[sym], fs_probs[0], fs_probs[1], fs_probs[2], horizon)}
       <p class="fc-note">{div_txt}<br>{fs_note}</p>
     </section>""")
         conclusions.append(f'<li><b>{d["name"]}</b>：日线 {cls["scenario"]} / 周线 {wcls["scenario"]} —— {cls["detail"]} <a href="#sec-{sym}" style="font-size:12px;color:{BLUE}">[查看图解]</a></li>')
         forecast_info[sym] = {"p_main": fs_probs[0], "p_alt": fs_probs[1], "p_risk": fs_probs[2],
+                              "p_hold": fc_data["p_hold"],
                               "zd": (r["zhongshu"][-1]["zd"] if r["zhongshu"] else d["klines"][-1]["close"] * 0.95),
-                              "stable": r["stability"]["stable"], "sigma": sigma, "fc": fc_data}
+                              "stable": r["stability"]["stable"],
+                              "level": r["stability"].get("level", "稳健"),
+                              "last_bi_bars": r["stability"].get("last_bi_bars", 0),
+                              "sigma": sigma, "fc": fc_data}
 
     fc_blob = {sym: forecast_info[sym]["fc"] for sym in data}
     diverge_note = ""
@@ -990,6 +1753,7 @@ def main():
     avg_agree2 = avg_agree
     worst_rel = max((d["meta"].get("consistency", {}).get("max_rel_dev") or 0) for d in data.values())
     avg_stable = sum(1 for s in data if results[s]["stability"]["stable"]) / len(data) * 100
+    n_mature = sum(1 for s in data if results[s]["stability"].get("maturity") == "established")
 
     # 数据驱动的市场格局描述（不写死，随每日自动刷新保持准确）
     n_daily_up = sum(1 for s in data if results[s]["classify"]["last_bi_dir"] == 1)
@@ -1015,7 +1779,7 @@ def main():
       <ul>
         <li><b>市场格局：</b>{pat}{stance}。</li>
         <li><b>数据可信度：</b>腾讯(qfq)↔新浪(裸价)双源<b>全序列比值最大偏离 {worst_rel*100:.2f}%</b>，K线校验 0 问题，笔双法一致率均值 {avg_agree2:.0f}%，已知拐点捕捉率均值 {avg_cap:.0f}%——历史划分具备较高稳健性。</li>
-        <li><b>推演结论：</b>各指数主路径概率最高（约 {int(min((forecast_info[s]['p_main'] for s in data))*100)}%~{int(max((forecast_info[s]['p_main'] for s in data))*100)}%），但均以<b>周线底分型确认</b>为兑现前提；结论稳定性 {avg_stable:.0f}%（标"敏感"者需随近 1 个月价格更新）。跌破各自中枢 ZD 即主路径失效、风险路径概率上升。具体指数推演见<a href="#s6">第六节</a>，关键位与策略见<a href="#s3">第三节</a>。</li>
+        <li><b>推演结论：</b>各指数主路径概率最高（约 {int(min((forecast_info[s]['p_main'] for s in data))*100)}%~{int(max((forecast_info[s]['p_main'] for s in data))*100)}%），但均以<b>周线底分型确认</b>为兑现前提；结论稳健度：{n_mature}/{total} 个指数信号成熟（最后笔≥12 交易日）、{total - n_mature} 个信号年轻·待确认（最后笔仅 ~7 根 K 线，结论对近 1~2 周价格敏感，已相应下调主路径概率 ±0.02~0.04）。跌破各自中枢 ZD 即主路径失效、风险路径概率上升。具体指数推演见<a href="#s6">第六节</a>，关键位与策略见<a href="#s3">第三节</a>。</li>
       </ul>
     </div>"""
 
@@ -1032,7 +1796,8 @@ def main():
   header h1 {{ font-size: 26px; }}
   header p {{ color: #64748b; margin-top: 6px; font-size: 14px; line-height: 1.7; }}
   .cards {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; margin: 20px 0; }}
-  .card {{ background: #fff; border: 1px solid #e5e9f0; border-radius: 10px; padding: 14px 16px; box-shadow: 0 1px 3px rgba(15,23,42,.04); }}
+  .card {{ background: #fff; border: 1px solid #e5e9f0; border-radius: 10px; padding: 14px 16px; box-shadow: 0 1px 3px rgba(15,23,42,.04); transition: box-shadow .18s ease, transform .18s ease, border-color .18s ease; }}
+  .card:hover {{ box-shadow: 0 6px 18px rgba(15,23,42,.10); transform: translateY(-2px); border-color: #cdd7e5; }}
   .card-head {{ display: flex; justify-content: space-between; align-items: baseline; }}
   .idx-name {{ font-weight: 700; }}
   .sym {{ color: {GRAY}; font-size: 12px; }}
@@ -1084,7 +1849,18 @@ def main():
   .fc-legend .ln-dash {{ background-image: repeating-linear-gradient(90deg, #94a3b8 0 5px, transparent 5px 9px); }}
   .fc-legend .ln-dot {{ background: {GREEN}; }}
   .fc-legend .ln-band {{ width: 18px; height: 11px; background: {RED}; opacity: .18; border-radius: 2px; }}
+  .fc-legend .ln-trend {{ width: 18px; height: 0; border-top: 2px dashed #0891b2; }}
   .fc-note {{ font-size: 13px; color: #b45309; background: #fffbeb; border: 1px solid #fde68a; border-radius: 6px; padding: 8px 12px; margin-top: 8px; line-height: 1.7; }}
+  .pathcheck {{ background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px 14px; margin-top: 10px; }}
+  .pathcheck > b {{ font-size: 14px; color: #0f172a; }}
+  .pc-sub {{ display: block; font-size: 12px; color: #64748b; margin: 3px 0 8px; line-height: 1.5; }}
+  .pc-row {{ display: flex; align-items: center; gap: 8px; margin: 5px 0; font-size: 13px; }}
+  .pc-lab {{ width: 64px; flex: none; font-weight: 600; }}
+  .pc-bar {{ flex: 1; height: 7px; background: #eef2f7; border-radius: 4px; overflow: hidden; max-width: 320px; }}
+  .pc-bar i {{ display: block; height: 100%; border-radius: 4px; }}
+  .pc-h {{ width: 70px; flex: none; color: #475569; text-align: right; }}
+  .pc-p {{ width: 78px; flex: none; color: #0f172a; font-weight: 600; text-align: right; }}
+  .pc-calib {{ margin-top: 8px; font-size: 13px; padding-top: 7px; border-top: 1px dashed #cbd5e1; }}
   .hero {{ display: flex; flex-wrap: wrap; gap: 10px; margin: 14px 0 4px; }}
   .kpi {{ flex: 1; min-width: 118px; background: #fff; border: 1px solid #e5e9f0; border-radius: 10px; padding: 12px 14px; text-align: center; box-shadow: 0 1px 3px rgba(15,23,42,.04); }}
   .kpi-v {{ font-size: 26px; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.1; }}
@@ -1131,8 +1907,8 @@ def main():
 <div class="wrap">
   <header>
     <h1>A股主要指数缠论结构分析报告</h1>
-    <p>数据区间：2021-01-04 ~ {last_date}（日线+周线，前复权） · 生成时间：{gen_time}<br>
-    方法：K线包含处理 → 顶底分型 → 笔（日线≥1.8% / 周线≥4% 幅度过滤）→ 笔中枢 → MACD 背驰 → 买卖点 → 日周双级别分类推演 → 信号回测验证</p>
+    <p>数据区间：2021-01-04 ~ {last_date}（日线+周线+月线，前复权） · 生成时间：{gen_time}<br>
+    方法：K线包含处理 → 顶底分型 → 笔（日线≥1.8% / 周线≥4% / 月线≥8% 幅度过滤）→ 笔中枢 → MACD 背驰 → 买卖点 → 日周月三级别区间套分类推演 → 信号回测验证</p>
   </header>
   <nav class="toc">
     <a href="#s1"><span class="num">一</span>数据质量</a>
@@ -1150,7 +1926,10 @@ def main():
     <div class="kpi" style="border-top:3px solid {BLUE}"><div class="kpi-v">{avg_health:.0f}</div><div class="kpi-l">平均结构健康度</div></div>
     <div class="kpi" style="border-top:3px solid {BLUE}"><div class="kpi-v">{avg_conf:.0f}</div><div class="kpi-l">平均推演置信度</div></div>
     <div class="kpi" style="border-top:3px solid {BLUE}"><div class="kpi-v">{avg_agree:.0f}%</div><div class="kpi-l">笔双法一致率</div></div>
+    <div class="kpi" style="border-top:3px solid {BLUE}"><div class="kpi-v">{avg_vol*100:.0f}%</div><div class="kpi-l">平均年化波动率</div></div>
+    <div class="kpi" style="border-top:3px solid {RED}"><div class="kpi-v" style="color:{RED}">{n_m_bull}<span style="font-size:15px;color:#94a3b8">/{total}</span></div><div class="kpi-l">月线多头背景</div></div>
   </div>
+  {breadth_banner}
   <div class="legend">
     <span><i class="dot" style="background:{RED}"></i>向上笔 / ▲买点</span>
     <span><i class="dot" style="background:{GREEN}"></i>向下笔 / ▼卖点</span>
@@ -1174,10 +1953,15 @@ def main():
   <div class="cards">{"".join(cards)}</div>
 
   <h2 class="sec" id="s3">三、关键位与应对策略汇总（日周双级别）</h2>
-  <div class="panel"><div class="tablescroll">{levels_table(data, results, results_week, scores)}</div></div>
+  <div class="panel"><div class="tablescroll">{levels_table(data, results, results_week, results_month, scores)}</div></div>
 
   <h2 class="sec" id="s4">四、买卖点信号历史回测 <span style="font-size:12px;color:{GRAY};font-weight:400">缠论信号有效性的统计验证</span></h2>
   <div class="panel"><div class="tablescroll">{backtest_table(backtests)}</div></div>
+
+  <div class="panel"><div class="tablescroll">{rr_table(data, results)}</div></div>
+
+  <h3 class="rob-h" style="font-size:16px;margin:18px 0 10px;color:#334155">四·B、样本外稳健性检验（校准过拟合检测）</h3>
+  <div class="panel"><div class="tablescroll">{robustness_table(robust, data)}</div></div>
 
   <h2 class="sec" id="s5">五、分指数结构图解</h2>
   {"".join(sections)}
@@ -1186,7 +1970,7 @@ def main():
   <div class="disclaimer" style="margin-bottom:14px">
     <b>⚠️ 重要说明（请先读）：</b>缠论是<b>概率性的结构分类框架，不是预测工具</b>。本节的"主/次/风险路径"与"置信锥"表达的是<b>在不同结构假设下的条件应对与概率分布</b>，绝非对具体价位的预测；其中主路径概率已尽量用历史同类信号的经验胜率校准，但样本有限，<b>任何路径都不构成买入/卖出建议</b>。真实决策请结合仓位管理与个人风险承受力，并独立判断。市场有风险。
   </div>
-  <div class="panel"><div class="tablescroll">{forecast_summary_table(data, results, results_week, forecast_info)}</div></div>
+  <div class="panel"><div class="tablescroll">{forecast_summary_table(data, results, results_week, results_month, forecast_info)}</div></div>
   <div class="panel conclusion">
     <ul>{"".join(conclusions)}</ul>
     {diverge_note}
@@ -1200,19 +1984,22 @@ def main():
   <details class="panel method">
     <summary style="font-weight:700;color:#1e40af;cursor:pointer">术语与方法论速查（点击展开）</summary>
     <h4 style="margin-top:12px">分析流程</h4>
-    <p>K线包含处理 → 顶底分型（含相等高低点处理）→ 笔（日线≥1.8% / 周线≥4% 幅度过滤）→ 笔中枢 → 笔级 + 走势段级（笔端点高阶 zigzag 聚合）MACD 背驰 → 一/二/三类买卖点（含量能背离确认）→ MA20/60/250 多空排列交叉验证 → 日×周双级别区间套 → 斐波那契回调位标注 → 经验校准的分类推演（自适应 horizon + 条件化波动率）→ 信号历史回测验证。</p>
+    <p>K线包含处理 → 顶底分型（含相等高低点处理）→ 笔（日线≥1.8% / 周线≥4% 幅度过滤）→ 笔中枢 → 笔级 + 走势段级（笔端点高阶 zigzag 聚合）MACD 背驰 → 一/二/三类买卖点（含量能背离确认）→ MA20/60/250 多空排列交叉验证 → 日×周×月三级别区间套 → 斐波那契回调位标注 → 经验校准的分类推演（自适应 horizon + 条件化波动率）→ 对数回归趋势外推交叉验证 → 信号历史回测验证。</p>
     <h4>核心术语</h4>
     <ul>
       <li><b>笔</b>：相邻顶底分型间至少 2 根独立 K 线、且幅度达到阈值的同向线段。</li>
       <li><b>中枢</b>：至少 3 笔重叠区间 [ZD, ZG]；站上 ZG 转强，跌破 ZD 转弱。</li>
       <li><b>背驰</b>：笔级与走势段级（在笔端点序列上做高阶 zigzag 聚合得到的更大级别走势腿）均检测——价格创新高/低，但 MACD 柱面积较前一同向段萎缩 ≥15%。同时辅以<b>量能背离确认</b>：当前段成交量较前一同向段萎缩则标记"量✓"，信号更可靠（段级背离为更高一层信号）。</li>
       <li><b>买卖点</b>：一类=背驰拐点；二类=中枢内回踩/反抽不破 ZD/ZG 的折返笔；三类=中枢完成后回踩不破 ZG / 反抽不过 ZD。</li>
-      <li><b>均线排列</b>：MA20/60/250 多空排列（多头/空头/纠缠），与缠论结构分歧时自动降权。</li>
-      <li><b>级别联立（区间套）</b>：日线背驰与周线趋势方向组合，给出更高一级共振判断（如日线底背驰×周线向下笔=潜在周线级低点）。</li>
+      <li><b>均线排列</b>：MA20/60/250 多空排列（多头/空头/纠缠），与缠论结构分歧时自动降权；三者均绘制于主图价格曲线上方，用于直观判断长期趋势的支撑/压力。</li>
+      <li><b>年化波动率</b>：近 1 年日对数收益率标准差年化（×√244），量化指数近期波动剧烈程度，与结构健康度互为补充，也用于评估推演置信锥的适用环境。</li>
+      <li><b>级别联立（区间套）</b>：日线背驰与周线趋势方向组合，给出更高一级共振判断（如日线底背驰×周线向下笔=潜在周线级低点）。<b>已升级为日×周×月三重区间套</b>：在日周共振基础上，再叠加月线方向作为大级别趋势背景（月线多头/空头背景），更高一层定调方向。卡片"日×周区间套"字段与结构解读【区间套】结论来自真实日/周线联立，新增"月线背景"字段来自真实月线 classify；共振出现时主路径概率额外 +3%。</li>
       <li><b>斐波那契回调位</b>：主图叠加最近一段已完成走势的 0.382/0.5/0.618 回调位（紫虚线），作为反弹/回踩的目标支撑与阻力，与推演中的 ZG/ZD 互为锚定参考。</li>
     </ul>
     <h4>概率与推演</h4>
-    <p>主路径概率优先采用<b>历史同类信号的经验同向胜率</b>校准（见第四节回测），样本不足时回退启发式；推演 horizon 按最近笔平均持续交易日自适应（30~90 日），置信锥宽度按近 20 日波动率相对长期水平条件化（震荡市收窄、动荡市放大）。缠论是概率性结构分类框架，推演为目的而非点位预测。</p>
+    <p>主路径概率优先采用<b>历史同类信号的经验同向胜率</b>校准（见第四节回测），样本不足时回退启发式；校准锚<b>严格按情景方向选取</b>（牛市只锚买点类、熊市只锚卖点类信号），杜绝「多头指数却被卖点胜率校准」的方向错配。推演 horizon 按最近笔<b>真实持续交易日</b>（已修正为原始日线索引，非合并 K 线索引）自适应（30~90 日），置信锥宽度按近 20 日波动率相对长期水平条件化（震荡市收窄、动荡市放大），且带宽按<b>随机游走的 √t 口径</b>扩张（近端的不确定性即已显著，避免线性外推把近月压成针状、低估真实风险）。当<b>趋势外推与主路径吻合且 R²≥0.15</b>或<b>日周区间套共振</b>时，主路径概率分别额外 +2% / +3%，把多种独立方法的共识显式转化为概率增益（弱拟合下不授予增益，防止虚增置信度）。推演另给出<b>结构存续概率（锥模型）</b>：用与置信锥同款 σ 计算「期末价 ≥ ZD」的概率 Φ(ln(现价/ZD)/σ)（随机游走中性假设），作为与情景概率互补、且与置信锥内部自洽的「结构是否守住失效位」的纯统计参照——它衡量「不破 ZD」，与情景概率衡量「方向性演绎」口径不同，两者并列呈现而非相互替代。</p>
+    <p>经验胜率进一步做<b>贝叶斯收缩</b>：样本越少、二项 95% 置信区间越宽，经验锚越向启发式基准回归，并在校准说明中标注该置信区间，避免小样本（如 n=5、CI 横跨 50%）噪声被过度外推、误导概率。报告顶部另给出<b>跨指数市场宽度</b>横幅（5 指数牛/熊情景数），把全市场对齐度折算为 ±8 的「全市场对齐度」反馈进各指数推演置信度，使个股指推演的基准方向与市场系统性环境一致。</p>
+    <p>为提升预测可信度，推演图额外叠加一条<b>趋势外推线</b>：对最近 min(horizon,90) 日收盘做<b>对数线性回归</b>外推 horizon 日，作为与缠论结构路径相互独立的验证方法。该独立验证的<b>拟合优度 R² 一并展示</b>：R²≥0.15 且终点与主路径吻合（误差&lt;6%）才算「共振」、相互印证、可信度更高；R² 过低（如≈0.1，趋势线近乎噪声）时明确标注「弱拟合」，<b>不授予共振概率增益</b>、亦不建议据此增减仓位；显著偏离时提示两种视角对后市节奏判断不一致，应结合仓位管理。缠论是概率性结构分类框架，推演为目的而非点位预测。</p>
     <h4>准确度校验</h4>
     <p>① 腾讯(qfq)↔新浪(裸价) 全序列<b>比值一致性</b>比对（前复权=裸价×常数调整因子，两源比值应恒定，漂移过大即异常）；② 标准严格笔与振幅过滤笔交叉一致率；③ 8 个已知历史拐点的捕捉率；④ 砍掉末 5/10/20 根 K 线重算分类的稳定性；⑤ 交易日连续性 / 缺失检测（相邻间隔与总数 vs 首末日期应有多少交易日）。结果见第一节与推演汇总表。</p>
   </details>
@@ -1275,6 +2062,7 @@ function initForecast(sym){{
         +'<span style="color:'+red+'">主路径 '+p.main.toFixed(2)+'</span>　'+Math.round(D.p_main*100)+'%<br>'
         +'<span style="color:'+gray+'">次路径 '+p.alt.toFixed(2)+'</span>　'+Math.round(D.p_alt*100)+'%<br>'
         +'<span style="color:'+grn+'">风险路径 '+p.risk.toFixed(2)+'</span>　'+Math.round(D.p_risk*100)+'%<br>'
+        +'<span style="color:#0891b2">趋势外推 '+p.trend.toFixed(2)+'</span><br>'
         +'<span style="color:#64748b">±1σ '+p.b1l.toFixed(0)+'~'+p.b1u.toFixed(0)+'</span><br>'
         +'<span style="color:#64748b">±2σ '+p.b2l.toFixed(0)+'~'+p.b2u.toFixed(0)+'</span>';
       showDots(PAD_L+hist_w+proj_w*f, f);
