@@ -1481,6 +1481,7 @@ def levels_table(data, results, results_week, results_month, scores):
           <td class="strategy">{strategy_text(cls, zs)}</td>
         </tr>""")
     return """<table class="tbl">
+      <colgroup><col style="width:90px"><col style="width:calc((100%% - 90px)/9)"><col style="width:calc((100%% - 90px)/9)"><col style="width:calc((100%% - 90px)/9)"><col style="width:calc((100%% - 90px)/9)"><col style="width:calc((100%% - 90px)/9)"><col style="width:calc((100%% - 90px)/9)"><col style="width:calc((100%% - 90px)/9)"><col style="width:calc((100%% - 90px)/9)"><col style="width:calc((100%% - 90px)/9)"></colgroup>
       <thead><tr><th>指数</th><th>日线分类</th><th>周线分类</th><th>月线背景</th><th>级别联立</th><th>现价</th><th>压力 ZG（距离）</th><th>支撑 ZD（距离）</th><th>健康度 / 置信度</th><th>应对策略</th></tr></thead>
       <tbody>%s</tbody></table>""" % "".join(rows)
 
@@ -1513,6 +1514,7 @@ def backtest_table(backtests):
             tds.append(f'<td class="tac">{st["n"]} 次 · 胜率 <b>{wr:.0f}%</b> · 均 <span style="color:{c}">{ar:+.1f}%</span></td>')
         rows.append("<tr>" + "".join(tds) + "</tr>")
     return """<table class="tbl">
+      <colgroup><col style="width:110px"><col style="width:22.5%%"><col style="width:22.5%%"><col style="width:22.5%%"><col style="width:22.5%%"></colgroup>
       <thead><tr><th>信号类型</th><th>后 5 个交易日</th><th>后 10 个交易日</th><th>后 20 个交易日</th><th>后 60 个交易日</th></tr></thead>
       <tbody>%s</tbody></table>
       <p style="font-size:12px;color:#64748b;margin-top:8px">统计 5 大指数 2021-01 至今全部信号（买点胜=之后涨，卖点胜=之后跌）。买卖点按缠论标准：一类=背驰拐点，二类=次低/次高折返，三类=回抽不进中枢。样本有限，历史特征，非投资建议。</p>""" % "".join(rows)
@@ -1543,6 +1545,7 @@ def rr_table(data, results, recent_n=8):
             </tr>""")
     return """<h3 class="fc-title" style="margin-top:22px">近期买卖点值博率（R:R）明细<span class="fc-sub">止损 / 目标 / 风险收益比 —— 缠论实战交易计划必备，此前报告完全缺失</span></h3>
       <table class="tbl">
+      <colgroup><col style="width:110px"><col style="width:calc((100%% - 110px)/8)"><col style="width:calc((100%% - 110px)/8)"><col style="width:calc((100%% - 110px)/8)"><col style="width:calc((100%% - 110px)/8)"><col style="width:calc((100%% - 110px)/8)"><col style="width:calc((100%% - 110px)/8)"><col style="width:calc((100%% - 110px)/8)"><col style="width:calc((100%% - 110px)/8)"></colgroup>
       <thead><tr><th>指数</th><th>买卖点</th><th>日期</th><th>触发价</th><th>止损位</th><th>目标位</th><th>R:R</th><th>值博率</th><th>量✓</th></tr></thead>
       <tbody>%s</tbody></table>
       <p style="font-size:12px;color:#64748b;margin-top:8px">R:R = (目标−触发) / (触发−止损)；值博率：优(RR≥2.5)/良(≥1.5)/中(≥1.0)/差(&lt;1)。止损取局部前低或中枢下沿 ZD，目标取近程摆动极值并封顶 6 倍防失真。结构参考，非交易建议。</p>""" % "".join(rows)
@@ -1589,6 +1592,7 @@ def robustness_table(robust, data):
           <td>{verdict}</td>
         </tr>""")
     _tbl = """<table class="tbl">
+      <colgroup><col style="width:140px"><col style="width:calc((100%% - 140px)/5)"><col style="width:calc((100%% - 140px)/5)"><col style="width:calc((100%% - 140px)/5)"><col style="width:calc((100%% - 140px)/5)"><col style="width:calc((100%% - 140px)/5)"></colgroup>
       <thead><tr><th>指数</th><th>早年买方信号胜率(均收益) h=20</th><th>近两年买方信号胜率(均收益) h=20</th><th>变化</th><th>滚动窗口衰减*</th><th>样本外稳健性</th></tr></thead>
       <tbody>%s</tbody></table>
       <p style="font-size:12px;color:#64748b;margin-top:8px">按 {SPLIT} 切分「早年 / 近两年」买方信号（一类买·三类买，持有 20 日）胜率与均收益对比。近两年显著下滑(≥15pt)提示过拟合风险；持平/更高则样本外稳定。*「滚动窗口衰减」=多个切分点(2022/2023/2024)聚合的两年 vs 早年胜率差均值，比单一切分更稳，刻画样本外稳健性。不构成投资建议。</p>""".replace("{SPLIT}", split)
@@ -1627,6 +1631,7 @@ def forecast_summary_table(data, results, results_week, results_month, forecast_
           <td class="tac" style="color:{stab_c};font-weight:600">{stab}</td>
         </tr>""")
     return f"""<table class="tbl">
+      <colgroup><col style="width:90px"><col style="width:calc((100% - 90px)/9)"><col style="width:calc((100% - 90px)/9)"><col style="width:calc((100% - 90px)/9)"><col style="width:calc((100% - 90px)/9)"><col style="width:calc((100% - 90px)/9)"><col style="width:calc((100% - 90px)/9)"><col style="width:calc((100% - 90px)/9)"><col style="width:calc((100% - 90px)/9)"><col style="width:calc((100% - 90px)/9)"></colgroup>
       <thead><tr><th>指数</th><th>日线分类</th><th>月线背景</th><th>级别联立</th><th>主路径概率</th><th>次路径概率</th><th>风险概率</th><th>结构存续(锥)</th><th>失效位 ZD</th><th>结论稳定性</th></tr></thead>
       <tbody>{"".join(rows)}</tbody></table>
       <p style="font-size:12px;color:#64748b;margin-top:8px">概率为「级别共振+置信度+回测胜率」启发式估算，主/次/风险已归一(合计100%)，结构存续(锥)为独立参照不计入。稳健度三级：<b style="color:{GREEN}">稳健</b>=极性趋势 20 日内不变；<b style="color:#d97706">边缘</b>=趋势守住但末笔年轻；<b style="color:{RED}">敏感·待确认</b>=极性翻转、已下调主路径概率。末笔仅~7根K线者宜轻仓等周线确认。</p>"""
@@ -1874,9 +1879,10 @@ def main():
   .badge {{ font-size: 12px; color: #fff; padding: 2px 10px; border-radius: 999px; font-weight: 600; }}
   .verdict {{ background: #f0f6ff; border-left: 4px solid {BLUE}; padding: 10px 14px; margin-top: 12px; font-size: 14px; border-radius: 0 6px 6px 0; }}
   .verdict p {{ margin-top: 4px; color: #475569; line-height: 1.7; }}
-  .tbl {{ width: 100%; border-collapse: collapse; font-size: 13px; background: #fff; }}
-  .tbl th {{ background: #f1f5f9; color: #475569; font-weight: 600; padding: 9px 10px; text-align: left; white-space: nowrap; }}
-  .tbl td {{ padding: 9px 10px; border-top: 1px solid #eef2f7; vertical-align: top; }}
+  .tbl {{ width: 100%; border-collapse: collapse; font-size: 13px; background: #fff; table-layout: fixed; }}
+  .tbl th, .tbl td {{ padding: 9px 10px; text-align: left; vertical-align: middle; border-top: 1px solid #eef2f7; overflow-wrap: break-word; }}
+  .tbl th {{ background: #f1f5f9; color: #475569; font-weight: 600; border-top: none; }}
+  .tbl td {{ background: #fff; }}
   .tbl tr:hover td {{ background: #f8fafc; }}
   .tbl .tac {{ text-align: center; }}
   .tac-all th, .tac-all td {{ text-align: center; }}
