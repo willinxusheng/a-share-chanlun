@@ -66,29 +66,47 @@ def fetch_sina_series(symbol, datalen=1400):
 
 
 def cross_validate(tx_klines, sina_close_map):
-    """在腾讯序列上均匀抽样若干交易日，与新浪比对收盘价，返回偏差统计"""
+    """腾讯(qfq) 与新浪(裸价) 收盘价<b>比值稳定性</b>校验。
+
+    前复权价 = 裸价 × 常数调整因子（相对末日的累计分红/拆股系数），故两源收盘价
+    在全序列的比值应基本恒定。若比值漂移过大，说明某源存在分红/拆股口径异常或多日缺口。
+    直接比绝对值偏差是错的（qfq 与裸价天然差一个常数倍），比值稳定性才是真正的一致性校验。
+    """
     n = len(tx_klines)
     if not sina_close_map or n < 10:
-        return {"n": 0, "max_dev": None, "mean_dev": None, "worst_date": None}
+        return {"n": 0, "median_ratio": None, "max_rel_dev": None, "worst_date": None}
     # 抽样：首、尾 + 每年约 2~3 个均匀点
     idxs = set([0, n - 1])
     step = max(1, n // 24)
     for i in range(step // 2, n, step):
         idxs.add(i)
-    devs, worst, worst_date = [], 0.0, None
-    compared = 0
+    ratios = []
     for i in sorted(idxs):
         d = tx_klines[i]["date"]
-        if d in sina_close_map and sina_close_map[d] > 0:
-            dev = abs(tx_klines[i]["close"] / sina_close_map[d] - 1) * 100
-            devs.append(dev)
-            compared += 1
-            if dev > worst:
-                worst, worst_date = dev, d
-    if not devs:
-        return {"n": 0, "max_dev": None, "mean_dev": None, "worst_date": None}
-    return {"n": compared, "max_dev": round(max(devs), 4),
-            "mean_dev": round(sum(devs) / len(devs), 4), "worst_date": worst_date}
+        sc = sina_close_map.get(d)
+        if sc and sc > 0 and tx_klines[i]["close"] > 0:
+            ratios.append(tx_klines[i]["close"] / sc)
+    if len(ratios) < 3:
+        return {"n": 0, "median_ratio": None, "max_rel_dev": None, "worst_date": None}
+    ratios.sort()
+    med = ratios[len(ratios) // 2]
+    max_rel = max(abs(r - med) / med for r in ratios)
+    worst, worst_date = 0.0, None
+    for i in sorted(idxs):
+        d = tx_klines[i]["date"]
+        sc = sina_close_map.get(d)
+        if sc and sc > 0 and tx_klines[i]["close"] > 0:
+            rel = abs(tx_klines[i]["close"] / sc - med) / med
+            if rel > worst:
+                worst, worst_date = rel, d
+    return {"n": len(ratios), "median_ratio": round(med, 4),
+            "max_rel_dev": round(max_rel, 4), "worst_date": worst_date}
+
+
+def _date_gap(d1, d2):
+    a = datetime.strptime(d1, "%Y-%m-%d")
+    b = datetime.strptime(d2, "%Y-%m-%d")
+    return (b - a).days
 
 
 def validate(klines):
@@ -108,7 +126,21 @@ def validate(klines):
             issues.append("%s 开盘价超出高低范围" % d)
         if k["close"] <= 0:
             issues.append("%s 收盘价非正" % d)
-    return issues[:10]  # 只保留前10条
+    # 交易日连续性 / 缺失检测（#6）
+    if len(klines) >= 2:
+        dates = [k["date"] for k in klines]
+        for i in range(1, len(dates)):
+            dd = _date_gap(dates[i - 1], dates[i])
+            if dd <= 0:
+                issues.append("日期非递增 %s→%s" % (dates[i - 1], dates[i]))
+            elif dd > 14:  # 超过最长法定长假（国庆/春节约 11 天），疑似漏数据而非休市
+                issues.append("间隔异常(疑似缺失交易日) %s→%s(%d天)" % (dates[i - 1], dates[i], dd))
+        total_days = _date_gap(dates[0], dates[-1])
+        if total_days > 0:
+            exp = int(total_days / 365.25 * 244)  # A股年均约 244 个交易日
+            if abs(len(dates) - exp) > max(5, exp * 0.04):
+                issues.append("交易日数量异常：实际%d 预计约%d" % (len(dates), exp))
+    return issues[:12]  # 只保留前12条
 
 
 def main():
@@ -117,10 +149,7 @@ def main():
         day = fetch_tx(sym, "day")
         week = fetch_tx(sym, "week")
         issues = validate(day)
-        sina_close = fetch_sina_last_close(sym)
-        tx_close = day[-1]["close"] if day else None
-        dev = abs(sina_close / tx_close - 1) * 100 if (sina_close and tx_close) else None
-        # 全序列抽样交叉验证
+        # 全序列抽样比值一致性校验（腾讯 qfq ↔ 新浪 裸价）
         sina_series = fetch_sina_series(sym)
         cc = cross_validate(day, sina_series)
         result[sym] = {
@@ -133,16 +162,13 @@ def main():
                 "first_date": day[0]["date"],
                 "last_date": day[-1]["date"],
                 "issues": issues,
-                "tx_close": tx_close,
-                "sina_close": sina_close,
-                "dev_pct": round(dev, 4) if dev is not None else None,
-                "cross_check": cc,
+                "consistency": cc,
             },
         }
-        print("%s: 日线%d(%s~%s) 周线%d 校验问题%d 末值偏差%s 序列抽样%d点 最大偏差%s" % (
+        print("%s: 日线%d(%s~%s) 周线%d 校验问题%d 双源比值稳定度 样本%d 最大偏离%s" % (
             name, len(day), day[0]["date"], day[-1]["date"], len(week),
-            len(issues), ("%.3f%%" % dev) if dev is not None else "N/A",
-            cc["n"], ("%.3f%%" % cc["max_dev"]) if cc["max_dev"] is not None else "N/A"))
+            len(issues), cc["n"],
+            ("%.3f%%" % (cc["max_rel_dev"] * 100)) if cc["max_rel_dev"] is not None else "N/A"))
     with open(os.path.join(_BASE, "data.json"), "w", encoding="utf-8") as f:
         json.dump(result, f, ensure_ascii=False)
     print("saved -> chanlun/data.json")
