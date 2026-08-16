@@ -91,10 +91,7 @@ def chart_svg(klines, r, sym, captured=None):
 
     # 背景 + 渐变 + 裁剪定义（最外层）
     base.append(f'<rect width="{W}" height="{CHART_TOTAL}" fill="#ffffff"/>')
-    base.append(f'<defs><linearGradient id="cg-{sym}" x1="0" y1="0" x2="0" y2="1">'
-                f'<stop offset="0%" stop-color="#64748b" stop-opacity="0.10"/>'
-                f'<stop offset="100%" stop-color="#64748b" stop-opacity="0"/></linearGradient>'
-                f'<clipPath id="clip-{sym}"><rect x="{PAD_L}" y="0" width="{plot_w}" height="{CHART_TOTAL}"/></clipPath></defs>')
+    base.append(f'<defs><clipPath id="clip-{sym}"><rect x="{PAD_L}" y="0" width="{plot_w}" height="{CHART_TOTAL}"/></clipPath></defs>')
 
     # 年份分隔竖线 + 标签；季度细分竖线（更细时间参考）
     prev_q = None
@@ -209,11 +206,21 @@ def chart_svg(klines, r, sym, captured=None):
             _last_y = _yy
             lg.append(f'<text x="{W - PAD_R - 60}" y="{_yy - 2:.1f}" font-size="10" font-weight="600" fill="#7c3aed" text-anchor="start">{_lab} {_pv:.0f}</text>')
 
-    # 收盘价平滑曲线 + 轻量渐变填充（更细腻）
-    close_pts = [(x(i), y(c)) for i, c in enumerate(closes)]
-    close_d = _smooth(close_pts)
-    pg.append(f'<path d="{close_d} L{W - PAD_R:.1f} {PAD_T + price_h:.1f} L{PAD_L:.1f} {PAD_T + price_h:.1f} Z" fill="url(#cg-{sym})" stroke="none"/>')
-    pg.append(f'<path d="{close_d}" fill="none" stroke="#64748b" stroke-width="1" stroke-opacity="0.8" stroke-linejoin="round" stroke-linecap="round"/>')
+    # 蜡烛图（替代原收盘价面积线：开高低收实体+影线，股票图专业度的核心要素；实体宽度随缩放
+    # 自适应——全览≈发丝线、放大后展开为完整蜡烛，符合交易终端习惯；影线合并为单 path 高效绘制，
+    # 实体用 rect。涨红跌绿遵循 A股惯例）。
+    _bw = max(plot_w / n * 0.62, 0.5)
+    _wicks, _bodies = [], []
+    for i, k in enumerate(klines):
+        xc = x(i)
+        yo = y(k["open"]); yc = y(k["close"])
+        yh = y(k["high"]); yl = y(k["low"])
+        _wicks.append(f"M{xc:.1f} {yh:.2f} L{xc:.1f} {yl:.2f}")
+        _yt = min(yo, yc); _bh = max(abs(yc - yo), 0.5)
+        _bc = RED if k["close"] >= k["open"] else GREEN
+        _bodies.append(f'<rect x="{xc - _bw / 2:.2f}" y="{_yt:.2f}" width="{_bw:.2f}" height="{_bh:.2f}" fill="{_bc}" fill-opacity="0.92"/>')
+    pg.append(f'<path d="{"".join(_wicks)}" fill="none" stroke="#94a3b8" stroke-width="0.7" stroke-opacity="0.55" vector-effect="non-scaling-stroke"/>')
+    pg.extend(_bodies)
 
     # MA20 / MA60 均线（与卡片"均线排列"呼应，提升专业度；置于图形层随窗口横向缩放）
     def ma_series(arr, p):
@@ -1822,7 +1829,9 @@ def main():
     avg_agree2 = avg_agree
     worst_rel = max((d["meta"].get("consistency", {}).get("max_rel_dev") or 0) for d in data.values())
     avg_stable = sum(1 for s in data if results[s]["stability"]["stable"]) / len(data) * 100
-    n_mature = sum(1 for s in data if results[s]["stability"].get("maturity") == "established")
+    n_robust = sum(1 for s in data if results[s]["stability"].get("level") == "稳健")
+    n_edge = sum(1 for s in data if results[s]["stability"].get("level") == "边缘")
+    n_sens = sum(1 for s in data if results[s]["stability"].get("level") == "敏感·待确认")
 
     # 数据驱动的市场格局描述（不写死，随每日自动刷新保持准确）
     n_daily_up = sum(1 for s in data if results[s]["classify"]["last_bi_dir"] == 1)
@@ -1848,7 +1857,7 @@ def main():
       <ul>
         <li><b>市场格局：</b>{pat}{stance}。</li>
         <li><b>数据可信度：</b>双源(qfq↔裸价)全序列比值最大偏离 {worst_rel*100:.2f}%，笔双法一致率 {avg_agree2:.0f}%，拐点捕捉率 {avg_cap:.0f}%——划分稳健。</li>
-        <li><b>推演结论：</b>各指数主路径概率约 {int(min((forecast_info[s]['p_main'] for s in data))*100)}%~{int(max((forecast_info[s]['p_main'] for s in data))*100)}%，均以<b>周线底分型确认</b>为兑现前提；稳健度 {n_mature}/{total} 成熟、{total - n_mature} 年轻·待确认（末笔仅~7根，已下调主路径概率）。跌破中枢 ZD 即主路径失效。详见<a href="#s6">第六节</a>·<a href="#s3">第三节</a>。</li>
+        <li><b>推演结论：</b>各指数主路径概率约 {int(min((forecast_info[s]['p_main'] for s in data))*100)}%~{int(max((forecast_info[s]['p_main'] for s in data))*100)}%，均以<b>周线底分型确认</b>为兑现前提；结论稳健度三级分布：<b style="color:{GREEN}">稳健 {n_robust}</b> / <b style="color:#d97706">边缘 {n_edge}</b> / <b style="color:{RED}">敏感·待确认 {n_sens}</b>（敏感信号依赖最近年轻笔，已相应下调主路径概率 ±0.02~0.04）。跌破中枢 ZD 即主路径失效。详见<a href="#s6">第六节</a>·<a href="#s3">第三节</a>。</li>
       </ul>
     </div>"""
 

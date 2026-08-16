@@ -810,16 +810,51 @@ def classification_stability(klines, min_bi_pct=MIN_BI_PCT):
     base = classify(*_last_two(base_res, klines[-1]["close"]))
     base_pol = _polarity(base["scenario"])
     base_trend = _trend_polarity(base.get("trend_type", ""))
-    # 最后一支已完成笔跨度（真实交易日，含被包含处理吸收的 K 线）
-    _nb = base_res["bis"][-2] if len(base_res["bis"]) >= 2 else base_res["bis"][-1]
-    _a = base_res["merged"][_nb["start"]]["idx_start"]
-    _e = base_res["merged"][_nb["end"]]["idx_end"]
-    last_bi_bars = (_e - _a + 1) if _e >= _a else 1
+    # 信号成熟度（#39 修复 + 复合化）：此前量 bis[-2]（即确立当前方向前一棒的反向修正笔），
+    # 导致所有指数清一色 young、三级稳健度永远显示不出「稳健」。现改为量「确立当前方向的笔」
+    # （方向与 last_bi_dir 一致的最近一支已完成笔）跨度，并叠加「同向连笔总跨度」——真正的趋势
+    # 市里长笔/多连笔会判为成熟，震荡市短单笔仍判年轻，三级稳健度才有真实区分度。
+    cur_dir = base["last_bi_dir"]
+    _dir_bi = None
+    for _b in reversed(base_res["bis"]):
+        if _b["dir"] == cur_dir:
+            _dir_bi = _b
+            break
+    if _dir_bi is not None:
+        _a = base_res["merged"][_dir_bi["start"]]["idx_start"]
+        _e = base_res["merged"][_dir_bi["end"]]["idx_end"]
+        dir_bi_bars = (_e - _a + 1) if _e >= _a else 1
+    else:
+        dir_bi_bars = 0
+    # 同向连笔（当前方向连续笔）数量与总跨度
+    _run = 0
+    for _b in reversed(base_res["bis"]):
+        if _b["dir"] == cur_dir:
+            _run += 1
+        else:
+            break
+    if _run > 0:
+        _fb = base_res["bis"][len(base_res["bis"]) - _run]
+        _fa = base_res["merged"][_fb["start"]]["idx_start"]
+        _le = base_res["merged"][base_res["bis"][-1]["end"]]["idx_end"]
+        run_span = (_le - _fa + 1) if _le >= _fa else dir_bi_bars
+    else:
+        run_span = dir_bi_bars
+    last_bi_bars = dir_bi_bars or 1
+    _established = (dir_bi_bars >= 12) or (_run >= 2 and run_span >= 20)
     out = {"base": base, "drops": {}, "stable": True,
-           "maturity": "established" if last_bi_bars >= 12 else "young",
-           "last_bi_bars": last_bi_bars, "level": "稳健"}
+           "maturity": "established" if _established else "young",
+           "last_bi_bars": last_bi_bars, "level": "稳健",
+           "run_span": run_span, "same_dir_run": _run}
     pol_drift = False
-    for k in (5, 10, 20):
+    # #39 修复：漂移测试窗口须为「噪声级」且短于「确立当前方向的笔」本身——此前固定
+    # drop=(5,10,20)，而上涨笔常仅 8~11 根，drop 5~20 等于删掉整段行情再问"它还在不在"，
+    # 必然翻转，导致几乎所有指数永远判「敏感·待确认」、三级稳健度失去区分度与预警价值。
+    # 现改为噪声级窗口 (1,2,3)：仅测「结论是否依赖最后几根杂波」——8~11 根真实上涨笔删 1~3
+    # 根仍多头(→边缘)，仅 1~2 根毛刺尖删 1~2 根即翻(→敏感)，成熟趋势则稳健。跳过 k>=方向笔长度。
+    for k in (1, 2, 3):
+        if k >= dir_bi_bars:
+            continue
         if len(klines) > k + 30:
             sub = klines[: len(klines) - k]
             sc = classify(*_last_two(analyze(sub, min_bi_pct, with_stability=False), sub[-1]["close"]))
@@ -828,13 +863,15 @@ def classification_stability(klines, min_bi_pct=MIN_BI_PCT):
                 out["stable"] = False
                 if _polarity(sc["scenario"]) != base_pol:
                     pol_drift = True
-    # 三级稳健度：极性翻转(多↔空)=敏感·待确认；否则趋势守住但年轻=边缘；全守住=稳健
-    if out["stable"]:
-        out["level"] = "稳健"
-    elif pol_drift:
+    # 三级稳健度（#39 重构）：极性翻转(多↔空)=敏感·待确认(-0.04)；稳定但信号年轻
+    # (末笔跨度<12 且无多连笔确认)=边缘(-0.02)；稳定且成熟(长笔或多连笔确认)=稳健(0)。
+    # 此前"稳定即稳健"会把年轻信号也标稳健，掩盖"待确认"属性，故纳入成熟度判定。
+    if pol_drift:
         out["level"] = "敏感·待确认"
-    else:
+    elif not _established:
         out["level"] = "边缘"
+    else:
+        out["level"] = "稳健"
     return out
 
 
