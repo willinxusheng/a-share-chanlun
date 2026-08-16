@@ -44,14 +44,6 @@ def fetch_tx(symbol, period):
     return out
 
 
-def fetch_sina_last_close(symbol):
-    try:
-        arr = json.loads(_get(SINA_URL % symbol))
-        return float(arr[-1]["close"]) if arr else None
-    except Exception as e:
-        return None
-
-
 def fetch_sina_series(symbol, datalen=1400):
     """拉取新浪全量日线（用于序列级交叉验证），返回 {date: close}"""
     try:
