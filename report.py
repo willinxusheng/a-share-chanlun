@@ -2053,7 +2053,7 @@ def levels_table(data, results, results_week, results_month, scores):
           <td style="color:{m_color}">{mcls["scenario"]}</td>
           <td class="tac">{syn}</td>
           <td>{close:.2f}</td><td>{zg_txt}</td><td>{zd_txt}</td>
-          <td class="tac">{score_chip(health, "")}<br>{score_chip(conf, "")}</td>
+          <td class="tac"><div style="display:flex;flex-direction:column;align-items:center;gap:4px">{score_chip(health, "")}{score_chip(conf, "")}</div></td>
           <td class="strategy">{strategy_text(cls, zs)}</td>
         </tr>""")
     return """<table class="tbl">
@@ -2108,7 +2108,7 @@ def rr_table(data, results, recent_n=8):
             _dir_col = RED if s["dir"] == 1 else GREEN
             _vc = "✓" if s.get("vol_confirm") else "—"
             _rr = ("%.1f" % s["rr"]) if s.get("rr") else "—"
-            rows.append(f"""<tr>
+            rows.append(f"""<tr data-sym="{sym}" class="linkrow" data-jump>
               <td><b>{d["name"]}</b></td>
               <td style="color:{_dir_col};font-weight:600">{s["kind"]}</td>
               <td>{s["date"]}</td>
@@ -2159,7 +2159,7 @@ def robustness_table(robust, data):
         def _fmt(x):
             return ("%.0f%% (%+.*f%%) n=%d" % (x[0] * 100, 1, x[1] * 100, x[2])) if x else "—"
 
-        rows.append(f"""<tr>
+        rows.append(f"""<tr data-sym="{sym}" class="linkrow" data-jump>
           <td><b>{name}</b>（{sym}）</td>
           <td class="tac">{_fmt(em)}</td>
           <td class="tac">{_fmt(rm)}</td>
@@ -2455,10 +2455,10 @@ def main():
   .verdict {{ background: #f0f6ff; border-left: 4px solid {BLUE}; padding: 10px 14px; margin-top: 12px; font-size: 14px; border-radius: 0 6px 6px 0; }}
   .verdict p {{ margin-top: 4px; color: #475569; line-height: 1.7; }}
   .tbl {{ width: 100%; border-collapse: collapse; font-size: 13px; background: #fff; table-layout: fixed; }}
-  .tbl th, .tbl td {{ padding: 9px 10px; text-align: left; vertical-align: middle; border-top: 1px solid #eef2f7; overflow-wrap: break-word; }}
+  .tbl th, .tbl td {{ padding: 9px 10px; text-align: left; vertical-align: middle; border-top: 1px solid #eef2f7; overflow-wrap: break-word; transition: background .12s ease; }}
   .tbl th {{ background: #f1f5f9; color: #475569; font-weight: 600; border-top: none; }}
-  .tbl td {{ background: #fff; }}
-  .tbl tr:hover td {{ background: #f8fafc; }}
+  .tbl tbody tr:hover td {{ background: #f8fafc; }}
+  .tbl tbody tr:last-child td {{ border-bottom: 1px solid #eef2f7; }}
   .tbl .tac {{ text-align: center; }}
   .tac-all th, .tac-all td {{ text-align: center; }}
   .tbl .best {{ font-weight: 700; }}
@@ -2554,9 +2554,9 @@ def main():
   nav.sym-rail .chip.active {{ background: {BLUE}; color: #fff; border-color: {BLUE}; box-shadow: 0 2px 8px rgba(43,108,176,0.25); }}
   .card.linked-active {{ border-color: {BLUE}; box-shadow: 0 0 0 2px rgba(43,108,176,0.25), 0 6px 18px rgba(15,23,42,0.12); transform: translateY(-2px); }}
   tr.linkrow {{ cursor: pointer; }}
-  tr.linkrow:hover td {{ background: #f1f5f9; }}
-  tr.row-linked td {{ background: #eff6ff !important; box-shadow: inset 3px 0 0 {BLUE}; }}
-  tr.row-linked:hover td {{ background: #e3edfb !important; }}
+  .tbl tbody tr.row-linked td {{ background: #f8fafc; }}
+  .tbl tbody tr.row-linked td:first-child {{ border-left: 3px solid {BLUE}; padding-left: 7px; }}
+  .tbl tbody tr.row-linked:hover td {{ background: #f1f5f9; }}
   .sec-flash {{ animation: secflash 1.1s ease; }}
   @keyframes secflash {{ 0% {{ box-shadow: 0 0 0 0 rgba(43,108,176,0); }} 25% {{ box-shadow: 0 0 0 4px rgba(43,108,176,0.35); }} 100% {{ box-shadow: 0 1px 3px rgba(15,23,42,0.04); }} }}
   @media (max-width: 720px) {{ nav.sym-rail {{ top: 48px; }} nav.sym-rail .chip {{ padding: 4px 9px; font-size: 12px; }} }}
