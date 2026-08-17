@@ -1485,8 +1485,123 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
                "p_hold": round(_p_hold, 3),
                "zd": round(zd, 2), "zg": round(zg, 2), "last": round(last, 2),
                "trend": round(trend_end, 2), "trend_agree": trend_agree, "trend_r2": round(_r2, 3),
-               "sigma": round(sigma, 4), "horizon": horizon, "lo": round(lo, 4), "span": round(span, 4)}
-    return "".join(p), note, (p_main, p_alt, p_risk), legend_html, fc_data
+               "sigma": round(sigma, 4), "horizon": horizon, "lo": round(lo, 4), "span": round(span, 4),
+               "gap_refs": [{"type": g["type"], "top": round(g["top"], 2), "bottom": round(g["bottom"], 2), "date": g["date"]} for g in _gap_refs]}
+    return forecast_echart(sym, fc_data), note, (p_main, p_alt, p_risk), legend_html, fc_data
+
+
+def forecast_echart(sym, fc_data):
+    """用 ECharts 重绘缠论未来走势推演图（路径+置信锥+标注），对标主图细腻度、放大矢量清晰。"""
+    hist = fc_data["hist"]
+    proj = fc_data["proj"]
+    zg, zd, last = fc_data["zg"], fc_data["zd"], fc_data["last"]
+    p_main, p_alt, p_risk = fc_data["p_main"], fc_data["p_alt"], fc_data["p_risk"]
+    gaps = fc_data.get("gap_refs", [])
+    x_hist = [h[0] for h in hist]
+    x_proj = [p["date"][-5:] for p in proj]   # "YY-MM-DD" -> "MM-DD"
+    xcats = x_hist + x_proj
+    n_hist = len(hist)
+    n_proj = len(proj)
+    hist_s = [h[1] for h in hist] + [None] * n_proj
+    main_s = [None] * n_hist + [p["main"] for p in proj]
+    alt_s = [None] * n_hist + [p["alt"] for p in proj]
+    risk_s = [None] * n_hist + [p["risk"] for p in proj]
+    trend_s = [None] * n_hist + [p["trend"] for p in proj]
+    b2l = [None] * n_hist + [p["b2l"] for p in proj]
+    b2h = [None] * n_hist + [round(p["b2u"] - p["b2l"], 2) for p in proj]
+    b1l = [None] * n_hist + [p["b1l"] for p in proj]
+    b1h = [None] * n_hist + [round(p["b1u"] - p["b1l"], 2) for p in proj]
+    lo = fc_data["lo"]
+    ymax = round(lo + fc_data["span"], 2)
+    hlines = [
+        {"yAxis": round(zg, 2), "lineStyle": {"type": "dashed", "color": GOLD, "width": 1.2},
+         "label": {"formatter": f"ZG {zg:.0f}", "position": "insideEndTop", "color": GOLD, "fontSize": 11, "align": "right"}},
+        {"yAxis": round(zd, 2), "lineStyle": {"type": "dashed", "color": GOLD, "width": 1.2},
+         "label": {"formatter": f"ZD {zd:.0f}", "position": "insideEndTop", "color": GOLD, "fontSize": 11, "align": "right"}},
+        {"yAxis": round(last, 2), "lineStyle": {"type": "solid", "color": "#64748b", "width": 1},
+         "label": {"formatter": f"现价 {last:.0f}", "position": "insideEndTop", "color": "#64748b", "fontSize": 11, "align": "right"}},
+    ]
+    for g in gaps:
+        _mid = (g["top"] + g["bottom"]) / 2
+        _c = RED if g["type"] == "up" else GREEN
+        _lab = ("缺口支撑" if g["type"] == "up" else "缺口压力") + f" {g['bottom']:.0f}-{g['top']:.0f}"
+        hlines.append({"yAxis": round(_mid, 2), "lineStyle": {"type": "dashed", "color": _c, "width": 0.8, "opacity": 0.6},
+                       "label": {"formatter": _lab, "position": "insideEndTop", "color": _c, "fontSize": 9, "align": "right"}})
+    vline = [{"xAxis": x_hist[-1], "lineStyle": {"type": "dashed", "color": INK, "width": 1.2},
+              "label": {"formatter": "今日 T", "position": "insideStartTop", "color": INK, "fontSize": 11}}]
+    _em, _ea, _er = proj[-1]["main"], proj[-1]["alt"], proj[-1]["risk"]
+    end_points = [
+        {"coord": [xcats[-1], round(_em, 2)], "value": f"主 {_em:.0f}", "itemStyle": {"color": RED}, "symbol": "circle", "symbolSize": 6,
+         "label": {"show": True, "position": "top", "color": RED, "fontSize": 11, "fontWeight": "bold"}},
+        {"coord": [xcats[-1], round(_ea, 2)], "value": f"次 {_ea:.0f}", "itemStyle": {"color": "#94a3b8"}, "symbol": "circle", "symbolSize": 6,
+         "label": {"show": True, "position": "top", "color": "#94a3b8", "fontSize": 11, "fontWeight": "bold"}},
+        {"coord": [xcats[-1], round(_er, 2)], "value": f"风险 {_er:.0f}", "itemStyle": {"color": GREEN}, "symbol": "circle", "symbolSize": 6,
+         "label": {"show": True, "position": "bottom", "color": GREEN, "fontSize": 11, "fontWeight": "bold"}},
+    ]
+    fdata = {
+        "xcats": xcats, "hist": hist_s, "main": main_s, "alt": alt_s, "risk": risk_s, "trend": trend_s,
+        "b2l": b2l, "b2h": b2h, "b1l": b1l, "b1h": b1h,
+        "lo": round(lo, 2), "ymax": ymax,
+        "hlines": hlines, "vline": vline, "endPoints": end_points,
+        "p_main": p_main, "p_alt": p_alt, "p_risk": p_risk, "proj_raw": proj,
+    }
+    cid = f"echart-forecast-{sym}"
+    return f'''<div class="echart-toolbar">🔍 滚轮/拖拽缩放 · 拖动底部滑块平移 · 悬停看推演路径/置信锥/趋势</div>
+<div id="{cid}" class="echart-main" style="width:100%;height:360px;"></div>
+<script>
+(function(){{
+  var D = {json.dumps(fdata, ensure_ascii=False)};
+  var chart = echarts.init(document.getElementById('{cid}'));
+  var option = {{
+    animation: false,
+    tooltip: {{ trigger: 'axis', axisPointer: {{ type: 'cross', label: {{ show: false }} }},
+      formatter: function(params){{
+        var i = params[0].dataIndex;
+        var x = D.xcats[i];
+        if(i < D.hist.length){{
+          var hv = D.hist[i];
+          if(hv == null) return '<b>'+x+'</b>';
+          return '<b>'+x+'</b><br>历史收盘 <b>'+hv.toFixed(2)+'</b>';
+        }}
+        var pi = i - D.hist.length;
+        var p = D.proj_raw[pi];
+        if(!p) return '<b>'+x+'</b>';
+        var red='#e54545', gray='#94a3b8', grn='#18a058', cyan='#0891b2';
+        return '<b>推演 · T+'+p.tplus+' ('+p.date+')</b><br>'
+          + '<span style="color:'+red+'">主路径 '+p.main.toFixed(2)+'</span> '+Math.round(D.p_main*100)+'%<br>'
+          + '<span style="color:'+gray+'">次路径 '+p.alt.toFixed(2)+'</span> '+Math.round(D.p_alt*100)+'%<br>'
+          + '<span style="color:'+grn+'">风险路径 '+p.risk.toFixed(2)+'</span> '+Math.round(D.p_risk*100)+'%<br>'
+          + '<span style="color:'+cyan+'">趋势外推 '+p.trend.toFixed(2)+'</span><br>'
+          + '<span style="color:#64748b">±1σ '+p.b1l.toFixed(0)+'~'+p.b1u.toFixed(0)+'</span><br>'
+          + '<span style="color:#64748b">±2σ '+p.b2l.toFixed(0)+'~'+p.b2u.toFixed(0)+'</span>';
+      }}
+    }},
+    legend: {{ data: ['历史','主路径','次路径','风险路径','趋势外推','置信锥 ±2σ','置信锥 ±1σ'], top: 2, itemGap: 12, textStyle: {{ fontSize: 12 }} }},
+    grid: {{ left: 72, right: 56, top: 40, bottom: 58 }},
+    xAxis: {{ type: 'category', data: D.xcats, boundaryGap: false, axisLabel: {{ fontSize: 11, hideOverlap: true }} }},
+    yAxis: {{ scale: false, min: D.lo, max: D.ymax, splitNumber: 6, axisLabel: {{ fontSize: 12, hideOverlap: true }} }},
+    dataZoom: [
+      {{ type: 'inside', xAxisIndex: 0, start: 0, end: 100 }},
+      {{ type: 'slider', xAxisIndex: 0, start: 0, end: 100, showDetail: false, height: 16, bottom: 8, handleStyle: {{ color: '#2b6cb0' }}, borderColor: '#e2e8f0', fillerColor: 'rgba(43,108,176,0.12)' }}
+    ],
+    series: [
+      {{ name: '历史', type: 'line', data: D.hist, symbol: 'none', smooth: true, lineStyle: {{ color: '#2b6cb0', width: 1.8 }} }},
+      {{ name: '主路径', type: 'line', data: D.main, symbol: 'none', smooth: true, lineStyle: {{ color: '#e54545', width: 2 }} }},
+      {{ name: '次路径', type: 'line', data: D.alt, symbol: 'none', smooth: true, lineStyle: {{ color: '#94a3b8', width: 1.6, type: 'dashed' }} }},
+      {{ name: '风险路径', type: 'line', data: D.risk, symbol: 'none', smooth: true, lineStyle: {{ color: '#18a058', width: 1.6, type: 'dashed' }} }},
+      {{ name: '趋势外推', type: 'line', data: D.trend, symbol: 'none', smooth: false, lineStyle: {{ color: '#0891b2', width: 1.3, type: 'dashed' }} }},
+      {{ name: '置信锥 ±2σ', type: 'line', data: D.b2l, stack: 'b2', symbol: 'none', lineStyle: {{ opacity: 0 }}, areaStyle: {{ opacity: 0 }}, tooltip: {{ show: false }}, silent: true }},
+      {{ name: '置信锥 ±2σ', type: 'line', data: D.b2h, stack: 'b2', symbol: 'none', lineStyle: {{ opacity: 0 }}, areaStyle: {{ color: 'rgba(229,69,69,0.06)' }}, tooltip: {{ show: false }}, silent: true }},
+      {{ name: '置信锥 ±1σ', type: 'line', data: D.b1l, stack: 'b1', symbol: 'none', lineStyle: {{ opacity: 0 }}, areaStyle: {{ opacity: 0 }}, tooltip: {{ show: false }}, silent: true }},
+      {{ name: '置信锥 ±1σ', type: 'line', data: D.b1h, stack: 'b1', symbol: 'none', lineStyle: {{ opacity: 0 }}, areaStyle: {{ color: 'rgba(229,69,69,0.12)' }}, tooltip: {{ show: false }}, silent: true }},
+      {{ name: '参考', type: 'line', data: [], silent: true,
+        markLine: {{ symbol: 'none', data: D.hlines.concat(D.vline), labelLayout: {{ moveOverlap: 'shiftY' }} }},
+        markPoint: {{ data: D.endPoints, labelLayout: {{ moveOverlap: 'shiftY' }} }} }}
+    ]
+  }};
+  chart.setOption(option);
+}})();
+</script>'''
 
 
 # ================= 归一化对比图（日历对齐到共同交易日，#7） =================
