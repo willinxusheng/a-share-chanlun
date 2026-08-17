@@ -1959,7 +1959,7 @@ def card_html(sym, name, klines, r, wcls, health, conf):
     _mat_chip = ('<span class="chip" style="background:%s1a;color:%s;border:1px solid %s55">'
                  '%s · 末笔%d日</span>' % (_mat_c, _mat_c, _mat_c, _mat_txt, _lbb))
     return f"""
-    <div class="card" style="border-left:4px solid {sc_color}">
+    <div class="card" id="card-{sym}" data-sym="{sym}" data-jump style="border-left:4px solid {sc_color};cursor:pointer">
       <div class="card-head"><span class="idx-name">{name}</span><span class="sym">{sym}</span></div>
       <div class="price">{last["close"]:.2f} <span style="color:{color}">{'+' if chg >= 0 else ''}{chg:.2f}%</span></div>
       <div class="spark">{spark}</div>
@@ -2032,7 +2032,7 @@ def levels_table(data, results, results_week, results_month, scores):
             zd_txt = f'{zs["zd"]:.0f}（{"+" if d_zd >= 0 else ""}{d_zd:.1f}%）'
         else:
             zg_txt = zd_txt = "—"
-        rows.append(f"""<tr>
+        rows.append(f"""<tr data-sym="{sym}" class="linkrow" data-jump>
           <td><b>{d["name"]}</b></td>
           <td style="color:{sc_color};font-weight:600">{cls["scenario"]}</td>
           <td style="color:{w_color}">{wcls["scenario"]}</td>
@@ -2180,7 +2180,7 @@ def forecast_summary_table(data, results, results_week, results_month, forecast_
         _lv_c = {"稳健": GREEN, "边缘": "#d97706", "敏感·待确认": RED}.get(_lv, GREEN)
         stab = _lv
         stab_c = _lv_c
-        rows.append(f"""<tr>
+        rows.append(f"""<tr data-sym="{sym}" class="linkrow" data-jump>
           <td><b>{d["name"]}</b></td>
           <td style="color:{sc_color};font-weight:600">{cls["scenario"]}</td>
           <td style="color:{m_color}">{mcls["scenario"]}</td>
@@ -2355,7 +2355,7 @@ def main():
       {path_hit_html(cls["scenario"], paths_bt[sym], fs_probs[0], fs_probs[1], fs_probs[2], horizon)}
       <p class="fc-note">{div_txt}<br>{fs_note}</p>
     </section>""")
-        conclusions.append(f'<li><b>{d["name"]}</b>：日线 {cls["scenario"]} / 周线 {wcls["scenario"]} —— {cls["detail"]} <a href="#sec-{sym}" style="font-size:12px;color:{BLUE}">[查看图解]</a></li>')
+        conclusions.append(f'<li><b>{d["name"]}</b>：日线 {cls["scenario"]} / 周线 {wcls["scenario"]} —— {cls["detail"]} <a href="#sec-{sym}" data-sym="{sym}" data-jump style="font-size:12px;color:{BLUE}">[查看图解]</a></li>')
         forecast_info[sym] = {"p_main": fs_probs[0], "p_alt": fs_probs[1], "p_risk": fs_probs[2],
                               "p_hold": fc_data["p_hold"],
                               "zd": (r["zhongshu"][-1]["zd"] if r["zhongshu"] else d["klines"][-1]["close"] * 0.95),
@@ -2408,6 +2408,11 @@ def main():
         <li><b>推演结论：</b>各指数主路径概率约 {int(min((forecast_info[s]['p_main'] for s in data))*100)}%~{int(max((forecast_info[s]['p_main'] for s in data))*100)}%，均以<b>周线底分型确认</b>为兑现前提；结论稳健度三级分布：<b style="color:{GREEN}">稳健 {n_robust}</b> / <b style="color:#d97706">边缘 {n_edge}</b> / <b style="color:{RED}">敏感·待确认 {n_sens}</b>（敏感信号依赖最近年轻笔，已相应下调主路径概率 ±0.02~0.04）。跌破中枢 ZD 即主路径失效。详见<a href="#s6">第六节</a>·<a href="#s3">第三节</a>。</li>
       </ul>
     </div>"""
+
+    # 全局指数联动条（模块互联互通：点击聚焦某指数，卡片/表行/图解三向联动）
+    sym_rail = ('<nav class="sym-rail" id="symRail" aria-label="指数联动条">'
+                + ''.join(f'<a class="chip" href="#sec-{sym}" data-sym="{sym}" data-jump>{d["name"]}</a>' for sym, d in data.items())
+                + '</nav>')
 
     html = f"""<!DOCTYPE html>
 <html lang="zh-CN">
@@ -2530,6 +2535,19 @@ def main():
     .legend {{ font-size: 11px; }}
     .hero {{ gap: 8px; }}
   }}
+  /* ===== 模块互联互通 ===== */
+  nav.sym-rail {{ position: sticky; top: 54px; z-index: 49; background: rgba(255,255,255,0.97); backdrop-filter: blur(8px); border: 1px solid #e2e8f0; border-radius: 12px; padding: 6px 10px; margin: 10px 0 18px; display: flex; flex-wrap: wrap; gap: 6px; box-shadow: 0 4px 14px rgba(15,23,42,0.05); }}
+  nav.sym-rail .chip {{ text-decoration: none; font-size: 13px; color: #475569; background: #f1f5f9; padding: 5px 12px; border-radius: 999px; cursor: pointer; transition: all .15s ease; white-space: nowrap; border: 1px solid transparent; }}
+  nav.sym-rail .chip:hover {{ background: #e2e8f0; color: #1e293b; }}
+  nav.sym-rail .chip.active {{ background: {BLUE}; color: #fff; border-color: {BLUE}; box-shadow: 0 2px 8px rgba(43,108,176,0.25); }}
+  .card.linked-active {{ border-color: {BLUE}; box-shadow: 0 0 0 2px rgba(43,108,176,0.25), 0 6px 18px rgba(15,23,42,0.12); transform: translateY(-2px); }}
+  tr.linkrow {{ cursor: pointer; }}
+  tr.linkrow:hover td {{ background: #f1f5f9; }}
+  tr.row-linked td {{ background: #eff6ff !important; box-shadow: inset 3px 0 0 {BLUE}; }}
+  tr.row-linked:hover td {{ background: #e3edfb !important; }}
+  .sec-flash {{ animation: secflash 1.1s ease; }}
+  @keyframes secflash {{ 0% {{ box-shadow: 0 0 0 0 rgba(43,108,176,0); }} 25% {{ box-shadow: 0 0 0 4px rgba(43,108,176,0.35); }} 100% {{ box-shadow: 0 1px 3px rgba(15,23,42,0.04); }} }}
+  @media (max-width: 720px) {{ nav.sym-rail {{ top: 48px; }} nav.sym-rail .chip {{ padding: 4px 9px; font-size: 12px; }} }}
 </style>
 </head>
 <body>
@@ -2547,6 +2565,7 @@ def main():
     <a href="#s5"><span class="num">五</span>分指数图解</a>
     <a href="#s6"><span class="num">六</span>走势推演</a>
   </nav>
+  {sym_rail}
   <div class="hero">
     <div class="kpi" style="border-top:3px solid {RED}"><div class="kpi-v" style="color:{RED}">{n_multi}</div><div class="kpi-l">多头延续</div></div>
     <div class="kpi" style="border-top:3px solid #d97706"><div class="kpi-v" style="color:#d97706">{n_osc}</div><div class="kpi-l">震荡偏多</div></div>
@@ -2720,6 +2739,46 @@ function initForecast(sym){{
   window.addEventListener('scroll', onScroll, {{passive:true}});
   window.addEventListener('resize', onScroll, {{passive:true}});
   onScroll();
+}})();
+</script>
+<script>
+(function(){{
+  var rail=document.getElementById('symRail');
+  var CURRENT=null;
+  function offset(){{ return 108; }}
+  function secs(){{ return Array.prototype.slice.call(document.querySelectorAll('[id^="sec-"]')); }}
+  function setActive(sym, fromScroll){{
+    CURRENT=sym;
+    if(rail) Array.prototype.forEach.call(rail.querySelectorAll('.chip'), function(c){{ c.classList.toggle('active', c.getAttribute('data-sym')===sym); }});
+    Array.prototype.forEach.call(document.querySelectorAll('.card'), function(c){{ c.classList.toggle('linked-active', c.id==='card-'+sym); }});
+    Array.prototype.forEach.call(document.querySelectorAll('tr.linkrow'), function(r){{ r.classList.toggle('row-linked', r.getAttribute('data-sym')===sym); }});
+    if(!fromScroll){{
+      var sec=document.getElementById('sec-'+sym);
+      if(sec){{ sec.classList.remove('sec-flash'); void sec.offsetWidth; sec.classList.add('sec-flash'); }}
+    }}
+  }}
+  function focusSymbol(sym){{
+    setActive(sym, false);
+    var sec=document.getElementById('sec-'+sym);
+    if(sec){{ var r=sec.getBoundingClientRect(); window.scrollTo({{ top: r.top + window.scrollY - offset(), behavior:'smooth' }}); }}
+  }}
+  document.addEventListener('click', function(e){{
+    var t=e.target; if(!t||!t.closest) return;
+    var el=t.closest('[data-jump]'); if(!el) return;
+    var sym=el.getAttribute('data-sym'); if(!sym) return;
+    e.preventDefault(); focusSymbol(sym);
+  }});
+  var SL=secs();
+  function spy(){{
+    if(!SL.length) return;
+    var y=window.scrollY + offset() + 20;
+    var cur=null;
+    SL.forEach(function(s){{ if(s.offsetTop <= y) cur=s.id.replace('sec-',''); }});
+    if(cur && cur!==CURRENT) setActive(cur, true);
+  }}
+  window.addEventListener('scroll', spy, {{passive:true}});
+  window.addEventListener('resize', spy, {{passive:true}});
+  spy();
 }})();
 </script>
 </body>
