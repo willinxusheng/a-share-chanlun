@@ -1447,7 +1447,7 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
             dt += timedelta(days=1)
             if dt.weekday() < 5:  # 0=周一 … 4=周五
                 kk -= 1
-        return dt.strftime("%y-%m-%d")
+        return dt.strftime("%Y-%m-%d")
 
     # 历史区底部：真实交易日日期刻度（约 6 个，均匀且不贴边）
     p.append(f'<text x="{PAD_L + 4:.1f}" y="{PAD_T3 - 10}" font-size="12" font-weight="700" fill="{GRAY}">近{len(tail)}日(交易日)</text>')
@@ -1592,7 +1592,10 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
 def forecast_echart(sym, fc_data):
     """用 ECharts 重绘缠论未来走势推演图（路径+置信锥+标注），对标主图细腻度、放大矢量清晰。"""
     hist = fc_data["hist"]
-    proj = fc_data["proj"]
+    def _norm4(s):
+        # 归一化推演日期为四位年： "26-09-25" -> "2026-09-25"，避免 x 轴 formatter 取到 "-25" 负号
+        return ("20" + s) if (len(s) == 8 and s[2] == "-") else s
+    proj = [dict(p, date=_norm4(p["date"])) for p in fc_data["proj"]]
     zg, zd, last = fc_data["zg"], fc_data["zd"], fc_data["last"]
     p_main, p_alt, p_risk = fc_data["p_main"], fc_data["p_alt"], fc_data["p_risk"]
     gaps = fc_data.get("gap_refs", [])
