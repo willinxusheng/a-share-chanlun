@@ -5,11 +5,11 @@ name: Deploy A股缠论看板
     branches: [main]
   workflow_dispatch:        # 手动触发（Actions 页面 → Run workflow）
   schedule:
-    # 美股 runner 使用 UTC。北京时间 16:00 = UTC 08:00，
+    # 美股 runner 使用 UTC。北京时间 16:30 = UTC 08:30，
     # 交易日（周一~周六，含调休补班交易日）盘后约 1 小时自动抓取当日收盘并发布；
     # 周日/非交易日运行也只会用最近一个交易日收盘重算，不会出错。
-    # GitHub 定时任务为 best-effort，实际触发可能延迟数分钟~半小时。
-    - cron: '0 8 * * 1-6'
+    # GitHub 定时任务为 best-effort，实际触发可能延迟；另有 WorkBuddy 自动化(每天16:30北京时间)推送触发作为冗余兜底。
+    - cron: '30 8 * * 1-6'
 
 # 部署 Pages 需要 pages/id-token 写权限；
 # contents: write 用于提交每日构建时间戳，保持仓库活跃，防止 GitHub 停用定时任务。
