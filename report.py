@@ -2141,7 +2141,8 @@ def levels_table(data, results, results_week, results_month, scores):
           <td class="tac"><div style="display:flex;flex-direction:column;align-items:center;gap:4px">{score_chip(health)}{score_chip(conf)}</div></td>
           <td class="strategy">{strategy_text(cls, zs)}</td>
         </tr>""")
-    return """<table class="tbl">
+    return """<h3 class="fc-title">关键位与中枢区间<span class="fc-sub">日 / 周 / 月三级联立 · 现价与 ZG/ZD 距离</span></h3>
+      <table class="tbl">
       <colgroup><col style="width:90px"><col style="width:calc((100%% - 90px)/9)"><col style="width:calc((100%% - 90px)/9)"><col style="width:calc((100%% - 90px)/9)"><col style="width:calc((100%% - 90px)/9)"><col style="width:calc((100%% - 90px)/9)"><col style="width:calc((100%% - 90px)/9)"><col style="width:calc((100%% - 90px)/9)"><col style="width:calc((100%% - 90px)/9)"><col style="width:calc((100%% - 90px)/9)"></colgroup>
       <thead><tr><th>指数</th><th>日线分类</th><th>周线分类</th><th>月线背景</th><th class="tac">级别联立</th><th>现价</th><th>压力 ZG（距离）</th><th>支撑 ZD（距离）</th><th class="tac">健康度 / 置信度</th><th>应对策略</th></tr></thead>
       <tbody>%s</tbody></table>""" % "".join(rows)
@@ -2174,7 +2175,8 @@ def backtest_table(backtests):
             c = RED if ar >= 0 else GREEN
             tds.append(f'<td class="tac">{st["n"]} 次 · 胜率 <b>{wr:.0f}%</b> · 均 <span style="color:{c}">{ar:+.1f}%</span></td>')
         rows.append("<tr>" + "".join(tds) + "</tr>")
-    return """<table class="tbl">
+    return """<h3 class="fc-title">信号历史回测汇总<span class="fc-sub">2021 至今全部买卖点 · 胜率与均收益</span></h3>
+      <table class="tbl">
       <colgroup><col style="width:110px"><col style="width:calc((100%% - 110px)/4)"><col style="width:calc((100%% - 110px)/4)"><col style="width:calc((100%% - 110px)/4)"><col style="width:calc((100%% - 110px)/4)"></colgroup>
       <thead><tr><th>信号类型</th><th class="tac">后 5 个交易日</th><th class="tac">后 10 个交易日</th><th class="tac">后 20 个交易日</th><th class="tac">后 60 个交易日</th></tr></thead>
       <tbody>%s</tbody></table>
@@ -2189,7 +2191,7 @@ def rr_table(data, results, recent_n=8):
         r = results[sym]
         for s in r["signals"][-recent_n:]:
             _q = s.get("quality", "—")
-            _qc = {"优": "#7c3aed", "良": GREEN, "中": "#64748b", "差": "#b45309", "—": "#94a3b8"}.get(_q, "#94a3b8")
+            _qc = {"优": RED, "良": GREEN, "中": "#64748b", "差": "#b45309", "—": "#94a3b8"}.get(_q, "#94a3b8")
             _dir_col = RED if s["dir"] == 1 else GREEN
             _vc = "✓" if s.get("vol_confirm") else "—"
             _rr = ("%.1f" % s["rr"]) if s.get("rr") else "—"
@@ -2204,7 +2206,7 @@ def rr_table(data, results, recent_n=8):
               <td class="tac">{badge(_q, _qc)}</td>
               <td class="tac">{_vc}</td>
             </tr>""")
-    return """<h3 class="fc-title" style="margin-top:22px">近期买卖点值博率（R:R）明细<span class="fc-sub">止损 / 目标 / 风险收益比 —— 缠论实战交易计划必备，此前报告完全缺失</span></h3>
+    return """<h3 class="fc-title">近期买卖点值博率（R:R）明细<span class="fc-sub">止损 / 目标 / 风险收益比 —— 缠论实战交易计划必备，此前报告完全缺失</span></h3>
       <table class="tbl">
       <colgroup><col style="width:110px"><col style="width:calc((100%% - 110px)/8)"><col style="width:calc((100%% - 110px)/8)"><col style="width:calc((100%% - 110px)/8)"><col style="width:calc((100%% - 110px)/8)"><col style="width:calc((100%% - 110px)/8)"><col style="width:calc((100%% - 110px)/8)"><col style="width:calc((100%% - 110px)/8)"><col style="width:calc((100%% - 110px)/8)"></colgroup>
       <thead><tr><th>指数</th><th>买卖点</th><th>日期</th><th class="tac">触发价</th><th class="tac">止损位</th><th class="tac">目标位</th><th class="tac">R:R</th><th class="tac">值博率</th><th class="tac">量✓</th></tr></thead>
@@ -2252,7 +2254,8 @@ def robustness_table(robust, data):
           <td class="tac">{wf_decay}</td>
           <td>{verdict}</td>
         </tr>""")
-    _tbl = """<table class="tbl">
+    _tbl = """<h3 class="fc-title">样本外稳健性检验<span class="fc-sub">早年 vs 近两年 · 检测校准过拟合</span></h3>
+      <table class="tbl">
       <colgroup><col style="width:140px"><col style="width:calc((100%% - 140px)/5)"><col style="width:calc((100%% - 140px)/5)"><col style="width:calc((100%% - 140px)/5)"><col style="width:calc((100%% - 140px)/5)"><col style="width:calc((100%% - 140px)/5)"></colgroup>
       <thead><tr><th>指数</th><th class="tac">早年买方信号胜率(均收益) h=20</th><th class="tac">近两年买方信号胜率(均收益) h=20</th><th class="tac">变化</th><th class="tac">滚动窗口衰减*</th><th>样本外稳健性</th></tr></thead>
       <tbody>%s</tbody></table>
@@ -2291,7 +2294,8 @@ def forecast_summary_table(data, results, results_week, results_month, forecast_
           <td class="tac">{fi["zd"]:.0f}</td>
           <td class="tac">{badge(stab, stab_c)}</td>
         </tr>""")
-    return f"""<table class="tbl">
+    return f"""<h3 class="fc-title">推演情景概率与结论稳定性<span class="fc-sub">主 / 次 / 风险已归一 · 结构存续为独立参照</span></h3>
+      <table class="tbl">
       <colgroup><col style="width:90px"><col style="width:calc((100% - 90px)/9)"><col style="width:calc((100% - 90px)/9)"><col style="width:calc((100% - 90px)/9)"><col style="width:calc((100% - 90px)/9)"><col style="width:calc((100% - 90px)/9)"><col style="width:calc((100% - 90px)/9)"><col style="width:calc((100% - 90px)/9)"><col style="width:calc((100% - 90px)/9)"><col style="width:calc((100% - 90px)/9)"></colgroup>
       <thead><tr><th>指数</th><th>日线分类</th><th>月线背景</th><th class="tac">级别联立</th><th class="tac">主路径概率</th><th class="tac">次路径概率</th><th class="tac">风险概率</th><th class="tac">结构存续(锥)</th><th class="tac">失效位 ZD</th><th class="tac">结论稳定性</th></tr></thead>
       <tbody>{"".join(rows)}</tbody></table>
@@ -2393,7 +2397,7 @@ def main():
                   f'<span style="width:150px;text-align:right;color:#475569;font-variant-numeric:tabular-nums">'
                   f'{_c["bull"]} 多 / {_c["bear"]} 空 / {_c["neutral"]} 中</span></div>')
     breadth_banner = (f'<div class="panel" style="border-left:4px solid {_bcolor};margin:4px 0 16px">'
-                      f'<h4 style="font-size:15px;color:#1e40af;margin-bottom:10px">跨指数市场广度综合研判 '
+                      f'<h4 style="font-size:15px;color:{BLUE};margin-bottom:10px">跨指数市场广度综合研判 '
                       f'<span style="font-size:12px;color:#64748b;font-weight:400">日 / 周 / 月三级区间套（数据截至 {last_date}）</span></h4>'
                       f'{_rows}'
                       f'<p style="font-size:13px;color:#334155;line-height:1.75;margin-top:10px;background:#f8fafc;'
@@ -2555,25 +2559,22 @@ def main():
   .price {{ font-size: 22px; font-weight: 700; margin: 8px 0; font-variant-numeric: tabular-nums; }}
   .price span {{ font-size: 14px; font-weight: 600; }}
   .kv {{ display: flex; justify-content: space-between; font-size: 13px; color: #64748b; padding: 3px 0; }}
-  .kv b {{ color: {INK}; }}
+  .kv b {{ color: {INK}; font-variant-numeric: tabular-nums; }}
   .panel {{ background: #fff; border: 1px solid #e5e9f0; border-radius: 10px; padding: 16px 18px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(15,23,42,.04); }}
   .panel h2 {{ font-size: 18px; margin-bottom: 10px; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }}
   .badge {{ font-size: 12px; color: #fff; padding: 2px 10px; border-radius: 999px; font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums; vertical-align: middle; }}
   .verdict {{ background: #f0f6ff; border-left: 4px solid {BLUE}; padding: 10px 14px; margin-top: 12px; font-size: 14px; border-radius: 0 6px 6px 0; }}
   .verdict p {{ margin-top: 4px; color: #475569; line-height: 1.7; }}
   .tbl {{ width: 100%; border-collapse: collapse; font-size: 13px; background: #fff; table-layout: fixed; }}
-  .tbl th, .tbl td {{ padding: 9px 10px; text-align: left; vertical-align: middle; border-top: 1px solid #eef2f7; overflow-wrap: break-word; transition: background .12s ease; }}
+  .tbl th, .tbl td {{ padding: 9px 10px; text-align: left; vertical-align: middle; border-top: 1px solid #eef2f7; overflow-wrap: break-word; transition: background .12s ease; font-variant-numeric: tabular-nums; }}
   .tbl th {{ background: #f1f5f9; color: #475569; font-weight: 600; border-top: none; }}
   .tbl tbody tr:hover td {{ background: #f8fafc; }}
   .tbl tbody tr:last-child td {{ border-bottom: 1px solid #eef2f7; }}
   .tbl .tac {{ text-align: center; }}
-  .tac-all th, .tac-all td {{ text-align: center; }}
   .tbl .best {{ font-weight: 700; }}
   .strategy {{ color: #475569; line-height: 1.6; }}
   .conclusion li {{ margin: 8px 0 8px 18px; line-height: 1.8; font-size: 14px; }}
   .disclaimer {{ background: #fff8e6; border: 1px solid #f0d98c; color: #92600a; border-radius: 10px; padding: 14px 18px; font-size: 13px; line-height: 1.8; }}
-  .legend {{ font-size: 12px; color: #64748b; margin: 10px 0 18px; line-height: 2; }}
-  .legend span {{ margin-right: 16px; white-space: nowrap; }}
   i.dot {{ display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }}
   h2.sec {{ font-size: 19px; margin: 26px 0 12px; padding-left: 12px; border-left: 4px solid {BLUE}; line-height: 1.3; }}
   nav.toc {{ position: sticky; top: 8px; z-index: 50; background: rgba(255,255,255,0.98); backdrop-filter: blur(8px); border: 1px solid #e2e8f0; border-radius: 999px; padding: 6px 10px; margin: 18px 0 24px; display: flex; flex-wrap: wrap; justify-content: center; gap: 4px; font-size: 13px; box-shadow: 0 4px 14px rgba(15,23,42,0.06); width: 100%; max-width: 100%; }}
@@ -2620,8 +2621,6 @@ def main():
   .kpi-l {{ font-size: 12px; color: #64748b; margin-top: 3px; }}
   .spark {{ margin: 6px 0 2px; }}
   .chips {{ display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }}
-  .chip {{ font-size: 11px; padding: 2px 8px; border-radius: 999px; font-variant-numeric: tabular-nums; white-space: nowrap; }}
-  .chip b {{ font-weight: 800; }}
   .quality .qsub {{ color: #64748b; font-size: 12px; margin-left: 6px; }}
   details.method summary {{ list-style: none; }}
   details.method summary::-webkit-details-marker {{ display: none; }}
@@ -2630,7 +2629,7 @@ def main():
   .method ul {{ margin: 0 0 4px 18px; }}
   .method li {{ margin: 4px 0; }}
   .exec {{ background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 10px; padding: 14px 18px; margin-bottom: 20px; }}
-  .exec h4 {{ font-size: 15px; color: #1e40af; margin-bottom: 8px; }}
+  .exec h4 {{ font-size: 15px; color: {BLUE}; margin-bottom: 8px; }}
   .exec ul {{ margin: 0 0 0 18px; }}
   .exec li {{ font-size: 13px; color: #334155; line-height: 1.85; margin: 5px 0; }}
   .xh-tip {{ position: absolute; pointer-events: none; background: rgba(15,23,42,.92); color: #fff; font-size: 13px; font-weight: 500; line-height: 1.55; padding: 8px 12px; border-radius: 6px; display: none; z-index: 20; white-space: nowrap; font-variant-numeric: tabular-nums; box-shadow: 0 2px 10px rgba(0,0,0,.3); }}
@@ -2651,7 +2650,6 @@ def main():
     nav.toc {{ font-size: 12px; padding: 5px 7px; gap: 3px; border-radius: 14px; margin: 12px 0 18px; }}
     nav.toc a {{ padding: 5px 8px; }}
     nav.toc a .num {{ width: 16px; height: 16px; font-size: 10px; margin-right: 4px; }}
-    .legend {{ font-size: 11px; }}
     .hero {{ gap: 8px; }}
   }}
   /* ===== 模块互联互通 ===== */
@@ -2704,6 +2702,7 @@ def main():
   <div class="panel"><div class="tablescroll">{levels_table(data, results, results_week, results_month, scores)}</div></div>
   <div class="panel"><div class="tablescroll">{forecast_summary_table(data, results, results_week, results_month, forecast_info)}</div></div>
   <div class="panel conclusion">
+    <h3 class="fc-title">各指数推演结论</h3>
     <ul>{"".join(conclusions)}</ul>
     {diverge_note}
   </div>
@@ -2713,7 +2712,7 @@ def main():
   <div class="panel"><div class="tablescroll">{rr_table(data, results)}</div></div>
   <div class="panel"><div class="tablescroll">{robustness_table(robust, data)}</div></div>
   <details class="panel" style="cursor:pointer">
-    <summary style="font-weight:700;color:#1e40af;cursor:pointer">五指数归一化对比图（2021=100）</summary>
+    <summary style="font-weight:700;color:{BLUE};cursor:pointer">五指数归一化对比图（2021=100）</summary>
     <div style="margin-top:12px">{compare_svg(data)}</div>
   </details>
 
