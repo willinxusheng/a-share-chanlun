@@ -1620,7 +1620,7 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
                       else f"其终点 ≈ {trend_end:.0f}，与主路径中点存在偏差（R²={_r2:.2f}），提示两种视角对后市节奏判断不完全一致，宜结合仓位管理；"))
              + f"若趋势外推也跌漏 ZD，则风险路径概率进一步上升。\n"
              f"主图叠加的斐波那契回调位（F38/F50/F62）与本路径上行目标、ZD 支撑相互印证：若回踩至 F61.8 附近获支撑，反弹结构更可靠；若直接跌漏 ZD，则风险路径概率上升。\n"
-             f"时间轴：左侧历史区为真实交易日（MM-DD）；右侧投影区日期按「从最后交易日往后推算相应交易日、跳过周末」得到（未含法定节假日），仅供参照。")
+             f"时间轴：左侧历史区为真实交易日（MM-DD）；右侧投影区日期按「从最后交易日往后推算相应交易日、跳过周末及法定节假日（A股日历）」得到，仅供参照。")
     note += (f"\n结构存续概率（锥模型·R59 与置信带同源）：由可见置信带自身参数（近窗口均值中心 + 非对称经验尾部离散度）直接反算「期末价 ≥ ZD {zd:.0f}」的概率 ≈ {_p_hold*100:.0f}%，与置信带 P05/P50/P95 标签严格自洽（ZD 落在带内对应分位即对应概率）。该概率与「主/次/风险」情景概率互为参照：情景概率衡量方向性演绎（续涨/震荡/跌），存续概率衡量「结构是否守住失效位」；两者现共用同一套置信带波动模型，口径一致、不再分裂。现价远高于 ZD 时存续概率天然偏高，不应与情景概率混为一谈。")
     if emp_wr is not None:
         _se = math.sqrt(emp_wr * (1 - emp_wr) / emp_n) if emp_n else 0
@@ -1634,6 +1634,16 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
                  f"{_dir_main*100:.0f}%/{_dir_alt*100:.0f}%/{_dir_risk*100:.0f}%（加权样本≈{_dir_n:.0f}），"
                  f"主路径概率据此由启发式基准向路径命中率收缩（权重 {_w_dir:.2f}）——这是与推演图路径定义直接对应的经验真值，"
                  f"次/风险路径占比也按实测比例分配，使三路径概率整体贴合历史兑现统计。")
+    # ---- 结构主路径(目标情景) vs 统计中位(无偏期望) 偏离诚实提示（R62·预测准确性）----
+    # main_p 是缠论结构演绎的「方向性目标」，med(_medf) 是近3年对数收益均值推演的「无偏期望」，
+    # 二者天然不同。当偏离过大(>8%)时明确提示，避免用户把"目标情景"误读为"概率中点"，
+    # 也暴露"结构判断相对纯统计更乐观/悲观"这一真实不确定性，使预测更诚实。
+    _dev = (_interp(main_p, 1.0) - _medf(1.0)) / _medf(1.0)
+    if abs(_dev) > 0.08:
+        _d = "偏高" if _dev > 0 else "偏低"
+        note += (f"\n⚠ <b>路径偏离提示</b>：结构主路径(目标情景)终点较「统计中位(无偏期望)」{_d} "
+                 f"{abs(_dev)*100:.1f}%，反映当前缠论结构判断相对纯历史统计更{'乐观' if _dev > 0 else '悲观'}；"
+                 f"实际落点更可能靠近统计中位(期望)，主路径应视为「方向性目标」而非「概率中点」，结论宜保守看待。")
     # ---- 悬浮交互数据：历史区真实收盘价 + 投影区密集采样（供 JS initForecast）----
     hist = [[_hd[i][5:10], round(tail[i], 2)] for i in range(len(tail))]
     proj = []
@@ -1656,6 +1666,7 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
                      "f75l": round(l75, 2), "f75h": round(u75 - l75, 2)})
     fc_data = {"hist": hist, "proj": proj, "p_main": p_main, "p_alt": p_alt, "p_risk": p_risk,
                "p_hold": round(_p_hold, 3),
+               "path_dev": round(_dev, 4),
                "zd": round(zd, 2), "zg": round(zg, 2), "last": round(last, 2),
                "trend": round(trend_end, 2), "trend_agree": trend_agree, "trend_r2": round(_r2, 3),
                "sigma": round(sigma, 4), "horizon": horizon, "lo": round(lo, 4), "span": round(span, 4),
@@ -2202,7 +2213,7 @@ def rr_table(data, results, recent_n=8):
               <td class="tac">{s["price"]:.1f}</td>
               <td class="tac">{s["stop"]:.1f}</td>
               <td class="tac">{s["target"]:.1f}</td>
-              <td class="tac" style="color:{_qc};font-weight:700">{_rr}</td>
+              <td class="tac" style="color:{INK};font-weight:700">{_rr}</td>
               <td class="tac">{badge(_q, _qc)}</td>
               <td class="tac">{_vc}</td>
             </tr>""")
@@ -2279,8 +2290,10 @@ def forecast_summary_table(data, results, results_week, results_month, forecast_
         else:
             syn = badge('日强周弱背离' if cls["last_bi_dir"] == 1 else '日弱周强背离', '#d97706', '⚠ ')
         _lv = fi.get("level", "稳健")
+        _dev = (fi.get("fc", {}) or {}).get("path_dev", 0) or 0
+        _lv_disp = (_lv + "·结构/统计偏离") if abs(_dev) > 0.08 else _lv
         _lv_c = {"稳健": GREEN, "边缘": "#d97706", "敏感·待确认": RED}.get(_lv, GREEN)
-        stab = _lv
+        stab = _lv_disp
         stab_c = _lv_c
         rows.append(f"""<tr data-sym="{sym}" class="linkrow" data-jump>
           <td><b>{d["name"]}</b></td>
@@ -2487,6 +2500,7 @@ def main():
         {fs_svg}
         <div class="xh-tip" id="fctip-{sym}"></div>
       </div>
+      <div style="white-space:pre-line;font-size:13px;line-height:1.85;color:#475569;margin:10px 0">{fs_note}</div>
       {fs_legend}
       {path_hit_html(cls["scenario"], paths_bt[sym], fs_probs[0], fs_probs[1], fs_probs[2], horizon)}
     </section>""")
@@ -2671,7 +2685,8 @@ def main():
   .card.linked-active {{ border-color: {BLUE}; box-shadow: 0 0 0 2px rgba(43,108,176,0.25), 0 6px 18px rgba(15,23,42,0.12); transform: translateY(-2px); }}
   tr.linkrow {{ cursor: pointer; }}
   .tbl tbody tr.row-linked td {{ background: #f8fafc; }}
-  .tbl tbody tr.row-linked td:first-child {{ border-left: 3px solid {BLUE}; padding-left: 7px; }}
+  .tbl tbody tr.row-linked td:first-child {{ border-left: 2px solid {BLUE}; padding-left: 10px; }}
+  .tbl tbody tr.row-linked td:first-child b {{ color: {BLUE}; }}
   .tbl tbody tr.row-linked:hover td {{ background: #f1f5f9; }}
   .sec-flash {{ animation: secflash 1.1s ease; }}
   @keyframes secflash {{ 0% {{ box-shadow: 0 0 0 0 rgba(43,108,176,0); }} 25% {{ box-shadow: 0 0 0 4px rgba(43,108,176,0.35); }} 100% {{ box-shadow: 0 1px 3px rgba(15,23,42,0.04); }} }}
