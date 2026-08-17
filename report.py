@@ -2405,7 +2405,7 @@ def main():
       <ul>
         <li><b>市场格局：</b>{pat}{stance}。</li>
         <li><b>数据可信度：</b>双源(qfq↔裸价)全序列比值最大偏离 {worst_rel*100:.2f}%，笔双法一致率 {avg_agree2:.0f}%，拐点捕捉率 {avg_cap:.0f}%——划分稳健。</li>
-        <li><b>推演结论：</b>各指数主路径概率约 {int(min((forecast_info[s]['p_main'] for s in data))*100)}%~{int(max((forecast_info[s]['p_main'] for s in data))*100)}%，均以<b>周线底分型确认</b>为兑现前提；结论稳健度三级分布：<b style="color:{GREEN}">稳健 {n_robust}</b> / <b style="color:#d97706">边缘 {n_edge}</b> / <b style="color:{RED}">敏感·待确认 {n_sens}</b>（敏感信号依赖最近年轻笔，已相应下调主路径概率 ±0.02~0.04）。跌破中枢 ZD 即主路径失效。详见<a href="#s6">第六节</a>·<a href="#s3">第三节</a>。</li>
+        <li><b>推演结论：</b>各指数主路径概率约 {int(min((forecast_info[s]['p_main'] for s in data))*100)}%~{int(max((forecast_info[s]['p_main'] for s in data))*100)}%，均以<b>周线底分型确认</b>为兑现前提；结论稳健度三级分布：<b style="color:{GREEN}">稳健 {n_robust}</b> / <b style="color:#d97706">边缘 {n_edge}</b> / <b style="color:{RED}">敏感·待确认 {n_sens}</b>（敏感信号依赖最近年轻笔，已相应下调主路径概率 ±0.02~0.04）。跌破中枢 ZD 即主路径失效。详见<a href="#s3">第三节</a>。</li>
       </ul>
     </div>"""
 
@@ -2558,14 +2558,18 @@ def main():
     方法：K线包含处理 → 顶底分型 → 笔（日线≥1.8% / 周线≥4% / 月线≥8% 幅度过滤）→ 笔中枢 → MACD 背驰 → 买卖点 → 日周月三级别区间套分类推演 → 信号回测验证</p>
   </header>
   <nav class="toc">
-    <a href="#s1"><span class="num">一</span>数据质量</a>
-    <a href="#s2"><span class="num">二</span>走势对比</a>
-    <a href="#s3"><span class="num">三</span>关键位策略</a>
-    <a href="#s4"><span class="num">四</span>信号回测</a>
-    <a href="#s5"><span class="num">五</span>分指数图解</a>
-    <a href="#s6"><span class="num">六</span>走势推演</a>
+    <a href="#s1"><span class="num">一</span>决策总览</a>
+    <a href="#s2"><span class="num">二</span>分指数图解</a>
+    <a href="#s3"><span class="num">三</span>关键位与推演</a>
+    <a href="#s4"><span class="num">四</span>信号回测对比</a>
+    <a href="#s5"><span class="num">五</span>数据质量</a>
+    <a href="#s6"><span class="num">六</span>方法论免责</a>
   </nav>
   {sym_rail}
+  {exec_summary}
+  <h2 class="sec" id="s1">一、决策总览（结论 · 卡片 · 广度 · 指标）</h2>
+  <div class="cards">{"".join(cards)}</div>
+  {breadth_banner}
   <div class="hero">
     <div class="kpi" style="border-top:3px solid {RED}"><div class="kpi-v" style="color:{RED}">{n_multi}</div><div class="kpi-l">多头延续</div></div>
     <div class="kpi" style="border-top:3px solid #d97706"><div class="kpi-v" style="color:#d97706">{n_osc}</div><div class="kpi-l">震荡偏多</div></div>
@@ -2577,7 +2581,6 @@ def main():
     <div class="kpi" style="border-top:3px solid {BLUE}"><div class="kpi-v">{avg_vol*100:.0f}%</div><div class="kpi-l">平均年化波动率</div></div>
     <div class="kpi" style="border-top:3px solid {RED}"><div class="kpi-v" style="color:{RED}">{n_m_bull}<span style="font-size:15px;color:#94a3b8">/{total}</span></div><div class="kpi-l">月线多头背景</div></div>
   </div>
-  {breadth_banner}
   <div class="legend">
     <span><i class="dot" style="background:{RED}"></i>向上笔 / ▲买点</span>
     <span><i class="dot" style="background:{GREEN}"></i>向下笔 / ▼卖点</span>
@@ -2587,35 +2590,12 @@ def main():
     <span><i class="dot" style="background:#475569"></i>成交量 MA5</span>
   </div>
 
-  {exec_summary}
-  <h2 class="sec" id="s1">一、数据质量与校验</h2>
-  {data_quality_strip(data, results)}
-
-  <h2 class="sec" id="s2">二、总览：五指数走势对比（2021-01-04 = 100，前复权）</h2>
-  <details class="panel" style="cursor:pointer">
-    <summary style="font-weight:700;color:#1e40af;cursor:pointer">五指数归一化对比图（点击展开 · 2021=100）</summary>
-    <div style="margin-top:12px">{compare_svg(data)}</div>
-    <p style="font-size:12px;color:#64748b;margin-top:8px">五指数已对齐到<b>共同交易日</b>（取交集），避免各指数因节假日/停牌错位导致曲线偏离；均为前复权口径。</p>
-  </details>
-
-  <div class="cards">{"".join(cards)}</div>
-
-  <h2 class="sec" id="s3">三、关键位与应对策略汇总（日周双级别）</h2>
-  <div class="panel"><div class="tablescroll">{levels_table(data, results, results_week, results_month, scores)}</div></div>
-
-  <h2 class="sec" id="s4">四、买卖点信号历史回测 <span style="font-size:12px;color:{GRAY};font-weight:400">缠论信号有效性的统计验证</span></h2>
-  <div class="panel"><div class="tablescroll">{backtest_table(backtests)}</div></div>
-
-  <div class="panel"><div class="tablescroll">{rr_table(data, results)}</div></div>
-
-  <h3 class="rob-h" style="font-size:16px;margin:18px 0 10px;color:#334155">四·B、样本外稳健性检验（校准过拟合检测）</h3>
-  <div class="panel"><div class="tablescroll">{robustness_table(robust, data)}</div></div>
-
-  <h2 class="sec" id="s5">五、分指数结构图解</h2>
+  <h2 class="sec" id="s2">二、分指数结构图解（主图 + 走势推演图）</h2>
   {"".join(sections)}
 
-  <h2 class="sec" id="s6">六、未来走势推演（"走势终完美"分类框架）</h2>
-  <div class="disclaimer" style="margin-bottom:14px">
+  <h2 class="sec" id="s3">三、关键位策略与走势推演汇总</h2>
+  <div class="panel"><div class="tablescroll">{levels_table(data, results, results_week, results_month, scores)}</div></div>
+  <div class="disclaimer" style="margin:14px 0">
     <b>⚠️ 重要说明（请先读）：</b>缠论是<b>概率性的结构分类框架，不是预测工具</b>。本节的"主/次/风险路径"与"置信锥"表达的是<b>在不同结构假设下的条件应对与概率分布</b>，绝非对具体价位的预测；其中主路径概率已尽量用历史同类信号的经验胜率校准，但样本有限，<b>任何路径都不构成买入/卖出建议</b>。真实决策请结合仓位管理与个人风险承受力，并独立判断。市场有风险。
   </div>
   <div class="panel"><div class="tablescroll">{forecast_summary_table(data, results, results_week, results_month, forecast_info)}</div></div>
@@ -2628,6 +2608,21 @@ def main():
     出现"顶背驰 + 跌破 ZD"组合才确认转空。</b>
     </p>
   </div>
+
+  <h2 class="sec" id="s4">四、信号回测与走势对比</h2>
+  <div class="panel"><div class="tablescroll">{backtest_table(backtests)}</div></div>
+  <div class="panel"><div class="tablescroll">{rr_table(data, results)}</div></div>
+  <h3 class="rob-h" style="font-size:16px;margin:18px 0 10px;color:#334155">四·B、样本外稳健性检验（校准过拟合检测）</h3>
+  <div class="panel"><div class="tablescroll">{robustness_table(robust, data)}</div></div>
+  <details class="panel" style="cursor:pointer">
+    <summary style="font-weight:700;color:#1e40af;cursor:pointer">五指数归一化对比图（点击展开 · 2021=100）</summary>
+    <div style="margin-top:12px">{compare_svg(data)}</div>
+    <p style="font-size:12px;color:#64748b;margin-top:8px">五指数已对齐到<b>共同交易日</b>（取交集），避免各指数因节假日/停牌错位导致曲线偏离；均为前复权口径。</p>
+  </details>
+
+  <h2 class="sec" id="s5">五、数据质量与校验</h2>
+  {data_quality_strip(data, results)}
+  <h2 class="sec" id="s6">六、方法论与免责</h2>
   <details class="panel method">
     <summary style="font-weight:700;color:#1e40af;cursor:pointer">术语与方法论速查（点击展开）</summary>
     <h4 style="margin-top:12px">分析流程</h4>
