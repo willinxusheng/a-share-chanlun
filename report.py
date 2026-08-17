@@ -2685,8 +2685,6 @@ def main():
   .card.linked-active {{ border-color: {BLUE}; box-shadow: 0 0 0 2px rgba(43,108,176,0.25), 0 6px 18px rgba(15,23,42,0.12); transform: translateY(-2px); }}
   tr.linkrow {{ cursor: pointer; }}
   .tbl tbody tr.row-linked td {{ background: #f8fafc; }}
-  .tbl tbody tr.row-linked td:first-child {{ border-left: 2px solid {BLUE}; padding-left: 10px; }}
-  .tbl tbody tr.row-linked td:first-child b {{ color: {BLUE}; }}
   .tbl tbody tr.row-linked:hover td {{ background: #f1f5f9; }}
   .sec-flash {{ animation: secflash 1.1s ease; }}
   @keyframes secflash {{ 0% {{ box-shadow: 0 0 0 0 rgba(43,108,176,0); }} 25% {{ box-shadow: 0 0 0 4px rgba(43,108,176,0.35); }} 100% {{ box-shadow: 0 1px 3px rgba(15,23,42,0.04); }} }}
