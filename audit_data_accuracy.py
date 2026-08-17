@@ -8,10 +8,11 @@ audit_data_accuracy.py — A股缠论看板「数据准确性」总审计（一�
   关3 预测归一化 : 复刻 main() 每符号推演管线，断言 p_main+p_alt+p_risk≈1.00 且 fc['trend'] 为真实价格(非~1.0)
   关4 校准回测   : --deep 时委托 audit_forecast_calibration.py（walk-forward 样本外, 验证风险带/方向技能）
   关5 情绪条件化 : --deep 时委托 audit_sentiment_conditioning.py（验证 H5 情绪指数条件化能否提升方向命中；监控门禁, 不阻断）
+  关6 突变漂移   : --deep 时委托 audit_forecast_drift.py（监控相邻刷新预测移动 vs 行情移动, 检测过拟合/数据异常；不阻断）
 
 用法:
   python audit_data_accuracy.py            # 关1+2+3（离线，约30~60s）
-  python audit_data_accuracy.py --deep     # 再加关4+关5（约10~20min）
+  python audit_data_accuracy.py --deep     # 再加关4+关5+关6（约10~20min）
   python audit_data_accuracy.py --online   # 关2 在线重算双源一致性（需网络）
 退出码: 0=全通过, 1=存在失败项
 """
@@ -137,6 +138,15 @@ def audit_sentiment(deep):
     return r.returncode == 0  # 该脚本恒退出0, 仅打印门禁判定
 
 
+def audit_drift(deep):
+    if not deep:
+        return True
+    print("\n=== 关6 突变漂移监控 (委托 audit_forecast_drift.py, 监控门禁不阻断) ===")
+    r = subprocess.run([sys.executable, "audit_forecast_drift.py"],
+                       cwd=os.path.dirname(os.path.abspath(__file__)))
+    return r.returncode == 0  # 该脚本恒退出0, 仅打印门禁判定
+
+
 def main():
     deep = "--deep" in sys.argv
     online = "--online" in sys.argv
@@ -147,12 +157,14 @@ def main():
     ok3 = audit_forecast(data)
     ok4 = audit_calibration(deep)
     ok5 = audit_sentiment(deep)
+    ok6 = audit_drift(deep)
     print("\n" + "=" * 60)
-    print("汇总: 关1历史完整性=%s  关2双源一致性=%s  关3预测归一化=%s  关4校准回测=%s  关5情绪条件化=%s"
+    print("汇总: 关1历史完整性=%s  关2双源一致性=%s  关3预测归一化=%s  关4校准回测=%s  关5情绪条件化=%s  关6突变漂移=%s"
           % (["FAIL", "OK"][ok1], ["FAIL", "OK"][ok2], ["FAIL", "OK"][ok3],
              (["SKIP", "OK"][ok4] if deep else "SKIP"),
-             (["SKIP", "OK"][ok5] if deep else "SKIP")))
-    allok = ok1 and ok2 and ok3 and (ok4 if deep else True) and (ok5 if deep else True)
+             (["SKIP", "OK"][ok5] if deep else "SKIP"),
+             (["SKIP", "OK"][ok6] if deep else "SKIP")))
+    allok = ok1 and ok2 and ok3 and (ok4 if deep else True) and (ok5 if deep else True) and (ok6 if deep else True)
     print("结论: %s" % ("✅ 全部通过" if allok else "❌ 存在失败项"))
     sys.exit(0 if allok else 1)
 
