@@ -2428,31 +2428,45 @@ def build_quality_cert_html(base):
     warn_cls = "" if bias_ok else " warn"
     bias_cell = (f'<div class="qc-cell{warn_cls}"><div class="qc-v">{bias_val}%</div>'
                  f'<div class="qc-l">中线偏置(中位)</div></div>')
-    # R80 分 regime 覆盖块：暴露「全样本平均覆盖」掩盖的隐藏弱点(如熊市覆盖塌方)
+    # R80/R81 分 regime 覆盖 + 方向块：覆盖低 ≠ 方向错——两者并排切片,
+    # 暴露「全样本平均」掩盖的弱点(如熊市常见『方向看空可信 / 区间太窄破带』)。
     regime_cov = c.get("regime_coverage", {})
-    regime_warn = c.get("regime_warn", False)
+    regime_dir = c.get("regime_direction", {})
+    regime_warn = c.get("regime_warn", False) or c.get("regime_dir_warn", False)
     regime_note = c.get("regime_note", "")
     _foot_regime = (f'🔍 <b>分regime告警</b>: {regime_note}<br>' if regime_note else "")
     _rg_rows = ""
     if regime_cov:
         _rg_rows = ('<div class="qc-regime"><div class="qc-regime-h">'
-                    '📈 分市场环境覆盖（牛/熊/震荡，暴露平均掩盖的弱点）</div>')
+                    '📈 分市场环境（牛/熊/震荡）：覆盖=区间可信度，方向=方向可信度 — 暴露「全样本平均」掩盖的弱点</div>')
         for _rg, _lab in (("bull", "牛"), ("bear", "熊"), ("range", "震荡")):
-            _d = regime_cov.get(_rg, {})
-            _t8, _t30 = _d.get("T8", {}), _d.get("T30", {})
-            _c8, _c30 = _t8.get("cover95"), _t30.get("cover95")
-            _n8, _n30 = _t8.get("N", 0), _t30.get("N", 0)
+            _dc = regime_cov.get(_rg, {})
+            _dd = regime_dir.get(_rg, {})
+            _t8c, _t30c = _dc.get("T8", {}), _dc.get("T30", {})
+            _t8d, _t30d = _dd.get("T8", {}), _dd.get("T30", {})
+            _c8, _c30 = _t8c.get("cover95"), _t30c.get("cover95")
+            _d8, _d30 = _t8d.get("dir_main"), _t30d.get("dir_main")
+            _n8, _n30 = _t8c.get("N", 0), _t30c.get("N", 0)
             _bad8 = (_c8 is not None and _c8 < 85)
             _bad30 = (_c30 is not None and _c30 < 85)
-            _ins8 = (_n8 is not None and _n8 < 20)   # 样本不足(N<20): 覆盖率统计不可靠
+            _d8bad = (_d8 is not None and _n8 >= 20 and _d8 < 50)  # 方向<抛硬币且样本足=方向不可信
+            _d30bad = (_d30 is not None and _n30 >= 20 and _d30 < 50)
+            _ins8 = (_n8 is not None and _n8 < 20)   # 样本不足(N<20): 统计不可靠
             _ins30 = (_n30 is not None and _n30 < 20)
             _cls8 = " bad" if _bad8 else ""
             _cls30 = " bad" if _bad30 else ""
-            _t8_txt = f'T+8 {_c8}% <i>(N={_n8})</i>' + (' ⚠️样本不足' if _ins8 else '')
-            _t30_txt = f'T+30 {_c30}% <i>(N={_n30})</i>' + (' ⚠️样本不足' if _ins30 else '')
+            _dcls8 = " bad" if _d8bad else ""
+            _dcls30 = " bad" if _d30bad else ""
+            _v = lambda x: ("%.1f%%" % x) if isinstance(x, (int, float)) else "-"
+            _t8_txt = f'覆盖{_v(_c8)}' + (' ⚠️样本不足' if _ins8 else '')
+            _t30_txt = f'覆盖{_v(_c30)}' + (' ⚠️样本不足' if _ins30 else '')
+            _t8d_txt = f'方向{_v(_d8)}'
+            _t30d_txt = f'方向{_v(_d30)}'
             _rg_rows += (f'<div class="qc-regime-row"><span class="qc-regime-lab">{_lab}</span>'
-                         f'<span class="qc-regime-cov{_cls8}">{_t8_txt}</span>'
-                         f'<span class="qc-regime-cov{_cls30}">{_t30_txt}</span></div>')
+                         f'<span class="qc-regime-cov{_cls8}">T+8 {_t8_txt}</span>'
+                         f'<span class="qc-regime-cov{_cls30}">T+30 {_t30_txt}</span>'
+                         f'<span class="qc-regime-cov{_dcls8}">T+8 {_t8d_txt}</span>'
+                         f'<span class="qc-regime-cov{_dcls30}">T+30 {_t30d_txt}</span></div>')
         _rg_rows += '</div>'
     html = (
         f'<div class="qc-card{" warn" if regime_warn else ""}">'
