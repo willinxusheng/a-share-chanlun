@@ -14,6 +14,49 @@ CHART_TOTAL = PAD_T + H_PRICE + 8 + H_VOL + 8 + H_MACD + PAD_B  # 600
 RED, GREEN, GOLD = "#e54545", "#18a058", "#d4a017"
 BLUE, GRAY, INK = "#2b6cb0", "#94a3b8", "#1f2937"
 
+
+def _label_w(t):
+    """估算标签像素宽度（与 verify_overlap.js 的字宽口径一致），用于确定性去重叠。"""
+    w = 0.0
+    for ch in str(t):
+        w += 11.0 if ord(ch) > 0x2e80 else 6.16
+    return w + 2.2
+
+
+def dedup_mark_labels(items, n, y_min, y_max, plot_w, plot_h, grid_l, grid_t,
+                      idx_map, default_pos="top"):
+    """确定性地去重叠 markPoint 标签：按 x 排序，贪心保留，与已保留标签框重叠的则隐藏。
+    仅修改各 item 的 label['show']，不改变标记符号。"""
+    if n <= 0 or (y_max - y_min) == 0:
+        return
+    bar = plot_w / n
+    ppx = plot_h / (y_max - y_min)
+
+    def y_of(p, pos):
+        yy = grid_t + (y_max - p) * ppx
+        return yy - 11 if pos == "top" else yy + 11
+
+    recs = []
+    for it in items:
+        c = it.get("coord")
+        if not c:
+            continue
+        xi = idx_map.get(c[0]) if isinstance(c[0], str) else c[0]
+        if xi is None:
+            continue
+        lab = it.get("label") or {}
+        pos = lab.get("position", default_pos)
+        recs.append({"x": grid_l + xi * bar, "yc": y_of(c[1], pos),
+                     "w": _label_w(it.get("value", "")), "p": it})
+    recs.sort(key=lambda d: d["x"])
+    kept = []
+    for m in recs:
+        if any(abs(m["x"] - k["x"]) < (m["w"] + k["w"]) / 2 + 2 and
+               abs(m["yc"] - k["yc"]) < 13 for k in kept):
+            m["p"]["label"]["show"] = False
+        else:
+            kept.append(m)
+
 IDX_COLORS = {
     "sh000001": "#2b6cb0",
     "sh000300": "#7c3aed",
@@ -639,15 +682,17 @@ def echart_main(klines, r, sym, captured=None):
             {"xAxis": dates[x1], "yAxis": round(zs["zd"], 2)}
         ])
 
-    # 最后中枢 ZG/ZD 金色虚线
+    # 最后中枢 ZG/ZD 金色虚线（标签移至顶部关键价位条，避免近价重叠）
     last_zs_lines = []
+    zg_v = zd_v = None
     if zss:
         zs = zss[-1]
+        zg_v, zd_v = round(zs["zg"]), round(zs["zd"])
         for val, lab in [(zs["zg"], "ZG"), (zs["zd"], "ZD")]:
             last_zs_lines.append({
                 "yAxis": round(val, 2),
                 "lineStyle": {"type": "dashed", "color": GOLD, "width": 1.2},
-                "label": {"formatter": f"{lab} {val:.0f}", "position": "insideEndTop", "color": GOLD, "fontSize": 11, "align": "right"}
+                "label": {"show": False}
             })
 
     # 跳空缺口 markArea
@@ -661,12 +706,13 @@ def echart_main(klines, r, sym, captured=None):
         gap_areas.append([
             {"xAxis": dates[g["idx"]], "yAxis": round(g["top"], 2),
              "itemStyle": {"color": f"{col}12"},
-             "label": {"formatter": ("▲缺" if g["type"] == "up" else "▼缺") + g["date"][5:], "color": col, "fontSize": 9, "position": "insideTopLeft", "align": "left"}},
+             "label": {"show": False}},
             {"xAxis": dates[-1], "yAxis": round(g["bottom"], 2)}
         ])
 
-    # 斐波那契回调位
+    # 斐波那契回调位（标签移顶部关键价位条，避免近价重叠）
     fib_lines = []
+    fib_pairs = []
     if len(bis) >= 2:
         leg = bis[-2]
         base_hi, base_lo = (leg["end_price"], leg["start_price"]) if leg["dir"] == 1 else (leg["start_price"], leg["end_price"])
@@ -674,11 +720,23 @@ def echart_main(klines, r, sym, captured=None):
         x0 = dates[merged[leg["end"]]["idx_end"]]
         for f, lab in ((0.0, "F0"), (0.382, "F38"), (0.5, "F50"), (0.618, "F62")):
             pv = base_hi - swing * f if leg["dir"] == 1 else base_lo + swing * f
+            fib_pairs.append((lab, round(pv)))
             fib_lines.append({
                 "xAxis": x0, "yAxis": round(pv, 2),
                 "lineStyle": {"type": "dashed", "color": "#7c3aed", "width": 0.8},
-                "label": {"formatter": f"{lab} {pv:.0f}", "color": "#7c3aed", "fontSize": 10, "position": "insideEndTop", "align": "right"}
+                "label": {"show": False}
             })
+
+    # 顶部关键价位条（富文本，避免近价标签相互重叠）
+    kl = []
+    if zg_v is not None:
+        kl.append(f"{{zg|ZG {zg_v}}}")
+    if zd_v is not None:
+        kl.append(f"{{zd|ZD {zd_v}}}")
+    if fib_pairs:
+        fib_txt = " ".join(f"{lab} {pv}" for lab, pv in fib_pairs)
+        kl.append(f"{{fib|Fib {fib_txt}}}")
+    key_levels_text = "  ".join(kl)
 
     # 买卖点 markPoint
     cutoff = n - 500
@@ -801,6 +859,10 @@ def echart_main(klines, r, sym, captured=None):
     vmax = max(volumes) or 1
     hmax = max(abs(v) for v in hist) or 1
 
+    # 确定性去重叠：买卖点/背驰/拐点标签（ECharts markPoint 的 hideOverlap 在带 position/distance 时不可靠）
+    dedup_mark_labels(sig_points + bc_points + cap_points, len(dates), _yMin, _yMax,
+                      1100 - 96 - 56, 640 * (1 - 0.40) - 48, 96, 48, date_idx)
+
     chart_data = {
         "dates": dates,
         "ohlc": ohlc,
@@ -823,6 +885,7 @@ def echart_main(klines, r, sym, captured=None):
         "bcPoints": bc_points,
         "segLines": seg_lines,
         "capPoints": cap_points,
+        "keyLevelsText": key_levels_text,
     }
 
     cid = f"echart-{sym}"
@@ -849,11 +912,11 @@ def echart_main(klines, r, sym, captured=None):
         return '<b>' + d + '</b><br>开 ' + o.toFixed(2) + ' 收 ' + c.toFixed(2) + '<br>高 ' + h.toFixed(2) + ' 低 ' + l.toFixed(2) + '<br>涨跌 <span style="color:' + col + '">' + (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%</span><br>成交量 ' + (D.volume[i]/1e8).toFixed(2) + ' 亿手';
       }}
     }},
-    legend: {{ data: ['日K', 'MA20', 'MA60', 'MA250', '成交量', 'MACD', 'DIF', 'DEA'], top: 2, itemGap: 12, textStyle: {{ fontSize: 12 }} }},
+    legend: {{ data: ['日K', 'MA20', 'MA60', 'MA250', '成交量', 'MACD', 'DIF', 'DEA'], top: 2, itemGap: 12, textStyle: {{ fontSize: 11 }} }},
     grid: [
-      {{ left: 88, right: 56, top: 44, bottom: '40%' }},
-      {{ left: 88, right: 56, top: '62%', height: '11%' }},
-      {{ left: 88, right: 56, top: '76%', bottom: 44 }}
+      {{ left: 96, right: 56, top: 48, bottom: '40%' }},
+      {{ left: 96, right: 56, top: '62%', height: '11%' }},
+      {{ left: 96, right: 56, top: '76%', bottom: 44 }}
     ],
     xAxis: [
       {{ type: 'category', data: D.dates, gridIndex: 0, axisLabel: {{ show: false }} }},
@@ -861,7 +924,7 @@ def echart_main(klines, r, sym, captured=None):
       {{ type: 'category', data: D.dates, gridIndex: 2, axisLabel: {{ fontSize: 11, hideOverlap: true, formatter: function(v){{ return v && v.length >= 10 ? v.slice(5) : v; }} }} }}
     ],
     yAxis: [
-      {{ scale: false, min: D.yMin, max: D.yMax, gridIndex: 0, splitNumber: 6, name: '价格(元)', nameLocation: 'middle', nameGap: 40, nameTextStyle: {{ color: '#64748b', fontSize: 12, fontWeight: 600 }}, axisLine: {{ lineStyle: {{ color: '#cbd5e1' }} }}, splitLine: {{ lineStyle: {{ color: '#eef2f7' }} }}, axisLabel: {{ fontSize: 12, hideOverlap: true }} }},
+      {{ scale: false, min: D.yMin, max: D.yMax, gridIndex: 0, splitNumber: 6, name: '价格(元)', nameLocation: 'middle', nameGap: 64, nameTextStyle: {{ color: '#64748b', fontSize: 12, fontWeight: 600 }}, axisLine: {{ lineStyle: {{ color: '#cbd5e1' }} }}, splitLine: {{ lineStyle: {{ color: '#eef2f7' }} }}, axisLabel: {{ fontSize: 12, hideOverlap: true }} }},
       {{ scale: true, gridIndex: 1, splitNumber: 2, name: '成交量', nameLocation: 'middle', nameGap: 34, nameTextStyle: {{ color: '#94a3b8', fontSize: 11 }}, axisLine: {{ show: false }}, splitLine: {{ show: false }}, axisLabel: {{ show: false }} }},
       {{ scale: true, gridIndex: 2, min: -D.hmax, max: D.hmax, splitNumber: 2, name: 'MACD', nameLocation: 'middle', nameGap: 34, nameTextStyle: {{ color: '#94a3b8', fontSize: 11 }}, axisLine: {{ show: false }}, splitLine: {{ show: false }}, axisLabel: {{ fontSize: 11 }} }}
     ],
@@ -875,7 +938,7 @@ def echart_main(klines, r, sym, captured=None):
         itemStyle: {{ color: '#e54545', color0: '#18a058', borderColor: '#e54545', borderColor0: '#18a058' }},
         markArea: {{ data: D.markAreas.concat(D.gapAreas), silent: true }},
         markLine: {{ symbol: 'none', data: D.lastZsLines.concat(D.fibLines).concat(D.segLines), silent: false, labelLayout: {{ moveOverlap: 'shiftY' }} }},
-        markPoint: {{ data: D.sigPoints.concat(D.bcPoints).concat(D.capPoints), labelLayout: {{ moveOverlap: 'shiftY' }} }}
+        markPoint: {{ data: D.sigPoints.concat(D.bcPoints).concat(D.capPoints) }}
       }},
       {{ name: 'MA20', type: 'line', data: D.ma20, symbol: 'none', lineStyle: {{ color: '#0ea5e9', width: 1.1 }} }},
       {{ name: 'MA60', type: 'line', data: D.ma60, symbol: 'none', lineStyle: {{ color: '#a855f7', width: 1.2 }} }},
@@ -892,6 +955,20 @@ def echart_main(klines, r, sym, captured=None):
       {{ name: 'DEA', type: 'line', xAxisIndex: 2, yAxisIndex: 2, data: D.dea, symbol: 'none', lineStyle: {{ color: '#d97706', width: 1 }} }}
     ]
   }};
+  if (D.keyLevelsText) {{
+    option.graphic = [{{
+      type: 'text', left: 100, top: 32, z: 100, silent: true,
+      style: {{
+        text: D.keyLevelsText,
+        fontFamily: 'Microsoft YaHei', fontSize: 11,
+        rich: {{
+          zg:  {{ fill: '{GOLD}', fontWeight: 'bold' }},
+          zd:  {{ fill: '{GOLD}', fontWeight: 'bold' }},
+          fib: {{ fill: '#7c3aed', fontSize: 10 }}
+        }}
+      }}
+    }}];
+  }}
   chart.setOption(option);
 }})();
 </script>"""
@@ -1533,32 +1610,46 @@ def forecast_echart(sym, fc_data):
     f75h = [None] * n_hist + [round(p["f75h"], 2) for p in proj]
     lo = fc_data["lo"]
     ymax = round(lo + fc_data["span"], 2)
+    zg_v, zd_v, last_v = round(zg), round(zd), round(last)
     hlines = [
         {"yAxis": round(zg, 2), "lineStyle": {"type": "dashed", "color": GOLD, "width": 1.2},
-         "label": {"formatter": f"ZG {zg:.0f}", "position": "insideEndTop", "color": GOLD, "fontSize": 11, "align": "right"}},
+         "label": {"show": False}},
         {"yAxis": round(zd, 2), "lineStyle": {"type": "dashed", "color": GOLD, "width": 1.2},
-         "label": {"formatter": f"ZD {zd:.0f}", "position": "insideEndTop", "color": GOLD, "fontSize": 11, "align": "right"}},
+         "label": {"show": False}},
         {"yAxis": round(last, 2), "lineStyle": {"type": "solid", "color": "#64748b", "width": 1},
-         "label": {"formatter": f"现价 {last:.0f}", "position": "insideEndTop", "color": "#64748b", "fontSize": 11, "align": "right"}},
+         "label": {"show": False}},
     ]
+    gap_chips = []
     for g in gaps:
         _mid = (g["top"] + g["bottom"]) / 2
         _c = RED if g["type"] == "up" else GREEN
+        _key = "gapup" if g["type"] == "up" else "gapdn"
         _lab = ("缺口支撑" if g["type"] == "up" else "缺口压力") + f" {g['bottom']:.0f}-{g['top']:.0f}"
+        gap_chips.append((_key, _lab))
         hlines.append({"yAxis": round(_mid, 2), "lineStyle": {"type": "dashed", "color": _c, "width": 0.8, "opacity": 0.6},
-                       "label": {"formatter": _lab, "position": "insideEndTop", "color": _c, "fontSize": 9, "align": "right"}})
+                       "label": {"show": False}})
     vline = [{"xAxis": x_hist[-1], "lineStyle": {"type": "dashed", "color": INK, "width": 1.2},
-              "label": {"formatter": "今日 T", "position": "insideStartTop", "color": INK, "fontSize": 11}}]
+              "label": {"show": False}}]
     _em, _ea, _er = proj[-1]["med"], proj[-1]["alt"], proj[-1]["risk"]
     end_points = [
         {"coord": [xcats[-1], round(_em, 2)], "value": f"主 {_em:.0f}", "itemStyle": {"color": RED}, "symbol": "circle", "symbolSize": 6,
          "label": {"show": True, "position": "top", "color": RED, "fontSize": 11, "fontWeight": "bold"}},
         {"coord": [xcats[-1], round(_ea, 2)], "value": f"次 {_ea:.0f}", "itemStyle": {"color": "#94a3b8"}, "symbol": "circle", "symbolSize": 6,
-         "label": {"show": True, "position": "top", "color": "#94a3b8", "fontSize": 11, "fontWeight": "bold"}},
+         "label": {"show": True, "position": "bottom", "color": "#94a3b8", "fontSize": 11, "fontWeight": "bold"}},
         {"coord": [xcats[-1], round(_er, 2)], "value": f"风险 {_er:.0f}", "itemStyle": {"color": GREEN}, "symbol": "circle", "symbolSize": 6,
          "label": {"show": True, "position": "bottom", "color": GREEN, "fontSize": 11, "fontWeight": "bold"}},
     ]
+    f_kl = [f"{{zg|ZG {zg_v}}}", f"{{zd|ZD {zd_v}}}", f"{{last|现价 {last_v}}}"]
+    for _key, _lab in gap_chips:
+        f_kl.append(f"{{{_key}|{_lab}}}")
+    key_levels_text = "  ".join(f_kl)
+
+    # 确定性去重叠：推演端点（主/次/风险）标签
+    dedup_mark_labels(end_points, len(xcats), lo, ymax, 1100 - 96 - 64, 440 - 44 - 74, 96, 44,
+                      {xcats[-1]: len(xcats) - 1})
+
     fdata = {
+        "keyLevelsText": key_levels_text,
         "xcats": xcats, "hist": hist_s, "main": main_s, "alt": alt_s, "risk": risk_s, "trend": trend_s,
         "lo": round(lo, 2), "ymax": ymax,
         "hlines": hlines, "vline": vline, "endPoints": end_points,
@@ -1596,10 +1687,10 @@ def forecast_echart(sym, fc_data):
           + '<span style="color:#64748b">P25~P75 '+(p.f75l).toFixed(0)+'~'+(p.f75l+p.f75h).toFixed(0)+'</span>';
       }}
     }},
-    legend: {{ data: ['历史','统计中位路径','结构演绎路径','次路径','风险路径','趋势外推','置信锥 P05–P95','置信锥 P25–P75'], top: 2, itemGap: 10, textStyle: {{ fontSize: 12 }} }},
-    grid: {{ left: 88, right: 64, top: 40, bottom: 74 }},
+    legend: {{ data: ['历史','统计中位路径','结构演绎路径','次路径','风险路径','趋势外推','置信锥 P05–P95','置信锥 P25–P75'], top: 2, itemGap: 8, textStyle: {{ fontSize: 11 }} }},
+    grid: {{ left: 96, right: 64, top: 44, bottom: 74 }},
     xAxis: {{ type: 'category', data: D.xcats, boundaryGap: false, name: '交易日（含未来外推）', nameLocation: 'middle', nameGap: 30, nameTextStyle: {{ color: '#64748b', fontSize: 12 }}, axisLabel: {{ fontSize: 11, hideOverlap: true }} }},
-    yAxis: {{ scale: false, min: D.lo, max: D.ymax, splitNumber: 6, name: '价格(元)', nameLocation: 'middle', nameGap: 42, nameTextStyle: {{ color: '#64748b', fontSize: 12, fontWeight: 600 }}, axisLine: {{ lineStyle: {{ color: '#cbd5e1' }} }}, splitLine: {{ lineStyle: {{ color: '#eef2f7' }} }}, axisLabel: {{ fontSize: 12, hideOverlap: true }} }},
+    yAxis: {{ scale: false, min: D.lo, max: D.ymax, splitNumber: 6, name: '价格(元)', nameLocation: 'middle', nameGap: 60, nameTextStyle: {{ color: '#64748b', fontSize: 12, fontWeight: 600 }}, axisLine: {{ lineStyle: {{ color: '#cbd5e1' }} }}, splitLine: {{ lineStyle: {{ color: '#eef2f7' }} }}, axisLabel: {{ fontSize: 12, hideOverlap: true }} }},
     dataZoom: [
       {{ type: 'inside', xAxisIndex: 0, start: 0, end: 100 }},
       {{ type: 'slider', xAxisIndex: 0, start: 0, end: 100, showDetail: false, height: 16, bottom: 8, handleStyle: {{ color: '#2b6cb0' }}, borderColor: '#e2e8f0', fillerColor: 'rgba(43,108,176,0.12)' }}
@@ -1617,9 +1708,25 @@ def forecast_echart(sym, fc_data):
       {{ name: '置信锥 P25–P75', type: 'line', data: D.f75h, stack: 'b75', symbol: 'none', lineStyle: {{ opacity: 0 }}, areaStyle: {{ color: 'rgba(229,69,69,0.12)' }}, tooltip: {{ show: false }}, silent: true }},
       {{ name: '参考', type: 'line', data: [], silent: true,
         markLine: {{ symbol: 'none', data: D.hlines.concat(D.vline), labelLayout: {{ moveOverlap: 'shiftY' }} }},
-        markPoint: {{ data: D.endPoints, labelLayout: {{ moveOverlap: 'shiftY' }} }} }}
+        markPoint: {{ data: D.endPoints }} }}
     ]
   }};
+  if (D.keyLevelsText) {{
+    option.graphic = [{{
+      type: 'text', left: 100, top: 30, z: 100, silent: true,
+      style: {{
+        text: D.keyLevelsText,
+        fontFamily: 'Microsoft YaHei', fontSize: 11,
+        rich: {{
+          zg:    {{ fill: '{GOLD}', fontWeight: 'bold' }},
+          zd:    {{ fill: '{GOLD}', fontWeight: 'bold' }},
+          last:  {{ fill: '#64748b', fontWeight: 'bold' }},
+          gapup: {{ fill: '{RED}', fontSize: 10 }},
+          gapdn: {{ fill: '{GREEN}', fontSize: 10 }}
+        }}
+      }}
+    }}];
+  }}
   chart.setOption(option);
 }})();
 </script>'''
