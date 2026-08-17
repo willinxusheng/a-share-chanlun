@@ -851,9 +851,9 @@ def echart_main(klines, r, sym, captured=None):
     }},
     legend: {{ data: ['日K', 'MA20', 'MA60', 'MA250', '成交量', 'MACD', 'DIF', 'DEA'], top: 2, itemGap: 12, textStyle: {{ fontSize: 12 }} }},
     grid: [
-      {{ left: 72, right: 56, top: 44, bottom: '40%' }},
-      {{ left: 72, right: 56, top: '62%', height: '11%' }},
-      {{ left: 72, right: 56, top: '76%', bottom: 44 }}
+      {{ left: 88, right: 56, top: 44, bottom: '40%' }},
+      {{ left: 88, right: 56, top: '62%', height: '11%' }},
+      {{ left: 88, right: 56, top: '76%', bottom: 44 }}
     ],
     xAxis: [
       {{ type: 'category', data: D.dates, gridIndex: 0, axisLabel: {{ show: false }} }},
@@ -861,9 +861,9 @@ def echart_main(klines, r, sym, captured=None):
       {{ type: 'category', data: D.dates, gridIndex: 2, axisLabel: {{ fontSize: 11, hideOverlap: true, formatter: function(v){{ return v && v.length >= 10 ? v.slice(5) : v; }} }} }}
     ],
     yAxis: [
-      {{ scale: false, min: D.yMin, max: D.yMax, gridIndex: 0, splitNumber: 6, axisLabel: {{ fontSize: 12, hideOverlap: true }} }},
-      {{ scale: true, gridIndex: 1, splitNumber: 2, axisLabel: {{ show: false }} }},
-      {{ scale: true, gridIndex: 2, min: -D.hmax, max: D.hmax, splitNumber: 2, axisLabel: {{ fontSize: 11 }} }}
+      {{ scale: false, min: D.yMin, max: D.yMax, gridIndex: 0, splitNumber: 6, name: '价格(元)', nameLocation: 'middle', nameGap: 40, nameTextStyle: {{ color: '#64748b', fontSize: 12, fontWeight: 600 }}, axisLine: {{ lineStyle: {{ color: '#cbd5e1' }} }}, splitLine: {{ lineStyle: {{ color: '#eef2f7' }} }}, axisLabel: {{ fontSize: 12, hideOverlap: true }} }},
+      {{ scale: true, gridIndex: 1, splitNumber: 2, name: '成交量', nameLocation: 'middle', nameGap: 34, nameTextStyle: {{ color: '#94a3b8', fontSize: 11 }}, axisLine: {{ show: false }}, splitLine: {{ show: false }}, axisLabel: {{ show: false }} }},
+      {{ scale: true, gridIndex: 2, min: -D.hmax, max: D.hmax, splitNumber: 2, name: 'MACD', nameLocation: 'middle', nameGap: 34, nameTextStyle: {{ color: '#94a3b8', fontSize: 11 }}, axisLine: {{ show: false }}, splitLine: {{ show: false }}, axisLabel: {{ fontSize: 11 }} }}
     ],
     dataZoom: [
       {{ type: 'inside', xAxisIndex: [0, 1, 2], start: 0, end: 100 }},
@@ -1285,16 +1285,31 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
     hist_w = plot_w * 0.40
     proj_w = plot_w * 0.60
 
-    # 置信锥(±2σ)在末端会显著超出路径端点（f=1、σ≈15% 时带宽≈中枢价 ±30%），
-    # 必须把锥体极值纳入纵轴范围，否则锥顶被裁剪/压平，看不出"随时间扩张"的形态
-    # 置信锥纵向范围：随机游走下，t 时刻累积收益标准差 ∝ √t（而非线性 t），
-    # 故带宽用 med*sigma*√f；线性口径会系统性低估近端不确定性（近月锥被压成针状）。
+    # ---- 经验分位扇形置信带（#预测精度·核心）：用真实历史 horizon 对数收益分布的分位，
+    # 生成非对称 P05/P25/P75/P95 扇形锥，并以「实测漂移中位路径」为中线锚定——
+    # 取代原对称 ±σ 带（A股肥尾/不对称性下，对称带会系统性低估单边极端风险、且中线未锚定统计中位）。
+    # 几何口径：horizon 对数收益中位数 q50 随时间线性缩放、离散度按 √f 缩放（GBM 一致性），
+    # 95/5 分位 = q50·f ± 1.645·sd·√f（sd 由真实分位反推，天然含肥尾）。
+    _rets = sorted(math.log(closes[i + horizon] / closes[i]) for i in range(n - horizon)) if n > horizon else []
+    def _q(p):
+        if not _rets:
+            return 0.0
+        k = (len(_rets) - 1) * p
+        f0 = int(math.floor(k)); c0 = int(math.ceil(k))
+        if f0 == c0:
+            return _rets[f0]
+        return _rets[f0] * (c0 - k) + _rets[c0] * (k - f0)
+    _q50, _q05, _q95 = _q(0.5), _q(0.05), _q(0.95)
+    _sd = (_q95 - _q50) / 1.645 if _q95 > _q50 else 0.0
+    def _medf(f):
+        return last * math.exp(_q50 * f)
+    def _bandf(f, z):
+        return last * math.exp(_q50 * f + z * _sd * math.sqrt(f))
     band_ext = []
     for _f in (0.25, 0.5, 0.75, 1.0):
-        _m = _interp(main_p, _f)
-        _sq = math.sqrt(_f)
-        band_ext.append(_m + _m * sigma * _sq * 2)
-        band_ext.append(_m - _m * sigma * _sq * 2)
+        band_ext.append(_bandf(_f, 1.645))   # 经验上沿(P95)
+        band_ext.append(_bandf(_f, -1.645))  # 经验下沿(P05)
+    band_ext.append(_medf(1.0))
     all_prices = tail + [v for _, v in main_p + alt_p + risk_p] + [zg, zd] + band_ext + [trend_end] \
         + [g["top"] for g in _gap_refs] + [g["bottom"] for g in _gap_refs]
     lo, hi = min(all_prices), max(all_prices)
@@ -1425,20 +1440,22 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
     # 图例改为图表下方的 HTML 图例条（不再压住推演路径与时间轴）
     legend_html = (
         f'<div class="fc-legend">'
-        f'<span><i class="ln" style="background:{RED}"></i>{main_lab} ≈ {p_main * 100:.0f}%</span>'
+        f'<span><i class="ln" style="background:{RED}"></i>统计中位路径 ≈ {p_main * 100:.0f}%（漂移中位终点 {_medf(1.0):.0f}）</span>'
         f'<span><i class="ln ln-dash" style="background:#94a3b8"></i>次路径：中枢内震荡 ≈ {p_alt * 100:.0f}%</span>'
         f'<span><i class="ln ln-dot" style="background:{GREEN}"></i>风险路径：跌破ZD转空 ≈ {p_risk * 100:.0f}%</span>'
-        f'<span><i class="ln ln-band"></i>置信锥 ±1σ/±2σ（σ={sigma * 100:.1f}%）</span>'
+        f'<span><i class="ln ln-band"></i>置信锥 经验分位 P05–P95 / P25–P75（真实分布·非对称）</span>'
         f'<span><i class="ln ln-trend"></i>趋势外推 {trend_end:.0f}（R²={_r2:.2f}{"，弱拟合" if trend_weak else ""}）</span>'
         f'</div>'
-        f'<div class="fc-targets">目标位(主路径终点) ≈ <b>{main_p[-1][1]:.0f}</b> · '
+        f'<div class="fc-targets">结构演绎目标(主路径终点) ≈ <b>{main_p[-1][1]:.0f}</b> · '
+        f'统计中位终点 ≈ <b>{_medf(1.0):.0f}</b> · '
         f'风险止损位(风险路径终点) ≈ <b>{risk_p[-1][1]:.0f}</b> · '
         f'趋势外推位 ≈ <b>{trend_end:.0f}</b> · '
         f'主路径失效位(有效跌破ZD) ≈ <b>{zd:.0f}</b> · '
         f'结构存续概率(锥) ≈ <b>{_p_hold*100:.0f}%</b></div>'
     )
     note = (f"主路径失效位：现价有效跌破 ZD {zd:.0f}（收盘确认）→ 主路径失效、风险路径概率上升；风险路径确认需同时满足「跌破 ZD + 周线笔转向下」。\n"
-             f"红色阴影为基于历史 {horizon} 日前向收益波动（σ={sigma*100:.1f}%）推演的置信锥：真实走势落在 ±1σ 带内的经验概率约 68%、±2σ 带内约 95%；带宽随时间按 √t 扩张（随机游走特性），近月不确定性即已显著，并非线性外推的针状。\n"
+             f"红色阴影为基于<b>真实历史 {horizon} 日对数收益分布</b>推演的<b>经验分位扇形置信带</b>（P05–P95 外层 / P25–P75 内层）：与对称 ±σ 带不同，它直接由本指数历史兑现统计得出、天然包含 A 股肥尾与涨跌不对称，"
+             f"故上下带非对称——单边极端风险（如急跌）被如实反映，而非被对称假设低估。中线路径为「实测漂移中位」（并非手工情景路径），使置信带中线统计诚实；带宽随时间按 √t 扩张（随机游走特性），近月不确定性即已显著，并非线性外推的针状。\n"
              f"本图为目的（分类框架）而非点位预测：缠论给出的是「不跌破 ZD 则结构延续、跌破则转弱」的条件应对，不是对具体价位的预测。\n"
              f"趋势外推（青色虚线，对最近 {min(horizon,90)} 日收盘做对数线性回归外推 {horizon} 日）是与结构路径相互独立的验证方法，"
              + (f"但其拟合优度极低（R²={_r2:.2f}），该独立验证参考性很弱、近乎噪声，不宜据此增减仓位；"
@@ -1472,20 +1489,22 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
         risk = _interp(risk_p, f)
         kk = round(f * horizon)
         dt = _fut(kk)
-        b1u = med + med * sigma * math.sqrt(f) * 1
-        b1l = med - med * sigma * math.sqrt(f) * 1
-        b2u = med + med * sigma * math.sqrt(f) * 2
-        b2l = med - med * sigma * math.sqrt(f) * 2
+        # 经验分位扇形（围绕实测漂移中位路径 medf）：P05/P95 外层、P25/P75 内层
+        mdf = _medf(f)
+        u95 = _bandf(f, 1.645); l95 = _bandf(f, -1.645)
+        u75 = _bandf(f, 0.674); l75 = _bandf(f, -0.674)
         trend = round(last * math.exp(_main_slope * kk), 2)
         proj.append({"f": round(f, 3), "tplus": kk, "date": dt,
                      "main": round(med, 2), "alt": round(alt, 2), "risk": round(risk, 2),
-                     "trend": trend,
-                     "b1u": round(b1u, 2), "b1l": round(b1l, 2), "b2u": round(b2u, 2), "b2l": round(b2l, 2)})
+                     "trend": trend, "med": round(mdf, 2),
+                     "f95l": round(l95, 2), "f95h": round(u95 - l95, 2),
+                     "f75l": round(l75, 2), "f75h": round(u75 - l75, 2)})
     fc_data = {"hist": hist, "proj": proj, "p_main": p_main, "p_alt": p_alt, "p_risk": p_risk,
                "p_hold": round(_p_hold, 3),
                "zd": round(zd, 2), "zg": round(zg, 2), "last": round(last, 2),
                "trend": round(trend_end, 2), "trend_agree": trend_agree, "trend_r2": round(_r2, 3),
                "sigma": round(sigma, 4), "horizon": horizon, "lo": round(lo, 4), "span": round(span, 4),
+               "med_term": round(_medf(1.0), 2), "q50": round(_q50, 4), "q_sd": round(_sd, 4),
                "gap_refs": [{"type": g["type"], "top": round(g["top"], 2), "bottom": round(g["bottom"], 2), "date": g["date"]} for g in _gap_refs]}
     return forecast_echart(sym, fc_data), note, (p_main, p_alt, p_risk), legend_html, fc_data
 
@@ -1503,14 +1522,15 @@ def forecast_echart(sym, fc_data):
     n_hist = len(hist)
     n_proj = len(proj)
     hist_s = [h[1] for h in hist] + [None] * n_proj
-    main_s = [None] * n_hist + [p["main"] for p in proj]
+    main_s = [None] * n_hist + [p["main"] for p in proj]      # 结构演绎路径(参考·虚线)
+    med_s = [None] * n_hist + [p["med"] for p in proj]        # 统计中位路径(主·实线)
     alt_s = [None] * n_hist + [p["alt"] for p in proj]
     risk_s = [None] * n_hist + [p["risk"] for p in proj]
     trend_s = [None] * n_hist + [p["trend"] for p in proj]
-    b2l = [None] * n_hist + [p["b2l"] for p in proj]
-    b2h = [None] * n_hist + [round(p["b2u"] - p["b2l"], 2) for p in proj]
-    b1l = [None] * n_hist + [p["b1l"] for p in proj]
-    b1h = [None] * n_hist + [round(p["b1u"] - p["b1l"], 2) for p in proj]
+    f95l = [None] * n_hist + [p["f95l"] for p in proj]
+    f95h = [None] * n_hist + [round(p["f95h"], 2) for p in proj]
+    f75l = [None] * n_hist + [p["f75l"] for p in proj]
+    f75h = [None] * n_hist + [round(p["f75h"], 2) for p in proj]
     lo = fc_data["lo"]
     ymax = round(lo + fc_data["span"], 2)
     hlines = [
@@ -1529,7 +1549,7 @@ def forecast_echart(sym, fc_data):
                        "label": {"formatter": _lab, "position": "insideEndTop", "color": _c, "fontSize": 9, "align": "right"}})
     vline = [{"xAxis": x_hist[-1], "lineStyle": {"type": "dashed", "color": INK, "width": 1.2},
               "label": {"formatter": "今日 T", "position": "insideStartTop", "color": INK, "fontSize": 11}}]
-    _em, _ea, _er = proj[-1]["main"], proj[-1]["alt"], proj[-1]["risk"]
+    _em, _ea, _er = proj[-1]["med"], proj[-1]["alt"], proj[-1]["risk"]
     end_points = [
         {"coord": [xcats[-1], round(_em, 2)], "value": f"主 {_em:.0f}", "itemStyle": {"color": RED}, "symbol": "circle", "symbolSize": 6,
          "label": {"show": True, "position": "top", "color": RED, "fontSize": 11, "fontWeight": "bold"}},
@@ -1540,14 +1560,14 @@ def forecast_echart(sym, fc_data):
     ]
     fdata = {
         "xcats": xcats, "hist": hist_s, "main": main_s, "alt": alt_s, "risk": risk_s, "trend": trend_s,
-        "b2l": b2l, "b2h": b2h, "b1l": b1l, "b1h": b1h,
         "lo": round(lo, 2), "ymax": ymax,
         "hlines": hlines, "vline": vline, "endPoints": end_points,
+        "med": med_s, "f95l": f95l, "f95h": f95h, "f75l": f75l, "f75h": f75h,
         "p_main": p_main, "p_alt": p_alt, "p_risk": p_risk, "proj_raw": proj,
     }
     cid = f"echart-forecast-{sym}"
     return f'''<div class="echart-toolbar">🔍 滚轮/拖拽缩放 · 拖动底部滑块平移 · 悬停看推演路径/置信锥/趋势</div>
-<div id="{cid}" class="echart-main" style="width:100%;height:360px;"></div>
+<div id="{cid}" class="echart-main" style="width:100%;height:440px;"></div>
 <script>
 (function(){{
   var D = {json.dumps(fdata, ensure_ascii=False)};
@@ -1572,28 +1592,29 @@ def forecast_echart(sym, fc_data):
           + '<span style="color:'+gray+'">次路径 '+p.alt.toFixed(2)+'</span> '+Math.round(D.p_alt*100)+'%<br>'
           + '<span style="color:'+grn+'">风险路径 '+p.risk.toFixed(2)+'</span> '+Math.round(D.p_risk*100)+'%<br>'
           + '<span style="color:'+cyan+'">趋势外推 '+p.trend.toFixed(2)+'</span><br>'
-          + '<span style="color:#64748b">±1σ '+p.b1l.toFixed(0)+'~'+p.b1u.toFixed(0)+'</span><br>'
-          + '<span style="color:#64748b">±2σ '+p.b2l.toFixed(0)+'~'+p.b2u.toFixed(0)+'</span>';
+          + '<span style="color:#64748b">经验分位 P05~P95 '+(p.f95l).toFixed(0)+'~'+(p.f95l+p.f95h).toFixed(0)+'</span><br>'
+          + '<span style="color:#64748b">P25~P75 '+(p.f75l).toFixed(0)+'~'+(p.f75l+p.f75h).toFixed(0)+'</span>';
       }}
     }},
-    legend: {{ data: ['历史','主路径','次路径','风险路径','趋势外推','置信锥 ±2σ','置信锥 ±1σ'], top: 2, itemGap: 12, textStyle: {{ fontSize: 12 }} }},
-    grid: {{ left: 72, right: 56, top: 40, bottom: 58 }},
-    xAxis: {{ type: 'category', data: D.xcats, boundaryGap: false, axisLabel: {{ fontSize: 11, hideOverlap: true }} }},
-    yAxis: {{ scale: false, min: D.lo, max: D.ymax, splitNumber: 6, axisLabel: {{ fontSize: 12, hideOverlap: true }} }},
+    legend: {{ data: ['历史','统计中位路径','结构演绎路径','次路径','风险路径','趋势外推','置信锥 P05–P95','置信锥 P25–P75'], top: 2, itemGap: 10, textStyle: {{ fontSize: 12 }} }},
+    grid: {{ left: 88, right: 64, top: 40, bottom: 74 }},
+    xAxis: {{ type: 'category', data: D.xcats, boundaryGap: false, name: '交易日（含未来外推）', nameLocation: 'middle', nameGap: 30, nameTextStyle: {{ color: '#64748b', fontSize: 12 }}, axisLabel: {{ fontSize: 11, hideOverlap: true }} }},
+    yAxis: {{ scale: false, min: D.lo, max: D.ymax, splitNumber: 6, name: '价格(元)', nameLocation: 'middle', nameGap: 42, nameTextStyle: {{ color: '#64748b', fontSize: 12, fontWeight: 600 }}, axisLine: {{ lineStyle: {{ color: '#cbd5e1' }} }}, splitLine: {{ lineStyle: {{ color: '#eef2f7' }} }}, axisLabel: {{ fontSize: 12, hideOverlap: true }} }},
     dataZoom: [
       {{ type: 'inside', xAxisIndex: 0, start: 0, end: 100 }},
       {{ type: 'slider', xAxisIndex: 0, start: 0, end: 100, showDetail: false, height: 16, bottom: 8, handleStyle: {{ color: '#2b6cb0' }}, borderColor: '#e2e8f0', fillerColor: 'rgba(43,108,176,0.12)' }}
     ],
     series: [
       {{ name: '历史', type: 'line', data: D.hist, symbol: 'none', smooth: true, lineStyle: {{ color: '#2b6cb0', width: 1.8 }} }},
-      {{ name: '主路径', type: 'line', data: D.main, symbol: 'none', smooth: true, lineStyle: {{ color: '#e54545', width: 2 }} }},
+      {{ name: '统计中位路径', type: 'line', data: D.med, symbol: 'none', smooth: true, lineStyle: {{ color: '#e54545', width: 2.4 }}, z: 5 }},
+      {{ name: '结构演绎路径', type: 'line', data: D.main, symbol: 'none', smooth: true, lineStyle: {{ color: '#e54545', width: 1.4, type: 'dashed', opacity: 0.7 }}, z: 4 }},
       {{ name: '次路径', type: 'line', data: D.alt, symbol: 'none', smooth: true, lineStyle: {{ color: '#94a3b8', width: 1.6, type: 'dashed' }} }},
       {{ name: '风险路径', type: 'line', data: D.risk, symbol: 'none', smooth: true, lineStyle: {{ color: '#18a058', width: 1.6, type: 'dashed' }} }},
       {{ name: '趋势外推', type: 'line', data: D.trend, symbol: 'none', smooth: false, lineStyle: {{ color: '#0891b2', width: 1.3, type: 'dashed' }} }},
-      {{ name: '置信锥 ±2σ', type: 'line', data: D.b2l, stack: 'b2', symbol: 'none', lineStyle: {{ opacity: 0 }}, areaStyle: {{ opacity: 0 }}, tooltip: {{ show: false }}, silent: true }},
-      {{ name: '置信锥 ±2σ', type: 'line', data: D.b2h, stack: 'b2', symbol: 'none', lineStyle: {{ opacity: 0 }}, areaStyle: {{ color: 'rgba(229,69,69,0.06)' }}, tooltip: {{ show: false }}, silent: true }},
-      {{ name: '置信锥 ±1σ', type: 'line', data: D.b1l, stack: 'b1', symbol: 'none', lineStyle: {{ opacity: 0 }}, areaStyle: {{ opacity: 0 }}, tooltip: {{ show: false }}, silent: true }},
-      {{ name: '置信锥 ±1σ', type: 'line', data: D.b1h, stack: 'b1', symbol: 'none', lineStyle: {{ opacity: 0 }}, areaStyle: {{ color: 'rgba(229,69,69,0.12)' }}, tooltip: {{ show: false }}, silent: true }},
+      {{ name: '置信锥 P05–P95', type: 'line', data: D.f95l, stack: 'b95', symbol: 'none', lineStyle: {{ opacity: 0 }}, areaStyle: {{ opacity: 0 }}, tooltip: {{ show: false }}, silent: true }},
+      {{ name: '置信锥 P05–P95', type: 'line', data: D.f95h, stack: 'b95', symbol: 'none', lineStyle: {{ opacity: 0 }}, areaStyle: {{ color: 'rgba(229,69,69,0.06)' }}, tooltip: {{ show: false }}, silent: true }},
+      {{ name: '置信锥 P25–P75', type: 'line', data: D.f75l, stack: 'b75', symbol: 'none', lineStyle: {{ opacity: 0 }}, areaStyle: {{ opacity: 0 }}, tooltip: {{ show: false }}, silent: true }},
+      {{ name: '置信锥 P25–P75', type: 'line', data: D.f75h, stack: 'b75', symbol: 'none', lineStyle: {{ opacity: 0 }}, areaStyle: {{ color: 'rgba(229,69,69,0.12)' }}, tooltip: {{ show: false }}, silent: true }},
       {{ name: '参考', type: 'line', data: [], silent: true,
         markLine: {{ symbol: 'none', data: D.hlines.concat(D.vline), labelLayout: {{ moveOverlap: 'shiftY' }} }},
         markPoint: {{ data: D.endPoints, labelLayout: {{ moveOverlap: 'shiftY' }} }} }}
@@ -1809,6 +1830,18 @@ def card_html(sym, name, klines, r, wcls, health, conf):
     _bias_state = _bias.get("state", "—")
     _bias_level = _bias.get("level", "—")
     _bias_color = {"超买": "#b45309", "超卖": "#2563eb", "中性": "#64748b"}.get(_bias_state, "#64748b")
+    # ADX 趋势强度（#专业度）：标准趋势强度指标，与缠论方向判断互补
+    _adx = r.get("adx") or {}
+    _adx_val = _adx.get("adx")
+    _adx_txt = ("%.0f·%s" % (_adx_val, _adx.get("trend", ""))) if _adx_val is not None else "—"
+    _adx_color = ("#18a058" if (_adx_val or 0) >= 25 else ("#d97706" if (_adx_val or 0) >= 20 else "#64748b"))
+    # 最大回撤（专业风险度量，与年化波动率互补）
+    _mdd = r.get("mdd") or {}
+    _mdd_txt = ("%.1f%%" % _mdd.get("mdd", 0)) if _mdd else "—"
+    # 量能趋势（放量/缩量，与量价背离/背驰缩量确认互为印证）
+    _vt = r.get("vol_trend") or {}
+    _vt_txt = ("%s %.2fx" % (_vt.get("state", ""), _vt.get("ratio", 1))) if _vt else "—"
+    _vt_color = {"放量": "#e54545", "缩量": "#2563eb", "温和": "#64748b"}.get(_vt.get("state"), "#64748b")
     # 信号成熟度（#29·稳健度三级重构）：最后一支已完成笔跨度，年轻信号属"待确认"而非可靠结论
     _stab = r.get("stability") or {}
     _mat = _stab.get("maturity", "established")
@@ -1828,6 +1861,9 @@ def card_html(sym, name, klines, r, wcls, health, conf):
       <div class="kv"><span>年化波动率</span><b>{vol_txt}</b></div>
       <div class="kv"><span>近20日涨跌(动量)</span><b style="color:{m20_color}">{m20_txt}</b></div>
       <div class="kv"><span>乖离率(MA20)</span><b style="color:{_bias_color}">{_bias20:+.1f}% {_bias_state}{_bias_level}</b></div>
+      <div class="kv"><span>ADX 趋势强度(14)</span><b style="color:{_adx_color}">{_adx_txt}</b></div>
+      <div class="kv"><span>最大回撤(全样本)</span><b>{_mdd_txt}</b></div>
+      <div class="kv"><span>量能趋势(20/60日)</span><b style="color:{_vt_color}">{_vt_txt}</b></div>
       <div class="kv"><span>笔 / 中枢 / 背驰 / 段背驰</span><b>{len(r["bis"])} / {len(r["zhongshu"])} / {len(r["beichi"])} / {len(r["seg_beichi"])}（顶×{sum(1 for _b in r.get("seg_beichi", []) if _b["type"] == "top")}/底×{sum(1 for _b in r.get("seg_beichi", []) if _b["type"] == "bottom")}）</b></div>
       <div class="kv"><span>最近一笔</span><b>{'↑' if cls.get('last_bi_dir') == 1 else '↓'} {amp:.1f}%</b></div>
       <div class="kv"><span>当前分类</span><b style="color:{sc_color}">{cls["scenario"]}</b></div>
@@ -2075,7 +2111,8 @@ def data_quality_strip(data, results):
         cards.append(
             f'<div class="qcard">'
             f'<div class="qtitle" style="color:{c}">{badge} {d["name"]}</div>'
-            f'<div class="qbody">日线{m["count"]}根 · 双源比值偏离 {cons_txt}<br>'
+            f'<div class="qbody">样本 {m["first_date"]}~{m["last_date"]} · 日线{m["count"]}根<br>'
+            f'前复权(qfq)口径 · 双源比值偏离 {cons_txt}<br>'
             f'双法一致 {r["agreement"]["rate"]*100:.0f}% · 拐点捕捉 {r["capture_rate"]*100:.0f}% · 分类{stab}</div>'
             f'</div>'
         )

@@ -948,7 +948,8 @@ def _path_targets(scenario, zg, zd, mid, last, move=0.05):
       main_dir    —— 主路径方向 1=向上 / -1=向下 / 0=中性
     """
     if scenario == "多头延续":
-        up_tgt = max(zg * 1.01, last * (1 + move))
+        # 与 report.forecast_svg「多头延续」主路径终点 (up_tgt*1.03) 严格一致，避免校准锚与展示路径错位
+        up_tgt = max(zg * 1.01, last * (1 + move)) * 1.03
         risk_level = zd * 0.94
         main_dir = 1
     elif scenario in ("中枢震荡偏多", "高位整理未破前高"):
@@ -1013,7 +1014,12 @@ def backtest_paths(klines, min_bi_pct=MIN_BI_PCT, horizon=60, step=20, with_stab
         mid = (zg + zd) / 2
         last = klines[t]["close"]
         sc = sub["classify"]["scenario"]
-        up_tgt, risk_level, main_dir = _path_targets(sc, zg, zd, mid, last, 0.05)
+        # 用「当时最近完成笔的真实幅度」作为 move 锚（与 report.forecast_svg 口径一致），
+        # 取代此前硬编码 0.05——否则校准命中率用的是 5% 固定目标、与展示路径(实测幅度)错位，
+        # 导致 p_main 的命中率夹逼校准失真、预测概率不可信。
+        _comp = sub["bis"][-2] if len(sub["bis"]) >= 2 else sub["bis"][-1]
+        _move = max(abs(_comp["end_price"] / _comp["start_price"] - 1), 0.03)
+        up_tgt, risk_level, main_dir = _path_targets(sc, zg, zd, mid, last, _move)
         hi = max(klines[i]["high"] for i in range(t + 1, t + 1 + horizon))
         lo = min(klines[i]["low"] for i in range(t + 1, t + 1 + horizon))
         # 方向感知命中判定（#23 修复空头情景虚高）
@@ -1171,6 +1177,97 @@ def bias_indicator(closes):
             "ma20": round(ma20, 2), "ma60": round(ma60, 2)}
 
 
+# ---------- 8g-4. ADX 趋势强度（Wilder，#专业度新增） ----------
+def _adx_trend(adxv, pdi, mdi):
+    """ADX 趋势强度定性：≥25 强趋势（方向由 ±DI 决定）；20~25 中等；<20 弱势震荡。"""
+    if adxv >= 25:
+        return "强趋势·" + ("多头" if pdi > mdi else "空头")
+    if adxv >= 20:
+        return "中等趋势"
+    return "弱势震荡"
+
+
+def adx(highs, lows, closes, period=14):
+    """Wilder's ADX/DI：量化趋势强度（与方向无关），区分「趋势市/震荡市」的标准专业指标。
+    返回 {adx, pdi, mdi, trend}；样本不足返回 None。ADX 与缠论「笔/中枢方向」互补——
+    缠论给方向，ADX 给该方向是否具备趋势动能；低 ADX（震荡）下方向性信号可靠性下降、
+    推演置信度应相应下调（见 forecast_confidence）。"""
+    n = len(closes)
+    if n < 2 * period + 1:
+        return None
+    tr = [0.0] * n
+    pdm = [0.0] * n
+    mdm = [0.0] * n
+    for i in range(1, n):
+        tr[i] = max(highs[i] - lows[i], abs(highs[i] - closes[i - 1]), abs(lows[i] - closes[i - 1]))
+        up = highs[i] - highs[i - 1]
+        dn = lows[i - 1] - lows[i]
+        if up > dn and up > 0:
+            pdm[i] = up
+        if dn > up and dn > 0:
+            mdm[i] = dn
+    atr = sum(tr[1:period + 1]) / period
+    spdm = sum(pdm[1:period + 1]) / period
+    smdm = sum(mdm[1:period + 1]) / period
+    pdi = [0.0] * n
+    mdi = [0.0] * n
+    dx = [0.0] * n
+    for i in range(period, n):
+        atr = (atr * (period - 1) + tr[i]) / period
+        spdm = (spdm * (period - 1) + pdm[i]) / period
+        smdm = (smdm * (period - 1) + mdm[i]) / period
+        p = 100 * spdm / atr if atr else 0.0
+        m = 100 * smdm / atr if atr else 0.0
+        pdi[i] = p
+        mdi[i] = m
+        dx[i] = 100 * abs(p - m) / (p + m) if (p + m) else 0.0
+    a = 2 * period - 1
+    if a >= n:
+        return None
+    adxv = sum(dx[period:a + 1]) / period
+    for i in range(a + 1, n):
+        adxv = (adxv * (period - 1) + dx[i]) / period
+    return {"adx": round(adxv, 1), "pdi": round(pdi[n - 1], 1), "mdi": round(mdi[n - 1], 1),
+            "trend": _adx_trend(adxv, pdi[n - 1], mdi[n - 1])}
+
+
+# ---------- 8g-5. 最大回撤（专业风险度量，#专业度新增） ----------
+def max_drawdown(closes, dates=None):
+    """区间内最大回撤（峰值到谷值最大跌幅，小数→返回百分比）。返回 {mdd, peak_date, trough_date}。
+    作为专业风险度量，与年化波动率互相补充：波动率看「抖不抖」，回撤看「最坏亏多少」。"""
+    if len(closes) < 2:
+        return None
+    peak = closes[0]
+    peak_i = 0
+    mdd = 0.0
+    ti = 0
+    for i, c in enumerate(closes):
+        if c > peak:
+            peak = c
+            peak_i = i
+        dd = (c - peak) / peak
+        if dd < mdd:
+            mdd = dd
+            ti = i
+    return {"mdd": round(mdd * 100, 1),
+            "peak_date": dates[peak_i] if dates else "",
+            "trough_date": dates[ti] if dates else ""}
+
+
+# ---------- 8g-6. 量能趋势（放量/缩量，#专业度新增） ----------
+def vol_trend(volumes):
+    """近 20 日成交量均量 / 近 60 日成交量均量，量化量能趋势。
+    放量(>1.15)常伴随突破有效性提升；缩量(<0.85)提示动能衰减、方向待确认。
+    返回 {ratio, state}。"""
+    n = len(volumes)
+    if n < 60:
+        return None
+    recent = sum(volumes[-20:]) / 20.0
+    base = sum(volumes[-60:]) / 60.0
+    ratio = recent / base if base else 1.0
+    state = "放量" if ratio > 1.15 else ("缩量" if ratio < 0.85 else "温和")
+    return {"ratio": round(ratio, 2), "state": state}
+
 
 # ---------- 8d. 结构健康度（0-100，多空力量量化） ----------
 def health_score(klines, r, wcls):
@@ -1225,6 +1322,14 @@ def forecast_confidence(r, wcls, bt, breadth_bias=0):
                 break
     if wr is not None:
         c += (wr - 0.5) * 40
+    # ADX 趋势强度交叉验证（#专业度）：低 ADX(弱势震荡)→方向性信号可靠性下降，推演置信度下调；
+    # 高 ADX(强趋势)→结构动能延续，方向信号更可信、置信度上调。与缠论方向判断互补。
+    _adx = r.get("adx")
+    if _adx and _adx.get("adx") is not None:
+        if _adx["adx"] < 20:
+            c -= 6
+        elif _adx["adx"] >= 30:
+            c += 4
     # 量能确认（缠论核心确认条件）：最近背驰若伴随量能萎缩（量价背离），
     # 方向性信号更可信——缩量背驰比放量背驰可靠性更高（放量背驰常是出货而非转折）。
     _bc_top = any(b["type"] == "top" for b in recent_bc)
@@ -1295,6 +1400,9 @@ def analyze(klines, min_bi_pct=MIN_BI_PCT, with_stability=True):
     capture_rate = len(captured) / len(KNOWN_PIVOTS) if KNOWN_PIVOTS else 0
     stability = classification_stability(klines, min_bi_pct) if with_stability else None
     bias = bias_indicator(closes)
+    adx_r = adx([k["high"] for k in klines], [k["low"] for k in klines], closes)
+    mdd = max_drawdown(closes, [k["date"] for k in klines])
+    vt = vol_trend([k["volume"] for k in klines])
     return {
         "merged": merged, "bis": bis, "zhongshu": zss,
         "dif": dif, "dea": dea, "hist": hist,
@@ -1303,6 +1411,7 @@ def analyze(klines, min_bi_pct=MIN_BI_PCT, with_stability=True):
         "agreement": {"ok": ok, "total": tot, "rate": agree},
         "captured": captured, "capture_rate": capture_rate,
         "stability": stability, "gaps": gaps, "bias": bias,
+        "adx": adx_r, "mdd": mdd, "vol_trend": vt,
     }
 
 
