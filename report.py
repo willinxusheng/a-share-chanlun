@@ -943,6 +943,7 @@ def echart_main(klines, r, sym, captured=None):
 (function(){{
   var D = {json.dumps(chart_data, ensure_ascii=False)};
   var chart = echarts.init(document.getElementById('{cid}'));
+  (window.__charts = window.__charts || []).push(chart);
   var option = {{
     animation: false,
     tooltip: {{
@@ -1782,6 +1783,7 @@ def forecast_echart(sym, fc_data):
 (function(){{
   var D = {json.dumps(fdata, ensure_ascii=False)};
   var chart = echarts.init(document.getElementById('{cid}'));
+  (window.__charts = window.__charts || []).push(chart);
   var option = {{
     animation: false,
     tooltip: {{ trigger: 'axis', axisPointer: {{ type: 'cross', label: {{ show: false }} }},
@@ -2540,11 +2542,11 @@ def main():
       <div class="verdict"><b>结构解读：</b><p>{cls["detail"]}</p>
       <p style="margin-top:4px"><b>周线级别：</b>{wcls["detail"]}</p></div>
       <h3 class="fc-title">未来走势推演</h3>
-      <div class="chartbox" id="fcbox-{sym}">
+      <div class="chartbox fcbox" id="fcbox-{sym}">
         {fs_svg}
         <div class="xh-tip" id="fctip-{sym}"></div>
       </div>
-      <div style="white-space:pre-line;font-size:13px;line-height:1.85;color:#475569;margin:10px 0">{fs_note}</div>
+      <div class="fc-note2" style="white-space:pre-line;font-size:13px;line-height:1.85;color:#475569;margin:10px 0">{fs_note}</div>
       {fs_legend}
       {path_hit_html(cls["scenario"], paths_bt[sym], fs_probs[0], fs_probs[1], fs_probs[2], horizon)}
     </section>""")
@@ -2762,6 +2764,47 @@ def main():
   .sec-flash {{ animation: secflash 1.1s ease; }}
   @keyframes secflash {{ 0% {{ box-shadow: 0 0 0 0 rgba(43,108,176,0); }} 25% {{ box-shadow: 0 0 0 4px rgba(43,108,176,0.35); }} 100% {{ box-shadow: 0 1px 3px rgba(15,23,42,0.04); }} }}
   @media (max-width: 720px) {{ nav.sym-rail {{ top: 48px; }} nav.sym-rail .chip {{ padding: 4px 9px; font-size: 12px; }} }}
+  /* ===== 手机横屏深度优化（宽>高，视口矮） ===== */
+  @media (orientation: landscape) and (max-height: 560px) {{
+    body {{ padding: 8px; }}
+    .wrap {{ max-width: 100%; }}
+    header h1 {{ font-size: 17px; }}
+    header p {{ font-size: 11px; line-height: 1.45; margin-top: 2px; }}
+    nav.toc, nav.sym-rail {{
+      position: static; flex-wrap: nowrap; overflow-x: auto; white-space: nowrap;
+      margin: 6px 0; padding: 4px 6px; gap: 4px; -webkit-overflow-scrolling: touch;
+    }}
+    nav.toc a, nav.sym-rail .chip {{ flex: 0 0 auto; }}
+    nav.toc a .num {{ display: none; }}
+    h2.sec, .panel h2 {{ font-size: 15px; margin: 12px 0 8px; }}
+    .panel {{ padding: 10px 12px; margin-bottom: 10px; }}
+    /* 每指数：左K线 / 右推演 并排，解读与备注在下方整行 */
+    section.panel {{
+      display: grid; grid-template-columns: 1.5fr 1fr;
+      grid-template-areas: "title title" "kline fc" "foot foot";
+      gap: 8px 12px; align-items: stretch;
+    }}
+    section.panel > h2, section.panel > h3.fc-title {{ grid-area: title; }}
+    section.panel > h3.fc-title {{ margin: 2px 0 0; font-size: 13px; }}
+    section.panel > .chartbox:first-of-type {{ grid-area: kline; }}
+    section.panel > .chartbox.fcbox {{ grid-area: fc; }}
+    section.panel > .verdict,
+    section.panel > .fc-note2,
+    section.panel > .fc-note,
+    section.panel > .fc-legend,
+    section.panel > .pathcheck {{ grid-area: foot; }}
+    .verdict {{ margin-top: 0; }}
+    /* 图表高度自适应横屏矮视口（!important 覆盖内联 640/440px） */
+    .echart-main {{ height: calc(100vh - 150px) !important; height: calc(100dvh - 150px) !important; max-height: 380px; min-height: 200px; }}
+    .echart-toolbar {{ font-size: 11px; padding: 5px 8px; }}
+    .fc-title {{ font-size: 13px; margin: 4px 0; }}
+    .fc-legend {{ font-size: 11px; gap: 8px; }}
+    .cards {{ grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }}
+    .kpi {{ min-width: 92px; padding: 8px; }}
+    .kpi-v {{ font-size: 19px; }}
+    .tbl {{ font-size: 11px; }}
+    .tbl th, .tbl td {{ padding: 5px 6px; }}
+  }}
 </style>
 </head>
 <body>
@@ -2944,6 +2987,14 @@ function initForecast(sym){{
   window.addEventListener('scroll', spy, {{passive:true}});
   window.addEventListener('resize', spy, {{passive:true}});
   spy();
+}})();
+</script>
+<script>
+(function(){{
+  function resizeAll(){{ (window.__charts||[]).forEach(function(c){{ try{{ c.resize(); }}catch(e){{}} }}); }}
+  window.addEventListener('resize', resizeAll, {{passive:true}});
+  window.addEventListener('orientationchange', function(){{ setTimeout(resizeAll, 250); }});
+  window.addEventListener('load', function(){{ setTimeout(resizeAll, 120); }});
 }})();
 </script>
 </body>
