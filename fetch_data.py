@@ -44,7 +44,7 @@ def fetch_tx(symbol, period):
     return out
 
 
-def fetch_sina_series(symbol, datalen=1400):
+def fetch_sina_series(symbol, datalen=2000):
     """拉取新浪全量日线（用于序列级交叉验证），返回 {date: close}"""
     try:
         url = SINA_URL.split("datalen=5")[0] + "datalen=%d" % datalen
@@ -145,6 +145,13 @@ def main():
         # 全序列抽样比值一致性校验（腾讯 qfq ↔ 新浪 裸价）
         sina_series = fetch_sina_series(sym)
         cc = cross_validate(day, sina_series)
+        # 双源一致性提升为“可见门禁”：缺校验/超阈值明确标出，避免静默当“干净”
+        if cc["n"] == 0:
+            cc_status = "N/A(新浪未校验)"
+        elif cc["max_rel_dev"] is not None and cc["max_rel_dev"] > 0.02:
+            cc_status = "WARN(偏离%.2f%%)" % (cc["max_rel_dev"] * 100)
+        else:
+            cc_status = "OK"
         result[sym] = {
             "name": name,
             "klines": day,
@@ -158,12 +165,14 @@ def main():
                 "last_date": day[-1]["date"],
                 "issues": issues,
                 "consistency": cc,
+                "consistency_status": cc_status,
             },
         }
-        print("%s: 日线%d(%s~%s) 周线%d 校验问题%d 双源比值稳定度 样本%d 最大偏离%s" % (
+        print("%s: 日线%d(%s~%s) 周线%d 校验问题%d 双源比值稳定度 样本%d 最大偏离%s 一致性:%s" % (
             name, len(day), day[0]["date"], day[-1]["date"], len(week),
             len(issues), cc["n"],
-            ("%.3f%%" % (cc["max_rel_dev"] * 100)) if cc["max_rel_dev"] is not None else "N/A"))
+            ("%.3f%%" % (cc["max_rel_dev"] * 100)) if cc["max_rel_dev"] is not None else "N/A",
+            cc_status))
     with open(os.path.join(_BASE, "data.json"), "w", encoding="utf-8") as f:
         json.dump(result, f, ensure_ascii=False)
     print("saved -> chanlun/data.json")
