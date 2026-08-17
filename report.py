@@ -2401,6 +2401,49 @@ def load_live_sentiment():
         return None
 
 
+def build_quality_cert_html(base):
+    """R79 预测质量自检证书：读 quality_cert.json 渲染顶部常驻区块（让预测准确性可见可验）。
+    文件缺失(CI 未生成/本地未跑)时优雅降级为提示条, 不报错不阻断。"""
+    p = os.path.join(base, "quality_cert.json")
+    if not os.path.exists(p):
+        return ('<div class="disclaimer" style="background:#f8fafc;border-color:#e2e8f0;'
+                'color:#64748b;margin:14px 0">ℹ️ 预测质量自检证书未生成'
+                '（运行 <code>python gen_quality_cert.py</code> 或等待 CI 部署后可见）。</div>')
+    try:
+        c = json.load(open(p, encoding="utf-8"))
+    except Exception:
+        return ""
+    cal = c.get("calibration", {})
+    t8, t30 = cal.get("T8", {}), cal.get("T30", {})
+
+    def cell(label, d, key):
+        v = d.get(key)
+        return (f'<div class="qc-cell"><div class="qc-v">{v if v is not None else "-"}</div>'
+                f'<div class="qc-l">{label}</div></div>')
+    bias_ok = c.get("bias_ok", True)
+    bias_val = t8.get("bias_median")
+    drift = c.get("drift", {}).get("note", "")
+    sent = c.get("sentiment", {}).get("note", "")
+    acc = c.get("accuracy_note", "")
+    warn_cls = "" if bias_ok else " warn"
+    bias_cell = (f'<div class="qc-cell{warn_cls}"><div class="qc-v">{bias_val}%</div>'
+                 f'<div class="qc-l">中线偏置(中位)</div></div>')
+    html = (
+        '<div class="qc-card">'
+        f'<div class="qc-head">📊 预测质量自检证书'
+        f'<span class="qc-sub">数据截至 {c.get("data_last_date")} · 生成 {c.get("generated_at")}</span></div>'
+        '<div class="qc-grid">'
+        + cell("P05-P95 覆盖 T+8", t8, "cover95") + cell("P05-P95 覆盖 T+30", t30, "cover95")
+        + cell("方向命中 T+8", t8, "dir_main") + cell("方向命中 T+30", t30, "dir_main")
+        + cell("中线 MAE T+30", t30, "mae_med") + bias_cell
+        + '</div>'
+        f'<div class="qc-foot">⚙️ <b>漂移监控</b>: {drift}<br>'
+        f'🧭 <b>情绪条件化</b>: {sent}<br>'
+        f'📌 <b>结论</b>: {acc}</div></div>'
+    )
+    return html
+
+
 def main():
     _base = os.path.dirname(os.path.abspath(__file__))
     with open(os.path.join(_base, "data.json"), encoding="utf-8") as f:
@@ -2450,6 +2493,8 @@ def main():
             f'请以最新行情重新生成后为准。</div>')
     else:
         freshness_banner = ""
+    # 预测质量自检证书(R79): 读 quality_cert.json 渲染顶部常驻区块, 让准确性可见可验
+    cert_html = build_quality_cert_html(_base)
     _breadth_bias = (_bull_cnt / _total - 0.5) * 2 * 8  # 全看多 +8 / 全看空 -8（0-100 置信度刻度）
     scores = {sym: (health_score(d["klines"], results[sym], results_week[sym]["classify"]),
                     forecast_confidence(results[sym], results_week[sym]["classify"], backtests[sym], breadth_bias=_breadth_bias))
@@ -2683,6 +2728,17 @@ def main():
   .strategy {{ color: #475569; line-height: 1.6; }}
   .conclusion li {{ margin: 8px 0 8px 18px; line-height: 1.8; font-size: 14px; }}
   .disclaimer {{ background: #fff8e6; border: 1px solid #f0d98c; color: #92600a; border-radius: 10px; padding: 14px 18px; font-size: 13px; line-height: 1.8; }}
+  /* R79 预测质量自检证书（顶部常驻, 准确性可见可验） */
+  .qc-card {{ background: linear-gradient(135deg,#f0f9ff,#eef2ff); border: 1px solid #c7d2fe; border-radius: 12px; padding: 14px 16px; margin: 14px 0; box-shadow: 0 4px 14px rgba(79,70,229,0.08); }}
+  .qc-head {{ font-size: 15px; font-weight: 700; color: #3730a3; margin-bottom: 10px; }}
+  .qc-sub {{ font-size: 11px; font-weight: 400; color: #64748b; margin-left: 8px; }}
+  .qc-grid {{ display: flex; flex-wrap: wrap; gap: 10px; }}
+  .qc-cell {{ flex: 1 1 120px; background: #fff; border: 1px solid #e0e7ff; border-radius: 8px; padding: 8px 10px; text-align: center; }}
+  .qc-cell.warn {{ border-color: #fca5a5; background: #fef2f2; }}
+  .qc-v {{ font-size: 18px; font-weight: 700; color: #1e293b; }}
+  .qc-cell.warn .qc-v {{ color: #b91c1c; }}
+  .qc-l {{ font-size: 11px; color: #64748b; margin-top: 2px; }}
+  .qc-foot {{ font-size: 12px; line-height: 1.7; color: #475569; margin-top: 10px; border-top: 1px dashed #c7d2fe; padding-top: 8px; }}
   i.dot {{ display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }}
   h2.sec {{ font-size: 19px; margin: 26px 0 12px; padding-left: 12px; border-left: 4px solid {BLUE}; line-height: 1.3; }}
   nav.toc {{ position: sticky; top: 8px; z-index: 50; background: rgba(255,255,255,0.98); backdrop-filter: blur(8px); border: 1px solid #e2e8f0; border-radius: 999px; padding: 6px 10px; margin: 18px 0 24px; display: flex; flex-wrap: wrap; justify-content: center; gap: 4px; font-size: 13px; box-shadow: 0 4px 14px rgba(15,23,42,0.06); width: 100%; max-width: 100%; }}
@@ -2822,6 +2878,7 @@ def main():
     <p>数据区间：2021-01-04 ~ {last_date} · 生成时间：{gen_time}<br>日线+周线+月线 · 前复权</p>
   </header>
   {freshness_banner}
+  {cert_html}
   <nav class="toc">
     <a href="#s1"><span class="num">一</span>决策总览</a>
     <a href="#s2"><span class="num">二</span>分指数图解</a>

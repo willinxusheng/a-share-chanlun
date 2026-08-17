@@ -42,6 +42,7 @@ jobs:
           for i in 1 2 3; do
             python fetch_data.py && break || sleep 30
           done
+          python gen_quality_cert.py
           python report.py
           cp report.html index.html
 

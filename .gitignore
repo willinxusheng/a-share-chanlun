@@ -1,6 +1,7 @@
 # ===== 生成产物：各机器本地重建，不入库（避免多机冲突）=====
 data.json
 report.html
+quality_cert.json
 
 # ===== Python 缓存 =====
 __pycache__/
