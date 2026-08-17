@@ -5,7 +5,7 @@ import json
 import os
 import math
 from datetime import datetime, timedelta
-from chanlun import analyze, backtest_signals, MIN_BI_PCT_WEEK, health_score, forecast_confidence, forward_vol, adaptive_horizon, classify, realized_vol_annualized, KNOWN_PIVOTS, _date_diff, MIN_BI_PCT_MONTH, backtest_robustness, backtest_paths, _path_targets, market_breadth
+from chanlun import analyze, backtest_signals, MIN_BI_PCT_WEEK, health_score, forecast_confidence, forward_vol, adaptive_horizon, classify, realized_vol_annualized, KNOWN_PIVOTS, _date_diff, MIN_BI_PCT_MONTH, backtest_robustness, backtest_paths, _path_targets, market_breadth, regime_factor
 
 W, H_PRICE, H_VOL, H_MACD = 1060, 360, 64, 110
 PAD_L, PAD_R, PAD_T, PAD_B = 12, 78, 24, 26
@@ -13,6 +13,39 @@ CHART_TOTAL = PAD_T + H_PRICE + 8 + H_VOL + 8 + H_MACD + PAD_B  # 600
 
 RED, GREEN, GOLD = "#e54545", "#18a058", "#d4a017"
 BLUE, GRAY, INK = "#2b6cb0", "#94a3b8", "#1f2937"
+
+# ---------- A 股交易日历（用于推演图投影日期推算）----------
+# 节假日来源：国务院办公厅《关于2026年部分节假日安排的通知》(2025-11-04 发布，已核实)；
+# 2027 仅列入已确认的元旦，春节及后续年度安排未发布暂不列（推演 horizon ≤90 交易日，
+# 从 2026-08 起最多触及 2027-01-02 附近，元旦已覆盖）。
+# 调休补班日(周末上班)仍计为交易日，避免把补班周末误判为休市而多算交易日。
+_A_SHARE_HOLIDAYS = {
+    # 2026
+    "2026-01-01", "2026-01-02", "2026-01-03",
+    "2026-02-15", "2026-02-16", "2026-02-17", "2026-02-18", "2026-02-19",
+    "2026-02-20", "2026-02-21", "2026-02-22", "2026-02-23",
+    "2026-04-04", "2026-04-05", "2026-04-06",
+    "2026-05-01", "2026-05-02", "2026-05-03", "2026-05-04", "2026-05-05",
+    "2026-06-19", "2026-06-20", "2026-06-21",
+    "2026-09-25", "2026-09-26", "2026-09-27",   # 中秋（周五~周日）
+    "2026-10-01", "2026-10-02", "2026-10-03", "2026-10-04",
+    "2026-10-05", "2026-10-06", "2026-10-07",   # 国庆
+    # 2027（元旦已确认）
+    "2027-01-01",
+}
+_A_SHARE_MAKEUP = {  # 周末补班（仍交易）
+    "2026-02-14", "2026-02-28", "2026-05-09", "2026-09-20", "2026-10-10",
+}
+
+
+def _is_trading_day(dt):
+    """判断某日历日是否为 A 股交易日：跳过周末与法定节假日；调休补班日仍交易。"""
+    s = dt.strftime("%Y-%m-%d")
+    if s in _A_SHARE_MAKEUP:
+        return True
+    if s in _A_SHARE_HOLIDAYS:
+        return False
+    return dt.weekday() < 5  # 0=周一 … 4=周五
 
 
 def _label_w(t):
@@ -1076,6 +1109,8 @@ def _interp(path, f):
 
 
 def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_paths=None, breadth_score=None):
+    bt = bt or {}            # 防御：未传回测时退化为空，避免 None.get 崩溃
+    bt_paths = bt_paths or {}
     closes = [k["close"] for k in klines]
     n = len(closes)
     tail = closes[-120:]
@@ -1380,6 +1415,9 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
         return _rets[f0] * (c0 - k) + _rets[c0] * (k - f0)
     _q50, _q05, _q95 = _q(0.5), _q(0.05), _q(0.95)
     _sd = (_q95 - _q50) / 1.645 if _q95 > _q50 else 0.0
+    # 与置信锥 σ 统一口径：经验分位带的离散度也按当前波动率 regime 调节（forward_vol 同款因子），
+    # 否则全历史分位带与 regime 调节后的锥带宽会互相矛盾（创业板此前偏差达 27%）。中位数漂移 _q50 不变。
+    _sd *= regime_factor(closes)
     def _medf(f):
         return last * math.exp(_q50 * f)
     def _bandf(f, z):
@@ -1441,11 +1479,12 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
     _last_dt = datetime.strptime(klines[-1]["date"], "%Y-%m-%d")
 
     def _fut(kk):
-        """从最后交易日往后推算 kk 个交易日对应的日历日期（跳过周末，忽略法定节假日）"""
+        """从最后交易日往后推算 kk 个交易日对应的日历日期（跳过周末与法定节假日，
+        保留调休补班日），避免把中秋/国庆等长假当天误算为交易日导致投影日期偏差。"""
         dt = _last_dt
         while kk > 0:
             dt += timedelta(days=1)
-            if dt.weekday() < 5:  # 0=周一 … 4=周五
+            if _is_trading_day(dt):
                 kk -= 1
         return dt.strftime("%Y-%m-%d")
 
@@ -1533,8 +1572,8 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
         f'结构存续概率(锥) ≈ <b>{_p_hold*100:.0f}%</b></div>'
     )
     note = (f"主路径失效位：现价有效跌破 ZD {zd:.0f}（收盘确认）→ 主路径失效、风险路径概率上升；风险路径确认需同时满足「跌破 ZD + 周线笔转向下」。\n"
-             f"红色阴影为基于<b>真实历史 {horizon} 日对数收益分布</b>推演的<b>经验分位扇形置信带</b>（P05–P95 外层 / P25–P75 内层）：与对称 ±σ 带不同，它直接由本指数历史兑现统计得出、天然包含 A 股肥尾与涨跌不对称，"
-             f"故上下带非对称——单边极端风险（如急跌）被如实反映，而非被对称假设低估。中线路径为「实测漂移中位」（并非手工情景路径），使置信带中线统计诚实；带宽随时间按 √t 扩张（随机游走特性），近月不确定性即已显著，并非线性外推的针状。\n"
+             f"红色阴影为基于<b>真实历史 {horizon} 日对数收益分布</b>推演、并<b>按当前波动率 regime 调节</b>的<b>经验分位扇形置信带</b>（P05–P95 外层 / P25–P75 内层）：与对称 ±σ 带不同，它直接由本指数历史兑现统计得出、天然包含 A 股肥尾与涨跌不对称，"
+             f"故上下带非对称——单边极端风险（如急跌）被如实反映，而非被对称假设低估；其离散度与上方置信锥 σ 采用<b>同一波动率调节因子</b>，二者口径一致、不会互相矛盾。中线路径为「实测漂移中位」（并非手工情景路径），使置信带中线统计诚实；带宽随时间按 √t 扩张（随机游走特性），近月不确定性即已显著，并非线性外推的针状。\n"
              f"本图为目的（分类框架）而非点位预测：缠论给出的是「不跌破 ZD 则结构延续、跌破则转弱」的条件应对，不是对具体价位的预测。\n"
              f"趋势外推（青色虚线，对最近 {min(horizon,90)} 日收盘做对数线性回归外推 {horizon} 日）是与结构路径相互独立的验证方法，"
              + (f"但其拟合优度极低（R²={_r2:.2f}），该独立验证参考性很弱、近乎噪声，不宜据此增减仓位；"
@@ -2273,6 +2312,22 @@ def main():
     _bear_cnt = sum(1 for s in data if results[s]["classify"]["scenario"] in SC_BEAR)
     _total = len(data)
     last_date = next(iter(data.values()))["meta"]["last_date"]
+    # 数据新鲜度护栏：推演完全基于截至 last_date 的行情，若严重滞后应醒目预警，
+    # 避免用户拿过期数据得出的预测当作当下结论（过期行情→结构/概率全失真）。
+    _last_d = datetime.strptime(last_date, "%Y-%m-%d").date()
+    _today = datetime.now().date()
+    _gap_days = (_today - _last_d).days
+    # 估算滞后交易日（统计 last_date 之后到今天之间的工作日，粗略，仅作预警阈值）
+    _gap_td = sum(1 for i in range(1, _gap_days + 1)
+                  if (_last_d + timedelta(days=i)).weekday() < 5)
+    if _gap_td > 2:
+        freshness_banner = (
+            f'<div class="disclaimer" style="border-color:#f0a0a0;background:#fff0f0;color:#a03030;'
+            f'border-radius:10px;padding:12px 18px;font-size:13px;line-height:1.8;margin:14px 0">'
+            f'⚠️ <b>数据滞后预警</b>：当前行情数据截至 <b>{last_date}</b>，已滞后约 <b>{_gap_td}</b> 个交易日。'
+            f'本报告的结构识别与推演概率均基于旧行情，结论可能已失真，请以最新行情重新生成后为准。</div>')
+    else:
+        freshness_banner = ""
     _breadth_bias = (_bull_cnt / _total - 0.5) * 2 * 8  # 全看多 +8 / 全看空 -8（0-100 置信度刻度）
     scores = {sym: (health_score(d["klines"], results[sym], results_week[sym]["classify"]),
                     forecast_confidence(results[sym], results_week[sym]["classify"], backtests[sym], breadth_bias=_breadth_bias))
@@ -2577,6 +2632,7 @@ def main():
     <h1>A股主要指数缠论结构分析报告</h1>
     <p>数据区间：2021-01-04 ~ {last_date} · 生成时间：{gen_time}<br>日线+周线+月线 · 前复权</p>
   </header>
+  {freshness_banner}
   <nav class="toc">
     <a href="#s1"><span class="num">一</span>决策总览</a>
     <a href="#s2"><span class="num">二</span>分指数图解</a>

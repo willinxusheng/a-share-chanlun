@@ -1078,13 +1078,7 @@ def forward_vol(closes, horizon=60, regime=True):
     var = sum((x - mean) ** 2 for x in rets) / len(rets)
     sigma = var ** 0.5
     if regime:
-        import statistics
-        daily = [math.log(closes[i + 1] / closes[i]) for i in range(len(closes) - 1)]
-        if len(daily) >= 40:
-            recent_sd = statistics.pstdev(daily[-20:])
-            long_sd = statistics.pstdev(daily[-min(len(daily), 250):])
-            if long_sd > 0:
-                sigma *= max(0.6, min(1.8, recent_sd / long_sd))
+        sigma *= regime_factor(closes)
     return sigma
 
 
@@ -1109,6 +1103,23 @@ def adaptive_horizon(bis, merged=None):
         durs = [abs(b["end"] - b["start"]) + 1 for b in bis[-8:]]
     avg = sum(durs) / len(durs)
     return max(30, min(90, round(avg * 1.6)))
+
+
+def regime_factor(closes):
+    """近期对数波动率相对长期水平的比值（截面调节因子，单一来源）。
+
+    震荡市(近期波动 < 长期) → 因子 <1，置信带宽收窄；趋势/动荡市(近期 > 长期) → 因子 >1，放宽。
+    置信锥 σ(forward_vol) 与经验分位带离散度(_sd) 必须共用同一因子，否则两张不确定性图
+    口径打架（创业板此前锥比经验带宽 27%、上证窄 11%）。夹逼 [0.6, 1.8] 防极端。"""
+    import statistics
+    daily = [math.log(closes[i + 1] / closes[i]) for i in range(len(closes) - 1)]
+    if len(daily) < 40:
+        return 1.0
+    recent_sd = statistics.pstdev(daily[-20:])
+    long_sd = statistics.pstdev(daily[-min(len(daily), 250):])
+    if long_sd <= 0:
+        return 1.0
+    return max(0.6, min(1.8, recent_sd / long_sd))
 
 
 def realized_vol_annualized(closes, periods=244):
