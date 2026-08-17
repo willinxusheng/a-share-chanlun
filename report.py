@@ -2428,18 +2428,47 @@ def build_quality_cert_html(base):
     warn_cls = "" if bias_ok else " warn"
     bias_cell = (f'<div class="qc-cell{warn_cls}"><div class="qc-v">{bias_val}%</div>'
                  f'<div class="qc-l">中线偏置(中位)</div></div>')
+    # R80 分 regime 覆盖块：暴露「全样本平均覆盖」掩盖的隐藏弱点(如熊市覆盖塌方)
+    regime_cov = c.get("regime_coverage", {})
+    regime_warn = c.get("regime_warn", False)
+    regime_note = c.get("regime_note", "")
+    _foot_regime = (f'🔍 <b>分regime告警</b>: {regime_note}<br>' if regime_note else "")
+    _rg_rows = ""
+    if regime_cov:
+        _rg_rows = ('<div class="qc-regime"><div class="qc-regime-h">'
+                    '📈 分市场环境覆盖（牛/熊/震荡，暴露平均掩盖的弱点）</div>')
+        for _rg, _lab in (("bull", "牛"), ("bear", "熊"), ("range", "震荡")):
+            _d = regime_cov.get(_rg, {})
+            _t8, _t30 = _d.get("T8", {}), _d.get("T30", {})
+            _c8, _c30 = _t8.get("cover95"), _t30.get("cover95")
+            _n8, _n30 = _t8.get("N", 0), _t30.get("N", 0)
+            _bad8 = (_c8 is not None and _c8 < 85)
+            _bad30 = (_c30 is not None and _c30 < 85)
+            _ins8 = (_n8 is not None and _n8 < 20)   # 样本不足(N<20): 覆盖率统计不可靠
+            _ins30 = (_n30 is not None and _n30 < 20)
+            _cls8 = " bad" if _bad8 else ""
+            _cls30 = " bad" if _bad30 else ""
+            _t8_txt = f'T+8 {_c8}% <i>(N={_n8})</i>' + (' ⚠️样本不足' if _ins8 else '')
+            _t30_txt = f'T+30 {_c30}% <i>(N={_n30})</i>' + (' ⚠️样本不足' if _ins30 else '')
+            _rg_rows += (f'<div class="qc-regime-row"><span class="qc-regime-lab">{_lab}</span>'
+                         f'<span class="qc-regime-cov{_cls8}">{_t8_txt}</span>'
+                         f'<span class="qc-regime-cov{_cls30}">{_t30_txt}</span></div>')
+        _rg_rows += '</div>'
     html = (
-        '<div class="qc-card">'
+        f'<div class="qc-card{" warn" if regime_warn else ""}">'
         f'<div class="qc-head">📊 预测质量自检证书'
+        f'{" ⚠️" if regime_warn else ""}'
         f'<span class="qc-sub">数据截至 {c.get("data_last_date")} · 生成 {c.get("generated_at")}</span></div>'
-        '<div class="qc-grid">'
+        + '<div class="qc-grid">'
         + cell("P05-P95 覆盖 T+8", t8, "cover95") + cell("P05-P95 覆盖 T+30", t30, "cover95")
         + cell("方向命中 T+8", t8, "dir_main") + cell("方向命中 T+30", t30, "dir_main")
         + cell("中线 MAE T+30", t30, "mae_med") + bias_cell
         + '</div>'
-        f'<div class="qc-foot">⚙️ <b>漂移监控</b>: {drift}<br>'
-        f'🧭 <b>情绪条件化</b>: {sent}<br>'
-        f'📌 <b>结论</b>: {acc}</div></div>'
+        + _rg_rows
+        + f'<div class="qc-foot">⚙️ <b>漂移监控</b>: {drift}<br>'
+        + f'🧭 <b>情绪条件化</b>: {sent}<br>'
+        + _foot_regime
+        + f'📌 <b>结论</b>: {acc}</div></div>'
     )
     return html
 
@@ -2739,6 +2768,14 @@ def main():
   .qc-cell.warn .qc-v {{ color: #b91c1c; }}
   .qc-l {{ font-size: 11px; color: #64748b; margin-top: 2px; }}
   .qc-foot {{ font-size: 12px; line-height: 1.7; color: #475569; margin-top: 10px; border-top: 1px dashed #c7d2fe; padding-top: 8px; }}
+  /* R80 分市场环境(regime)覆盖块：暴露全样本平均掩盖的弱点, 熊市塌方标红 */
+  .qc-regime {{ margin-top: 10px; border-top: 1px dashed #c7d2fe; padding-top: 8px; }}
+  .qc-regime-h {{ font-size: 12px; font-weight: 600; color: #4338ca; margin-bottom: 6px; }}
+  .qc-regime-row {{ display: flex; align-items: center; gap: 10px; font-size: 12px; padding: 3px 0; }}
+  .qc-regime-lab {{ flex: 0 0 40px; font-weight: 700; color: #334155; }}
+  .qc-regime-cov {{ flex: 1; color: #16a34a; font-variant-numeric: tabular-nums; }}
+  .qc-regime-cov.bad {{ color: #b91c1c; font-weight: 700; }}
+  .qc-regime-cov i {{ color: #94a3b8; font-style: normal; font-size: 11px; }}
   i.dot {{ display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }}
   h2.sec {{ font-size: 19px; margin: 26px 0 12px; padding-left: 12px; border-left: 4px solid {BLUE}; line-height: 1.3; }}
   nav.toc {{ position: sticky; top: 8px; z-index: 50; background: rgba(255,255,255,0.98); backdrop-filter: blur(8px); border: 1px solid #e2e8f0; border-radius: 999px; padding: 6px 10px; margin: 18px 0 24px; display: flex; flex-wrap: wrap; justify-content: center; gap: 4px; font-size: 13px; box-shadow: 0 4px 14px rgba(15,23,42,0.06); width: 100%; max-width: 100%; }}

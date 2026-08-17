@@ -27,10 +27,29 @@ import json
 import os
 import statistics
 
+import math
+
 from chanlun import analyze, adaptive_horizon
 from report import forecast_svg  # report.py 内含推演渲染核心
 
 BASE = os.path.dirname(os.path.abspath(__file__))
+
+
+def classify_regime(trunc, win=60, bull=0.10, bear=-0.10):
+    """按锚点前 win 交易日累计对数收益, 把市场环境分三档(无前视):
+       牛(bull) > +10% | 熊(bear) < -10% | 其余震荡(range)。
+       用于 R80 分 regime 覆盖分析, 暴露「全样本平均覆盖」掩盖的隐藏弱点。"""
+    if len(trunc) < win + 2:
+        return "range"
+    pre = trunc[-(win + 1):-1]  # anchor 之前的 win 根
+    cum = 0.0
+    for j in range(1, len(pre)):
+        cum += math.log(pre[j]["close"] / pre[j - 1]["close"])
+    if cum > bull:
+        return "bull"
+    if cum < bear:
+        return "bear"
+    return "range"
 H_TARGETS = (8, 30)
 ANCHOR_STEP = 15          # 锚点间隔(交易日)，越小样本越多越慢
 MIN_HISTORY = 800         # 截断后最少样本(满足 _WIN+horizon≈762)
@@ -57,6 +76,10 @@ def run():
     agg = {sym: {h: {"N": 0, "in95": 0, "in75": 0, "dir_main": 0, "dir_med": 0,
                      "mae_main": 0.0, "mae_med": 0.0, "bias_list": []} for h in H_TARGETS}
            for sym in symbols}
+    # R80 分 regime 覆盖分桶(牛/熊/震荡): 与 agg 同结构, 仅按市场环境切片
+    REGIMES = ("bull", "bear", "range")
+    regime_agg = {rg: {h: {"N": 0, "in95": 0, "in75": 0, "dir_main": 0, "dir_med": 0,
+                           "bias_list": []} for h in H_TARGETS} for rg in REGIMES}
     # 跨指数方向共识(R75): 每个锚点收集 5 指数主路径方向符号 + 真实方向符号, 事后投票
     cons = {h: [] for h in H_TARGETS}
     i = MIN_HISTORY
@@ -107,13 +130,26 @@ def run():
                 s["mae_main"] += abs(main_v - real)
                 s["mae_med"] += abs(med_v - real)
                 s["bias_list"].append((real - med_v) / med_v)
+                # R80: 按该 sym 自身市场环境分桶累加
+                rg = classify_regime(trunc)
+                rs = regime_agg[rg][H]
+                rs["N"] += 1
+                if p05 <= real <= p95:
+                    rs["in95"] += 1
+                if p25 <= real <= p75:
+                    rs["in75"] += 1
+                if ms * (real - last_a) > 0:
+                    rs["dir_main"] += 1
+                if (med_v - last_a) * (real - last_a) > 0:
+                    rs["dir_med"] += 1
+                rs["bias_list"].append((real - med_v) / med_v)
                 anchor[H]["m"].append(ms)
                 anchor[H]["r"].append(rs)
         if cons_ok and all(len(anchor[H]["m"]) >= 3 for H in H_TARGETS):
             for H in H_TARGETS:
                 cons[H].append((anchor[H]["m"], anchor[H]["r"]))
         i += ANCHOR_STEP
-    return data, agg, cons
+    return data, agg, cons, regime_agg
 
 
 def report(data, agg, cons):
@@ -219,5 +255,5 @@ def report(data, agg, cons):
 
 
 if __name__ == "__main__":
-    data, agg, cons = run()
+    data, agg, cons, regime_agg = run()
     report(data, agg, cons)
