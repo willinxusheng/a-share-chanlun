@@ -921,7 +921,7 @@ def echart_main(klines, r, sym, captured=None):
     xAxis: [
       {{ type: 'category', data: D.dates, gridIndex: 0, axisLabel: {{ show: false }} }},
       {{ type: 'category', data: D.dates, gridIndex: 1, axisLabel: {{ show: false }} }},
-      {{ type: 'category', data: D.dates, gridIndex: 2, axisLabel: {{ fontSize: 11, hideOverlap: true, showMinLabel: true,
+      {{ type: 'category', data: D.dates, gridIndex: 2, axisLabel: {{ fontSize: 11, margin: 6, hideOverlap: true, showMinLabel: true,
         interval: function(idx, val){{ if (idx === 0) return true; var c = D.dates[idx], p = D.dates[idx-1]; if (!c || !p) return true; if (c.slice(0,4) !== p.slice(0,4)) return true; var m = parseInt(c.slice(5,7),10); return (m % 3 === 1); }},
         formatter: (function(){{ var _py = null; return function(v, i){{ var d = (D.dates && D.dates[i]) ? D.dates[i] : v; if (!d || d.length < 7) return v; var y = d.slice(0,4); if (i === 0 || y !== _py) {{ _py = y; return y; }} return d.slice(5); }}; }})() }} }}
     ],
@@ -932,7 +932,7 @@ def echart_main(klines, r, sym, captured=None):
     ],
     dataZoom: [
       {{ type: 'inside', xAxisIndex: [0, 1, 2], start: 0, end: 100 }},
-      {{ type: 'slider', xAxisIndex: [0, 1, 2], start: 0, end: 100, showDetail: false, height: 16, bottom: 30, handleStyle: {{ color: '#2b6cb0' }}, borderColor: '#e2e8f0', fillerColor: 'rgba(43,108,176,0.12)' }}
+      {{ type: 'slider', xAxisIndex: [0, 1, 2], start: 0, end: 100, showDetail: false, height: 16, bottom: 12, handleStyle: {{ color: '#2b6cb0' }}, borderColor: '#e2e8f0', fillerColor: 'rgba(43,108,176,0.12)' }}
     ],
     series: [
       {{
@@ -1703,14 +1703,14 @@ def forecast_echart(sym, fc_data):
       }}
     }},
     legend: {{ data: ['历史','统计中位路径','结构演绎路径','次路径','风险路径','趋势外推','置信锥 P05–P95','置信锥 P25–P75'], top: 2, itemGap: 8, textStyle: {{ fontSize: 11 }} }},
-    grid: {{ left: 96, right: 64, top: 44, bottom: 86 }},
-    xAxis: {{ type: 'category', data: D.xcats, boundaryGap: false, name: '历史交易日 → 未来外推（年份已标注）', nameLocation: 'middle', nameGap: 30, nameTextStyle: {{ color: '#64748b', fontSize: 12 }}, axisLabel: {{ fontSize: 11, hideOverlap: true, showMinLabel: true, showMaxLabel: false,
+    grid: {{ left: 96, right: 64, top: 44, bottom: 80 }},
+    xAxis: {{ type: 'category', data: D.xcats, boundaryGap: false, axisLabel: {{ fontSize: 11, margin: 6, hideOverlap: true, showMinLabel: true, showMaxLabel: false,
         interval: function(idx, val){{ if (idx === 0) return true; var c = D.xfull[idx], p = D.xfull[idx-1]; if (!c || !p) return true; if (c.slice(0,4) !== p.slice(0,4)) return true; return (idx % 24 === 0); }},
         formatter: (function(){{ var _py = null; return function(v, i){{ var d = (D.xfull && D.xfull[i]) ? D.xfull[i] : v; if (!d || d.length < 7) return v; var y = d.slice(0,4); if (i === 0 || y !== _py) {{ _py = y; return y; }} return d.slice(5); }}; }})() }} }},
     yAxis: {{ scale: false, min: D.ymin_core, max: D.ymax_core, splitNumber: 6, axisLine: {{ lineStyle: {{ color: '#cbd5e1' }} }}, splitLine: {{ lineStyle: {{ color: '#eef2f7' }} }}, axisLabel: {{ fontSize: 12, hideOverlap: true }} }},
     dataZoom: [
       {{ type: 'inside', xAxisIndex: 0, start: 0, end: 100 }},
-      {{ type: 'slider', xAxisIndex: 0, start: 0, end: 100, showDetail: false, height: 16, bottom: 60, handleStyle: {{ color: '#2b6cb0' }}, borderColor: '#e2e8f0', fillerColor: 'rgba(43,108,176,0.12)' }}
+      {{ type: 'slider', xAxisIndex: 0, start: 0, end: 100, showDetail: false, height: 16, bottom: 32, handleStyle: {{ color: '#2b6cb0' }}, borderColor: '#e2e8f0', fillerColor: 'rgba(43,108,176,0.12)' }}
     ],
     series: [
       {{ name: '历史', type: 'line', data: D.hist, symbol: 'none', smooth: true, lineStyle: {{ color: '#2b6cb0', width: 1.8 }} }},
