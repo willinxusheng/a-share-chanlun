@@ -1838,14 +1838,21 @@ def sparkline(klines, color, w=150, h=34):
     return f'<svg viewBox="0 0 {w} {h}" width="{w}" height="{h}" xmlns="http://www.w3.org/2000/svg"><path d="{d}" fill="none" stroke="{color}" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round"/></svg>'
 
 
-def score_chip(score, label):
+def badge(text, color, icon=''):
+    """统一实心胶囊标签：白字 + 彩色背景"""
+    return f'<span class="badge" style="background:{color}">{icon}{text}</span>'
+
+
+def score_chip(score, label=''):
+    """健康度/置信度等数值评分胶囊"""
     if score >= 66:
         c = RED
     elif score >= 45:
         c = "#d97706"
     else:
         c = GREEN
-    return f'<span class="chip" style="background:{c}1a;color:{c};border:1px solid {c}55"><b>{score}</b> {label}</span>'
+    txt = f'{score}' if not label else f'{score} {label}'
+    return badge(txt, c)
 
 
 def prob_bar(pct, color):
@@ -1973,8 +1980,7 @@ def card_html(sym, name, klines, r, wcls, health, conf):
     _lbb = _stab.get("last_bi_bars", 0)
     _mat_txt = ("信号成熟" if _mat == "established" else "信号年轻·待确认")
     _mat_c = ("#18a058" if _mat == "established" else "#d97706")
-    _mat_chip = ('<span class="chip" style="background:%s1a;color:%s;border:1px solid %s55">'
-                 '%s · 末笔%d日</span>' % (_mat_c, _mat_c, _mat_c, _mat_txt, _lbb))
+    _mat_chip = badge(f'{_mat_txt} · 末笔{_lbb}日', _mat_c)
     return f"""
     <div class="card" id="card-{sym}" data-sym="{sym}" data-jump style="border-left:4px solid {sc_color};cursor:pointer">
       <div class="card-head"><span class="idx-name">{name}</span><span class="sym">{sym}</span></div>
@@ -2001,7 +2007,7 @@ def card_html(sym, name, klines, r, wcls, health, conf):
         <span style="color:{m_color2}">月 {_md}</span>
         <span style="color:#94a3b8">（{cls['scenario']}/{_wsc}/{_msc}）</span><br>
         <span style="color:{_res_color};font-weight:700">{_res}</span></b></div>
-      <div class="chips">{score_chip(health, "结构健康")}{score_chip(conf, "推演置信")}<span class="chip" style="background:#eef2f7;color:#475569;border:1px solid #e2e8f0">双法一致 {agree:.0f}%</span>{_mat_chip}</div>
+      <div class="chips">{score_chip(health, "结构健康")}{score_chip(conf, "推演置信")}{badge(f'双法一致 {agree:.0f}%', '#64748b')}{_mat_chip}</div>
     </div>"""
 
 
@@ -2039,9 +2045,9 @@ def levels_table(data, results, results_week, results_month, scores):
         sc_color = SCENARIO_COLOR.get(cls["scenario"], BLUE)
         w_color = SCENARIO_COLOR.get(wcls["scenario"], BLUE)
         if cls.get("last_bi_dir") == wcls.get("last_bi_dir"):
-            syn = '<span style="color:%s;font-weight:700">✓ 共振%s</span>' % (RED if cls["last_bi_dir"] == 1 else GREEN, "多" if cls["last_bi_dir"] == 1 else "空")
+            syn = badge(f'共振{"多" if cls["last_bi_dir"] == 1 else "空"}', RED if cls["last_bi_dir"] == 1 else GREEN, '✓ ')
         else:
-            syn = '<span style="color:#d97706;font-weight:700">⚠ 日强周弱背离</span>' if cls["last_bi_dir"] == 1 else '<span style="color:#d97706;font-weight:700">⚠ 日弱周强背离</span>'
+            syn = badge('日强周弱背离' if cls["last_bi_dir"] == 1 else '日弱周强背离', '#d97706', '⚠ ')
         if zs:
             d_zg = (close / zs["zg"] - 1) * 100
             d_zd = (close / zs["zd"] - 1) * 100
@@ -2051,12 +2057,12 @@ def levels_table(data, results, results_week, results_month, scores):
             zg_txt = zd_txt = "—"
         rows.append(f"""<tr data-sym="{sym}" class="linkrow" data-jump>
           <td><b>{d["name"]}</b></td>
-          <td style="color:{sc_color};font-weight:600">{cls["scenario"]}</td>
-          <td style="color:{w_color}">{wcls["scenario"]}</td>
-          <td style="color:{m_color}">{mcls["scenario"]}</td>
+          <td>{badge(cls["scenario"], sc_color)}</td>
+          <td>{badge(wcls["scenario"], w_color)}</td>
+          <td>{badge(mcls["scenario"], m_color)}</td>
           <td class="tac">{syn}</td>
           <td>{close:.2f}</td><td>{zg_txt}</td><td>{zd_txt}</td>
-          <td class="tac"><div style="display:flex;flex-direction:column;align-items:center;gap:4px">{score_chip(health, "")}{score_chip(conf, "")}</div></td>
+          <td class="tac"><div style="display:flex;flex-direction:column;align-items:center;gap:4px">{score_chip(health)}{score_chip(conf)}</div></td>
           <td class="strategy">{strategy_text(cls, zs)}</td>
         </tr>""")
     return """<table class="tbl">
@@ -2119,7 +2125,7 @@ def rr_table(data, results, recent_n=8):
               <td class="tac">{s["stop"]:.1f}</td>
               <td class="tac">{s["target"]:.1f}</td>
               <td class="tac" style="color:{_qc};font-weight:700">{_rr}</td>
-              <td class="tac" style="color:{_qc};font-weight:700">{_q}</td>
+              <td class="tac">{badge(_q, _qc)}</td>
               <td class="tac">{_vc}</td>
             </tr>""")
     return """<h3 class="fc-title" style="margin-top:22px">近期买卖点值博率（R:R）明细<span class="fc-sub">止损 / 目标 / 风险收益比 —— 缠论实战交易计划必备，此前报告完全缺失</span></h3>
@@ -2150,11 +2156,11 @@ def robustness_table(robust, data):
         if em and rm:
             diff_pt = (rm[0] - em[0]) * 100
             if diff_pt <= -15:
-                verdict = '<span style="color:#d97706;font-weight:700">近两年显著衰减⚠ 校准或存过拟合</span>'
+                verdict = badge('近两年显著衰减 · 校准或存过拟合', '#d97706', '⚠ ')
             elif diff_pt >= -5:
-                verdict = '<span style="color:#18a058;font-weight:700">样本外稳定✓</span>'
+                verdict = badge('样本外稳定', GREEN, '✓ ')
             else:
-                verdict = '<span style="color:#64748b">轻微衰减</span>'
+                verdict = badge('轻微衰减', '#64748b')
             diff_txt = "%+.0fpt" % diff_pt
         else:
             verdict, diff_txt = "—", "—"
@@ -2190,24 +2196,24 @@ def forecast_summary_table(data, results, results_week, results_month, forecast_
         cls = r["classify"]
         sc_color = SCENARIO_COLOR.get(cls["scenario"], BLUE)
         if cls.get("last_bi_dir") == wcls.get("last_bi_dir"):
-            syn = '<span style="color:%s;font-weight:700">共振%s</span>' % (RED if cls["last_bi_dir"] == 1 else GREEN, "多" if cls["last_bi_dir"] == 1 else "空")
+            syn = badge(f'共振{"多" if cls["last_bi_dir"] == 1 else "空"}', RED if cls["last_bi_dir"] == 1 else GREEN, '✓ ')
         else:
-            syn = '<span style="color:#d97706;font-weight:700">日强周弱背离</span>' if cls["last_bi_dir"] == 1 else '<span style="color:#d97706;font-weight:700">日弱周强背离</span>'
+            syn = badge('日强周弱背离' if cls["last_bi_dir"] == 1 else '日弱周强背离', '#d97706', '⚠ ')
         _lv = fi.get("level", "稳健")
         _lv_c = {"稳健": GREEN, "边缘": "#d97706", "敏感·待确认": RED}.get(_lv, GREEN)
         stab = _lv
         stab_c = _lv_c
         rows.append(f"""<tr data-sym="{sym}" class="linkrow" data-jump>
           <td><b>{d["name"]}</b></td>
-          <td style="color:{sc_color};font-weight:600">{cls["scenario"]}</td>
-          <td style="color:{m_color}">{mcls["scenario"]}</td>
+          <td>{badge(cls["scenario"], sc_color)}</td>
+          <td>{badge(mcls["scenario"], m_color)}</td>
           <td class="tac">{syn}</td>
           <td class="tac"><b style="color:{RED}">{fi["p_main"]*100:.0f}%</b>{prob_bar(fi["p_main"], RED)}</td>
-          <td class="tac">{fi["p_alt"]*100:.0f}%{prob_bar(fi["p_alt"], "#64748b")}</td>
+          <td class="tac"><b style="color:#64748b">{fi["p_alt"]*100:.0f}%</b>{prob_bar(fi["p_alt"], "#64748b")}</td>
           <td class="tac"><b style="color:{GREEN}">{fi["p_risk"]*100:.0f}%</b>{prob_bar(fi["p_risk"], GREEN)}</td>
           <td class="tac"><b style="color:{BLUE}">{fi["p_hold"]*100:.0f}%</b>{prob_bar(fi["p_hold"], BLUE)}</td>
           <td class="tac">{fi["zd"]:.0f}</td>
-          <td class="tac" style="color:{stab_c};font-weight:600">{stab}</td>
+          <td class="tac">{badge(stab, stab_c)}</td>
         </tr>""")
     return f"""<table class="tbl">
       <colgroup><col style="width:90px"><col style="width:calc((100% - 90px)/9)"><col style="width:calc((100% - 90px)/9)"><col style="width:calc((100% - 90px)/9)"><col style="width:calc((100% - 90px)/9)"><col style="width:calc((100% - 90px)/9)"><col style="width:calc((100% - 90px)/9)"><col style="width:calc((100% - 90px)/9)"><col style="width:calc((100% - 90px)/9)"><col style="width:calc((100% - 90px)/9)"></colgroup>
@@ -2357,7 +2363,7 @@ def main():
                    else "日周级别共振，主路径置信度较高。")
         sections.append(f"""
     <section class="panel" id="sec-{sym}">
-      <h2>{d["name"]}（{sym}）<span class="badge" style="background:{sc_color}">日线：{cls["scenario"]}</span><span class="badge" style="background:{w_color}">周线：{wcls["scenario"]}</span><span class="badge" style="background:{m_color}">月线：{mcls["scenario"]}</span><span class="chip" style="background:{RED}1a;color:{RED}">健康 {health}</span><span class="chip" style="background:{BLUE}1a;color:{BLUE}">置信 {conf}</span></h2>
+      <h2>{d["name"]}（{sym}）{badge(f'日线：{cls["scenario"]}', sc_color)}{badge(f'周线：{wcls["scenario"]}', w_color)}{badge(f'月线：{mcls["scenario"]}', m_color)}{badge(f'健康 {health}', RED)}{badge(f'置信 {conf}', BLUE)}</h2>
       <div class="chartbox">
         {echart_main(d["klines"], r, sym, r["captured"])}
       </div>
@@ -2454,7 +2460,7 @@ def main():
   .kv b {{ color: {INK}; }}
   .panel {{ background: #fff; border: 1px solid #e5e9f0; border-radius: 10px; padding: 16px 18px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(15,23,42,.04); }}
   .panel h2 {{ font-size: 18px; margin-bottom: 10px; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }}
-  .badge {{ font-size: 12px; color: #fff; padding: 2px 10px; border-radius: 999px; font-weight: 600; }}
+  .badge {{ font-size: 12px; color: #fff; padding: 2px 10px; border-radius: 999px; font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums; vertical-align: middle; }}
   .verdict {{ background: #f0f6ff; border-left: 4px solid {BLUE}; padding: 10px 14px; margin-top: 12px; font-size: 14px; border-radius: 0 6px 6px 0; }}
   .verdict p {{ margin-top: 4px; color: #475569; line-height: 1.7; }}
   .tbl {{ width: 100%; border-collapse: collapse; font-size: 13px; background: #fff; table-layout: fixed; }}
