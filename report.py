@@ -600,6 +600,303 @@ def chart_svg(klines, r, sym, captured=None):
     return "".join(p)
 
 
+# ================= ECharts 主图（参考斐波那契项目，解决放大失真） =================
+def echart_main(klines, r, sym, captured=None):
+    """用 ECharts 绘制缠论主图（价格+成交量+MACD），缩放后仍清晰细腻。"""
+    dates = [k["date"] for k in klines]
+    # ECharts 蜡烛图数据格式为 [open, close, low, high]
+    ohlc = [[round(k["open"], 2), round(k["close"], 2), round(k["low"], 2), round(k["high"], 2)] for k in klines]
+    volumes = [k["volume"] for k in klines]
+    closes = [k["close"] for k in klines]
+    n = len(klines)
+    merged, bis, zss = r["merged"], r["bis"], r["zhongshu"]
+    dif, dea, hist = r["dif"], r["dea"], r["hist"]
+
+    def ma_series(arr, p):
+        out = [None] * len(arr)
+        for i in range(len(arr)):
+            if i + 1 >= p:
+                out[i] = sum(arr[i + 1 - p:i + 1]) / p
+        return out
+
+    ma20 = [round(v, 3) if v is not None else None for v in ma_series(closes, 20)]
+    ma60 = [round(v, 3) if v is not None else None for v in ma_series(closes, 60)]
+    ma250 = [round(v, 3) if v is not None else None for v in ma_series(closes, 250)]
+
+    date_idx = {d: i for i, d in enumerate(dates)}
+
+    # 中枢 markArea（最近8个）
+    mark_areas = []
+    for zs in zss[-8:]:
+        x0 = merged[zs["start"]]["idx_start"]
+        x1 = merged[zs["end"]]["idx_end"]
+        if x1 < x0:
+            x0, x1 = x1, x0
+        mark_areas.append([
+            {"xAxis": dates[x0], "yAxis": round(zs["zg"], 2),
+             "itemStyle": {"color": "rgba(43,108,176,0.10)"},
+             "label": {"show": False}},
+            {"xAxis": dates[x1], "yAxis": round(zs["zd"], 2)}
+        ])
+
+    # 最后中枢 ZG/ZD 金色虚线
+    last_zs_lines = []
+    if zss:
+        zs = zss[-1]
+        for val, lab in [(zs["zg"], "ZG"), (zs["zd"], "ZD")]:
+            last_zs_lines.append({
+                "yAxis": round(val, 2),
+                "lineStyle": {"type": "dashed", "color": GOLD, "width": 1.2},
+                "label": {"formatter": f"{lab} {val:.0f}", "position": "insideEndTop", "color": GOLD, "fontSize": 11, "align": "right"}
+            })
+
+    # 跳空缺口 markArea
+    _close = closes[-1]
+    gap_areas = []
+    for g in sorted(
+        [g for g in r.get("gaps", []) if not g["filled"] and abs((g["top"] + g["bottom"]) / 2 / _close - 1) <= 0.15],
+        key=lambda x: x["idx"]
+    )[-5:]:
+        col = RED if g["type"] == "up" else GREEN
+        gap_areas.append([
+            {"xAxis": dates[g["idx"]], "yAxis": round(g["top"], 2),
+             "itemStyle": {"color": f"{col}12"},
+             "label": {"formatter": ("▲缺" if g["type"] == "up" else "▼缺") + g["date"][5:], "color": col, "fontSize": 9, "position": "insideEndTop", "align": "right"}},
+            {"xAxis": dates[-1], "yAxis": round(g["bottom"], 2)}
+        ])
+
+    # 斐波那契回调位
+    fib_lines = []
+    if len(bis) >= 2:
+        leg = bis[-2]
+        base_hi, base_lo = (leg["end_price"], leg["start_price"]) if leg["dir"] == 1 else (leg["start_price"], leg["end_price"])
+        swing = base_hi - base_lo
+        x0 = dates[merged[leg["end"]]["idx_end"]]
+        for f, lab in ((0.0, "F0"), (0.382, "F38"), (0.5, "F50"), (0.618, "F62")):
+            pv = base_hi - swing * f if leg["dir"] == 1 else base_lo + swing * f
+            fib_lines.append({
+                "xAxis": x0, "yAxis": round(pv, 2),
+                "lineStyle": {"type": "dashed", "color": "#7c3aed", "width": 0.8},
+                "label": {"formatter": f"{lab} {pv:.0f}", "color": "#7c3aed", "fontSize": 10, "position": "insideEndTop", "align": "right"}
+            })
+
+    # 买卖点 markPoint
+    cutoff = n - 500
+    sig_points = []
+    last_x_by_dir = {1: -999, -1: -999}
+    for s in r["signals"]:
+        b = bis[s["bi_index"]]
+        xi = merged[b["end"]]["idx_end"]
+        if xi < cutoff:
+            continue
+        d = s["dir"]
+        if xi - last_x_by_dir[d] < 55:
+            continue
+        last_x_by_dir[d] = xi
+        price = round(klines[xi]["high"], 2) if d == 1 else round(klines[xi]["low"], 2)
+        _marker = ""
+        if s.get("bc_type") == "趋势背驰":
+            _marker += "·趋"
+        elif s.get("bc_type") == "盘整背驰":
+            _marker += "·盘"
+        if s.get("vol_confirm"):
+            _marker += "·量"
+        lbl = s["kind"][:3] + _marker
+        sig_points.append({
+            "coord": [dates[xi], price],
+            "value": lbl,
+            "itemStyle": {"color": RED if d == 1 else GREEN},
+            "symbol": "triangle" if d == 1 else "invertedTriangle",
+            "symbolSize": 10,
+            "label": {"show": True, "position": "top" if d == 1 else "bottom", "color": RED if d == 1 else GREEN, "fontSize": 11, "fontWeight": "bold", "distance": 4}
+        })
+
+    # 背驰 markPoint
+    bc_points = []
+    _bc_cut = n - 500
+    _last_x_bc = {1: -999, -1: -999}
+    for bc in r.get("beichi", []):
+        bi = bc["bi_index"]
+        if bi < 0 or bi >= len(bis):
+            continue
+        b = bis[bi]
+        xi = merged[b["end"]]["idx_end"]
+        if xi < _bc_cut:
+            continue
+        d = 1 if bc["type"] == "top" else -1
+        if xi - _last_x_bc[d] < 40:
+            continue
+        _last_x_bc[d] = xi
+        bc_points.append({
+            "coord": [dates[xi], round(b["end_price"], 2)],
+            "value": "顶背驰" if d == 1 else "底背驰",
+            "itemStyle": {"color": RED if d == 1 else GREEN},
+            "symbol": "pin",
+            "symbolSize": 11,
+            "label": {"show": True, "position": "top" if d == 1 else "bottom", "color": RED if d == 1 else GREEN, "fontSize": 10, "fontWeight": "bold"}
+        })
+
+    # 线段结构 markLine
+    seg_lines = []
+    segments = r.get("segments", [])
+    if len(segments) >= 2:
+        seg_pts = []
+        for sg in segments:
+            s0 = merged[sg["start"]]["idx_start"]
+            e0 = merged[sg["end"]]["idx_end"]
+            if e0 < s0:
+                s0, e0 = e0, s0
+            if sg["dir"] == 1:
+                idx = max(range(s0, e0 + 1), key=lambda i: klines[i]["high"])
+                pv = klines[idx]["high"]
+            else:
+                idx = min(range(s0, e0 + 1), key=lambda i: klines[i]["low"])
+                pv = klines[idx]["low"]
+            seg_pts.append((idx, pv, sg["dir"]))
+        recent = seg_pts[-14:]
+        for i in range(len(recent) - 1):
+            idx0, v0, _ = recent[i]
+            idx1, v1, _ = recent[i + 1]
+            seg_lines.append([
+                {"coord": [dates[idx0], round(v0, 2)], "lineStyle": {"color": "#334155", "width": 1.5, "type": "dashed", "opacity": 0.5}},
+                {"coord": [dates[idx1], round(v1, 2)]}
+            ])
+
+    # 已知历史拐点
+    cap_points = []
+    if captured is not None:
+        _cap_labels = {c[0] for c in captured}
+        for _pd, (_lab, _dir) in KNOWN_PIVOTS.items():
+            _bi, _bd = 0, 1e9
+            for _i, _k in enumerate(klines):
+                _dd = abs(_date_diff(_k["date"], _pd))
+                if _dd < _bd:
+                    _bd, _bi = _dd, _i
+            _is_cap = _lab in _cap_labels
+            _pcol = GOLD if _is_cap else "#94a3b8"
+            cap_points.append({
+                "coord": [dates[_bi], round(klines[_bi]["close"], 2)],
+                "value": "✓" if _is_cap else "◇",
+                "itemStyle": {"color": _pcol},
+                "symbol": "diamond",
+                "symbolSize": 8,
+                "label": {"show": True, "color": _pcol, "fontSize": 11, "fontWeight": "bold"}
+            })
+
+    # y 轴范围
+    _kMin = min(k["low"] for k in klines)
+    _kMax = max(k["high"] for k in klines)
+    _yMin, _yMax = _kMin, _kMax
+    if zss:
+        _yMin = min(_yMin, min(zs["zd"] for zs in zss[-3:]))
+        _yMax = max(_yMax, max(zs["zg"] for zs in zss[-3:]))
+    for g in r.get("gaps", []):
+        if not g["filled"]:
+            _yMin = min(_yMin, g["bottom"])
+            _yMax = max(_yMax, g["top"])
+    _pad = (_yMax - _yMin) * 0.04
+    _yMin = math.floor((_yMin - _pad) / 10) * 10
+    _yMax = math.ceil((_yMax + _pad) / 10) * 10
+
+    vmax = max(volumes) or 1
+    hmax = max(abs(v) for v in hist) or 1
+
+    chart_data = {
+        "dates": dates,
+        "ohlc": ohlc,
+        "volume": volumes,
+        "ma20": ma20,
+        "ma60": ma60,
+        "ma250": ma250,
+        "dif": dif,
+        "dea": dea,
+        "hist": hist,
+        "yMin": round(_yMin, 2),
+        "yMax": round(_yMax, 2),
+        "vmax": vmax,
+        "hmax": round(hmax, 3),
+        "markAreas": mark_areas,
+        "lastZsLines": last_zs_lines,
+        "gapAreas": gap_areas,
+        "fibLines": fib_lines,
+        "sigPoints": sig_points,
+        "bcPoints": bc_points,
+        "segLines": seg_lines,
+        "capPoints": cap_points,
+    }
+
+    cid = f"echart-{sym}"
+    return f"""<div class="echart-toolbar">🔍 滚轮/拖拽缩放 · 拖动底部滑块平移 · 悬停看 OHLC/量能</div>
+<div id="{cid}" class="echart-main" style="width:100%;height:640px;"></div>
+<script>
+(function(){{
+  var D = {json.dumps(chart_data, ensure_ascii=False)};
+  var chart = echarts.init(document.getElementById('{cid}'));
+  var option = {{
+    animation: false,
+    tooltip: {{
+      trigger: 'axis',
+      axisPointer: {{ type: 'cross', label: {{ show: false }} }},
+      formatter: function(params){{
+        var k = params[0];
+        if(!k) return '';
+        var i = k.dataIndex;
+        var d = D.dates[i];
+        var o = D.ohlc[i][0], c = D.ohlc[i][1], l = D.ohlc[i][2], h = D.ohlc[i][3];
+        var prev = D.ohlc[i-1] ? D.ohlc[i-1][1] : o;
+        var chg = (c / prev - 1) * 100;
+        var col = chg >= 0 ? '#e54545' : '#18a058';
+        return '<b>' + d + '</b><br>开 ' + o.toFixed(2) + ' 收 ' + c.toFixed(2) + '<br>高 ' + h.toFixed(2) + ' 低 ' + l.toFixed(2) + '<br>涨跌 <span style="color:' + col + '">' + (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%</span><br>成交量 ' + (D.volume[i]/1e8).toFixed(2) + ' 亿手';
+      }}
+    }},
+    legend: {{ data: ['日K', 'MA20', 'MA60', 'MA250', '成交量', 'MACD', 'DIF', 'DEA'], top: 0, textStyle: {{ fontSize: 12 }} }},
+    grid: [
+      {{ left: 72, right: 56, top: 44, bottom: '40%' }},
+      {{ left: 72, right: 56, top: '62%', height: '11%' }},
+      {{ left: 72, right: 56, top: '76%', bottom: 44 }}
+    ],
+    xAxis: [
+      {{ type: 'category', data: D.dates, gridIndex: 0, axisLabel: {{ show: false }} }},
+      {{ type: 'category', data: D.dates, gridIndex: 1, axisLabel: {{ show: false }} }},
+      {{ type: 'category', data: D.dates, gridIndex: 2, axisLabel: {{ fontSize: 11 }} }}
+    ],
+    yAxis: [
+      {{ scale: false, min: D.yMin, max: D.yMax, gridIndex: 0, axisLabel: {{ fontSize: 12 }} }},
+      {{ scale: true, gridIndex: 1, splitNumber: 2, axisLabel: {{ show: false }} }},
+      {{ scale: true, gridIndex: 2, min: -D.hmax, max: D.hmax, splitNumber: 2, axisLabel: {{ fontSize: 11 }} }}
+    ],
+    dataZoom: [
+      {{ type: 'inside', xAxisIndex: [0, 1, 2], start: 0, end: 100 }},
+      {{ type: 'slider', xAxisIndex: [0, 1, 2], start: 0, end: 100, showDetail: false, height: 16, bottom: 8, handleStyle: {{ color: '#2b6cb0' }}, borderColor: '#e2e8f0', fillerColor: 'rgba(43,108,176,0.12)' }}
+    ],
+    series: [
+      {{
+        name: '日K', type: 'candlestick', data: D.ohlc,
+        itemStyle: {{ color: '#e54545', color0: '#18a058', borderColor: '#e54545', borderColor0: '#18a058' }},
+        markArea: {{ data: D.markAreas.concat(D.gapAreas), silent: true }},
+        markLine: {{ symbol: 'none', data: D.lastZsLines.concat(D.fibLines).concat(D.segLines), silent: false, labelLayout: {{ hideOverlap: true }} }},
+        markPoint: {{ data: D.sigPoints.concat(D.bcPoints).concat(D.capPoints), labelLayout: {{ hideOverlap: true }} }}
+      }},
+      {{ name: 'MA20', type: 'line', data: D.ma20, symbol: 'none', lineStyle: {{ color: '#0ea5e9', width: 1.1 }} }},
+      {{ name: 'MA60', type: 'line', data: D.ma60, symbol: 'none', lineStyle: {{ color: '#a855f7', width: 1.2 }} }},
+      {{ name: 'MA250', type: 'line', data: D.ma250, symbol: 'none', lineStyle: {{ color: '#0d9488', width: 1.2 }} }},
+      {{
+        name: '成交量', type: 'bar', xAxisIndex: 1, yAxisIndex: 1, data: D.volume,
+        itemStyle: {{ color: function(p){{ var c = D.ohlc[p.dataIndex]; return c[1] >= c[0] ? '#e54545' : '#18a058'; }} }}
+      }},
+      {{
+        name: 'MACD', type: 'bar', xAxisIndex: 2, yAxisIndex: 2, data: D.hist,
+        itemStyle: {{ color: function(p){{ return p.value >= 0 ? '#e54545' : '#18a058'; }} }}
+      }},
+      {{ name: 'DIF', type: 'line', xAxisIndex: 2, yAxisIndex: 2, data: D.dif, symbol: 'none', lineStyle: {{ color: '#2b6cb0', width: 1 }} }},
+      {{ name: 'DEA', type: 'line', xAxisIndex: 2, yAxisIndex: 2, data: D.dea, symbol: 'none', lineStyle: {{ color: '#d97706', width: 1 }} }}
+    ]
+  }};
+  chart.setOption(option);
+}})();
+</script>"""
+
+
 # ================= 区间导航条（缩略图 + 可拖窗口） =================
 NAV_H = 24
 
@@ -1489,7 +1786,7 @@ def levels_table(data, results, results_week, results_month, scores):
         </tr>""")
     return """<table class="tbl">
       <colgroup><col style="width:90px"><col style="width:calc((100%% - 90px)/9)"><col style="width:calc((100%% - 90px)/9)"><col style="width:calc((100%% - 90px)/9)"><col style="width:calc((100%% - 90px)/9)"><col style="width:calc((100%% - 90px)/9)"><col style="width:calc((100%% - 90px)/9)"><col style="width:calc((100%% - 90px)/9)"><col style="width:calc((100%% - 90px)/9)"><col style="width:calc((100%% - 90px)/9)"></colgroup>
-      <thead><tr><th>指数</th><th>日线分类</th><th>周线分类</th><th>月线背景</th><th>级别联立</th><th>现价</th><th>压力 ZG（距离）</th><th>支撑 ZD（距离）</th><th>健康度 / 置信度</th><th>应对策略</th></tr></thead>
+      <thead><tr><th>指数</th><th>日线分类</th><th>周线分类</th><th>月线背景</th><th class="tac">级别联立</th><th>现价</th><th>压力 ZG（距离）</th><th>支撑 ZD（距离）</th><th class="tac">健康度 / 置信度</th><th>应对策略</th></tr></thead>
       <tbody>%s</tbody></table>""" % "".join(rows)
 
 
@@ -1521,8 +1818,8 @@ def backtest_table(backtests):
             tds.append(f'<td class="tac">{st["n"]} 次 · 胜率 <b>{wr:.0f}%</b> · 均 <span style="color:{c}">{ar:+.1f}%</span></td>')
         rows.append("<tr>" + "".join(tds) + "</tr>")
     return """<table class="tbl">
-      <colgroup><col style="width:110px"><col style="width:22.5%%"><col style="width:22.5%%"><col style="width:22.5%%"><col style="width:22.5%%"></colgroup>
-      <thead><tr><th>信号类型</th><th>后 5 个交易日</th><th>后 10 个交易日</th><th>后 20 个交易日</th><th>后 60 个交易日</th></tr></thead>
+      <colgroup><col style="width:110px"><col style="width:calc((100%% - 110px)/4)"><col style="width:calc((100%% - 110px)/4)"><col style="width:calc((100%% - 110px)/4)"><col style="width:calc((100%% - 110px)/4)"></colgroup>
+      <thead><tr><th>信号类型</th><th class="tac">后 5 个交易日</th><th class="tac">后 10 个交易日</th><th class="tac">后 20 个交易日</th><th class="tac">后 60 个交易日</th></tr></thead>
       <tbody>%s</tbody></table>
       <p style="font-size:12px;color:#64748b;margin-top:8px">统计 5 大指数 2021-01 至今全部信号（买点胜=之后涨，卖点胜=之后跌）。买卖点按缠论标准：一类=背驰拐点，二类=次低/次高折返，三类=回抽不进中枢。样本有限，历史特征，非投资建议。</p>""" % "".join(rows)
 
@@ -1553,7 +1850,7 @@ def rr_table(data, results, recent_n=8):
     return """<h3 class="fc-title" style="margin-top:22px">近期买卖点值博率（R:R）明细<span class="fc-sub">止损 / 目标 / 风险收益比 —— 缠论实战交易计划必备，此前报告完全缺失</span></h3>
       <table class="tbl">
       <colgroup><col style="width:110px"><col style="width:calc((100%% - 110px)/8)"><col style="width:calc((100%% - 110px)/8)"><col style="width:calc((100%% - 110px)/8)"><col style="width:calc((100%% - 110px)/8)"><col style="width:calc((100%% - 110px)/8)"><col style="width:calc((100%% - 110px)/8)"><col style="width:calc((100%% - 110px)/8)"><col style="width:calc((100%% - 110px)/8)"></colgroup>
-      <thead><tr><th>指数</th><th>买卖点</th><th>日期</th><th>触发价</th><th>止损位</th><th>目标位</th><th>R:R</th><th>值博率</th><th>量✓</th></tr></thead>
+      <thead><tr><th>指数</th><th>买卖点</th><th>日期</th><th class="tac">触发价</th><th class="tac">止损位</th><th class="tac">目标位</th><th class="tac">R:R</th><th class="tac">值博率</th><th class="tac">量✓</th></tr></thead>
       <tbody>%s</tbody></table>
       <p style="font-size:12px;color:#64748b;margin-top:8px">R:R = (目标−触发) / (触发−止损)；值博率：优(RR≥2.5)/良(≥1.5)/中(≥1.0)/差(&lt;1)。止损取局部前低或中枢下沿 ZD，目标取近程摆动极值并封顶 6 倍防失真。结构参考，非交易建议。</p>""" % "".join(rows)
 
@@ -1600,7 +1897,7 @@ def robustness_table(robust, data):
         </tr>""")
     _tbl = """<table class="tbl">
       <colgroup><col style="width:140px"><col style="width:calc((100%% - 140px)/5)"><col style="width:calc((100%% - 140px)/5)"><col style="width:calc((100%% - 140px)/5)"><col style="width:calc((100%% - 140px)/5)"><col style="width:calc((100%% - 140px)/5)"></colgroup>
-      <thead><tr><th>指数</th><th>早年买方信号胜率(均收益) h=20</th><th>近两年买方信号胜率(均收益) h=20</th><th>变化</th><th>滚动窗口衰减*</th><th>样本外稳健性</th></tr></thead>
+      <thead><tr><th>指数</th><th class="tac">早年买方信号胜率(均收益) h=20</th><th class="tac">近两年买方信号胜率(均收益) h=20</th><th class="tac">变化</th><th class="tac">滚动窗口衰减*</th><th>样本外稳健性</th></tr></thead>
       <tbody>%s</tbody></table>
       <p style="font-size:12px;color:#64748b;margin-top:8px">按 {SPLIT} 切分「早年 / 近两年」买方信号（一类买·三类买，持有 20 日）胜率与均收益对比。近两年显著下滑(≥15pt)提示过拟合风险；持平/更高则样本外稳定。*「滚动窗口衰减」=多个切分点(2022/2023/2024)聚合的两年 vs 早年胜率差均值，比单一切分更稳，刻画样本外稳健性。不构成投资建议。</p>""".replace("{SPLIT}", split)
     return _tbl % "".join(rows)
@@ -1639,7 +1936,7 @@ def forecast_summary_table(data, results, results_week, results_month, forecast_
         </tr>""")
     return f"""<table class="tbl">
       <colgroup><col style="width:90px"><col style="width:calc((100% - 90px)/9)"><col style="width:calc((100% - 90px)/9)"><col style="width:calc((100% - 90px)/9)"><col style="width:calc((100% - 90px)/9)"><col style="width:calc((100% - 90px)/9)"><col style="width:calc((100% - 90px)/9)"><col style="width:calc((100% - 90px)/9)"><col style="width:calc((100% - 90px)/9)"><col style="width:calc((100% - 90px)/9)"></colgroup>
-      <thead><tr><th>指数</th><th>日线分类</th><th>月线背景</th><th>级别联立</th><th>主路径概率</th><th>次路径概率</th><th>风险概率</th><th>结构存续(锥)</th><th>失效位 ZD</th><th>结论稳定性</th></tr></thead>
+      <thead><tr><th>指数</th><th>日线分类</th><th>月线背景</th><th class="tac">级别联立</th><th class="tac">主路径概率</th><th class="tac">次路径概率</th><th class="tac">风险概率</th><th class="tac">结构存续(锥)</th><th class="tac">失效位 ZD</th><th class="tac">结论稳定性</th></tr></thead>
       <tbody>{"".join(rows)}</tbody></table>
       <p style="font-size:12px;color:#64748b;margin-top:8px">概率为「级别共振+置信度+回测胜率」启发式估算，主/次/风险已归一(合计100%)，结构存续(锥)为独立参照不计入。稳健度三级：<b style="color:{GREEN}">稳健</b>=极性趋势 20 日内不变；<b style="color:#d97706">边缘</b>=趋势守住但末笔年轻；<b style="color:{RED}">敏感·待确认</b>=极性翻转、已下调主路径概率。末笔仅~7根K线者宜轻仓等周线确认。</p>"""
 
@@ -1747,7 +2044,6 @@ def main():
 
     cards, sections, conclusions = [], [], []
     forecast_info = {}
-    kl_blob = {}
     paths_bt = {}
     for sym, d in data.items():
         r = results[sym]
@@ -1783,18 +2079,11 @@ def main():
         div_txt = ('⚠️ 周线向下笔运行中，以上路径的兑现以周线底分型确认为前提；若周线续创新低，风险路径概率上升。'
                    if cls.get("last_bi_dir") != wcls.get("last_bi_dir")
                    else "日周级别共振，主路径置信度较高。")
-        # 悬浮提示数据
-        kl_blob[sym] = [[k["date"], round(k["open"], 2), round(k["close"], 2),
-                         round(k["high"], 2), round(k["low"], 2), round(k["volume"] / 1e8, 3)]
-                        for k in d["klines"]]
         sections.append(f"""
     <section class="panel" id="sec-{sym}">
       <h2>{d["name"]}（{sym}）<span class="badge" style="background:{sc_color}">日线：{cls["scenario"]}</span><span class="badge" style="background:{w_color}">周线：{wcls["scenario"]}</span><span class="badge" style="background:{m_color}">月线：{mcls["scenario"]}</span><span class="chip" style="background:{RED}1a;color:{RED}">健康 {health}</span><span class="chip" style="background:{BLUE}1a;color:{BLUE}">置信 {conf}</span></h2>
       <div class="chartbox">
-        <div class="toolbar">🔍 拖导航条缩放/平移·双击复位　|　悬停看 OHLC/量能　|　图例：◆✓拐点 ▼▲背驰 ■缺口·MACD，详见底部「术语与方法论速查」</div>
-        {chart_svg(d["klines"], r, sym, r["captured"])}
-        <div class="xh-tip" id="tip-{sym}"></div>
-        {navigator_svg(d["klines"], sym)}
+        {echart_main(d["klines"], r, sym, r["captured"])}
       </div>
       <div class="verdict"><b>结构解读：</b><p>{cls["detail"]}</p>
       <p style="margin-top:4px"><b>周线级别：</b>{wcls["detail"]}</p></div>
@@ -1867,6 +2156,7 @@ def main():
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>A股缠论结构分析报告 · 2021-2026</title>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
 <style>
   * {{ box-sizing: border-box; margin: 0; padding: 0; }}
   body {{ font-family: "Microsoft YaHei", "PingFang SC", "Hiragino Sans GB", sans-serif; background: #f5f7fa; color: {INK}; padding: 24px; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }}
@@ -1917,6 +2207,7 @@ def main():
   .qbody {{ font-size: 12px; color: #64748b; }}
   .qhead {{ font-size: 13px; color: #334155; }}
   .chartbox {{ border: 1px solid #eef2f7; border-radius: 8px; overflow: hidden; position: relative; }}
+  .echart-toolbar {{ display: flex; align-items: center; gap: 10px; padding: 8px 12px; font-size: 13px; color: #475569; background: #f8fafc; border-bottom: 1px solid #eef2f7; }}
   .toolbar {{ display: flex; align-items: center; gap: 10px; padding: 8px 12px; font-size: 13px; color: #475569; background: #f8fafc; border-bottom: 1px solid #eef2f7; }}
   .fc-title {{ font-size: 15px; margin: 18px 0 8px; display: flex; align-items: baseline; gap: 10px; }}
   .fc-sub {{ font-size: 12px; color: {GRAY}; font-weight: 400; }}
@@ -2087,10 +2378,7 @@ def main():
   </div>
 </div>
 <script>
-var KL_DATA = {json.dumps(kl_blob, ensure_ascii=False)};
 var FC_DATA = {json.dumps(fc_blob, ensure_ascii=False)};
-{NAV_JS}
-{"".join(f'initNav("{sym}",{W},{CHART_TOTAL});' for sym in data)}
 function initForecast(sym){{
   var svg=document.getElementById('forecast-'+sym);
   if(!svg) return;
@@ -2158,55 +2446,6 @@ function initForecast(sym){{
   svg.addEventListener('touchmove',function(e){{move(e);}},{{passive:true}});
   svg.addEventListener('touchend',leave);
 }}
-function initTip(sym){{
-  var svg=document.getElementById('main-'+sym);
-  var tip=document.getElementById('tip-'+sym);
-  var box=svg.closest('.chartbox');
-  var PAD_L=12, PAD_R=78, PLOT_W={W-PAD_L-PAD_R}, PAD_T={PAD_T}, PH={H_PRICE};
-  var lo=+svg.getAttribute('data-lo'), span=+svg.getAttribute('data-span');
-  var KL=KL_DATA[sym];
-  var n=KL.length;
-  var cx=document.getElementById('cx-'+sym);
-  var cy=document.getElementById('cy-'+sym);
-  var pr=document.getElementById('pr-'+sym);
-  var prt=document.getElementById('prt-'+sym);
-  function move(ev){{
-    var ce=ev.touches?ev.touches[0]:ev;
-    if(!ce) return;
-    var pt=svg.createSVGPoint(); pt.x=ce.clientX; pt.y=ce.clientY;
-    var loc=pt.matrixTransform(svg.getScreenCTM().inverse());
-    var s=+svg.getAttribute('data-s'), e=+svg.getAttribute('data-e');
-    var a=1/(e-s), b=(PAD_L*(e-s-1)-PLOT_W*s)/(e-s);
-    var xo=(loc.x-b)/a;   // 反算回原始 viewBox x
-    var frac=(xo-PAD_L)/PLOT_W;
-    if(frac<0||frac>1){{ tip.style.display='none'; cx.setAttribute('opacity','0'); cy.setAttribute('opacity','0'); pr.setAttribute('opacity','0'); return; }}
-    var idx=Math.round(frac*(n-1)); idx=Math.max(0,Math.min(n-1,idx));
-    var k=KL[idx], prev=KL[idx-1]||k;
-    var chg=(k[2]/prev[2]-1)*100;
-    var cc=chg>=0?'#f87171':'#4ade80';
-    tip.innerHTML='<b>'+k[0]+'</b><br>开 '+k[1]+'　收 '+k[2]+'<br>高 '+k[3]+'　低 '+k[4]+'<br>涨跌 <span style="color:'+cc+'">'+(chg>=0?'+':'')+chg.toFixed(2)+'%</span><br>成交量 '+k[5]+' 亿手';
-    tip.style.display='block';
-    var rect=box.getBoundingClientRect();
-    var x=ev.clientX-rect.left+14, y=ev.clientY-rect.top+14;
-    if(x+tip.offsetWidth>rect.width) x=rect.width-tip.offsetWidth-6;
-    if(y+tip.offsetHeight>rect.height) y=rect.height-tip.offsetHeight-6;
-    tip.style.left=x+'px'; tip.style.top=y+'px';
-    // 竖线（按光标 viewBox x）+ 横线（按光标 viewBox y）+ 右侧价格读数
-    cx.setAttribute('x1',loc.x); cx.setAttribute('x2',loc.x); cx.setAttribute('opacity','0.5');
-    cy.setAttribute('y1',loc.y); cy.setAttribute('y2',loc.y); cy.setAttribute('opacity','0.5');
-    if(loc.y>=PAD_T && loc.y<=PAD_T+PH){{
-      var price=lo+(1-(loc.y-PAD_T)/PH)*span;
-      prt.textContent=price.toFixed(2);
-      pr.setAttribute('transform','translate(0,'+loc.y+')'); pr.setAttribute('opacity','1');
-    }} else {{ pr.setAttribute('opacity','0'); }}
-  }}
-  function leave(){{ tip.style.display='none'; cx.setAttribute('opacity','0'); cy.setAttribute('opacity','0'); pr.setAttribute('opacity','0'); }}
-  svg.addEventListener('mousemove',move);
-  svg.addEventListener('mouseleave',leave);
-  svg.addEventListener('touchmove',function(e){{move(e);}},{{passive:true}});
-  svg.addEventListener('touchend',leave);
-}}
-{"".join(f'initTip("{sym}");' for sym in data)}
 {"".join(f'initForecast("{sym}");' for sym in data)}
 (function(){{
   var links = document.querySelectorAll('nav.toc a');
