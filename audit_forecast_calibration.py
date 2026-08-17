@@ -9,7 +9,8 @@ audit_forecast_calibration.py  —  缠论推演「预测数据准确性」滚�
   - P05-P95 覆盖率：名义 90%；实测越高=带越宽(安全侧)，越低=漏覆盖(风险)。
   - P25-P75 覆盖率：名义 50%（经验分位内层）。
   - 主路径/中线 方向准确率：>50% 即优于抛硬币。
-  - 中线系统性偏误：mean((realized-med)/med)；>0=系统保守(低估)，<0=系统激进(高估)。
+  - 中线系统性偏误(稳健中位口径)：median((realized-med)/med)；>0=系统保守(低估)，<0=系统激进(高估)。
+    用中位而非均值——A股右偏肥尾会使均值口径虚高(看似偏高偏置)，中位口径如实反映中心校准。
 
 实现要点（避免前视偏差）：
   - forecast_svg 的带与路径几何只依赖传入的 klines + analyze(r)，与 bt/breadth 概率校准无关；
@@ -24,6 +25,7 @@ audit_forecast_calibration.py  —  缠论推演「预测数据准确性」滚�
 """
 import json
 import os
+import statistics
 
 from chanlun import analyze, adaptive_horizon
 from report import forecast_svg  # report.py 内含推演渲染核心
@@ -53,7 +55,7 @@ def run():
         kl = sorted(d["klines"], key=lambda k: k["date"])
         n = len(kl)
         rec = {h: {"N": 0, "in95": 0, "in75": 0, "dir_main": 0, "dir_med": 0,
-                   "mae_main": 0.0, "mae_med": 0.0, "bias_med": 0.0} for h in H_TARGETS}
+                   "mae_main": 0.0, "mae_med": 0.0, "bias_list": []} for h in H_TARGETS}
         i = MIN_HISTORY
         while i < n - 35:
             trunc = kl[:i + 1]
@@ -91,7 +93,7 @@ def run():
                     s["dir_med"] += 1
                 s["mae_main"] += abs(main_v - real)
                 s["mae_med"] += abs(med_v - real)
-                s["bias_med"] += (real - med_v) / med_v
+                s["bias_list"].append((real - med_v) / med_v)
             i += ANCHOR_STEP
         agg[sym] = rec
     return data, agg
@@ -106,7 +108,7 @@ def report(data, agg):
     print(hdr)
     print("-" * 96)
     tot = {h: {"N": 0, "in95": 0, "in75": 0, "dir_main": 0, "dir_med": 0,
-               "mae_main": 0.0, "mae_med": 0.0, "bias_med": 0.0} for h in H_TARGETS}
+               "mae_main": 0.0, "mae_med": 0.0, "bias_list": []} for h in H_TARGETS}
     for sym, d in data.items():
         nm = d.get("name", sym)
         for H in H_TARGETS:
@@ -120,14 +122,14 @@ def report(data, agg):
             dmed = s["dir_med"] / s["N"] * 100
             maem = s["mae_main"] / s["N"]
             maemed = s["mae_med"] / s["N"]
-            bias = s["bias_med"] / s["N"] * 100
+            bias = statistics.median(s["bias_list"]) * 100
             print(f"{nm:<12}{'T+'+str(H):>5}{s['N']:>6}{c95:>13.1f}%{c75:>13.1f}%"
                   f"{dm:>11.1f}%{dmed:>9.1f}%{maem:>11.1f}{maemed:>10.1f}{bias:>9.1f}%")
             for k in ("N", "in95", "in75", "dir_main", "dir_med"):
                 tot[H][k] += s[k]
             tot[H]["mae_main"] += s["mae_main"]
             tot[H]["mae_med"] += s["mae_med"]
-            tot[H]["bias_med"] += s["bias_med"]
+            tot[H]["bias_list"].extend(s["bias_list"])
     print("-" * 96)
     print("合计(五指数加权平均):")
     for H in H_TARGETS:
@@ -140,12 +142,21 @@ def report(data, agg):
         dmed = s["dir_med"] / s["N"] * 100
         maem = s["mae_main"] / s["N"]
         maemed = s["mae_med"] / s["N"]
-        bias = s["bias_med"] / s["N"] * 100
+        bias = statistics.median(s["bias_list"]) * 100
         print(f"{'全部':<12}{'T+'+str(H):>5}{s['N']:>6}{c95:>13.1f}%{c75:>13.1f}%"
               f"{dm:>11.1f}%{dmed:>9.1f}%{maem:>11.1f}{maemed:>10.1f}{bias:>9.1f}%")
     print("=" * 96)
+    # 偏置监控(#预测精度·R74)：中线系统性偏置(稳健中位口径)超阈值即告警(可据需升级为硬门禁)。
+    # 注：用「中位」而非「均值」口径——A股右偏肥尾会使均值口径虚高(看似偏高), 中位口径如实反映中心校准。
+    BIAS_WARN = 5.0
+    worst_bias = max((statistics.median(tot[H]["bias_list"]) * 100) for H in H_TARGETS if tot[H]["bias_list"])
+    if abs(worst_bias) > BIAS_WARN:
+        print("⚠️ 偏置告警: 全样本中线系统性偏置 %.1f%% 超阈值 ±%.1f%% —— 需检查置信带中心口径" % (worst_bias, BIAS_WARN))
+    else:
+        print("✅ 偏置监控: 全样本中线偏置 %.1f%% 在 ±%.1f%% 阈值内(中心校准良好)" % (worst_bias, BIAS_WARN))
+    print("=" * 96)
     print("解读: P05-P95 名义90%覆盖(实测≥此=偏保守安全); P25-P75 名义50%; 方向>50%优于抛硬币; "
-          "中线偏误>0=系统保守(低估), <0=系统激进(高估)")
+          "中线偏误(稳健中位口径)>0=系统保守(低估), <0=系统激进(高估); 均值口径因右偏肥尾会虚高, 故用中位口径。")
 
 
 if __name__ == "__main__":

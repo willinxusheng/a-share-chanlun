@@ -2538,6 +2538,17 @@ def main():
     历史统计上此类组合意味着日线上涨是周线调整中的反弹结构，<b>仓位与预期应低于"日周共振多头"的情形</b>；
     只有周线笔重新转向上（周线底分型确认），日线多头延续的置信度才会提高。</p>"""
 
+    # 预测校准脚注(#预测精度·R74)：把 R72 滚动样本外回测的实证校准结果作为常驻透明提示，
+    # 避免用户把"主路径"误当方向信号——看板真正的价值在风险带(置信区间)，不在方向赌注。
+    calib_note = (
+        "<p style='margin-top:10px;color:#475569;font-size:13px;line-height:1.85;background:#f8fafc;"
+        "padding:10px 12px;border-left:3px solid #0891b2;border-radius:4px'>"
+        "<b>📐 预测校准参考（walk-forward 样本外回测，五指数·180 锚点，可复跑 audit_forecast_calibration.py）：</b><br>"
+        "• <b>风险带（置信区间）准确且偏保守</b>：P05–P95 实测覆盖 ≈95%（名义 90%），真实罩住后来走势；<br>"
+        "• <b>方向性技能较弱</b>：主路径方向命中 T+8≈43%、T+30≈53%（接近抛硬币）——<b>主路径不是可靠方向信号，切勿据此满仓押方向</b>；<br>"
+        "• <b>中线中心校准良好</b>：稳健中位口径实测偏置≈0.9%（此前均值口径显示的 +2.8% 为右偏肥尾造成的指标假偏置，非中心真偏）；<br>"
+        "• <b>用法</b>：用带宽管理波动/止损，用「跌破 ZD 即主路径失效」做条件应对，方向仅作参考。</p>")
+
     # 全局可信度指标（用于一句话结论）
     avg_cap = sum(results[s]["capture_rate"] for s in data) / len(data) * 100
     avg_agree2 = avg_agree
@@ -2746,6 +2757,7 @@ def main():
     <h3 class="fc-title">各指数推演结论</h3>
     <ul>{"".join(conclusions)}</ul>
     {diverge_note}
+    {calib_note}
   </div>
 
   <h2 class="sec" id="s4">四、信号回测与走势对比</h2>
