@@ -661,7 +661,7 @@ def echart_main(klines, r, sym, captured=None):
         gap_areas.append([
             {"xAxis": dates[g["idx"]], "yAxis": round(g["top"], 2),
              "itemStyle": {"color": f"{col}12"},
-             "label": {"formatter": ("▲缺" if g["type"] == "up" else "▼缺") + g["date"][5:], "color": col, "fontSize": 9, "position": "insideEndTop", "align": "right"}},
+             "label": {"formatter": ("▲缺" if g["type"] == "up" else "▼缺") + g["date"][5:], "color": col, "fontSize": 9, "position": "insideTopLeft", "align": "left"}},
             {"xAxis": dates[-1], "yAxis": round(g["bottom"], 2)}
         ])
 
@@ -849,7 +849,7 @@ def echart_main(klines, r, sym, captured=None):
         return '<b>' + d + '</b><br>开 ' + o.toFixed(2) + ' 收 ' + c.toFixed(2) + '<br>高 ' + h.toFixed(2) + ' 低 ' + l.toFixed(2) + '<br>涨跌 <span style="color:' + col + '">' + (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%</span><br>成交量 ' + (D.volume[i]/1e8).toFixed(2) + ' 亿手';
       }}
     }},
-    legend: {{ data: ['日K', 'MA20', 'MA60', 'MA250', '成交量', 'MACD', 'DIF', 'DEA'], top: 0, textStyle: {{ fontSize: 12 }} }},
+    legend: {{ data: ['日K', 'MA20', 'MA60', 'MA250', '成交量', 'MACD', 'DIF', 'DEA'], top: 2, itemGap: 12, textStyle: {{ fontSize: 12 }} }},
     grid: [
       {{ left: 72, right: 56, top: 44, bottom: '40%' }},
       {{ left: 72, right: 56, top: '62%', height: '11%' }},
@@ -858,10 +858,10 @@ def echart_main(klines, r, sym, captured=None):
     xAxis: [
       {{ type: 'category', data: D.dates, gridIndex: 0, axisLabel: {{ show: false }} }},
       {{ type: 'category', data: D.dates, gridIndex: 1, axisLabel: {{ show: false }} }},
-      {{ type: 'category', data: D.dates, gridIndex: 2, axisLabel: {{ fontSize: 11 }} }}
+      {{ type: 'category', data: D.dates, gridIndex: 2, axisLabel: {{ fontSize: 11, hideOverlap: true, formatter: function(v){{ return v && v.length >= 10 ? v.slice(5) : v; }} }} }}
     ],
     yAxis: [
-      {{ scale: false, min: D.yMin, max: D.yMax, gridIndex: 0, axisLabel: {{ fontSize: 12 }} }},
+      {{ scale: false, min: D.yMin, max: D.yMax, gridIndex: 0, splitNumber: 6, axisLabel: {{ fontSize: 12, hideOverlap: true }} }},
       {{ scale: true, gridIndex: 1, splitNumber: 2, axisLabel: {{ show: false }} }},
       {{ scale: true, gridIndex: 2, min: -D.hmax, max: D.hmax, splitNumber: 2, axisLabel: {{ fontSize: 11 }} }}
     ],
@@ -874,8 +874,8 @@ def echart_main(klines, r, sym, captured=None):
         name: '日K', type: 'candlestick', data: D.ohlc,
         itemStyle: {{ color: '#e54545', color0: '#18a058', borderColor: '#e54545', borderColor0: '#18a058' }},
         markArea: {{ data: D.markAreas.concat(D.gapAreas), silent: true }},
-        markLine: {{ symbol: 'none', data: D.lastZsLines.concat(D.fibLines).concat(D.segLines), silent: false, labelLayout: {{ hideOverlap: true }} }},
-        markPoint: {{ data: D.sigPoints.concat(D.bcPoints).concat(D.capPoints), labelLayout: {{ hideOverlap: true }} }}
+        markLine: {{ symbol: 'none', data: D.lastZsLines.concat(D.fibLines).concat(D.segLines), silent: false, labelLayout: {{ moveOverlap: 'shiftY' }} }},
+        markPoint: {{ data: D.sigPoints.concat(D.bcPoints).concat(D.capPoints), labelLayout: {{ moveOverlap: 'shiftY' }} }}
       }},
       {{ name: 'MA20', type: 'line', data: D.ma20, symbol: 'none', lineStyle: {{ color: '#0ea5e9', width: 1.1 }} }},
       {{ name: 'MA60', type: 'line', data: D.ma60, symbol: 'none', lineStyle: {{ color: '#a855f7', width: 1.2 }} }},
