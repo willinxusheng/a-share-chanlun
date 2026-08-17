@@ -916,12 +916,14 @@ def echart_main(klines, r, sym, captured=None):
     grid: [
       {{ left: 96, right: 56, top: 48, bottom: '40%' }},
       {{ left: 96, right: 56, top: '62%', height: '11%' }},
-      {{ left: 96, right: 56, top: '76%', bottom: 44 }}
+      {{ left: 96, right: 56, top: '76%', bottom: 56 }}
     ],
     xAxis: [
       {{ type: 'category', data: D.dates, gridIndex: 0, axisLabel: {{ show: false }} }},
       {{ type: 'category', data: D.dates, gridIndex: 1, axisLabel: {{ show: false }} }},
-      {{ type: 'category', data: D.dates, gridIndex: 2, axisLabel: {{ fontSize: 11, hideOverlap: true, formatter: function(v){{ return v && v.length >= 10 ? v.slice(5) : v; }} }} }}
+      {{ type: 'category', data: D.dates, gridIndex: 2, axisLabel: {{ fontSize: 11, hideOverlap: true, showMinLabel: true,
+        interval: function(idx, val){{ if (idx === 0) return true; var c = D.dates[idx], p = D.dates[idx-1]; if (!c || !p) return true; if (c.slice(0,4) !== p.slice(0,4)) return true; var m = parseInt(c.slice(5,7),10); return (m % 3 === 1); }},
+        formatter: (function(){{ var _py = null; return function(v, i){{ var d = (D.dates && D.dates[i]) ? D.dates[i] : v; if (!d || d.length < 7) return v; var y = d.slice(0,4); if (i === 0 || y !== _py) {{ _py = y; return y; }} return d.slice(5); }}; }})() }} }}
     ],
     yAxis: [
       {{ scale: false, min: D.yMin, max: D.yMax, gridIndex: 0, splitNumber: 6, name: '价格(元)', nameLocation: 'middle', nameGap: 64, nameTextStyle: {{ color: '#64748b', fontSize: 12, fontWeight: 600 }}, axisLine: {{ lineStyle: {{ color: '#cbd5e1' }} }}, splitLine: {{ lineStyle: {{ color: '#eef2f7' }} }}, axisLabel: {{ fontSize: 12, hideOverlap: true }} }},
@@ -1582,6 +1584,7 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
                "trend": round(trend_end, 2), "trend_agree": trend_agree, "trend_r2": round(_r2, 3),
                "sigma": round(sigma, 4), "horizon": horizon, "lo": round(lo, 4), "span": round(span, 4),
                "med_term": round(_medf(1.0), 2), "q50": round(_q50, 4), "q_sd": round(_sd, 4),
+               "hist_dates": [_hd[i] for i in range(len(tail))],
                "gap_refs": [{"type": g["type"], "top": round(g["top"], 2), "bottom": round(g["bottom"], 2), "date": g["date"]} for g in _gap_refs]}
     return forecast_echart(sym, fc_data), note, (p_main, p_alt, p_risk), legend_html, fc_data
 
@@ -1596,6 +1599,7 @@ def forecast_echart(sym, fc_data):
     x_hist = [h[0] for h in hist]
     x_proj = [p["date"][-5:] for p in proj]   # "YY-MM-DD" -> "MM-DD"
     xcats = x_hist + x_proj
+    x_full = list(fc_data.get("hist_dates", [])) + [p["date"] for p in proj]
     n_hist = len(hist)
     n_proj = len(proj)
     hist_s = [h[1] for h in hist] + [None] * n_proj
@@ -1650,7 +1654,7 @@ def forecast_echart(sym, fc_data):
 
     fdata = {
         "keyLevelsText": key_levels_text,
-        "xcats": xcats, "hist": hist_s, "main": main_s, "alt": alt_s, "risk": risk_s, "trend": trend_s,
+        "xcats": xcats, "xfull": x_full, "hist": hist_s, "main": main_s, "alt": alt_s, "risk": risk_s, "trend": trend_s,
         "lo": round(lo, 2), "ymax": ymax,
         "hlines": hlines, "vline": vline, "endPoints": end_points,
         "med": med_s, "f95l": f95l, "f95h": f95h, "f75l": f75l, "f75h": f75h,
@@ -1688,8 +1692,10 @@ def forecast_echart(sym, fc_data):
       }}
     }},
     legend: {{ data: ['历史','统计中位路径','结构演绎路径','次路径','风险路径','趋势外推','置信锥 P05–P95','置信锥 P25–P75'], top: 2, itemGap: 8, textStyle: {{ fontSize: 11 }} }},
-    grid: {{ left: 96, right: 64, top: 44, bottom: 74 }},
-    xAxis: {{ type: 'category', data: D.xcats, boundaryGap: false, name: '交易日（含未来外推）', nameLocation: 'middle', nameGap: 30, nameTextStyle: {{ color: '#64748b', fontSize: 12 }}, axisLabel: {{ fontSize: 11, hideOverlap: true }} }},
+    grid: {{ left: 96, right: 64, top: 44, bottom: 86 }},
+    xAxis: {{ type: 'category', data: D.xcats, boundaryGap: false, name: '历史交易日 → 未来外推（年份已标注）', nameLocation: 'middle', nameGap: 30, nameTextStyle: {{ color: '#64748b', fontSize: 12 }}, axisLabel: {{ fontSize: 11, hideOverlap: true, showMinLabel: true,
+        interval: function(idx, val){{ if (idx === 0) return true; var c = D.xfull[idx], p = D.xfull[idx-1]; if (!c || !p) return true; if (c.slice(0,4) !== p.slice(0,4)) return true; return (idx % 24 === 0); }},
+        formatter: (function(){{ var _py = null; return function(v, i){{ var d = (D.xfull && D.xfull[i]) ? D.xfull[i] : v; if (!d || d.length < 7) return v; var y = d.slice(0,4); if (i === 0 || y !== _py) {{ _py = y; return y; }} return d.slice(5); }}; }})() }} }},
     yAxis: {{ scale: false, min: D.lo, max: D.ymax, splitNumber: 6, name: '价格(元)', nameLocation: 'middle', nameGap: 60, nameTextStyle: {{ color: '#64748b', fontSize: 12, fontWeight: 600 }}, axisLine: {{ lineStyle: {{ color: '#cbd5e1' }} }}, splitLine: {{ lineStyle: {{ color: '#eef2f7' }} }}, axisLabel: {{ fontSize: 12, hideOverlap: true }} }},
     dataZoom: [
       {{ type: 'inside', xAxisIndex: 0, start: 0, end: 100 }},
