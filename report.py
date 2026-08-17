@@ -2367,6 +2367,33 @@ def data_quality_strip(data, results):
 
 
 # ================= 年度收益表 =================
+def load_live_sentiment():
+    """读取 H5 情绪看板 live 情绪分(同机绝对路径; 可用环境变量 SENTIMENT_V2_PATH 覆盖)。
+    不可用时(如 CI 无该文件)优雅降级为 None —— 不影响预测管线, 仅用于 R76 极端区透明化提示。
+    注: 仅做提示, 不进入任何预测数学(预测数学由门禁 R76 严格管控, 当前未达并入阈值)。"""
+    try:
+        import os as _os
+        p = _os.environ.get("SENTIMENT_V2_PATH") or \
+            r"C:\Users\Administrator\WorkBuddy\2026-08-01-12-23-48\sentiment\sentiment_v2.json"
+        if not _os.path.exists(p):
+            return None
+        d = json.load(open(p, encoding="utf-8"))
+        score = float(d.get("score"))
+        buy_th = float(d.get("buy_th", 20))
+        sell_th = float(d.get("sell_th", 85))
+        asof = d.get("asof")
+        if score <= buy_th:
+            zone, label = "fear", "恐惧"
+        elif score >= sell_th:
+            zone, label = "greed", "贪婪"
+        else:
+            zone, label = "neutral", "中性"
+        return {"score": score, "zone": zone, "label": label,
+                "buy_th": buy_th, "sell_th": sell_th, "asof": asof}
+    except Exception:
+        return None
+
+
 def main():
     _base = os.path.dirname(os.path.abspath(__file__))
     with open(os.path.join(_base, "data.json"), encoding="utf-8") as f:
@@ -2540,6 +2567,19 @@ def main():
 
     # 预测校准脚注(#预测精度·R74)：把 R72 滚动样本外回测的实证校准结果作为常驻透明提示，
     # 避免用户把"主路径"误当方向信号——看板真正的价值在风险带(置信区间)，不在方向赌注。
+    # R76: 情绪极端区提示(读取 live 情绪分; 不可用时 sent=None, sentiment_note 为空)。
+    sent = load_live_sentiment()
+    if sent and sent["zone"] != "neutral":
+        zlabel = sent["label"]
+        sentiment_note = (
+            "<p style='margin-top:10px;color:#9a3412;font-size:13px;line-height:1.85;background:#fff7ed;"
+            "padding:10px 12px;border-left:3px solid #ea580c;border-radius:4px'>"
+            f"<b>⚠️ 情绪极端区提示（R76 回测证据）：</b>当前市场情绪处于<b>极端{zlabel}</b>区"
+            f"（情绪分 {sent['score']:.1f}，阈值 {sent['buy_th']:.0f}/{sent['sell_th']:.0f}，asof {sent['asof']}）。"
+            "历史回测显示此类区制下斐波那契主路径方向有<b>系统性偏置</b>——T+30 极端区基线命中仅 31%、"
+            "翻转逆向后达 69%；主路径方向在此类拐点区<b>仅供参考，请以风险带/反转应对为准，勿直接押方向</b>。</p>")
+    else:
+        sentiment_note = ""
     calib_note = (
         "<p style='margin-top:10px;color:#475569;font-size:13px;line-height:1.85;background:#f8fafc;"
         "padding:10px 12px;border-left:3px solid #0891b2;border-radius:4px'>"
@@ -2548,6 +2588,10 @@ def main():
         "• <b>方向性技能较弱</b>：主路径方向命中 T+8≈43%、T+30≈53%（接近抛硬币）——<b>主路径不是可靠方向信号，切勿据此满仓押方向</b>；<br>"
         "• <b>中线中心校准良好</b>：稳健中位口径实测偏置≈0.9%（此前均值口径显示的 +2.8% 为右偏肥尾造成的指标假偏置，非中心真偏）；<br>"
         "• <b>跨指数方向共识无效</b>：5 指数主路径方向投票在 T+8 反而更差（-2.2pp）、T+30 仅边际改善（+5.6pp，≈噪声）——方向偏差为系统性（同模型同 regime），聚合无法分散误差，故看板不提供「共识方向」信号；<br>"
+        "• <b>情绪条件化（R76 第九道门禁，监控中未并入）</b>：回测显示斐波那契主路径在情绪极端区有系统性方向偏置——"
+        "T+30 全样本条件化 +9.4pp（近期样本外 +8.9pp，稳定）、极端区基线 31%→翻转后 69%；但 T+8 近期样本外仅 +2.2pp（短期增益不稳定），"
+        "且极端区近期样本仅 10 个（不足 20 阈值）→ <b>暂未并入预测数学，仅做监控+本提示</b>。注：纯情绪逆向信号本身无效（T+8 命中 26.7%，比抛硬币差），"
+        "增益来自「纠正斐波那契在拐点的方向偏置」，非情绪预测涨跌；<br>"
         "• <b>用法</b>：用带宽管理波动/止损，用「跌破 ZD 即主路径失效」做条件应对，方向仅作参考。</p>")
 
     # 全局可信度指标（用于一句话结论）
@@ -2759,6 +2803,7 @@ def main():
     <ul>{"".join(conclusions)}</ul>
     {diverge_note}
     {calib_note}
+    {sentiment_note}
   </div>
 
   <h2 class="sec" id="s4">四、信号回测与走势对比</h2>
