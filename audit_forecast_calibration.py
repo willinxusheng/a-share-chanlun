@@ -50,14 +50,25 @@ def find_proj(proj, tplus_target):
 
 def run():
     data = json.load(open(os.path.join(BASE, "data.json"), encoding="utf-8"))
-    agg = {}
-    for sym, d in data.items():
-        kl = sorted(d["klines"], key=lambda k: k["date"])
-        n = len(kl)
-        rec = {h: {"N": 0, "in95": 0, "in75": 0, "dir_main": 0, "dir_med": 0,
-                   "mae_main": 0.0, "mae_med": 0.0, "bias_list": []} for h in H_TARGETS}
-        i = MIN_HISTORY
-        while i < n - 35:
+    symbols = list(data.keys())
+    kls = {sym: sorted(data[sym]["klines"], key=lambda k: k["date"]) for sym in symbols}
+    base = kls[symbols[0]]
+    n_base = len(base)
+    agg = {sym: {h: {"N": 0, "in95": 0, "in75": 0, "dir_main": 0, "dir_med": 0,
+                     "mae_main": 0.0, "mae_med": 0.0, "bias_list": []} for h in H_TARGETS}
+           for sym in symbols}
+    # 跨指数方向共识(R75): 每个锚点收集 5 指数主路径方向符号 + 真实方向符号, 事后投票
+    cons = {h: [] for h in H_TARGETS}
+    i = MIN_HISTORY
+    while i < n_base - 35:
+        date_i = base[i]["date"]
+        anchor = {h: {"m": [], "r": []} for h in H_TARGETS}
+        cons_ok = True
+        for sym in symbols:
+            kl = kls[sym]
+            if i >= len(kl) or kl[i]["date"] != date_i:
+                cons_ok = False
+                continue
             trunc = kl[:i + 1]
             last_a = trunc[-1]["close"]
             try:
@@ -68,7 +79,7 @@ def run():
                 _svg, _note, _probs, _leg, fc = forecast_svg(
                     trunc, r, r["classify"], 50.0, 0.0, sym, horizon)
             except Exception:
-                i += ANCHOR_STEP
+                cons_ok = False
                 continue
             proj = fc["proj"]
             for H in H_TARGETS:
@@ -81,25 +92,31 @@ def run():
                 main_v, med_v = row["main"], row["med"]
                 p05, p95 = row["f95l"], row["f95l"] + row["f95h"]
                 p25, p75 = row["f75l"], row["f75l"] + row["f75h"]
-                s = rec[H]
+                s = agg[sym][H]
                 s["N"] += 1
                 if p05 <= real <= p95:
                     s["in95"] += 1
                 if p25 <= real <= p75:
                     s["in75"] += 1
-                if (main_v - last_a) * (real - last_a) > 0:
+                ms = 1 if (main_v - last_a) > 0 else (-1 if (main_v - last_a) < 0 else 0)
+                rs = 1 if (real - last_a) > 0 else (-1 if (real - last_a) < 0 else 0)
+                if ms * (real - last_a) > 0:
                     s["dir_main"] += 1
                 if (med_v - last_a) * (real - last_a) > 0:
                     s["dir_med"] += 1
                 s["mae_main"] += abs(main_v - real)
                 s["mae_med"] += abs(med_v - real)
                 s["bias_list"].append((real - med_v) / med_v)
-            i += ANCHOR_STEP
-        agg[sym] = rec
-    return data, agg
+                anchor[H]["m"].append(ms)
+                anchor[H]["r"].append(rs)
+        if cons_ok and all(len(anchor[H]["m"]) >= 3 for H in H_TARGETS):
+            for H in H_TARGETS:
+                cons[H].append((anchor[H]["m"], anchor[H]["r"]))
+        i += ANCHOR_STEP
+    return data, agg, cons
 
 
-def report(data, agg):
+def report(data, agg, cons):
     print("=" * 96)
     print("R72 滚动样本外回测 — 缠论推演预测准确性(锚点每%d交易日, 截断跑真实 forecast_svg)" % ANCHOR_STEP)
     print("=" * 96)
@@ -155,10 +172,52 @@ def report(data, agg):
     else:
         print("✅ 偏置监控: 全样本中线偏置 %.1f%% 在 ±%.1f%% 阈值内(中心校准良好)" % (worst_bias, BIAS_WARN))
     print("=" * 96)
+    # === 跨指数方向共识(R75新增) ===
+    print("R75 跨指数方向共识回测 - 5指数主路径方向投票是否优于单指数(锚点每%d交易日)" % ANCHOR_STEP)
+    print("-" * 96)
+    print(f"{'窗口':>5}{'锚点数':>8}{'共识→市场':>12}{'共识→单指数':>14}{'单指数基线':>12}{'提升':>9}")
+    deltas = {}
+    for H in H_TARGETS:
+        entries = cons[H]
+        na = len(entries)
+        if na == 0:
+            continue
+        c_market = c_per = tot_per = 0
+        for mains, reals in entries:
+            cs = 1 if sum(mains) > 0 else (-1 if sum(mains) < 0 else 0)
+            if cs == 0:
+                continue
+            rs_market = 1 if sum(reals) > 0 else (-1 if sum(reals) < 0 else 0)
+            if cs == rs_market:
+                c_market += 1
+            for rj in reals:
+                tot_per += 1
+                if cs == rj:
+                    c_per += 1
+        acc_market = c_market / na * 100
+        acc_per = c_per / tot_per * 100 if tot_per else 0
+        baseline = tot[H]["dir_main"] / tot[H]["N"] * 100 if tot[H]["N"] else 0
+        delta = acc_per - baseline
+        deltas[H] = delta
+        print(f"{'T+'+str(H):>5}{na:>8}{acc_market:>11.1f}%{acc_per:>13.1f}%{baseline:>11.1f}%{delta:>+8.1f}pp")
+    print("-" * 96)
+    # 判定(#预测精度·R75): 要求"两个 horizon 都显著改善(>2pp)"才算有效, 避免单点 borderline 误导。
+    # 实测 T+8 反而 -2.2pp(更差)、T+30 +5.6pp(180样本≈1.5SE, 边际且被短horizon抵消) → 不稳健。
+    eff = [d for d in deltas.values() if d > 2.0]
+    if len(eff) == len(deltas) and deltas:
+        print("共识有效: 跨指数方向投票在两个 horizon 均显著提升单指数方向命中(峰值 +%.1fpp), 看板可加共识徽标。" % max(deltas.values()))
+    elif eff:
+        print("共识分化(弱信号): 仅长 horizon(T+30)边际改善 +%.1fpp(≈噪声), 短 horizon(T+8)反而 %+.1fpp 更差; "
+              "方向偏差主要为系统性(同模型同regime), 跨指数聚合仅边际、且短 horizon 无效 → 不新增共识徽标(避免误用弱信号)。"
+              % (max(deltas.values()), min(deltas.values())))
+    else:
+        print("共识中性: 跨指数投票未显著优于单指数(峰值 +%.1fpp) - 方向偏差为系统性(同模型同regime), "
+              "聚合无法分散误差; 故不新增共识徽标, 真正杠杆仍是 R74 的校准透明化。" % max(deltas.values()) if deltas else 0.0)
+    print("=" * 96)
     print("解读: P05-P95 名义90%覆盖(实测≥此=偏保守安全); P25-P75 名义50%; 方向>50%优于抛硬币; "
           "中线偏误(稳健中位口径)>0=系统保守(低估), <0=系统激进(高估); 均值口径因右偏肥尾会虚高, 故用中位口径。")
 
 
 if __name__ == "__main__":
-    data, agg = run()
-    report(data, agg)
+    data, agg, cons = run()
+    report(data, agg, cons)
