@@ -1175,6 +1175,8 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
     # 主窗口（保持推演图视觉连续）：最近 min(horizon,90) 日
     _tw = closes[-min(horizon, 90):]
     _main_slope, _r2, trend_end = _loglin(_tw)
+    trend_end_price = last * trend_end   # R71 修复：_loglin 第三返回为对数线性外推「比值」，须乘 last 还原为绝对价位；
+                                           # 此前在 L1585(SVG青线)/L1617(图例)/L1686(fc字段) 直接当价格用 → 青线指向图表底部、图例显示"趋势外推 1"、数值 0.99 错乱
     # 多窗口方向共识：所有可用窗口斜率同号（全上行/全下行）
     _agree_dir = (len(_slopes) >= 2) and (all(s > 0 for s in _slopes) or all(s < 0 for s in _slopes))
     # 加速度衰减（主窗口前/后半段斜率差）：上行情景后半段斜率明显低于前半段 → 涨速衰减（背驰信号）
@@ -1582,7 +1584,7 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
     p.append('</g>')
 
     # 趋势外推（独立交叉验证）：对数线性回归外推 horizon 日，青色虚线叠加
-    p.append(f'<line x1="{PAD_L + hist_w:.1f}" y1="{y(last):.1f}" x2="{xp(1):.1f}" y2="{y(trend_end):.1f}" stroke="#0891b2" stroke-width="1.3" stroke-dasharray="2,5" stroke-opacity="0.85"/>')
+    p.append(f'<line x1="{PAD_L + hist_w:.1f}" y1="{y(last):.1f}" x2="{xp(1):.1f}" y2="{y(trend_end_price):.1f}" stroke="#0891b2" stroke-width="1.3" stroke-dasharray="2,5" stroke-opacity="0.85"/>')
     p.append(f'<circle cx="{xp(1):.1f}" cy="{y(trend_end):.1f}" r="2.8" fill="#0891b2"/>')
 
     draw_path(main_p, RED, "none")
@@ -1614,7 +1616,7 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
         f'<span><i class="ln ln-dash" style="background:#94a3b8"></i>次路径：中枢内震荡 ≈ {p_alt * 100:.0f}%</span>'
         f'<span><i class="ln ln-dot" style="background:{GREEN}"></i>风险路径：跌破ZD转空 ≈ {p_risk * 100:.0f}%</span>'
         f'<span><i class="ln ln-band"></i>置信锥 经验分位 P05–P95 / P25–P75（真实分布·非对称）</span>'
-        f'<span><i class="ln ln-trend"></i>趋势外推 {trend_end:.0f}（R²={_r2:.2f}{"，弱拟合" if trend_weak else ""}）</span>'
+        f'<span><i class="ln ln-trend"></i>趋势外推 {trend_end_price:.0f}（R²={_r2:.2f}{"，弱拟合" if trend_weak else ""}）</span>'
         f'</div>'
         f'<div class="fc-targets">结构演绎目标(主路径终点) ≈ <b>{main_p[-1][1]:.0f}</b> · '
         f'均值期望终点 ≈ <b>{_medf(1.0):.0f}</b> · '
@@ -1683,7 +1685,7 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
                "p_hold": round(_p_hold, 3),
                "path_dev": round(_dev, 4),
                "zd": round(zd, 2), "zg": round(zg, 2), "last": round(last, 2),
-               "trend": round(trend_end, 2), "trend_agree": trend_agree, "trend_r2": round(_r2, 3),
+               "trend": round(trend_end_price, 2), "trend_agree": trend_agree, "trend_r2": round(_r2, 3),
                "sigma": round(sigma, 4), "horizon": horizon, "lo": round(lo, 4), "span": round(span, 4),
                "med_term": round(_medf(1.0), 2), "q50": round(_q50, 4), "q_sd": round((_sp_up + _sp_dn) / 2, 4),
                "hist_dates": [_hd[i] for i in range(len(tail))],
