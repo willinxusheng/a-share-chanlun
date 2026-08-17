@@ -2364,15 +2364,26 @@ def main():
     _last_d = datetime.strptime(last_date, "%Y-%m-%d").date()
     _today = datetime.now().date()
     _gap_days = (_today - _last_d).days
-    # 估算滞后交易日（统计 last_date 之后到今天之间的工作日，粗略，仅作预警阈值）
+    # 滞后交易日：复用 R55 的 A 股交易日历 _is_trading_day（跳过周末+法定假期、保留补班），
+    # 避免把国庆/春节等长假的休市日误算为「滞后交易日」（此前 weekday()<5 会在休市期误报
+    # 「数据滞后」，其实休市无交易、数据即最新）。这是与 _is_trading_day 口径分裂的回归修复。
     _gap_td = sum(1 for i in range(1, _gap_days + 1)
-                  if (_last_d + timedelta(days=i)).weekday() < 5)
+                  if _is_trading_day(_last_d + timedelta(days=i)))
     if _gap_td > 2:
+        # 分级预警：轻度(3~5) / 中度(6~10) / 严重(>10，CI 很可能已失败停更)
+        if _gap_td <= 5:
+            _sev, _col, _bg, _bd, _msg = "轻度", "#a0701f", "#fff8ec", "#f0d9a0", "结论可能略滞后"
+        elif _gap_td <= 10:
+            _sev, _col, _bg, _bd, _msg = "中度", "#a05020", "#fff2e8", "#f0b890", "结论或已失真，建议重新生成"
+        else:
+            _sev, _col, _bg, _bd, _msg = ("严重", "#a03030", "#fff0f0", "#f0a0a0",
+                                          "数据疑似停更（CI 可能失败），结论很可能已严重失真")
         freshness_banner = (
-            f'<div class="disclaimer" style="border-color:#f0a0a0;background:#fff0f0;color:#a03030;'
+            f'<div class="disclaimer" style="border-color:{_bd};background:{_bg};color:{_col};'
             f'border-radius:10px;padding:12px 18px;font-size:13px;line-height:1.8;margin:14px 0">'
-            f'⚠️ <b>数据滞后预警</b>：当前行情数据截至 <b>{last_date}</b>，已滞后约 <b>{_gap_td}</b> 个交易日。'
-            f'本报告的结构识别与推演概率均基于旧行情，结论可能已失真，请以最新行情重新生成后为准。</div>')
+            f'⚠️ <b>数据滞后预警（{_sev}）</b>：当前行情数据截至 <b>{last_date}</b>，已滞后约 '
+            f'<b>{_gap_td}</b> 个交易日。本报告的结构识别与推演概率均基于旧行情，{_msg}，'
+            f'请以最新行情重新生成后为准。</div>')
     else:
         freshness_banner = ""
     _breadth_bias = (_bull_cnt / _total - 0.5) * 2 * 8  # 全看多 +8 / 全看空 -8（0-100 置信度刻度）
