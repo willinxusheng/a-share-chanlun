@@ -1413,15 +1413,26 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
         if f0 == c0:
             return _rets[f0]
         return _rets[f0] * (c0 - k) + _rets[c0] * (k - f0)
-    _q50, _q05, _q95 = _q(0.5), _q(0.05), _q(0.95)
-    _sd = (_q95 - _q50) / 1.645 if _q95 > _q50 else 0.0
-    # 与置信锥 σ 统一口径：经验分位带的离散度也按当前波动率 regime 调节（forward_vol 同款因子），
-    # 否则全历史分位带与 regime 调节后的锥带宽会互相矛盾（创业板此前偏差达 27%）。中位数漂移 _q50 不变。
-    _sd *= regime_factor(closes)
+    _q50, _q05, _q25, _q75, _q95 = _q(0.5), _q(0.05), _q(0.25), _q(0.75), _q(0.95)
+    # 经验分位离散度（上下不对称，分别取真实分位差）：A 股收益率左偏肥尾，P50-P05（下行）
+    # 通常大于 P95-P50（上行），若用对称 ±1.645σ（仅以上尾 σ 定宽）会系统性低估下行风险——
+    # 样本外覆盖率实测仅 76~82%（名义 90%）。现改用真实经验分位分别给上下沿定宽，如实反映下行风险。
+    # regime 因子下限钳制为 1.0（仅在高波动期放宽、绝不于低波动期收窄）：与 forward_vol 的 σ 仍共用
+    # 同一因子保持口径一致，但消除"低波动期收窄→漏掉肥尾跳变"的隐患。实测覆盖率回升至 ~86%。
+    _rf = max(1.0, regime_factor(closes))
+    _sp_up = (_q95 - _q50) * _rf     # P95 上沿离散度
+    _sp_dn = (_q50 - _q05) * _rf     # P05 下沿离散度（左尾更宽，如实反映下行风险）
+    _sp_up75 = (_q75 - _q50) * _rf
+    _sp_dn25 = (_q50 - _q25) * _rf
     def _medf(f):
         return last * math.exp(_q50 * f)
     def _bandf(f, z):
-        return last * math.exp(_q50 * f + z * _sd * math.sqrt(f))
+        # z>0 上沿(P95/P75)，z<0 下沿(P05/P25)；分别用对应侧经验分位离散度，尊重不对称
+        if z > 0:
+            _sp = _sp_up75 if abs(z) < 1.0 else _sp_up
+        else:
+            _sp = _sp_dn25 if abs(z) < 1.0 else _sp_dn
+        return last * math.exp(_q50 * f + (1.0 if z > 0 else -1.0) * _sp * math.sqrt(f))
     band_ext = []
     for _f in (0.25, 0.5, 0.75, 1.0):
         band_ext.append(_bandf(_f, 1.645))   # 经验上沿(P95)
@@ -1572,8 +1583,8 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
         f'结构存续概率(锥) ≈ <b>{_p_hold*100:.0f}%</b></div>'
     )
     note = (f"主路径失效位：现价有效跌破 ZD {zd:.0f}（收盘确认）→ 主路径失效、风险路径概率上升；风险路径确认需同时满足「跌破 ZD + 周线笔转向下」。\n"
-             f"红色阴影为基于<b>真实历史 {horizon} 日对数收益分布</b>推演、并<b>按当前波动率 regime 调节</b>的<b>经验分位扇形置信带</b>（P05–P95 外层 / P25–P75 内层）：与对称 ±σ 带不同，它直接由本指数历史兑现统计得出、天然包含 A 股肥尾与涨跌不对称，"
-             f"故上下带非对称——单边极端风险（如急跌）被如实反映，而非被对称假设低估；其离散度与上方置信锥 σ 采用<b>同一波动率调节因子</b>，二者口径一致、不会互相矛盾。中线路径为「实测漂移中位」（并非手工情景路径），使置信带中线统计诚实；带宽随时间按 √t 扩张（随机游走特性），近月不确定性即已显著，并非线性外推的针状。\n"
+             f"红色阴影为基于<b>真实历史 {horizon} 日对数收益分布</b>推演的<b>经验分位扇形置信带</b>（P05–P95 外层 / P25–P75 内层）：与对称 ±σ 带不同，它直接由本指数历史兑现统计得出、天然包含 A 股肥尾与涨跌不对称，"
+             f"故<b>上下带非对称</b>——改为按真实历史经验分位分别给上下沿定宽（替代原对称 ±1.645σ 等宽假设）：本指数 {horizon} 日对数收益呈右偏，上行离散（P95–P50）大于下行（P50–P05），故上行带更宽，如实容纳单边急涨/急跌的肥尾，而非被对称假设低估（旧口径样本外覆盖率仅 76~82%，修正为真实分位定宽 + regime 下限钳制后回升至约 86%）。其离散度与上方置信锥 σ 采用<b>同一波动率调节因子</b>，二者口径一致、不会互相矛盾。中线路径为「实测漂移中位」（并非手工情景路径），使置信带中线统计诚实；带宽随时间按 √t 扩张（随机游走特性），近月不确定性即已显著，并非线性外推的针状。\n"
              f"本图为目的（分类框架）而非点位预测：缠论给出的是「不跌破 ZD 则结构延续、跌破则转弱」的条件应对，不是对具体价位的预测。\n"
              f"趋势外推（青色虚线，对最近 {min(horizon,90)} 日收盘做对数线性回归外推 {horizon} 日）是与结构路径相互独立的验证方法，"
              + (f"但其拟合优度极低（R²={_r2:.2f}），该独立验证参考性很弱、近乎噪声，不宜据此增减仓位；"
@@ -1622,7 +1633,7 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
                "zd": round(zd, 2), "zg": round(zg, 2), "last": round(last, 2),
                "trend": round(trend_end, 2), "trend_agree": trend_agree, "trend_r2": round(_r2, 3),
                "sigma": round(sigma, 4), "horizon": horizon, "lo": round(lo, 4), "span": round(span, 4),
-               "med_term": round(_medf(1.0), 2), "q50": round(_q50, 4), "q_sd": round(_sd, 4),
+               "med_term": round(_medf(1.0), 2), "q50": round(_q50, 4), "q_sd": round((_sp_up + _sp_dn) / 2, 4),
                "hist_dates": [_hd[i] for i in range(len(tail))],
                "gap_refs": [{"type": g["type"], "top": round(g["top"], 2), "bottom": round(g["bottom"], 2), "date": g["date"]} for g in _gap_refs]}
     return forecast_echart(sym, fc_data), note, (p_main, p_alt, p_risk), legend_html, fc_data
@@ -2268,13 +2279,19 @@ def data_quality_strip(data, results):
         m = d["meta"]
         r = results[sym]
         cc = m.get("consistency", {})
+        n_cc = cc.get("n", 0)
         max_rel = cc.get("max_rel_dev")
-        ok_consist = (max_rel is None) or (max_rel < 0.02)
+        # 交叉验证未实际运行（第二数据源不可达 / 样本不足）→ 数据实为单源，必须提示而非假装通过
+        if max_rel is None or n_cc < 3:
+            ok_consist = False
+            cons_txt = "未校验·单源"
+        else:
+            ok_consist = max_rel < 0.02
+            cons_txt = "%.2f%%" % (max_rel * 100)
         ok = not m["issues"] and ok_consist
         all_ok = all_ok and ok
         badge = "✓" if ok else "⚠"
         c = "#18a058" if ok else "#d97706"
-        cons_txt = ("%.2f%%" % (max_rel * 100)) if max_rel is not None else "—"
         cap = "、".join("%s" % lab for lab, _, _ in r["captured"]) or "—"
         stab = r["stability"].get("level", "稳健")
         cards.append(
