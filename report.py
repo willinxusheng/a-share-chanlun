@@ -926,7 +926,7 @@ def echart_main(klines, r, sym, captured=None):
         formatter: (function(){{ var _py = null; return function(v, i){{ var d = (D.dates && D.dates[i]) ? D.dates[i] : v; if (!d || d.length < 7) return v; var y = d.slice(0,4); if (i === 0 || y !== _py) {{ _py = y; return y; }} return d.slice(5); }}; }})() }} }}
     ],
     yAxis: [
-      {{ scale: false, min: D.yMin, max: D.yMax, gridIndex: 0, splitNumber: 6, name: '价格(元)', nameLocation: 'middle', nameGap: 64, nameTextStyle: {{ color: '#64748b', fontSize: 12, fontWeight: 600 }}, axisLine: {{ lineStyle: {{ color: '#cbd5e1' }} }}, splitLine: {{ lineStyle: {{ color: '#eef2f7' }} }}, axisLabel: {{ fontSize: 12, hideOverlap: true }} }},
+      {{ scale: false, min: D.yMin, max: D.yMax, gridIndex: 0, splitNumber: 6, axisLine: {{ lineStyle: {{ color: '#cbd5e1' }} }}, splitLine: {{ lineStyle: {{ color: '#eef2f7' }} }}, axisLabel: {{ fontSize: 12, hideOverlap: true }} }},
       {{ scale: true, gridIndex: 1, splitNumber: 2, name: '成交量', nameLocation: 'middle', nameGap: 34, nameTextStyle: {{ color: '#94a3b8', fontSize: 11 }}, axisLine: {{ show: false }}, splitLine: {{ show: false }}, axisLabel: {{ show: false }} }},
       {{ scale: true, gridIndex: 2, min: -D.hmax, max: D.hmax, splitNumber: 2, name: 'MACD', nameLocation: 'middle', nameGap: 34, nameTextStyle: {{ color: '#94a3b8', fontSize: 11 }}, axisLine: {{ show: false }}, splitLine: {{ show: false }}, axisLabel: {{ fontSize: 11 }} }}
     ],
@@ -1614,6 +1614,13 @@ def forecast_echart(sym, fc_data):
     f75h = [None] * n_hist + [round(p["f75h"], 2) for p in proj]
     lo = fc_data["lo"]
     ymax = round(lo + fc_data["span"], 2)
+    tail_prices = [h[1] for h in hist]
+    core_prices = tail_prices + [last, zg, zd] + [p["main"] for p in proj] + [p["alt"] for p in proj] + [p["risk"] for p in proj] + [p["trend"] for p in proj] + [p["med"] for p in proj]
+    core_lo = min(core_prices)
+    core_hi = max(core_prices)
+    core_pad = (core_hi - core_lo) * 0.03
+    core_lo -= core_pad
+    core_hi += core_pad
     zg_v, zd_v, last_v = round(zg), round(zd), round(last)
     hlines = [
         {"yAxis": round(zg, 2), "lineStyle": {"type": "dashed", "color": GOLD, "width": 1.2},
@@ -1649,13 +1656,14 @@ def forecast_echart(sym, fc_data):
     key_levels_text = "  ".join(f_kl)
 
     # 确定性去重叠：推演端点（主/次/风险）标签
-    dedup_mark_labels(end_points, len(xcats), lo, ymax, 1100 - 96 - 64, 440 - 44 - 74, 96, 44,
+    dedup_mark_labels(end_points, len(xcats), core_lo, core_hi, 1100 - 96 - 64, 440 - 44 - 74, 96, 44,
                       {xcats[-1]: len(xcats) - 1})
 
     fdata = {
         "keyLevelsText": key_levels_text,
-        "xcats": xcats, "xfull": x_full, "hist": hist_s, "main": main_s, "alt": alt_s, "risk": risk_s, "trend": trend_s,
-        "lo": round(lo, 2), "ymax": ymax,
+        "xcats": xcats, "xfull": x_full, "n_hist": n_hist, "proj": proj,
+        "hist": hist_s, "main": main_s, "alt": alt_s, "risk": risk_s, "trend": trend_s,
+        "lo": round(lo, 2), "ymax": ymax, "ymin_core": round(core_lo, 2), "ymax_core": round(core_hi, 2),
         "hlines": hlines, "vline": vline, "endPoints": end_points,
         "med": med_s, "f95l": f95l, "f95h": f95h, "f75l": f75l, "f75h": f75h,
         "p_main": p_main, "p_alt": p_alt, "p_risk": p_risk, "proj_raw": proj,
@@ -1673,13 +1681,13 @@ def forecast_echart(sym, fc_data):
       formatter: function(params){{
         var i = params[0].dataIndex;
         var x = D.xcats[i];
-        if(i < D.hist.length){{
+        if(i < D.n_hist){{
           var hv = D.hist[i];
           if(hv == null) return '<b>'+x+'</b>';
           return '<b>'+x+'</b><br>历史收盘 <b>'+hv.toFixed(2)+'</b>';
         }}
-        var pi = i - D.hist.length;
-        var p = D.proj_raw[pi];
+        var pi = i - D.n_hist;
+        var p = D.proj[pi];
         if(!p) return '<b>'+x+'</b>';
         var red='#e54545', gray='#94a3b8', grn='#18a058', cyan='#0891b2';
         return '<b>推演 · T+'+p.tplus+' ('+p.date+')</b><br>'
@@ -1693,10 +1701,10 @@ def forecast_echart(sym, fc_data):
     }},
     legend: {{ data: ['历史','统计中位路径','结构演绎路径','次路径','风险路径','趋势外推','置信锥 P05–P95','置信锥 P25–P75'], top: 2, itemGap: 8, textStyle: {{ fontSize: 11 }} }},
     grid: {{ left: 96, right: 64, top: 44, bottom: 86 }},
-    xAxis: {{ type: 'category', data: D.xcats, boundaryGap: false, name: '历史交易日 → 未来外推（年份已标注）', nameLocation: 'middle', nameGap: 30, nameTextStyle: {{ color: '#64748b', fontSize: 12 }}, axisLabel: {{ fontSize: 11, hideOverlap: true, showMinLabel: true,
+    xAxis: {{ type: 'category', data: D.xcats, boundaryGap: false, name: '历史交易日 → 未来外推（年份已标注）', nameLocation: 'middle', nameGap: 30, nameTextStyle: {{ color: '#64748b', fontSize: 12 }}, axisLabel: {{ fontSize: 11, hideOverlap: true, showMinLabel: true, showMaxLabel: false,
         interval: function(idx, val){{ if (idx === 0) return true; var c = D.xfull[idx], p = D.xfull[idx-1]; if (!c || !p) return true; if (c.slice(0,4) !== p.slice(0,4)) return true; return (idx % 24 === 0); }},
         formatter: (function(){{ var _py = null; return function(v, i){{ var d = (D.xfull && D.xfull[i]) ? D.xfull[i] : v; if (!d || d.length < 7) return v; var y = d.slice(0,4); if (i === 0 || y !== _py) {{ _py = y; return y; }} return d.slice(5); }}; }})() }} }},
-    yAxis: {{ scale: false, min: D.lo, max: D.ymax, splitNumber: 6, name: '价格(元)', nameLocation: 'middle', nameGap: 60, nameTextStyle: {{ color: '#64748b', fontSize: 12, fontWeight: 600 }}, axisLine: {{ lineStyle: {{ color: '#cbd5e1' }} }}, splitLine: {{ lineStyle: {{ color: '#eef2f7' }} }}, axisLabel: {{ fontSize: 12, hideOverlap: true }} }},
+    yAxis: {{ scale: false, min: D.ymin_core, max: D.ymax_core, splitNumber: 6, axisLine: {{ lineStyle: {{ color: '#cbd5e1' }} }}, splitLine: {{ lineStyle: {{ color: '#eef2f7' }} }}, axisLabel: {{ fontSize: 12, hideOverlap: true }} }},
     dataZoom: [
       {{ type: 'inside', xAxisIndex: 0, start: 0, end: 100 }},
       {{ type: 'slider', xAxisIndex: 0, start: 0, end: 100, showDetail: false, height: 16, bottom: 8, handleStyle: {{ color: '#2b6cb0' }}, borderColor: '#e2e8f0', fillerColor: 'rgba(43,108,176,0.12)' }}
@@ -2352,14 +2360,13 @@ def main():
       </div>
       <div class="verdict"><b>结构解读：</b><p>{cls["detail"]}</p>
       <p style="margin-top:4px"><b>周线级别：</b>{wcls["detail"]}</p></div>
-      <h3 class="fc-title">未来走势推演<span class="fc-sub">分类框架 · 原则化路径 + 置信锥 · 非点位预测</span></h3>
+      <h3 class="fc-title">未来走势推演</h3>
       <div class="chartbox" id="fcbox-{sym}">
         {fs_svg}
         <div class="xh-tip" id="fctip-{sym}"></div>
       </div>
       {fs_legend}
       {path_hit_html(cls["scenario"], paths_bt[sym], fs_probs[0], fs_probs[1], fs_probs[2], horizon)}
-      <p class="fc-note">{div_txt}<br>{fs_note}</p>
     </section>""")
         conclusions.append(f'<li><b>{d["name"]}</b>：日线 {cls["scenario"]} / 周线 {wcls["scenario"]} —— {cls["detail"]} <a href="#sec-{sym}" data-sym="{sym}" data-jump style="font-size:12px;color:{BLUE}">[查看图解]</a></li>')
         forecast_info[sym] = {"p_main": fs_probs[0], "p_alt": fs_probs[1], "p_risk": fs_probs[2],
@@ -2407,11 +2414,10 @@ def main():
     n_inside = sum(1 for s in data if results[s]["classify"].get("position") == "中枢内部")
     exec_summary = f"""
     <div class="panel exec">
-      <h4>一句话结论（Executive Summary）</h4>
+      <h4>一句话结论</h4>
       <ul>
         <li><b>市场格局：</b>{pat}{stance}。</li>
-        <li><b>数据可信度：</b>双源(qfq↔裸价)全序列比值最大偏离 {worst_rel*100:.2f}%，笔双法一致率 {avg_agree2:.0f}%，拐点捕捉率 {avg_cap:.0f}%——划分稳健。</li>
-        <li><b>推演结论：</b>各指数主路径概率约 {int(min((forecast_info[s]['p_main'] for s in data))*100)}%~{int(max((forecast_info[s]['p_main'] for s in data))*100)}%，均以<b>周线底分型确认</b>为兑现前提；结论稳健度三级分布：<b style="color:{GREEN}">稳健 {n_robust}</b> / <b style="color:#d97706">边缘 {n_edge}</b> / <b style="color:{RED}">敏感·待确认 {n_sens}</b>（敏感信号依赖最近年轻笔，已相应下调主路径概率 ±0.02~0.04）。跌破中枢 ZD 即主路径失效。详见<a href="#s3">第三节</a>。</li>
+        <li><b>推演结论：</b>各指数主路径概率约 {int(min((forecast_info[s]['p_main'] for s in data))*100)}%~{int(max((forecast_info[s]['p_main'] for s in data))*100)}%；跌破中枢 ZD 即主路径失效。详见<a href="#s3">第三节</a>。</li>
       </ul>
     </div>"""
 
@@ -2560,20 +2566,18 @@ def main():
 <div class="wrap">
   <header>
     <h1>A股主要指数缠论结构分析报告</h1>
-    <p>数据区间：2021-01-04 ~ {last_date}（日线+周线+月线，前复权，<b>最新交易日</b>） · 生成时间：{gen_time}<br>
-    方法：K线包含处理 → 顶底分型 → 笔（日线≥1.8% / 周线≥4% / 月线≥8% 幅度过滤）→ 笔中枢 → MACD 背驰 → 买卖点 → 日周月三级别区间套分类推演 → 信号回测验证</p>
+    <p>数据区间：2021-01-04 ~ {last_date} · 生成时间：{gen_time}<br>日线+周线+月线 · 前复权</p>
   </header>
   <nav class="toc">
     <a href="#s1"><span class="num">一</span>决策总览</a>
     <a href="#s2"><span class="num">二</span>分指数图解</a>
     <a href="#s3"><span class="num">三</span>关键位与推演</a>
     <a href="#s4"><span class="num">四</span>信号回测对比</a>
-    <a href="#s5"><span class="num">五</span>数据质量</a>
-    <a href="#s6"><span class="num">六</span>方法论免责</a>
+    <a href="#s5"><span class="num">五</span>免责说明</a>
   </nav>
   {sym_rail}
   {exec_summary}
-  <h2 class="sec" id="s1">一、决策总览（结论 · 卡片 · 广度 · 指标）</h2>
+  <h2 class="sec" id="s1">一、决策总览</h2>
   <div class="cards">{"".join(cards)}</div>
   {breadth_banner}
   <div class="hero">
@@ -2584,76 +2588,30 @@ def main():
     <div class="kpi" style="border-top:3px solid {BLUE}"><div class="kpi-v">{avg_health:.0f}</div><div class="kpi-l">平均结构健康度</div></div>
     <div class="kpi" style="border-top:3px solid {BLUE}"><div class="kpi-v">{avg_conf:.0f}</div><div class="kpi-l">平均推演置信度</div></div>
     <div class="kpi" style="border-top:3px solid {BLUE}"><div class="kpi-v">{avg_agree:.0f}%</div><div class="kpi-l">笔双法一致率</div></div>
-    <div class="kpi" style="border-top:3px solid {BLUE}"><div class="kpi-v">{avg_vol*100:.0f}%</div><div class="kpi-l">平均年化波动率</div></div>
-    <div class="kpi" style="border-top:3px solid {RED}"><div class="kpi-v" style="color:{RED}">{n_m_bull}<span style="font-size:15px;color:#94a3b8">/{total}</span></div><div class="kpi-l">月线多头背景</div></div>
   </div>
-  <div class="legend">
-    <span><i class="dot" style="background:{RED}"></i>向上笔 / ▲买点</span>
-    <span><i class="dot" style="background:{GREEN}"></i>向下笔 / ▼卖点</span>
-    <span><i class="dot" style="background:{BLUE}"></i>中枢区间（最近8个）</span>
-    <span><i class="dot" style="background:{GOLD}"></i>最后中枢 ZG/ZD</span>
-    <span><i class="dot" style="background:#7c3aed"></i>斐波那契回调位(F38/F50/F62)</span>
-    <span><i class="dot" style="background:#475569"></i>成交量 MA5</span>
-  </div>
-
-  <h2 class="sec" id="s2">二、分指数结构图解（主图 + 走势推演图）</h2>
+  <h2 class="sec" id="s2">二、分指数结构图解</h2>
   {"".join(sections)}
 
-  <h2 class="sec" id="s3">三、关键位策略与走势推演汇总</h2>
+  <h2 class="sec" id="s3">三、关键位与推演汇总</h2>
   <div class="panel"><div class="tablescroll">{levels_table(data, results, results_week, results_month, scores)}</div></div>
-  <div class="disclaimer" style="margin:14px 0">
-    <b>⚠️ 重要说明（请先读）：</b>缠论是<b>概率性的结构分类框架，不是预测工具</b>。本节的"主/次/风险路径"与"置信锥"表达的是<b>在不同结构假设下的条件应对与概率分布</b>，绝非对具体价位的预测；其中主路径概率已尽量用历史同类信号的经验胜率校准，但样本有限，<b>任何路径都不构成买入/卖出建议</b>。真实决策请结合仓位管理与个人风险承受力，并独立判断。市场有风险。
-  </div>
   <div class="panel"><div class="tablescroll">{forecast_summary_table(data, results, results_week, results_month, forecast_info)}</div></div>
   <div class="panel conclusion">
     <ul>{"".join(conclusions)}</ul>
     {diverge_note}
-    <p style="margin-top:10px;color:#475569;font-size:14px;line-height:1.8">
-    缠论不预测点位，只给出分类应对：<b>不跌破各自最后中枢上沿 ZG / 下沿 ZD，结构仍按多头处理；
-    其中 {n_above} 个指数运行于中枢上方（多头延续）、{n_inside} 个在中枢内部震荡。跌回中枢内部则降级为震荡；
-    出现"顶背驰 + 跌破 ZD"组合才确认转空。</b>
-    </p>
   </div>
 
   <h2 class="sec" id="s4">四、信号回测与走势对比</h2>
   <div class="panel"><div class="tablescroll">{backtest_table(backtests)}</div></div>
   <div class="panel"><div class="tablescroll">{rr_table(data, results)}</div></div>
-  <h3 class="rob-h" style="font-size:16px;margin:18px 0 10px;color:#334155">四·B、样本外稳健性检验（校准过拟合检测）</h3>
   <div class="panel"><div class="tablescroll">{robustness_table(robust, data)}</div></div>
   <details class="panel" style="cursor:pointer">
-    <summary style="font-weight:700;color:#1e40af;cursor:pointer">五指数归一化对比图（点击展开 · 2021=100）</summary>
+    <summary style="font-weight:700;color:#1e40af;cursor:pointer">五指数归一化对比图（2021=100）</summary>
     <div style="margin-top:12px">{compare_svg(data)}</div>
-    <p style="font-size:12px;color:#64748b;margin-top:8px">五指数已对齐到<b>共同交易日</b>（取交集），避免各指数因节假日/停牌错位导致曲线偏离；均为前复权口径。</p>
   </details>
 
-  <h2 class="sec" id="s5">五、数据质量与校验</h2>
-  {data_quality_strip(data, results)}
-  <h2 class="sec" id="s6">六、方法论与免责</h2>
-  <details class="panel method">
-    <summary style="font-weight:700;color:#1e40af;cursor:pointer">术语与方法论速查（点击展开）</summary>
-    <h4 style="margin-top:12px">分析流程</h4>
-    <p>K线包含处理 → 顶底分型（含相等高低点处理）→ 笔（日线≥1.8% / 周线≥4% 幅度过滤）→ 笔中枢 → 笔级 + 走势段级（笔端点高阶 zigzag 聚合）MACD 背驰 → 一/二/三类买卖点（含量能背离确认）→ MA20/60/250 多空排列交叉验证 → 日×周×月三级别区间套 → 斐波那契回调位标注 → 经验校准的分类推演（自适应 horizon + 条件化波动率）→ 对数回归趋势外推交叉验证 → 信号历史回测验证。</p>
-    <h4>核心术语</h4>
-    <ul>
-      <li><b>笔</b>：相邻顶底分型间至少 2 根独立 K 线、且幅度达到阈值的同向线段。</li>
-      <li><b>中枢</b>：至少 3 笔重叠区间 [ZD, ZG]；站上 ZG 转强，跌破 ZD 转弱。</li>
-      <li><b>背驰</b>：笔级与走势段级（在笔端点序列上做高阶 zigzag 聚合得到的更大级别走势腿）均检测——价格创新高/低，但 MACD 柱面积较前一同向段萎缩 ≥15%。同时辅以<b>量能背离确认</b>：当前段成交量较前一同向段萎缩则标记"量✓"，信号更可靠（段级背离为更高一层信号）。</li>
-      <li><b>买卖点</b>：一类=背驰拐点；二类=中枢内回踩/反抽不破 ZD/ZG 的折返笔；三类=中枢完成后回踩不破 ZG / 反抽不过 ZD。</li>
-      <li><b>均线排列</b>：MA20/60/250 多空排列（多头/空头/纠缠），与缠论结构分歧时自动降权；三者均绘制于主图价格曲线上方，用于直观判断长期趋势的支撑/压力。</li>
-      <li><b>年化波动率</b>：近 1 年日对数收益率标准差年化（×√244），量化指数近期波动剧烈程度，与结构健康度互为补充，也用于评估推演置信锥的适用环境。</li>
-      <li><b>级别联立（区间套）</b>：日线背驰与周线趋势方向组合，给出更高一级共振判断（如日线底背驰×周线向下笔=潜在周线级低点）。<b>已升级为日×周×月三重区间套</b>：在日周共振基础上，再叠加月线方向作为大级别趋势背景（月线多头/空头背景），更高一层定调方向。卡片"日×周区间套"字段与结构解读【区间套】结论来自真实日/周线联立，新增"月线背景"字段来自真实月线 classify；共振出现时主路径概率额外 +3%。</li>
-      <li><b>斐波那契回调位</b>：主图叠加最近一段已完成走势的 0.382/0.5/0.618 回调位（紫虚线），作为反弹/回踩的目标支撑与阻力，与推演中的 ZG/ZD 互为锚定参考。</li>
-    </ul>
-    <h4>概率与推演</h4>
-    <p>主路径概率优先采用<b>历史同类信号的经验同向胜率</b>校准（见第四节回测），样本不足时回退启发式；校准锚<b>严格按情景方向选取</b>（牛市只锚买点类、熊市只锚卖点类信号），杜绝「多头指数却被卖点胜率校准」的方向错配。推演 horizon 按最近笔<b>真实持续交易日</b>（已修正为原始日线索引，非合并 K 线索引）自适应（30~90 日），置信锥宽度按近 20 日波动率相对长期水平条件化（震荡市收窄、动荡市放大），且带宽按<b>随机游走的 √t 口径</b>扩张（近端的不确定性即已显著，避免线性外推把近月压成针状、低估真实风险）。当<b>趋势外推与主路径吻合且 R²≥0.15</b>或<b>日周区间套共振</b>时，主路径概率分别额外 +2% / +3%，把多种独立方法的共识显式转化为概率增益（弱拟合下不授予增益，防止虚增置信度）。推演另给出<b>结构存续概率（锥模型）</b>：用与置信锥同款 σ 计算「期末价 ≥ ZD」的概率 Φ(ln(现价/ZD)/σ)（随机游走中性假设），作为与情景概率互补、且与置信锥内部自洽的「结构是否守住失效位」的纯统计参照——它衡量「不破 ZD」，与情景概率衡量「方向性演绎」口径不同，两者并列呈现而非相互替代。</p>
-    <p>经验胜率进一步做<b>贝叶斯收缩</b>：样本越少、二项 95% 置信区间越宽，经验锚越向启发式基准回归，并在校准说明中标注该置信区间，避免小样本（如 n=5、CI 横跨 50%）噪声被过度外推、误导概率。报告顶部另给出<b>跨指数市场广度综合研判</b>（日/周/月三级），把全市场对齐度与跨级别背离显式呈现，并折算为 ±8 的「全市场对齐度」反馈进各指数推演置信度，使个股指推演的基准方向与市场系统性环境一致。</p>
-    <p>为提升预测可信度，推演图额外叠加一条<b>趋势外推线</b>：对最近 min(horizon,90) 日收盘做<b>对数线性回归</b>外推 horizon 日，作为与缠论结构路径相互独立的验证方法。该独立验证的<b>拟合优度 R² 一并展示</b>：R²≥0.15 且终点与主路径吻合（误差&lt;6%）才算「共振」、相互印证、可信度更高；R² 过低（如≈0.1，趋势线近乎噪声）时明确标注「弱拟合」，<b>不授予共振概率增益</b>、亦不建议据此增减仓位；显著偏离时提示两种视角对后市节奏判断不一致，应结合仓位管理。缠论是概率性结构分类框架，推演为目的而非点位预测。</p>
-    <h4>准确度校验</h4>
-    <p>① 腾讯(qfq)↔新浪(裸价) 全序列<b>比值一致性</b>比对（前复权=裸价×常数调整因子，两源比值应恒定，漂移过大即异常）；② 标准严格笔与振幅过滤笔交叉一致率；③ 8 个已知历史拐点的捕捉率；④ 砍掉末 5/10/20 根 K 线重算分类的稳定性；⑤ 交易日连续性 / 缺失检测（相邻间隔与总数 vs 首末日期应有多少交易日）。结果见第一节与推演汇总表。</p>
-  </details>
+  <h2 class="sec" id="s5">五、免责说明</h2>
   <div class="disclaimer">
-    <b>免责声明：</b>本报告基于缠中说禅技术分析理论的自动化结构划分，笔与中枢识别采用近似规则（含最小幅度过滤），并辅以标准严格笔交叉验证；与严格手工画线仍可能存在差异。
-    回测为历史统计特征，不代表未来表现；推演概率为启发式估算，非点位预测。缠论是概率性的结构分类框架，不构成投资建议。市场有风险，决策需独立。
+    <b>免责声明：</b>本报告基于缠论技术分析的自动化结构划分，推演概率为启发式估算，非点位预测，不构成投资建议。市场有风险，决策需独立。
   </div>
 </div>
 <script>
