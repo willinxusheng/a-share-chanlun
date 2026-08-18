@@ -2496,6 +2496,106 @@ def main():
   /* —— 预测质量自检卡 —— */
   .qc-card {{ box-shadow:var(--shadow); }}
   .fc-note {{ background:#fffbeb; }}
+
+  /* ===== R152 横屏深度美化增强层 =====
+     置于 R134 美化层之后，仅 (orientation:landscape)&(max-height:560px) 生效；
+     源码靠后 => 同优先级下天然覆盖 R134，把横屏做成专业交易终端观感。 */
+  @media (orientation: landscape) and (max-height: 560px) {{
+    /* 全局令牌（横屏紧凑化覆盖） */
+    .wrap {{ max-width: 100%; }}
+
+    /* 品牌 banner：紧凑但保留深海渐变 + 左侧高光条 */
+    header {{
+      padding: 9px 18px 9px 20px !important; border-radius: 14px; margin-bottom: 7px !important;
+      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    }}
+    header h1 {{ font-size: 16px !important; letter-spacing: .3px; }}
+    header p {{ font-size: 10px; line-height: 1.35; margin: 1px 0 0; max-height: 2.6em; overflow: hidden; color: rgba(255,255,255,.82) !important; }}
+    header::before {{ content:""; position:absolute; left:0; top:10px; bottom:10px; width:4px; background:linear-gradient(180deg,#60a5fa,#2b6cb0); border-radius:4px; }}
+
+    /* 顶部导航：磨砂胶囊横滑条 */
+    nav.toc, nav.sym-rail {{
+      position: static; flex-wrap: nowrap; overflow-x: auto; white-space: nowrap;
+      margin: 3px 0; padding: 5px 9px; gap: 5px; -webkit-overflow-scrolling: touch;
+      background: rgba(255,255,255,.82); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+      border: 1px solid #e2e8f0; border-radius: 12px; box-shadow: 0 4px 14px rgba(15,23,42,.05);
+    }}
+    nav.toc a, nav.sym-rail .chip {{ flex: 0 0 auto; border-radius: 999px; transition: all .15s ease; }}
+    nav.toc a .num {{ display: none; }}
+    nav.toc a.active {{ background: linear-gradient(135deg,var(--primary),var(--primary2)); color:#fff; box-shadow: 0 2px 8px rgba(43,108,176,.3); }}
+
+    /* KPI 小卡：精致 + 悬停微抬 */
+    .hero {{ gap: 6px; margin: 8px 0 4px; }}
+    .kpi {{
+      min-width: 80px; padding: 7px 9px; border-radius: 12px; background: #fff;
+      border: 1px solid #e5e9f0; box-shadow: 0 1px 3px rgba(15,23,42,.05);
+      transition: transform .15s ease, box-shadow .15s ease;
+    }}
+    .kpi:hover {{ transform: translateY(-2px); box-shadow: var(--shadow); }}
+    .kpi-v {{ font-size: 18px; font-variant-numeric: tabular-nums; letter-spacing: -.5px; }}
+    .kpi-l {{ font-size: 10px; }}
+
+    /* 指数概览卡：宽屏多列 + 渐变顶条 + 悬停微抬 */
+    .cards {{ grid-template-columns: repeat(auto-fit, minmax(140px,1fr)); gap: 6px; }}
+    .card {{ padding: 9px 10px; border-radius: 12px; }}
+    .card::before {{ margin: -9px -10px 8px !important; height: 3px; }}
+    .card:hover {{ transform: translateY(-2px); }}
+
+    /* 核心：每指数双栏交易终端 */
+    section.panel {{
+      display: grid; grid-template-columns: 1.5fr 1fr;
+      grid-template-areas:
+        "title fctitle"
+        "kline fc"
+        "verdict verdict"
+        "foot foot";
+      gap: 8px 14px; padding: 10px 12px; margin-bottom: 9px; align-items: stretch;
+      border-radius: 14px; background: #fff; border: 1px solid #e3e9f2; box-shadow: var(--shadow);
+    }}
+    section.panel > h2 {{ grid-area: title; font-size: 14px; margin: 0; padding: 0; border: 0; align-self: center; color: var(--ink); }}
+    section.panel > h3.fc-title {{ grid-area: fctitle; font-size: 12px; margin: 0; color: var(--muted); text-align: right; align-self: center; }}
+    section.panel > .chartbox:first-of-type {{
+      grid-area: kline; background: #fbfdff; border: 1px solid #eef2f7; border-radius: 10px; padding: 6px;
+    }}
+    section.panel > .chartbox.fcbox {{
+      grid-area: fc; background: #fbfdff; border: 1px solid #eef2f7; border-left: 1px dashed #dbe4ef; border-radius: 10px; padding: 6px;
+    }}
+    .echart-main {{ height: calc(100dvh - 215px) !important; max-height: 290px; min-height: 150px; border-radius: 8px; }}
+    .echart-toolbar {{ font-size: 10.5px; padding: 4px 7px; border-radius: 8px; background:#f1f5f9; }}
+
+    /* 解读 / 图例 / 路径校验区 */
+    section.panel > .verdict {{
+      grid-area: verdict; margin-top: 2px; font-size: 12px; line-height: 1.5;
+      background: #f8fafc; border: 1px solid #eef2f7; border-left: 3px solid var(--primary); border-radius: 8px; padding: 8px 10px;
+    }}
+    section.panel > .sec-foot {{ grid-area: foot; display: block; }}
+    .fc-note2 {{ font-size: 11.5px; line-height: 1.55; margin: 6px 0; background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 7px 9px; }}
+    .fc-legend {{ font-size: 10.5px; gap: 8px; margin: 5px 0; color: var(--muted); }}
+    .pathcheck {{ padding: 8px 11px; margin-top: 7px; border-radius: 10px; background: #f8fafc; border: 1px solid #e2e8f0; }}
+    .pathcheck > b {{ font-size: 12px; }}
+
+    /* 章节标题：渐变标签（继承 R134，横屏微调） */
+    h2.sec {{ font-size: 14px; margin: 10px 0 6px; }}
+
+    /* 表格：精致表头 + 圆角滚动条 */
+    .tbl {{ font-size: 10.5px; border-radius: 10px; }}
+    .tbl th, .tbl td {{ padding: 5px 6px; white-space: nowrap; }}
+    .tablescroll {{ border-radius: 10px; }}
+    .tablescroll::-webkit-scrollbar {{ height: 7px; }}
+    .tablescroll::-webkit-scrollbar-thumb {{ background: #cbd5e1; border-radius: 4px; }}
+    .tablescroll::-webkit-scrollbar-track {{ background: #f1f5f9; border-radius: 4px; }}
+
+    /* 文本块圆角统一 */
+    .qc-card {{ margin: 8px 0; padding: 11px 13px; border-radius: 14px; }}
+    .qc-head {{ font-size: 13px; }}
+    .qc-v {{ font-size: 15px; }}
+    .qc-l {{ font-size: 10px; }}
+    .quality, .disclaimer, .exec {{ padding: 11px 13px; font-size: 11.5px; line-height: 1.7; border-radius: 14px; }}
+    .qc-regime-row {{ font-size: 11px; }}
+
+    /* 通用柔和过渡 */
+    .card, .kpi, nav.toc a, nav.sym-rail .chip {{ transition: all .15s ease; }}
+  }}
 </style>
 </head>
 <body>
