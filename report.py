@@ -1087,13 +1087,13 @@ def forecast_echart(sym, fc_data):
     n_hist = len(hist)
     n_proj = len(proj)
     hist_s = [h[1] for h in hist] + [None] * n_proj
-    # R123/R124: 历史线末点(idx=n_hist-1=今日)与未来路径衔接处理：
-    #  · 主路径(统计中位路径, 红实线)保持从 idx=n_hist 起绘制——不跨过今日虚线往左冒头，
-    #    落点紧贴今日右侧(未来段首)，与历史末点相邻、category 轴上无水平空档。
-    #  · 其余情景路径(结构演绎/次/风险/趋势外推, 虚线)与置信锥(f95/f75)首点前移到 idx=n_hist-1(今日)，
-    #    bridge 值取各路径 T+1 首值(f95h/f75h 取 0→零宽)，使虚线/置信带拼接到今日虚线、无空档。
+    # R123/R125: 历史线末点(idx=n_hist-1=今日=2026-08-18)与未来路径衔接——旭总要求"预测的几条线都要
+    # 紧贴今日虚线、不要有空档"：故所有预测线(主路径med + 结构演绎/次/风险/趋势外推 + 置信锥)首点统一前移到
+    # idx=n_hist-1(今日)，与历史末点同 x 位置无缝衔接。bridge 值取各路径 T+1 首值(f95h/f75h 取 0→零宽)。
+    # "不往左侧冒头"= bridge 点恰落在今日(idx119=历史末点同位置)，不延伸到历史区(idx<119)；红线自今日向右
+    # 展开，既紧贴今日虚线、又不会往左越过今日线伸进历史段。
     main_s = [None] * (n_hist - 1) + [proj[0]["main"]] + [p["main"] for p in proj]
-    med_s = [None] * n_hist + [p["med"] for p in proj]
+    med_s = [None] * (n_hist - 1) + [proj[0]["med"]] + [p["med"] for p in proj]
     alt_s = [None] * (n_hist - 1) + [proj[0]["alt"]] + [p["alt"] for p in proj]
     risk_s = [None] * (n_hist - 1) + [proj[0]["risk"]] + [p["risk"] for p in proj]
     trend_s = [None] * (n_hist - 1) + [proj[0]["trend"]] + [p["trend"] for p in proj]
