@@ -413,6 +413,26 @@ def find_signals(bis, zss, beichis, klines=None, merged=None):
                                     "vol_confirm": False, "bc_type": ""})
                     break
     signals.sort(key=lambda s: s["bi_index"])
+    # 信号去重（fix R97）：同一笔可能被标记为多个买卖点——（1）多个一类买点共享同一支折返笔
+    # 会重复生成「二类买」；（2）一支折返笔同时满足二类与三类判定会叠加；（3）同一支笔可能满足
+    # 多个中枢的三类条件被多重标记。同一 bi_index 仅保留一个信号，优先级 一类 > 三类 > 二类
+    # （一类买卖点确定性最高，三类次之，二类为次级折返），消除图上叠加三角形与回测重复计数偏倚。
+    _prio = lambda k: 0 if "一类" in k else (1 if "三类" in k else 2)
+    _seen = {}
+    _dedup = []
+    for s in signals:
+        i = s["bi_index"]
+        if i in _seen:
+            if _prio(s["kind"]) < _prio(_seen[i]["kind"]):
+                for n, x in enumerate(_dedup):
+                    if x["bi_index"] == i:
+                        _dedup[n] = s
+                        _seen[i] = s
+                        break
+        else:
+            _seen[i] = s
+            _dedup.append(s)
+    signals = _dedup
     # 风险收益比（R:R）量化——缠论实战必备：每个买卖点须有明确止损位与目标位才算完整交易计划。
     # 止损（stop）：买点取该点之前「局部前低」（最近 30 笔窗口内的笔末端最低价）下破一点点；
     #   卖点取局部前高上破一点点。窗口限制至关重要——此前误用全历史最低点导致止损远低于现价、
