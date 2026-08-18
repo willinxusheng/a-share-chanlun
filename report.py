@@ -1881,7 +1881,7 @@ def build_quality_cert_html(base):
         return (f'<div class="qc-cell"><div class="qc-v">{v if v is not None else "-"}</div>'
                 f'<div class="qc-l">{label}</div></div>')
     bias_ok = c.get("bias_ok", True)
-    bias_val = t8.get("bias_median")
+    bias_val = c.get("bias_worst", t8.get("bias_median"))  # 优先 worst(与 bias_ok 同口径), 老证书回退 T8
     drift = c.get("drift", {}).get("note", "")
     sent = c.get("sentiment", {}).get("note", "")
     acc = c.get("accuracy_note", "")

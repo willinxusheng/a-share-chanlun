@@ -95,10 +95,13 @@ def main():
         regime_note += (" — 主路径『方向』在动量/震荡regime的短线命中不如抛硬币, "
                         "决策应以「置信区间(带)」为锚而非单一方向路径; 方向技能主要体现在中长线(T+30)且需结合regime")
 
-    # Bug 修复：用 max(abs(...)) 而非 max(...)，否则负偏置会被漏报，
-    # 可能把 bias_ok 误报为 True（与 R98 audit_forecast_calibration 同类 bug）
-    worst_bias = max((abs(statistics.median(tot[H]["bias_list"]) * 100))
-                     for H in ac.H_TARGETS if tot[H]["bias_list"])
+    # 取 T8/T30 中 |中位偏置| 最大者(signed)作为最差口径: 用于证书标红判定(bias_ok)与
+    # 展示(bias_worst)同口径, 避免「标红用 worst、显示却用 T8 偏置」的口径分裂误导用户
+    worst = max(((H, statistics.median(tot[H]["bias_list"]) * 100)
+                 for H in ac.H_TARGETS if tot[H]["bias_list"]),
+                key=lambda kv: abs(kv[1]))
+    worst_bias = abs(worst[1])
+    worst_bias_signed = round(worst[1], 2)
     # 取所有标的最新日期的最大值（不同指数末根日期可能差 1 个交易日），避免只取首个标的偏低
     last_date = max((data[s]["meta"]["last_date"] for s in data), default=None) if data else None
 
@@ -107,7 +110,8 @@ def main():
         "data_last_date": last_date,
         "calibration": cal,
         "bias_warn": 5.0,
-        "bias_ok": abs(worst_bias) <= 5.0,
+        "bias_ok": worst_bias <= 5.0,
+        "bias_worst": worst_bias_signed,  # 与 bias_ok 同口径(最差), 消费端优先显示, 消除口径分裂误导
         "drift": {
             "status": "healthy",
             "note": "R78 突变漂移监控: 五指数×T8/T30 的 P95|超额|≤0.7%(阈值10%), 零异常 — 预测随行情平滑移动, 无过拟合/数据异常",
