@@ -1062,8 +1062,9 @@ def forecast_echart(sym, fc_data):
     lo = fc_data["lo"]
     ymax = round(lo + fc_data["span"], 2)
     tail_prices = [h[1] for h in hist]
-    # 推演图均线（R119）：基于全量历史真实收盘价 + 统计中位路径(基准预测) 拼接算 MA20/60/120/年线(250)，
-    # 切片对齐推演图可见窗口——hist 段由全量历史(1363根)铺垫，长周期均线起点左对齐、年线不再缺失；推演段延续至预测区。
+    # 推演图均线（R119/R120b）：基于全量历史真实收盘价 + 统计中位路径 拼接算 MA20/60/120/年线(250)，
+    # 切片对齐推演图可见窗口——hist 段由全量历史(1363根)铺垫，长周期均线起点左对齐、年线不缺失；
+    # 仅历史段(hist)绘制均线，未来预测段置 None 不画（用户要求预测部分不显示均线）。
     _closes_all = fc_data.get("closes_all") or [h[1] for h in hist]
     _n_all = fc_data.get("n_all") or len(hist)
     _offset = max(0, _n_all - len(hist))            # 推演图 hist 段在全量中的位置
@@ -1075,6 +1076,10 @@ def forecast_echart(sym, fc_data):
     ma60_s = _sma(_ma_base, 60)[_offset:_offset + _L]
     ma120_s = _sma(_ma_base, 120)[_offset:_offset + _L]
     ma250_s = _sma(_ma_base, 250)[_offset:_offset + _L]
+    # 仅历史段(hist, 索引 < n_hist)保留均线值，未来预测段置 None 不绘制（R120b）
+    for _arr in (ma20_s, ma60_s, ma120_s, ma250_s):
+        for _i in range(n_hist, len(_arr)):
+            _arr[_i] = None
     core_prices = tail_prices + [last, zg, zd] + [p["main"] for p in proj] + [p["alt"] for p in proj] + [p["risk"] for p in proj] + [p["trend"] for p in proj] + [p["med"] for p in proj]
     core_lo = min(core_prices)
     core_hi = max(core_prices)
