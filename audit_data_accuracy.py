@@ -55,8 +55,15 @@ def audit_consistency(data, online=False):
                     cstat = "OK"
             else:
                 cstat = "N/A(未记录, 加 --online 重算)"
-        flag = "OK" if cstat.startswith("OK") else ("WARN" if cstat.startswith("WARN") else "FAIL")
-        if flag != "OK":
+        if cstat.startswith("OK"):
+            flag = "OK"
+        elif cstat.startswith("N/A"):
+            flag = "N/A"   # 未记录/无法校验(中性, 不阻断); 加 --online 可重算
+        elif cstat.startswith("WARN"):
+            flag = "WARN"
+        else:
+            flag = "FAIL"
+        if flag in ("WARN", "FAIL"):   # 仅 WARN/FAIL 阻断; N/A 中性不阻断(修复语义矛盾)
             ok = False
         print("  %-9s %-7s 一致性:%s" % (sym, d["name"], cstat))
     return ok
