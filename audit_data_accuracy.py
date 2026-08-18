@@ -16,11 +16,12 @@ audit_data_accuracy.py — A股缠论看板「数据准确性」总审计（一�
   关11 区间锐度  : --deep 时委托 audit_interval_score.py（用区间评分 Interval Score 同时衡量覆盖与宽度, 检验置信带『诚实且锐利(有用)』还是『只靠够宽才盖住(废带)』；含锐度过宽/IS比/不确定性校准/窄半覆盖四诊断；监控门禁, 不阻断）
   关12 水平偏置  : --deep 时委托 audit_point_bias.py（测主路径目标main 与 统计中位期望med 相对真实收盘的水平偏置, 做符号检验查系统性乐观/悲观; 关8只验方向/关11只验带宽/关10只验概率, 本门禁正交地验『价位目标准不准』；监控门禁, 不阻断）
   关13 数值自洽  : --deep 时委托 audit_forecast_consistency.py（验证看板「显示的预测数字彼此不自相矛盾」: ①存续概率p_hold↔置信带分位自洽(声明核验) ②置信带单调嵌套 ③带有限非负 ④文本终点↔图series一致；监控门禁, 不阻断）
-  关14 路径形态保真: --deep 时委托 audit_path_shape.py（把结构主路径 main 逐交易日形态与后来真实收盘形态比对, 检验『画出来的路形状对不对』——逐段方向吻合度+Spearmanρ; 暴露端点/带都OK但『途中弯法错』的盲区; 与关8/12端点方向、关11带覆盖、关10概率正交; 监控门禁, 不阻断）（验证看板『显示的预测数字彼此不自相矛盾』: ①存续概率p_hold↔置信带分位自洽(声明核验) ②置信带单调嵌套 ③带有限非负 ④文本终点↔图series一致；监控门禁, 不阻断）
+  关14 路径形态保真: --deep 时委托 audit_path_shape.py（把结构主路径 main 逐交易日形态与后来真实收盘形态比对, 检验『画出来的路形状对不对』——逐段方向吻合度+Spearmanρ; 暴露端点/带都OK但『途中弯法错』的盲区; 与关8/12端点方向、关11带覆盖、关10概率正交; 监控门禁, 不阻断）
+  关15 极端尾部覆盖: --deep 时委托 audit_tail_coverage.py（Kupiec POF 无条件覆盖回测 + 下行尾部条件覆盖 + 最差十分位条件击穿; 检验『暴跌时95%带兜没兜住』——关11无条件IS掩盖的灾难性击穿盲区; 熊市单独切片; 监控门禁, 不阻断）
 
 用法:
   python audit_data_accuracy.py            # 关1+2+3（离线，约30~60s）
-  python audit_data_accuracy.py --deep     # 再加关4+关5+关6+关7+关8+关9+关10+关11+关12+关13（约15~30min）
+  python audit_data_accuracy.py --deep     # 再加关4+关5+关6+关7+关8+关9+关10+关11+关12+关13+关14+关15（约15~30min）
   python audit_data_accuracy.py --online   # 关2 在线重算双源一致性（需网络）
 退出码: 0=全通过, 1=存在失败项
 """
@@ -227,6 +228,15 @@ def audit_path_shape(deep):
     return r.returncode == 0  # 该脚本恒退出0, 仅打印路径形态吻合度+Spearmanρ
 
 
+def audit_tail_coverage(deep):
+    if not deep:
+        return True
+    print("\n=== 关15 极端尾部覆盖检验 (委托 audit_tail_coverage.py, 监控门禁不阻断) ===")
+    r = subprocess.run([sys.executable, "audit_tail_coverage.py"],
+                       cwd=os.path.dirname(os.path.abspath(__file__)))
+    return r.returncode == 0  # 该脚本恒退出0, 仅打印 Kupiec POF/下行尾部/最差十分位击穿
+
+
 def main():
     deep = "--deep" in sys.argv
     online = "--online" in sys.argv
@@ -246,8 +256,9 @@ def main():
     ok12 = audit_point_bias(deep)
     ok13 = audit_forecast_consistency(deep)
     ok14 = audit_path_shape(deep)
+    ok15 = audit_tail_coverage(deep)
     print("\n" + "=" * 60)
-    print("汇总: 关1历史完整性=%s  关2双源一致性=%s  关3预测归一化=%s  关4校准回测=%s  关5情绪条件化=%s  关6突变漂移=%s  关7质量证书=%s  关8分regime方向=%s  关9点前完整性=%s  关10概率校准=%s  关11区间锐度=%s  关12水平偏置=%s  关13数值自洽=%s  关14路径形态=%s"
+    print("汇总: 关1历史完整性=%s  关2双源一致性=%s  关3预测归一化=%s  关4校准回测=%s  关5情绪条件化=%s  关6突变漂移=%s  关7质量证书=%s  关8分regime方向=%s  关9点前完整性=%s  关10概率校准=%s  关11区间锐度=%s  关12水平偏置=%s  关13数值自洽=%s  关14路径形态=%s  关15尾部覆盖=%s"
           % (["FAIL", "OK"][ok1], ["FAIL", "OK"][ok2], ["FAIL", "OK"][ok3],
              (["SKIP", "OK"][ok4] if deep else "SKIP"),
              (["SKIP", "OK"][ok5] if deep else "SKIP"),
@@ -259,8 +270,9 @@ def main():
              (["SKIP", "OK"][ok11] if deep else "SKIP"),
              (["SKIP", "OK"][ok12] if deep else "SKIP"),
              (["SKIP", "OK"][ok13] if deep else "SKIP"),
-             (["SKIP", "OK"][ok14] if deep else "SKIP")))
-    allok = ok1 and ok2 and ok3 and (ok4 if deep else True) and (ok5 if deep else True) and (ok6 if deep else True) and (ok7 if deep else True) and (ok8 if deep else True) and (ok9 if deep else True) and (ok10 if deep else True) and (ok11 if deep else True) and (ok12 if deep else True) and (ok13 if deep else True) and (ok14 if deep else True)
+             (["SKIP", "OK"][ok14] if deep else "SKIP"),
+             (["SKIP", "OK"][ok15] if deep else "SKIP")))
+    allok = ok1 and ok2 and ok3 and (ok4 if deep else True) and (ok5 if deep else True) and (ok6 if deep else True) and (ok7 if deep else True) and (ok8 if deep else True) and (ok9 if deep else True) and (ok10 if deep else True) and (ok11 if deep else True) and (ok12 if deep else True) and (ok13 if deep else True) and (ok14 if deep else True) and (ok15 if deep else True)
     print("结论: %s" % ("✅ 全部通过" if allok else "❌ 存在失败项"))
     sys.exit(0 if allok else 1)
 
