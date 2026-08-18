@@ -1156,11 +1156,11 @@ def forecast_echart(sym, fc_data):
   }}
   function __makeFcFormatter() {{ return function(v, i) {{ return __fcFormatter(v, i); }}; }}
   function updateForecastLabels() {{
+    // 用全量类目数 D.xcats.length 计算可见天数，避免依赖 getOption().xAxis[0].data 在 dataZoom 过滤后的行为（跨版本不可靠）。
     var opt = chart.getOption();
     var dz = (opt.dataZoom && opt.dataZoom[0]) || {{ start: 0, end: 100 }};
-    var v = ((opt.xAxis && opt.xAxis[0] && opt.xAxis[0].data) ? opt.xAxis[0].data.length : D.xcats.length);
     var start = dz.start || 0, end = dz.end || 100;
-    __fcVisible = Math.max(1, Math.floor(v * (end - start) / 100));
+    __fcVisible = Math.max(1, Math.floor(D.xcats.length * (end - start) / 100));
     chart.setOption({{ xAxis: {{ axisLabel: {{ interval: 0, autoHide: false, hideOverlap: false, formatter: __makeFcFormatter() }} }} }});
   }}
   var option = {{
