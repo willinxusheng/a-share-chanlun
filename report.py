@@ -1087,15 +1087,18 @@ def forecast_echart(sym, fc_data):
     n_hist = len(hist)
     n_proj = len(proj)
     hist_s = [h[1] for h in hist] + [None] * n_proj
-    main_s = [None] * n_hist + [p["main"] for p in proj]      # 结构演绎路径(参考·虚线)
-    med_s = [None] * n_hist + [p["med"] for p in proj]        # 统计中位路径(主·实线)
-    alt_s = [None] * n_hist + [p["alt"] for p in proj]
-    risk_s = [None] * n_hist + [p["risk"] for p in proj]
-    trend_s = [None] * n_hist + [p["trend"] for p in proj]
-    f95l = [None] * n_hist + [p["f95l"] for p in proj]
-    f95h = [None] * n_hist + [round(p["f95h"], 2) for p in proj]
-    f75l = [None] * n_hist + [p["f75l"] for p in proj]
-    f75h = [None] * n_hist + [round(p["f75h"], 2) for p in proj]
+    # R123: 让未来推演路径从历史最后一天(idx=n_hist-1)开始绘制，使历史线末端与未来线
+    # 起点在 x 轴上重合，消除 category 轴上的一个类目水平视觉缺口。future 段仍从
+    # idx=n_hist 起有真实推演值，bridge 点值取对应路径的 T+1 首值，保持线形连续。
+    main_s = [None] * (n_hist - 1) + [proj[0]["main"]] + [p["main"] for p in proj]
+    med_s = [None] * (n_hist - 1) + [proj[0]["med"]] + [p["med"] for p in proj]
+    alt_s = [None] * (n_hist - 1) + [proj[0]["alt"]] + [p["alt"] for p in proj]
+    risk_s = [None] * (n_hist - 1) + [proj[0]["risk"]] + [p["risk"] for p in proj]
+    trend_s = [None] * (n_hist - 1) + [proj[0]["trend"]] + [p["trend"] for p in proj]
+    f95l = [None] * (n_hist - 1) + [proj[0]["f95l"]] + [p["f95l"] for p in proj]
+    f95h = [None] * (n_hist - 1) + [0] + [round(p["f95h"], 2) for p in proj]
+    f75l = [None] * (n_hist - 1) + [proj[0]["f75l"]] + [p["f75l"] for p in proj]
+    f75h = [None] * (n_hist - 1) + [0] + [round(p["f75h"], 2) for p in proj]
     lo = fc_data["lo"]
     ymax = round(lo + fc_data["span"], 2)
     tail_prices = [h[1] for h in hist]
