@@ -2005,7 +2005,11 @@ def main():
         freshness_banner = ""
     # 预测质量自检证书(R79): 读 quality_cert.json 渲染顶部常驻区块, 让准确性可见可验
     cert_html = build_quality_cert_html(_base)
-    _breadth_bias = (_bull_cnt / _total - 0.5) * 2 * 8  # 全看多 +8 / 全看空 -8（0-100 置信度刻度）
+    # 净极性：全看多 +8 / 全看空 -8（0-100 置信度刻度）。
+    # 旧式 (bull/total - 0.5) * 16 在存在中性情景(震荡待方向/无中枢笔/数据不足，classify 可能返回
+    # 且不在 _SC_BULL/_SC_BEAR 内)时，会把"多数震荡"错误压成偏空——数学上 = 净极性 - 8*neutral/total，
+    # 致推演置信度被误惩罚。改用 (bull - bear) / total * 8，中性情景正确计入"非多非空"，不污染极性。
+    _breadth_bias = (_bull_cnt - _bear_cnt) / _total * 8
     # 关键修复(R136)：在「算 scores / 画 card / 推演」之前，统一用周线 classify 重算日线 classify，
     # 使 interval_nesting / ma_alignment 等字段在 health_score / forecast_confidence / forecast_svg
     # 全链路口径一致。此前 scores 在重算之前计算，导致 health/conf 不含 nest、与 p_main 的 nest
