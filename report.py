@@ -1174,13 +1174,26 @@ def forecast_echart(sym, fc_data):
     dedup_mark_labels(end_points, len(xcats), core_lo, core_hi, 1100 - 96 - 64, 440 - 44 - 74, 96, 44,
                       {xcats[-1]: len(xcats) - 1})
 
+    # R126: 在今日虚线(idx=n_hist-1)处给各条预测路径加一个小标记，避免多线同起点重叠后
+    # 看起来"只有一条线紧贴今日虚线"。5 条预测线（主/结构演绎/次/风险/趋势）都以昨日
+    # 收盘价(last_v)作为今日桥接值，故数据上完全重合；用 symbolOffset 在像素级微微
+    # 散开，使每条路径的起点在视觉上都能被看到，且仍在今日虚线上/紧邻。
+    _sp = round(last_v, 2)
+    start_points = [
+        {"coord": [xcats[n_hist - 1], _sp], "itemStyle": {"color": RED}, "symbol": "circle", "symbolSize": 5, "symbolOffset": [0, 0]},
+        {"coord": [xcats[n_hist - 1], _sp], "itemStyle": {"color": RED, "opacity": 0.7}, "symbol": "diamond", "symbolSize": 3.5, "symbolOffset": [0, -4]},
+        {"coord": [xcats[n_hist - 1], _sp], "itemStyle": {"color": "#94a3b8"}, "symbol": "triangle", "symbolSize": 3.5, "symbolOffset": [0, 4]},
+        {"coord": [xcats[n_hist - 1], _sp], "itemStyle": {"color": GREEN}, "symbol": "rect", "symbolSize": 3.5, "symbolOffset": [-4, 0]},
+        {"coord": [xcats[n_hist - 1], _sp], "itemStyle": {"color": "#0891b2"}, "symbol": "roundRect", "symbolSize": 3.5, "symbolOffset": [4, 0]},
+    ]
+
     fdata = {
         "keyLevelsText": key_levels_text,
         "xcats": xcats, "xfull": x_full, "n_hist": n_hist, "proj": proj,
         "hist": hist_s, "main": main_s, "alt": alt_s, "risk": risk_s, "trend": trend_s,
         "ma20": ma20_s, "ma60": ma60_s, "ma120": ma120_s, "ma250": ma250_s,
         "lo": round(lo, 2), "ymax": ymax, "ymin_core": round(core_lo, 2), "ymax_core": round(core_hi, 2),
-        "hlines": hlines, "vline": vline, "endPoints": end_points,
+        "hlines": hlines, "vline": vline, "endPoints": end_points, "startPoints": start_points,
         "med": med_s, "f95l": f95l, "f95h": f95h, "f75l": f75l, "f75h": f75h,
         "p_main": p_main, "p_alt": p_alt, "p_risk": p_risk, "proj_raw": proj,
     }
@@ -1288,7 +1301,7 @@ def forecast_echart(sym, fc_data):
       {{ name: '置信锥 P25–P75', type: 'line', data: D.f75h, stack: 'b75', symbol: 'none', lineStyle: {{ opacity: 0 }}, areaStyle: {{ color: 'rgba(229,69,69,0.12)' }}, tooltip: {{ show: false }}, silent: true }},
       {{ name: '参考', type: 'line', data: [], silent: true,
         markLine: {{ symbol: 'none', data: D.hlines.concat(D.vline), labelLayout: {{ moveOverlap: 'shiftY' }} }},
-        markPoint: {{ data: D.endPoints }} }}
+        markPoint: {{ data: D.endPoints.concat(D.startPoints) }} }}
     ]
   }};
   if (D.keyLevelsText) {{
