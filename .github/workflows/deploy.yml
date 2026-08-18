@@ -56,6 +56,17 @@ jobs:
           python report.py
           cp report.html index.html
 
+      - name: 标签重叠诊断（非阻塞护栏，仅告警 + 上传 artifact）
+        # 实证守卫：R100 日期轴修复(hideOverlap:false + formatter 控显)后，各图表文字
+        # 标签应零重叠。每日自动跑一遍，一旦回归即产生重叠对并被记录告警；该步骤
+        # 永不阻断发布(continue-on-error + || true)，诊断产物上传 artifact 供回溯。
+        continue-on-error: true
+        run: |
+          npm install echarts@^5 --no-save --silent 2>/dev/null || true
+          node verify_overlap.js || true
+          echo "—— 标签重叠诊断报告(重叠对数见 total=) ——"
+          cat _ov.txt 2>/dev/null || echo "(_ov.txt 未生成)"
+
       - name: 提交每日构建时间戳（keep-alive，防定时任务被停用）
         run: |
           set -euo pipefail
@@ -75,6 +86,14 @@ jobs:
         uses: actions/upload-pages-artifact@v5
         with:
           path: .
+
+      - name: 上传标签重叠诊断产物
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: overlap-report
+          path: _ov.txt
+          if-no-files-found: ignore
 
       - name: 部署到 GitHub Pages
         uses: actions/deploy-pages@v5
