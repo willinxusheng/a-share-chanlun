@@ -431,13 +431,16 @@ def echart_main(klines, r, sym, captured=None):
     return idx === 0 || __isQuarterStart(idx);
   }}
   function __mainAxisFormatter(v, i) {{
-    var d = (D.dates && D.dates[i]) ? D.dates[i] : v;
+    // ECharts dataZoom 后 formatter 的 i 可能是视觉索引而非数据索引；优先用 v 反查真实日期，避免缩放后显示 2021 这种错配。
+    var idx = (D.dates && v) ? D.dates.indexOf(v) : i;
+    if (idx < 0) idx = i;
+    var d = (idx >= 0 && D.dates && D.dates[idx]) ? D.dates[idx] : v;
     if (!d || d.length < 7) return v;
-    if (!__mainAxisShowLabel(i)) return '';
+    if (!__mainAxisShowLabel(idx)) return '';
     var y = d.slice(0,4);
-    var prev = i > 0 ? D.dates[i-1] : null;
+    var prev = idx > 0 ? D.dates[idx-1] : null;
     if (__mainAxisVisible <= 10) return d;  // 放大到极少 K 线时显示完整日期，避免只看 MM-DD 误判年份
-    if (i === 0 || !prev || prev.slice(0,4) !== y) return y;
+    if (idx === 0 || !prev || prev.slice(0,4) !== y) return y;
     return d.slice(5);
   }}
   function __makeMainAxisFormatter() {{ return function(v, i) {{ return __mainAxisFormatter(v, i); }}; }}
@@ -1139,13 +1142,16 @@ def forecast_echart(sym, fc_data):
     return idx === 0 || __fcQuarterStart(idx);
   }}
   function __fcFormatter(v, i) {{
-    var d = (D.xcats && D.xcats[i]) ? D.xcats[i] : v;
+    // ECharts dataZoom 后 formatter 的 i 可能是视觉索引而非数据索引；优先用 v 反查真实日期，避免推演图缩放后日期错配。
+    var idx = (D.xcats && v) ? D.xcats.indexOf(v) : i;
+    if (idx < 0) idx = i;
+    var d = (idx >= 0 && D.xcats && D.xcats[idx]) ? D.xcats[idx] : v;
     if (!d || d.length < 7) return v;
-    if (!__fcShowLabel(i)) return '';
+    if (!__fcShowLabel(idx)) return '';
     if (__fcVisible <= 10) return d;  // 放大到极少 K 线时显示完整日期，与主图 R113 对齐，避免只看 MM-DD 误判年份
     var y = d.slice(0,4);
-    var prev = i > 0 ? D.xcats[i-1] : null;
-    if (i === 0 || !prev || prev.slice(0,4) !== y) return y;
+    var prev = idx > 0 ? D.xcats[idx-1] : null;
+    if (idx === 0 || !prev || prev.slice(0,4) !== y) return y;
     return d.slice(5);
   }}
   function __makeFcFormatter() {{ return function(v, i) {{ return __fcFormatter(v, i); }}; }}
