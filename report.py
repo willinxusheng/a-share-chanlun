@@ -1702,8 +1702,12 @@ def load_live_sentiment():
     注: 仅做提示, 不进入任何预测数学(预测数学由门禁 R76 严格管控, 当前未达并入阈值)。"""
     try:
         import os as _os
-        p = _os.environ.get("SENTIMENT_V2_PATH") or \
-            r"C:\Users\Administrator\WorkBuddy\2026-08-01-12-23-48\sentiment\sentiment_v2.json"
+        p = _os.environ.get("SENTIMENT_V2_PATH")
+        if not p:
+            # 部署布局：情绪看板与本报告同工作区、位于 chanlun 的同级 sentiment/ 目录。
+            # 用相对脚本目录推导，避免写死过期绝对路径导致兜底永远失效（此前指向已删除的 08-01 工作区）。
+            _base = _os.path.dirname(_os.path.abspath(__file__))
+            p = _os.path.join(_base, "..", "sentiment", "sentiment_v2.json")
         if not _os.path.exists(p):
             return None
         d = json.load(open(p, encoding="utf-8"))
@@ -1813,6 +1817,8 @@ def main():
     _base = os.path.dirname(os.path.abspath(__file__))
     with open(os.path.join(_base, "data.json"), encoding="utf-8") as f:
         data = json.load(f)
+    if not data:
+        raise SystemExit("data.json 为空：无指数数据，无法生成报告（上游数据管线可能失败）")
 
     results = {sym: analyze(d["klines"]) for sym, d in data.items()}
     results_week = {sym: analyze(d["week_klines"], MIN_BI_PCT_WEEK) for sym, d in data.items()}
