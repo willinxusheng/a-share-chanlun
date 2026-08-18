@@ -174,6 +174,7 @@ def echart_main(klines, r, sym, captured=None):
 
     ma20 = [round(v, 3) if v is not None else None for v in ma_series(closes, 20)]
     ma60 = [round(v, 3) if v is not None else None for v in ma_series(closes, 60)]
+    ma120 = [round(v, 3) if v is not None else None for v in ma_series(closes, 120)]
     ma250 = [round(v, 3) if v is not None else None for v in ma_series(closes, 250)]
 
     date_idx = {d: i for i, d in enumerate(dates)}
@@ -379,6 +380,7 @@ def echart_main(klines, r, sym, captured=None):
         "volume": volumes,
         "ma20": ma20,
         "ma60": ma60,
+        "ma120": ma120,
         "ma250": ma250,
         "dif": dif,
         "dea": dea,
@@ -468,7 +470,7 @@ def echart_main(klines, r, sym, captured=None):
         return '<b>' + d + '</b><br>开 ' + o.toFixed(2) + ' 收 ' + c.toFixed(2) + '<br>高 ' + h.toFixed(2) + ' 低 ' + l.toFixed(2) + '<br>涨跌 <span style="color:' + col + '">' + (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%</span><br>成交量 ' + (D.volume[i]/1e8).toFixed(2) + ' 亿手';
       }}
     }},
-    legend: {{ data: ['日K', 'MA20', 'MA60', 'MA250', '成交量', 'MACD', 'DIF', 'DEA'], top: 2, itemGap: 12, textStyle: {{ fontSize: 11 }} }},
+    legend: {{ data: ['日K', 'MA20', 'MA60', 'MA120', 'MA250', '成交量', 'MACD', 'DIF', 'DEA'], top: 2, itemGap: 12, textStyle: {{ fontSize: 11 }} }},
     grid: [
       {{ left: 96, right: 56, top: 48, bottom: '40%' }},
       {{ left: 96, right: 56, top: '62%', height: '11%' }},
@@ -501,6 +503,7 @@ def echart_main(klines, r, sym, captured=None):
       }},
       {{ name: 'MA20', type: 'line', data: D.ma20, symbol: 'none', lineStyle: {{ color: '#0ea5e9', width: 1.1 }} }},
       {{ name: 'MA60', type: 'line', data: D.ma60, symbol: 'none', lineStyle: {{ color: '#a855f7', width: 1.2 }} }},
+      {{ name: 'MA120', type: 'line', data: D.ma120, symbol: 'none', lineStyle: {{ color: '#f59e0b', width: 1.2 }} }},
       {{ name: 'MA250', type: 'line', data: D.ma250, symbol: 'none', lineStyle: {{ color: '#0d9488', width: 1.2 }} }},
       {{
         name: '成交量', type: 'bar', xAxisIndex: 1, yAxisIndex: 1, data: D.volume,
@@ -1511,7 +1514,7 @@ def card_html(sym, name, klines, r, wcls, health, conf):
       <div class="kv"><span>走势类型</span><b style="color:{_tt_color}">{_tt}</b></div>
       <div class="kv"><span>最后中枢</span><b>{_zs_txt}</b></div>
       <div class="kv"><span>关键缺口(未补)</span><b style="color:#475569;font-size:11px">{_gap_txt}</b></div>
-      <div class="kv"><span>均线排列(MA20/60/250)</span><b style="color:{ma_color}">{ma_txt}</b></div>
+      <div class="kv"><span>均线排列(MA20/60/120/250)</span><b style="color:{ma_color}">{ma_txt}</b></div>
       <div class="kv"><span>多周期共振</span><b style="font-size:11px;line-height:1.55">
         <span style="color:{sc_color}">日 {_dd}</span>·
         <span style="color:{w_color}">周 {_wd}</span>·

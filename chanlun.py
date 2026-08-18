@@ -1182,20 +1182,21 @@ def realized_vol_annualized(closes, periods=244):
 
 # ---------- 8g-2. 均线多空排列（与缠论结构交叉验证，#4） ----------
 def ma_alignment(closes):
-    """返回 {ma20, ma60, ma250, alignment}；alignment: 多头排列/空头排列/纠缠。"""
+    """返回 {ma20, ma60, ma120, ma250, alignment}；alignment: 多头排列/空头排列/纠缠。"""
     n = len(closes)
     if n < 260:
         return None
     ma20 = sum(closes[-20:]) / 20
     ma60 = sum(closes[-60:]) / 60
+    ma120 = sum(closes[-120:]) / 120
     ma250 = sum(closes[-250:]) / 250
-    if ma20 > ma60 > ma250:
+    if ma20 > ma60 > ma120 > ma250:
         alignment = "多头排列"
-    elif ma20 < ma60 < ma250:
+    elif ma20 < ma60 < ma120 < ma250:
         alignment = "空头排列"
     else:
         alignment = "纠缠"
-    return {"ma20": round(ma20, 2), "ma60": round(ma60, 2),
+    return {"ma20": round(ma20, 2), "ma60": round(ma60, 2), "ma120": round(ma120, 2),
             "ma250": round(ma250, 2), "alignment": alignment}
 
 
