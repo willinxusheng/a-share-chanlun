@@ -409,7 +409,6 @@ def echart_main(klines, r, sym, captured=None):
   // 主图时间轴标签动态密度：按可见窗口交易日常数选择日/周/月/季边界，避免固定季度标签在放大后"断断续续"。
   // 实现方式：interval 固定为 0 + autoHide 关闭，把"是否显示"的判断下沉到 formatter；彻底避免 ECharts 自动抽稀导致日期"错配"。
   var __mainAxisVisible = D.dates.length;
-  var __mainAxisPrevYear = null;
   function __isMonthStart(idx) {{ return idx === 0 || D.dates[idx].slice(0,7) !== D.dates[idx-1].slice(0,7); }}
   function __isQuarterStart(idx) {{
     if (idx === 0) return true;
@@ -435,7 +434,8 @@ def echart_main(klines, r, sym, captured=None):
     if (!d || d.length < 7) return v;
     if (!__mainAxisShowLabel(i)) return '';
     var y = d.slice(0,4);
-    if (i === 0 || y !== __mainAxisPrevYear) {{ __mainAxisPrevYear = y; return y; }}
+    var prev = i > 0 ? D.dates[i-1] : null;
+    if (i === 0 || !prev || prev.slice(0,4) !== y) return y;
     return d.slice(5);
   }}
   function __makeMainAxisFormatter() {{ return function(v, i) {{ return __mainAxisFormatter(v, i); }}; }}
@@ -444,7 +444,6 @@ def echart_main(klines, r, sym, captured=None):
     var dz = (opt.dataZoom && opt.dataZoom[0]) || {{ start: 0, end: 100 }};
     var start = dz.start || 0, end = dz.end || 100;
     __mainAxisVisible = Math.max(1, Math.floor(D.dates.length * (end - start) / 100));
-    __mainAxisPrevYear = null;
     chart.setOption({{ xAxis: [{{}}, {{}}, {{ axisLabel: {{ interval: 0, autoHide: false, hideOverlap: true, formatter: __makeMainAxisFormatter() }} }}] }});
   }}
   var option = {{
@@ -1102,6 +1101,46 @@ def forecast_echart(sym, fc_data):
   var D = {json.dumps(fdata, ensure_ascii=False)};
   var chart = echarts.init(document.getElementById('{cid}'));
   (window.__charts = window.__charts || []).push(chart);
+  // 推演图时间轴：与主图一致——interval 固定 0 + autoHide 关闭 + formatter 控制显示，杜绝 ECharts 自动抽稀造成的日期错配；并按 dataZoom 可见天数动态切日/周/月/季密度。
+  var __fcVisible = D.xcats.length;
+  function __fcMonthStart(idx) {{ return idx === 0 || D.xcats[idx].slice(0,7) !== D.xcats[idx-1].slice(0,7); }}
+  function __fcQuarterStart(idx) {{
+    if (idx === 0) return true;
+    var c = D.xcats[idx], p = D.xcats[idx-1];
+    if (!c || !p) return false;
+    var cm = parseInt(c.slice(5,7),10), pm = parseInt(p.slice(5,7),10);
+    return c.slice(0,4) !== p.slice(0,4) || Math.floor((cm-1)/3) !== Math.floor((pm-1)/3);
+  }}
+  function __fcMonday(idx) {{
+    if (idx === 0) return true;
+    var parts = D.xcats[idx].split('-');
+    return new Date(parseInt(parts[0],10), parseInt(parts[1],10)-1, parseInt(parts[2],10)).getDay() === 1;
+  }}
+  function __fcShowLabel(idx) {{
+    var v = __fcVisible;
+    if (v <= 30) return true;
+    if (v <= 60) return idx === 0 || __fcMonday(idx);
+    if (v <= 180) return idx === 0 || __fcMonthStart(idx);
+    return idx === 0 || __fcQuarterStart(idx);
+  }}
+  function __fcFormatter(v, i) {{
+    var d = (D.xcats && D.xcats[i]) ? D.xcats[i] : v;
+    if (!d || d.length < 7) return v;
+    if (!__fcShowLabel(i)) return '';
+    var y = d.slice(0,4);
+    var prev = i > 0 ? D.xcats[i-1] : null;
+    if (i === 0 || !prev || prev.slice(0,4) !== y) return y;
+    return d.slice(5);
+  }}
+  function __makeFcFormatter() {{ return function(v, i) {{ return __fcFormatter(v, i); }}; }}
+  function updateForecastLabels() {{
+    var opt = chart.getOption();
+    var dz = (opt.dataZoom && opt.dataZoom[0]) || {{ start: 0, end: 100 }};
+    var v = ((opt.xAxis && opt.xAxis[0] && opt.xAxis[0].data) ? opt.xAxis[0].data.length : D.xcats.length);
+    var start = dz.start || 0, end = dz.end || 100;
+    __fcVisible = Math.max(1, Math.floor(v * (end - start) / 100));
+    chart.setOption({{ xAxis: {{ axisLabel: {{ interval: 0, autoHide: false, hideOverlap: true, formatter: __makeFcFormatter() }} }} }});
+  }}
   var option = {{
     animation: false,
     tooltip: {{ trigger: 'axis', axisPointer: {{ type: 'cross', label: {{ show: false }} }},
@@ -1128,9 +1167,8 @@ def forecast_echart(sym, fc_data):
     }},
     legend: {{ data: ['历史','统计中位路径','结构演绎路径','次路径','风险路径','趋势外推','置信锥 P05–P95','置信锥 P25–P75'], top: 2, itemGap: 8, textStyle: {{ fontSize: 11 }} }},
     grid: {{ left: 96, right: 64, top: 44, bottom: 80 }},
-    xAxis: {{ type: 'category', data: D.xcats, boundaryGap: false, axisLabel: {{ fontSize: 11, margin: 6, hideOverlap: true, showMinLabel: true, showMaxLabel: false,
-        interval: function(idx, val){{ if (idx === 0) return true; var c = D.xfull[idx], p = D.xfull[idx-1]; if (!c || !p) return true; if (c.slice(0,4) !== p.slice(0,4)) return true; return (idx % 24 === 0); }},
-        formatter: (function(){{ var _py = null; return function(v, i){{ var d = (D.xfull && D.xfull[i]) ? D.xfull[i] : v; if (!d || d.length < 7) return v; var y = d.slice(0,4); if (i === 0 || y !== _py) {{ _py = y; return y; }} return d.slice(5); }}; }})() }} }},
+    xAxis: {{ type: 'category', data: D.xcats, boundaryGap: false, axisTick: {{ show: false }}, axisLabel: {{ fontSize: 11, margin: 6, interval: 0, autoHide: false, hideOverlap: true, showMinLabel: true, showMaxLabel: false,
+        formatter: __makeFcFormatter() }} }},
     yAxis: {{ scale: false, min: D.ymin_core, max: D.ymax_core, splitNumber: 6, axisLine: {{ lineStyle: {{ color: '#cbd5e1' }} }}, splitLine: {{ lineStyle: {{ color: '#eef2f7' }} }}, axisLabel: {{ fontSize: 12, hideOverlap: true }} }},
     dataZoom: [
       {{ type: 'inside', xAxisIndex: 0, start: 0, end: 100 }},
@@ -1169,6 +1207,8 @@ def forecast_echart(sym, fc_data):
     }}];
   }}
   chart.setOption(option);
+  chart.on('dataZoom', updateForecastLabels);
+  updateForecastLabels();
 }})();
 </script>'''
 
