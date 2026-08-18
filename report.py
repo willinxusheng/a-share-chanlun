@@ -1537,7 +1537,7 @@ def card_html(sym, name, klines, r, wcls, health, conf):
     _zs = r["zhongshu"][-1] if r["zhongshu"] else None
     _zs_txt = ("%s · %d笔" % ("延伸" if _zs.get("extension") else "标准", _zs["count"])) if _zs else "—"
     _tt = cls.get("trend_type", "—")
-    _tt_color = {"上涨走势(趋势)": RED, "下跌走势(趋势)": GREEN, "扩张/盘整走势": "#64748b", "盘整走势": "#64748b"}.get(_tt, "#0f172a")
+    _tt_color = {"上涨走势(趋势)": RED, "下跌走势(趋势)": GREEN, "盘整/扩张走势": "#64748b", "盘整走势": "#64748b"}.get(_tt, "#0f172a")
     # 关键缺口（未补，±18%内最近3个）—— 中枢之外最重要的价位锚，A股「逢缺必补」规律下意义显著
     _gaps_unf = [g for g in r.get("gaps", []) if not g["filled"]]
     _gaps_near = [g for g in _gaps_unf
@@ -1758,7 +1758,12 @@ def robustness_table(robust, data):
         em, rm = _pick(early), _pick(recent)
         if em and rm:
             diff_pt = (rm[0] - em[0]) * 100
-            if diff_pt <= -15:
+            # 样本充足性护栏：早年或近两年买方样本任一不足 20，早期胜率(尤极小样本易出 100%)
+            # 不可信，衰减 pt 多为抽样噪声，禁止据此发「过拟合」告警——与 build_quality_cert 的
+            # regime 判定 n>=20 可靠性口径一致。仅给中性「样本不足·难判定」，避免误导。
+            if em[2] < 20 or rm[2] < 20:
+                verdict = badge('样本不足 · 难判定', '#64748b')
+            elif diff_pt <= -15:
                 verdict = badge('近两年显著衰减 · 校准或存过拟合', '#d97706', '⚠ ')
             elif diff_pt >= -5:
                 verdict = badge('样本外稳定', GREEN, '✓ ')
@@ -1784,7 +1789,7 @@ def robustness_table(robust, data):
       <colgroup><col style="width:140px"><col style="width:calc((100%% - 140px)/5)"><col style="width:calc((100%% - 140px)/5)"><col style="width:calc((100%% - 140px)/5)"><col style="width:calc((100%% - 140px)/5)"><col style="width:calc((100%% - 140px)/5)"></colgroup>
       <thead><tr><th>指数</th><th class="tac">早年买方信号胜率(均收益) h=20</th><th class="tac">近两年买方信号胜率(均收益) h=20</th><th class="tac">变化</th><th class="tac">滚动窗口衰减*</th><th>样本外稳健性</th></tr></thead>
       <tbody>%s</tbody></table>
-      <p style="font-size:12px;color:#64748b;margin-top:8px">按 {SPLIT} 切分「早年 / 近两年」买方信号（一类买·三类买，持有 20 日）胜率与均收益对比。近两年显著下滑(≥15pt)提示过拟合风险；持平/更高则样本外稳定。*「滚动窗口衰减」=多个切分点(2022/2023/2024)聚合的两年 vs 早年胜率差均值，比单一切分更稳，刻画样本外稳健性。不构成投资建议。</p>""".replace("{SPLIT}", split)
+      <p style="font-size:12px;color:#64748b;margin-top:8px">按 {SPLIT} 切分「早年 / 近两年」买方信号（一类买·三类买，持有 20 日）胜率与均收益对比。近两年显著下滑(≥15pt)提示过拟合风险；持平/更高则样本外稳定。<b>早年或近两年买方样本&lt;20 时判定为「样本不足·难判定」，不据此发过拟合告警</b>（极小样本易出 100%% 胜率致衰减 pt 失真）。*「滚动窗口衰减」=多个切分点(2022/2023/2024)聚合的两年 vs 早年胜率差均值，比单一切分更稳，刻画样本外稳健性。不构成投资建议。</p>""".replace("{SPLIT}", split)
     return _tbl % "".join(rows)
 
 
