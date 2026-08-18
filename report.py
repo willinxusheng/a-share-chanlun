@@ -477,12 +477,13 @@ def echart_main(klines, r, sym, captured=None):
     ],
     yAxis: [
       {{ scale: false, min: D.yMin, max: D.yMax, gridIndex: 0, splitNumber: 6, axisLine: {{ lineStyle: {{ color: '#cbd5e1' }} }}, splitLine: {{ lineStyle: {{ color: '#eef2f7' }} }}, axisLabel: {{ fontSize: 12, hideOverlap: true }} }},
-      {{ scale: true, gridIndex: 1, splitNumber: 2, name: '成交量', nameLocation: 'middle', nameGap: 34, nameTextStyle: {{ color: '#94a3b8', fontSize: 11 }}, axisLine: {{ show: false }}, splitLine: {{ show: false }}, axisLabel: {{ show: false }} }},
-      {{ scale: true, gridIndex: 2, min: -D.hmax, max: D.hmax, splitNumber: 2, name: 'MACD', nameLocation: 'middle', nameGap: 34, nameTextStyle: {{ color: '#94a3b8', fontSize: 11 }}, axisLine: {{ show: false }}, splitLine: {{ show: false }}, axisLabel: {{ fontSize: 11 }} }}
+      {{ scale: true, gridIndex: 1, splitNumber: 2, name: '成交量', nameLocation: 'middle', nameGap: 34, nameTextStyle: {{ color: '#94a3b8', fontSize: 11 }}, axisLine: {{ show: false }}, splitLine: {{ show: false }}, axisLabel: {{ show: false }}, axisPointer: {{ label: {{ show: false }} }} }},
+      {{ scale: true, gridIndex: 2, min: -D.hmax, max: D.hmax, splitNumber: 2, name: 'MACD', nameLocation: 'middle', nameGap: 34, nameTextStyle: {{ color: '#94a3b8', fontSize: 11 }}, axisLine: {{ show: false }}, splitLine: {{ show: false }}, axisLabel: {{ show: false }}, axisPointer: {{ label: {{ show: false }} }} }}
     ],
+    // 默认展示最近约 1 年(252 交易日)，避免首次打开落在 5 年前最早数据上造成"时间轴日期不对"的错觉；用户仍可缩放/平移看全历史。
     dataZoom: [
-      {{ type: 'inside', xAxisIndex: [0, 1, 2], start: 0, end: 100 }},
-      {{ type: 'slider', xAxisIndex: [0, 1, 2], start: 0, end: 100, showDetail: false, height: 16, bottom: 12, handleStyle: {{ color: '#2b6cb0' }}, borderColor: '#e2e8f0', fillerColor: 'rgba(43,108,176,0.12)' }}
+      {{ type: 'inside', xAxisIndex: [0, 1, 2], start: Math.max(0, (D.dates.length - 252) / D.dates.length * 100), end: 100 }},
+      {{ type: 'slider', xAxisIndex: [0, 1, 2], start: Math.max(0, (D.dates.length - 252) / D.dates.length * 100), end: 100, showDetail: false, height: 16, bottom: 12, handleStyle: {{ color: '#2b6cb0' }}, borderColor: '#e2e8f0', fillerColor: 'rgba(43,108,176,0.12)' }}
     ],
     series: [
       {{
@@ -1185,9 +1186,10 @@ def forecast_echart(sym, fc_data):
     xAxis: {{ type: 'category', data: D.xcats, boundaryGap: false, axisTick: {{ show: false }}, axisLabel: {{ fontSize: 11, margin: 6, interval: 0, autoHide: false, hideOverlap: false, showMinLabel: true, showMaxLabel: false,
         formatter: __makeFcFormatter() }} }},
     yAxis: {{ scale: false, min: D.ymin_core, max: D.ymax_core, splitNumber: 6, axisLine: {{ lineStyle: {{ color: '#cbd5e1' }} }}, splitLine: {{ lineStyle: {{ color: '#eef2f7' }} }}, axisLabel: {{ fontSize: 12, hideOverlap: true }} }},
+    // 推演图默认展示历史最后 120 个交易日 + 全部推演窗口；避免首次打开落在多年前历史数据上。
     dataZoom: [
-      {{ type: 'inside', xAxisIndex: 0, start: 0, end: 100 }},
-      {{ type: 'slider', xAxisIndex: 0, start: 0, end: 100, showDetail: false, height: 16, bottom: 32, handleStyle: {{ color: '#2b6cb0' }}, borderColor: '#e2e8f0', fillerColor: 'rgba(43,108,176,0.12)' }}
+      {{ type: 'inside', xAxisIndex: 0, start: Math.max(0, (D.n_hist - 120) / D.xcats.length * 100), end: 100 }},
+      {{ type: 'slider', xAxisIndex: 0, start: Math.max(0, (D.n_hist - 120) / D.xcats.length * 100), end: 100, showDetail: false, height: 16, bottom: 32, handleStyle: {{ color: '#2b6cb0' }}, borderColor: '#e2e8f0', fillerColor: 'rgba(43,108,176,0.12)' }}
     ],
     series: [
       {{ name: '历史', type: 'line', data: D.hist, symbol: 'none', smooth: true, lineStyle: {{ color: '#2b6cb0', width: 1.8 }} }},
