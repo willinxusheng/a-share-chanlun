@@ -17,7 +17,7 @@ python report.py       # 2. 运行缠论分析并生成 report.html
 
 ## 多电脑同步工作流（核心）
 
-> 本仓库**只跟踪源码**（本文件 + 3 个 .py）。`data.json` 与 `report.html` 是生成产物，已写入 `.gitignore`，**不入库**。
+> 本仓库**只跟踪源码**（本文件 + 17 个 `.py` + `.github/workflows/deploy.yml`）。`data.json`、`report.html`、`quality_cert.json` 是生成产物，已写入 `.gitignore`，**不入库**。
 > 这样任何一台电脑都不会修改同一个被追踪文件，天然避免合并冲突。
 
 新电脑首次使用：
@@ -62,9 +62,13 @@ python fetch_data.py && python report.py   # 本地重建数据+报告
 |------|------|----------|
 | `fetch_data.py` | 拉取行情（腾讯主源 + 新浪交叉验证） | ✅ |
 | `chanlun.py` | 缠论算法：笔/中枢/背驰/买卖点/回测/健康度 | ✅ |
-| `report.py` | 生成自包含 HTML 报告 | ✅ |
+| `report.py` | 生成自包含 HTML 报告（内嵌 ECharts 前端） | ✅ |
+| `gen_quality_cert.py` | 生成数据质量证书（口径/偏置/校准汇总） | ✅ |
+| `audit_*.py`（13 个） | 校准/监控门禁：区间得分、尾部覆盖、概率校准、共识偏置、情绪条件化等 | ✅ |
+| `.github/workflows/deploy.yml` | GitHub Actions：云端独家抓取 data/ + 生成报告 + 发布 Pages | ✅ |
 | `data.json` | 行情快照（脚本生成） | ❌ 本地 |
 | `report.html` | 最终报告（脚本生成） | ❌ 本地 |
+| `quality_cert.json` | 质量证书（脚本生成） | ❌ 本地 |
 
 ## 免责声明
 
