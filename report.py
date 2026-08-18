@@ -1153,7 +1153,9 @@ def forecast_echart(sym, fc_data):
         gap_chips.append((_key, _lab))
         hlines.append({"yAxis": round(_mid, 2), "lineStyle": {"type": "dashed", "color": _c, "width": 0.8, "opacity": 0.6},
                        "label": {"show": False}})
-    vline = [{"xAxis": x_hist[-1], "lineStyle": {"type": "dashed", "color": INK, "width": 1.2},
+    # R133: 强化今日垂直虚线——加粗置顶，让 4 条预测虚线的起点"贴"在今日线上一目了然。
+    # markLine 默认绘制在该 series 所有数据之上；参考 series 位于 series 列表末端，故 vline 在所有预测线之上。
+    vline = [{"xAxis": x_hist[-1], "lineStyle": {"type": "dashed", "color": "#334155", "width": 2.0},
               "label": {"show": False}}]
     _em, _ea, _er = proj[-1]["med"], proj[-1]["alt"], proj[-1]["risk"]
     end_points = [
