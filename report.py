@@ -1020,6 +1020,7 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
                      "f95l": round(l95, 2), "f95h": round(u95 - l95, 2),
                      "f75l": round(l75, 2), "f75h": round(u75 - l75, 2)})
     fc_data = {"hist": hist, "proj": proj, "p_main": p_main, "p_alt": p_alt, "p_risk": p_risk,
+               "closes_all": closes, "n_all": n,  # R119b: 透传全量历史收盘价，供推演图均线基于全量铺垫(左对齐/年线不缺失)
                "regime": _rg, "kappa": round(_kappa, 3),
                "p_hold": round(_p_hold, 3),
                "path_dev": round(_dev, 4),
@@ -1058,15 +1059,19 @@ def forecast_echart(sym, fc_data):
     lo = fc_data["lo"]
     ymax = round(lo + fc_data["span"], 2)
     tail_prices = [h[1] for h in hist]
-    # 推演图均线：历史真实收盘价 + 统计中位路径(基准预测) 拼接算 MA20/MA60，延伸至推演区，辅助判断预测是否站上/跌破均线。
-    _ma_base = [h[1] for h in hist] + [p["med"] for p in proj]
-    def _sma(vals, n):
-        out = []
-        for i in range(len(vals)):
-            out.append(None if i < n - 1 else round(sum(vals[i - n + 1:i + 1]) / n, 2))
-        return out
-    ma20_s = _sma(_ma_base, 20)
-    ma60_s = _sma(_ma_base, 60)
+    # 推演图均线（R119）：基于全量历史真实收盘价 + 统计中位路径(基准预测) 拼接算 MA20/60/120/年线(250)，
+    # 切片对齐推演图可见窗口——hist 段由全量历史(1363根)铺垫，长周期均线起点左对齐、年线不再缺失；推演段延续至预测区。
+    _closes_all = fc_data.get("closes_all") or [h[1] for h in hist]
+    _n_all = fc_data.get("n_all") or len(hist)
+    _offset = max(0, _n_all - len(hist))            # 推演图 hist 段在全量中的位置
+    _ma_base = list(_closes_all) + [p["med"] for p in proj]
+    _L = len(hist) + len(proj)
+    def _sma(vals, m):
+        return [None if i < m - 1 else round(sum(vals[i - m + 1:i + 1]) / m, 2) for i in range(len(vals))]
+    ma20_s = _sma(_ma_base, 20)[_offset:_offset + _L]
+    ma60_s = _sma(_ma_base, 60)[_offset:_offset + _L]
+    ma120_s = _sma(_ma_base, 120)[_offset:_offset + _L]
+    ma250_s = _sma(_ma_base, 250)[_offset:_offset + _L]
     core_prices = tail_prices + [last, zg, zd] + [p["main"] for p in proj] + [p["alt"] for p in proj] + [p["risk"] for p in proj] + [p["trend"] for p in proj] + [p["med"] for p in proj]
     core_lo = min(core_prices)
     core_hi = max(core_prices)
@@ -1115,7 +1120,7 @@ def forecast_echart(sym, fc_data):
         "keyLevelsText": key_levels_text,
         "xcats": xcats, "xfull": x_full, "n_hist": n_hist, "proj": proj,
         "hist": hist_s, "main": main_s, "alt": alt_s, "risk": risk_s, "trend": trend_s,
-        "ma20": ma20_s, "ma60": ma60_s,
+        "ma20": ma20_s, "ma60": ma60_s, "ma120": ma120_s, "ma250": ma250_s,
         "lo": round(lo, 2), "ymax": ymax, "ymin_core": round(core_lo, 2), "ymax_core": round(core_hi, 2),
         "hlines": hlines, "vline": vline, "endPoints": end_points,
         "med": med_s, "f95l": f95l, "f95h": f95h, "f75l": f75l, "f75h": f75h,
@@ -1201,7 +1206,7 @@ def forecast_echart(sym, fc_data):
           + '<span style="color:#64748b">P25~P75 '+s75+'</span>';
       }}
     }},
-    legend: {{ data: ['历史','统计中位路径','结构演绎路径','次路径','风险路径','趋势外推','MA20','MA60','置信锥 P05–P95','置信锥 P25–P75'], top: 2, itemGap: 8, textStyle: {{ fontSize: 11 }} }},
+    legend: {{ data: ['历史','统计中位路径','结构演绎路径','次路径','风险路径','趋势外推','MA20','MA60','MA120','MA250','置信锥 P05–P95','置信锥 P25–P75'], top: 2, itemGap: 8, textStyle: {{ fontSize: 11 }} }},
     grid: {{ left: 96, right: 64, top: 44, bottom: 80 }},
     xAxis: {{ type: 'category', data: D.xcats, boundaryGap: false, axisTick: {{ show: false }}, axisLabel: {{ fontSize: 11, margin: 6, interval: 0, autoHide: false, hideOverlap: false, showMinLabel: true, showMaxLabel: false,
         formatter: __makeFcFormatter() }} }},
@@ -1220,6 +1225,8 @@ def forecast_echart(sym, fc_data):
       {{ name: '趋势外推', type: 'line', data: D.trend, symbol: 'none', smooth: false, lineStyle: {{ color: '#0891b2', width: 1.3, type: 'dashed' }} }},
       {{ name: 'MA20', type: 'line', data: D.ma20, symbol: 'none', smooth: false, lineStyle: {{ color: '#0ea5e9', width: 1, opacity: 0.9 }} }},
       {{ name: 'MA60', type: 'line', data: D.ma60, symbol: 'none', smooth: false, lineStyle: {{ color: '#a855f7', width: 1, opacity: 0.9 }} }},
+      {{ name: 'MA120', type: 'line', data: D.ma120, symbol: 'none', smooth: false, lineStyle: {{ color: '#f59e0b', width: 1, opacity: 0.9 }} }},
+      {{ name: 'MA250', type: 'line', data: D.ma250, symbol: 'none', smooth: false, lineStyle: {{ color: '#dc2626', width: 1.2, opacity: 0.95 }} }},
       {{ name: '置信锥 P05–P95', type: 'line', data: D.f95l, stack: 'b95', symbol: 'none', lineStyle: {{ opacity: 0 }}, areaStyle: {{ opacity: 0 }}, tooltip: {{ show: false }}, silent: true }},
       {{ name: '置信锥 P05–P95', type: 'line', data: D.f95h, stack: 'b95', symbol: 'none', lineStyle: {{ opacity: 0 }}, areaStyle: {{ color: 'rgba(229,69,69,0.06)' }}, tooltip: {{ show: false }}, silent: true }},
       {{ name: '置信锥 P25–P75', type: 'line', data: D.f75l, stack: 'b75', symbol: 'none', lineStyle: {{ opacity: 0 }}, areaStyle: {{ opacity: 0 }}, tooltip: {{ show: false }}, silent: true }},
