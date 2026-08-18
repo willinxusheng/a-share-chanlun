@@ -424,6 +424,7 @@ def echart_main(klines, r, sym, captured=None):
   }}
   function __mainAxisShowLabel(idx) {{
     var v = __mainAxisVisible;
+    if (v <= 10) return true;
     if (v <= 30) return true;
     if (v <= 60) return idx === 0 || __isMonday(idx);
     if (v <= 180) return idx === 0 || __isMonthStart(idx);
@@ -435,6 +436,7 @@ def echart_main(klines, r, sym, captured=None):
     if (!__mainAxisShowLabel(i)) return '';
     var y = d.slice(0,4);
     var prev = i > 0 ? D.dates[i-1] : null;
+    if (__mainAxisVisible <= 10) return d;  // 放大到极少 K 线时显示完整日期，避免只看 MM-DD 误判年份
     if (i === 0 || !prev || prev.slice(0,4) !== y) return y;
     return d.slice(5);
   }}
@@ -483,7 +485,8 @@ def echart_main(klines, r, sym, captured=None):
     // 默认展示最近约 1 年(252 交易日)，避免首次打开落在 5 年前最早数据上造成"时间轴日期不对"的错觉；用户仍可缩放/平移看全历史。
     dataZoom: [
       {{ type: 'inside', xAxisIndex: [0, 1, 2], start: Math.max(0, (D.dates.length - 252) / D.dates.length * 100), end: 100 }},
-      {{ type: 'slider', xAxisIndex: [0, 1, 2], start: Math.max(0, (D.dates.length - 252) / D.dates.length * 100), end: 100, showDetail: false, height: 16, bottom: 12, handleStyle: {{ color: '#2b6cb0' }}, borderColor: '#e2e8f0', fillerColor: 'rgba(43,108,176,0.12)' }}
+      // showDetail 默认 true：拖拽/悬停 slider 手柄时显示当前窗口起止日期，避免 showDetail:false 时缩略图只剩一个左端年份（如 2021）造成"时间轴不对"的误解。
+      {{ type: 'slider', xAxisIndex: [0, 1, 2], start: Math.max(0, (D.dates.length - 252) / D.dates.length * 100), end: 100, height: 16, bottom: 12, handleStyle: {{ color: '#2b6cb0' }}, borderColor: '#e2e8f0', fillerColor: 'rgba(43,108,176,0.12)' }}
     ],
     series: [
       {{
@@ -1189,7 +1192,7 @@ def forecast_echart(sym, fc_data):
     // 推演图默认展示历史最后 120 个交易日 + 全部推演窗口；避免首次打开落在多年前历史数据上。
     dataZoom: [
       {{ type: 'inside', xAxisIndex: 0, start: Math.max(0, (D.n_hist - 120) / D.xcats.length * 100), end: 100 }},
-      {{ type: 'slider', xAxisIndex: 0, start: Math.max(0, (D.n_hist - 120) / D.xcats.length * 100), end: 100, showDetail: false, height: 16, bottom: 32, handleStyle: {{ color: '#2b6cb0' }}, borderColor: '#e2e8f0', fillerColor: 'rgba(43,108,176,0.12)' }}
+      {{ type: 'slider', xAxisIndex: 0, start: Math.max(0, (D.n_hist - 120) / D.xcats.length * 100), end: 100, height: 16, bottom: 32, handleStyle: {{ color: '#2b6cb0' }}, borderColor: '#e2e8f0', fillerColor: 'rgba(43,108,176,0.12)' }}
     ],
     series: [
       {{ name: '历史', type: 'line', data: D.hist, symbol: 'none', smooth: true, lineStyle: {{ color: '#2b6cb0', width: 1.8 }} }},
