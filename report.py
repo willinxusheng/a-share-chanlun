@@ -444,7 +444,7 @@ def echart_main(klines, r, sym, captured=None):
     var dz = (opt.dataZoom && opt.dataZoom[0]) || {{ start: 0, end: 100 }};
     var start = dz.start || 0, end = dz.end || 100;
     __mainAxisVisible = Math.max(1, Math.floor(D.dates.length * (end - start) / 100));
-    chart.setOption({{ xAxis: [{{}}, {{}}, {{ axisLabel: {{ interval: 0, autoHide: false, hideOverlap: true, formatter: __makeMainAxisFormatter() }} }}] }});
+    chart.setOption({{ xAxis: [{{}}, {{}}, {{ axisLabel: {{ interval: 0, autoHide: false, hideOverlap: false, formatter: __makeMainAxisFormatter() }} }}] }});
   }}
   var option = {{
     animation: false,
@@ -472,7 +472,7 @@ def echart_main(klines, r, sym, captured=None):
     xAxis: [
       {{ type: 'category', data: D.dates, gridIndex: 0, axisLabel: {{ show: false }} }},
       {{ type: 'category', data: D.dates, gridIndex: 1, axisLabel: {{ show: false }} }},
-      {{ type: 'category', data: D.dates, gridIndex: 2, axisTick: {{ show: false }}, axisLabel: {{ fontSize: 11, margin: 6, interval: 0, autoHide: false, hideOverlap: true,
+      {{ type: 'category', data: D.dates, gridIndex: 2, axisTick: {{ show: false }}, axisLabel: {{ fontSize: 11, margin: 6, interval: 0, autoHide: false, hideOverlap: false,
         formatter: __makeMainAxisFormatter() }} }}
     ],
     yAxis: [
@@ -523,6 +523,7 @@ def echart_main(klines, r, sym, captured=None):
   }}
   chart.setOption(option);
   chart.on('dataZoom', updateMainAxisLabels);
+  chart.on('dblclick', function(){{ chart.dispatchAction({{ type: 'dataZoom', start: 0, end: 100 }}); }});
   updateMainAxisLabels();
 }})();
 </script>"""
@@ -1139,12 +1140,13 @@ def forecast_echart(sym, fc_data):
     var v = ((opt.xAxis && opt.xAxis[0] && opt.xAxis[0].data) ? opt.xAxis[0].data.length : D.xcats.length);
     var start = dz.start || 0, end = dz.end || 100;
     __fcVisible = Math.max(1, Math.floor(v * (end - start) / 100));
-    chart.setOption({{ xAxis: {{ axisLabel: {{ interval: 0, autoHide: false, hideOverlap: true, formatter: __makeFcFormatter() }} }} }});
+    chart.setOption({{ xAxis: {{ axisLabel: {{ interval: 0, autoHide: false, hideOverlap: false, formatter: __makeFcFormatter() }} }} }});
   }}
   var option = {{
     animation: false,
     tooltip: {{ trigger: 'axis', axisPointer: {{ type: 'cross', label: {{ show: false }} }},
       formatter: function(params){{
+        if(!params || !params[0]) return '';
         var i = params[0].dataIndex;
         var x = D.xcats[i];
         if(i < D.n_hist){{
@@ -1156,18 +1158,21 @@ def forecast_echart(sym, fc_data):
         var p = D.proj[pi];
         if(!p) return '<b>'+x+'</b>';
         var red='#e54545', gray='#94a3b8', grn='#18a058', cyan='#0891b2';
+        var f95l=p.f95l, f95h=p.f95h, f75l=p.f75l, f75h=p.f75h;
+        var s95=(f95l!=null&&f95h!=null)?(f95l.toFixed(0)+'~'+(f95l+f95h).toFixed(0)):'—';
+        var s75=(f75l!=null&&f75h!=null)?(f75l.toFixed(0)+'~'+(f75l+f75h).toFixed(0)):'—';
         return '<b>推演 · T+'+p.tplus+' ('+p.date+')</b><br>'
           + '<span style="color:'+red+'">主路径 '+p.main.toFixed(2)+'</span> '+Math.round(D.p_main*100)+'%<br>'
           + '<span style="color:'+gray+'">次路径 '+p.alt.toFixed(2)+'</span> '+Math.round(D.p_alt*100)+'%<br>'
           + '<span style="color:'+grn+'">风险路径 '+p.risk.toFixed(2)+'</span> '+Math.round(D.p_risk*100)+'%<br>'
           + '<span style="color:'+cyan+'">趋势外推 '+p.trend.toFixed(2)+'</span><br>'
-          + '<span style="color:#64748b">经验分位 P05~P95 '+(p.f95l).toFixed(0)+'~'+(p.f95l+p.f95h).toFixed(0)+'</span><br>'
-          + '<span style="color:#64748b">P25~P75 '+(p.f75l).toFixed(0)+'~'+(p.f75l+p.f75h).toFixed(0)+'</span>';
+          + '<span style="color:#64748b">经验分位 P05~P95 '+s95+'</span><br>'
+          + '<span style="color:#64748b">P25~P75 '+s75+'</span>';
       }}
     }},
     legend: {{ data: ['历史','统计中位路径','结构演绎路径','次路径','风险路径','趋势外推','置信锥 P05–P95','置信锥 P25–P75'], top: 2, itemGap: 8, textStyle: {{ fontSize: 11 }} }},
     grid: {{ left: 96, right: 64, top: 44, bottom: 80 }},
-    xAxis: {{ type: 'category', data: D.xcats, boundaryGap: false, axisTick: {{ show: false }}, axisLabel: {{ fontSize: 11, margin: 6, interval: 0, autoHide: false, hideOverlap: true, showMinLabel: true, showMaxLabel: false,
+    xAxis: {{ type: 'category', data: D.xcats, boundaryGap: false, axisTick: {{ show: false }}, axisLabel: {{ fontSize: 11, margin: 6, interval: 0, autoHide: false, hideOverlap: false, showMinLabel: true, showMaxLabel: false,
         formatter: __makeFcFormatter() }} }},
     yAxis: {{ scale: false, min: D.ymin_core, max: D.ymax_core, splitNumber: 6, axisLine: {{ lineStyle: {{ color: '#cbd5e1' }} }}, splitLine: {{ lineStyle: {{ color: '#eef2f7' }} }}, axisLabel: {{ fontSize: 12, hideOverlap: true }} }},
     dataZoom: [
@@ -1208,6 +1213,7 @@ def forecast_echart(sym, fc_data):
   }}
   chart.setOption(option);
   chart.on('dataZoom', updateForecastLabels);
+  chart.on('dblclick', function(){{ chart.dispatchAction({{ type: 'dataZoom', start: 0, end: 100 }}); }});
   updateForecastLabels();
 }})();
 </script>'''
@@ -2308,10 +2314,6 @@ def main():
   </div>
 </div>
 <script>
-var FC_DATA = {json.dumps(fc_blob, ensure_ascii=False)};
-  svg.addEventListener('touchmove',function(e){{move(e);}},{{passive:true}});
-  svg.addEventListener('touchend',leave);
-}}
 (function(){{
   var links = document.querySelectorAll('nav.toc a');
   var sections = Array.from(links).map(function(a){{ return document.querySelector(a.getAttribute('href')); }}).filter(Boolean);
