@@ -506,6 +506,9 @@ def find_signals(bis, zss, beichis, klines=None, merged=None):
             target = min(target, price + risk * _RR_CAP)
         else:
             target = max(target, price - risk * _RR_CAP)
+        # 透明度标记(R109): 目标被 _RR_CAP 封顶时, 真实 R:R 可能远高于 6(近程摆动极值锚定的
+        # 合法高值博率 setup); 标注供看板显示「≥6.0」, 避免把封顶值误读为精确 6.0。
+        s["rr_capped"] = (abs(target - tgt) > 1e-9)
         reward = abs(target - price)
         rr = reward / risk if risk > 0 else None
         s["stop"] = round(stop, 2)

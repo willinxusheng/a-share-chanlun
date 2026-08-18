@@ -1598,7 +1598,9 @@ def rr_table(data, results, recent_n=8):
             _qc = {"优": RED, "良": GREEN, "中": "#64748b", "差": "#b45309", "—": "#94a3b8"}.get(_q, "#94a3b8")
             _dir_col = RED if s["dir"] == 1 else GREEN
             _vc = "✓" if s.get("vol_confirm") else "—"
-            _rr = ("%.1f" % s["rr"]) if s.get("rr") is not None else "—"
+            _rr_raw = s.get("rr")
+            _rr = ("≥%.1f" % _rr_raw) if (s.get("rr_capped") and _rr_raw is not None) else (
+                ("%.1f" % _rr_raw) if _rr_raw is not None else "—")
             _price = ("%.1f" % s["price"]) if s.get("price") is not None else "—"
             _stop = ("%.1f" % s["stop"]) if s.get("stop") is not None else "—"
             _target = ("%.1f" % s["target"]) if s.get("target") is not None else "—"
@@ -1618,7 +1620,7 @@ def rr_table(data, results, recent_n=8):
       <colgroup><col style="width:110px"><col style="width:calc((100%% - 110px)/8)"><col style="width:calc((100%% - 110px)/8)"><col style="width:calc((100%% - 110px)/8)"><col style="width:calc((100%% - 110px)/8)"><col style="width:calc((100%% - 110px)/8)"><col style="width:calc((100%% - 110px)/8)"><col style="width:calc((100%% - 110px)/8)"><col style="width:calc((100%% - 110px)/8)"></colgroup>
       <thead><tr><th>指数</th><th>买卖点</th><th>日期</th><th class="tac">触发价</th><th class="tac">止损位</th><th class="tac">目标位</th><th class="tac">R:R</th><th class="tac">值博率</th><th class="tac">量✓</th></tr></thead>
       <tbody>%s</tbody></table>
-      <p style="font-size:12px;color:#64748b;margin-top:8px">R:R = (目标−触发) / (触发−止损)；值博率：优(RR≥2.5)/良(≥1.5)/中(≥1.0)/差(&lt;1)。止损取局部前低或中枢下沿 ZD，目标取近程摆动极值并封顶 6 倍防失真。结构参考，非交易建议。</p>""" % "".join(rows)
+      <p style="font-size:12px;color:#64748b;margin-top:8px">R:R = (目标−触发) / (触发−止损)；值博率：优(RR≥2.5)/良(≥1.5)/中(≥1.0)/差(&lt;1)。止损取局部前低或中枢下沿 ZD，目标取近程摆动极值并封顶 6 倍防失真（表中 R:R 标「≥」者为封顶值，真实风险收益比可能更高）。结构参考，非交易建议。</p>""" % "".join(rows)
 
 
 def robustness_table(robust, data):
