@@ -406,6 +406,35 @@ def echart_main(klines, r, sym, captured=None):
   var D = {json.dumps(chart_data, ensure_ascii=False)};
   var chart = echarts.init(document.getElementById('{cid}'));
   (window.__charts = window.__charts || []).push(chart);
+  // 主图时间轴标签动态密度：按可见窗口交易日常数选择日/周/月/季边界，避免固定季度标签在放大后"断断续续"。
+  var __mainAxisVisible = D.dates.length;
+  function __isMonthStart(idx) {{ return idx === 0 || D.dates[idx].slice(0,7) !== D.dates[idx-1].slice(0,7); }}
+  function __isQuarterStart(idx) {{
+    if (idx === 0) return true;
+    var c = D.dates[idx], p = D.dates[idx-1];
+    if (!c || !p) return false;
+    var cm = parseInt(c.slice(5,7),10), pm = parseInt(p.slice(5,7),10);
+    return c.slice(0,4) !== p.slice(0,4) || Math.floor((cm-1)/3) !== Math.floor((pm-1)/3);
+  }}
+  function __isMonday(idx) {{
+    if (idx === 0) return true;
+    var parts = D.dates[idx].split('-');
+    return new Date(parseInt(parts[0],10), parseInt(parts[1],10)-1, parseInt(parts[2],10)).getDay() === 1;
+  }}
+  function __mainAxisInterval(idx) {{
+    var v = __mainAxisVisible;
+    if (v <= 30) return true;
+    if (v <= 60) return idx === 0 || __isMonday(idx);
+    if (v <= 180) return idx === 0 || __isMonthStart(idx);
+    return idx === 0 || __isQuarterStart(idx);
+  }}
+  function updateMainAxisLabels() {{
+    var opt = chart.getOption();
+    var dz = (opt.dataZoom && opt.dataZoom[0]) || {{ start: 0, end: 100 }};
+    var start = dz.start || 0, end = dz.end || 100;
+    __mainAxisVisible = Math.max(1, Math.floor(D.dates.length * (end - start) / 100));
+    chart.setOption({{ xAxis: [{{}}, {{}}, {{ axisLabel: {{ interval: __mainAxisInterval }} }}] }});
+  }}
   var option = {{
     animation: false,
     tooltip: {{
@@ -433,7 +462,7 @@ def echart_main(klines, r, sym, captured=None):
       {{ type: 'category', data: D.dates, gridIndex: 0, axisLabel: {{ show: false }} }},
       {{ type: 'category', data: D.dates, gridIndex: 1, axisLabel: {{ show: false }} }},
       {{ type: 'category', data: D.dates, gridIndex: 2, axisLabel: {{ fontSize: 11, margin: 6, hideOverlap: true, showMinLabel: true,
-        interval: function(idx, val){{ if (idx === 0) return true; var c = D.dates[idx], p = D.dates[idx-1]; if (!c || !p) return true; if (c.slice(0,4) !== p.slice(0,4)) return true; var m = parseInt(c.slice(5,7),10); return (m % 3 === 1); }},
+        interval: __mainAxisInterval,
         formatter: (function(){{ var _py = null; return function(v, i){{ var d = (D.dates && D.dates[i]) ? D.dates[i] : v; if (!d || d.length < 7) return v; var y = d.slice(0,4); if (i === 0 || y !== _py) {{ _py = y; return y; }} return d.slice(5); }}; }})() }} }}
     ],
     yAxis: [
@@ -483,6 +512,8 @@ def echart_main(klines, r, sym, captured=None):
     }}];
   }}
   chart.setOption(option);
+  chart.on('dataZoom', updateMainAxisLabels);
+  updateMainAxisLabels();
 }})();
 </script>"""
 
