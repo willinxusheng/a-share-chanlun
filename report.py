@@ -1174,17 +1174,16 @@ def forecast_echart(sym, fc_data):
     dedup_mark_labels(end_points, len(xcats), core_lo, core_hi, 1100 - 96 - 64, 440 - 44 - 74, 96, 44,
                       {xcats[-1]: len(xcats) - 1})
 
-    # R126: 在今日虚线(idx=n_hist-1)处给各条预测路径加一个小标记，避免多线同起点重叠后
-    # 看起来"只有一条线紧贴今日虚线"。5 条预测线（主/结构演绎/次/风险/趋势）都以昨日
-    # 收盘价(last_v)作为今日桥接值，故数据上完全重合；用 symbolOffset 在像素级微微
-    # 散开，使每条路径的起点在视觉上都能被看到，且仍在今日虚线上/紧邻。
+    # R126/R129: 5 条预测线在今日虚线处完全重合（bridge 值均为 last_v），粗红线盖在其上，
+    # 导致肉眼只能看到红线贴今日、误以为其他虚线没挪过来。在今日处用超大 scatter 标记
+    # 垂直错开显示， unmistakably 证明 5 条线都从今日(idx=n_hist-1)起笔。
     _sp = round(last_v, 2)
     start_points = [
-        {"coord": [xcats[n_hist - 1], _sp], "itemStyle": {"color": RED}, "symbol": "circle", "symbolSize": 5, "symbolOffset": [0, 0]},
-        {"coord": [xcats[n_hist - 1], _sp], "itemStyle": {"color": RED, "opacity": 0.7}, "symbol": "diamond", "symbolSize": 3.5, "symbolOffset": [0, -4]},
-        {"coord": [xcats[n_hist - 1], _sp], "itemStyle": {"color": "#94a3b8"}, "symbol": "triangle", "symbolSize": 3.5, "symbolOffset": [0, 4]},
-        {"coord": [xcats[n_hist - 1], _sp], "itemStyle": {"color": GREEN}, "symbol": "rect", "symbolSize": 3.5, "symbolOffset": [-4, 0]},
-        {"coord": [xcats[n_hist - 1], _sp], "itemStyle": {"color": "#0891b2"}, "symbol": "roundRect", "symbolSize": 3.5, "symbolOffset": [4, 0]},
+        {"value": [xcats[n_hist - 1], _sp], "itemStyle": {"color": RED, "borderColor": "#fff", "borderWidth": 2, "shadowBlur": 4, "shadowColor": "rgba(0,0,0,0.25)"}, "symbol": "circle", "symbolSize": 16, "symbolOffset": [0, -22]},
+        {"value": [xcats[n_hist - 1], _sp], "itemStyle": {"color": RED, "opacity": 0.7, "borderColor": "#fff", "borderWidth": 2, "shadowBlur": 4, "shadowColor": "rgba(0,0,0,0.25)"}, "symbol": "diamond", "symbolSize": 14, "symbolOffset": [0, -11]},
+        {"value": [xcats[n_hist - 1], _sp], "itemStyle": {"color": "#94a3b8", "borderColor": "#fff", "borderWidth": 2, "shadowBlur": 4, "shadowColor": "rgba(0,0,0,0.25)"}, "symbol": "triangle", "symbolSize": 14, "symbolOffset": [0, 0]},
+        {"value": [xcats[n_hist - 1], _sp], "itemStyle": {"color": GREEN, "borderColor": "#fff", "borderWidth": 2, "shadowBlur": 4, "shadowColor": "rgba(0,0,0,0.25)"}, "symbol": "rect", "symbolSize": 14, "symbolOffset": [0, 11]},
+        {"value": [xcats[n_hist - 1], _sp], "itemStyle": {"color": "#0891b2", "borderColor": "#fff", "borderWidth": 2, "shadowBlur": 4, "shadowColor": "rgba(0,0,0,0.25)"}, "symbol": "roundRect", "symbolSize": 14, "symbolOffset": [0, 22]},
     ]
 
     fdata = {
@@ -1286,12 +1285,12 @@ def forecast_echart(sym, fc_data):
     ],
     series: [
       {{ name: '历史', type: 'line', data: D.hist, symbol: 'none', smooth: true, lineStyle: {{ color: '#2b6cb0', width: 1.8 }} }},
-      {{ name: '统计中位路径', type: 'line', data: D.med, symbol: 'none', smooth: true, lineStyle: {{ color: '#e54545', width: 2.4 }}, z: 5,
-        markPoint: {{ data: D.startPoints, label: {{ show: false }}, animation: false }} }},
+      {{ name: '统计中位路径', type: 'line', data: D.med, symbol: 'none', smooth: true, lineStyle: {{ color: '#e54545', width: 2.4 }}, z: 5 }},
       {{ name: '结构演绎路径', type: 'line', data: D.main, symbol: 'none', smooth: true, lineStyle: {{ color: '#e54545', width: 1.4, type: 'dashed', opacity: 0.7 }}, z: 4 }},
       {{ name: '次路径', type: 'line', data: D.alt, symbol: 'none', smooth: true, lineStyle: {{ color: '#94a3b8', width: 1.6, type: 'dashed' }} }},
       {{ name: '风险路径', type: 'line', data: D.risk, symbol: 'none', smooth: true, lineStyle: {{ color: '#18a058', width: 1.6, type: 'dashed' }} }},
       {{ name: '趋势外推', type: 'line', data: D.trend, symbol: 'none', smooth: false, lineStyle: {{ color: '#0891b2', width: 1.3, type: 'dashed' }} }},
+      {{ name: '预测起点', type: 'scatter', data: D.startPoints, z: 100, silent: true, tooltip: {{ show: false }} }},
       {{ name: 'MA20', type: 'line', data: D.ma20, symbol: 'none', smooth: false, lineStyle: {{ color: '#0ea5e9', width: 1, opacity: 0.9 }} }},
       {{ name: 'MA60', type: 'line', data: D.ma60, symbol: 'none', smooth: false, lineStyle: {{ color: '#a855f7', width: 1, opacity: 0.9 }} }},
       {{ name: 'MA120', type: 'line', data: D.ma120, symbol: 'none', smooth: false, lineStyle: {{ color: '#f59e0b', width: 1, opacity: 0.9 }} }},
