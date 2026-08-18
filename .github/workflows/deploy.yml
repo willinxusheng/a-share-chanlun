@@ -56,6 +56,13 @@ jobs:
           python report.py
           cp report.html index.html
 
+      - name: 生成情绪指数 sentiment_v2.json（本地 calc_v2，无需联网；守卫式）
+        # 情绪模块随仓库内置(chanlun/sentiment/)：用提交的原始行情 txt 本地重算情绪指数,
+        # 供关5 情绪条件化门禁消费。失败不阻断发布(已提交兜底 sentiment_v2.json 仍生效)。
+        continue-on-error: true
+        run: |
+          python sentiment/calc_v2.py || echo "WARN: 情绪指数再生失败, 使用已提交的兜底 sentiment_v2.json"
+
       - name: 标签重叠诊断（非阻塞护栏，仅告警 + 上传 artifact）
         # 实证守卫：R100 日期轴修复(hideOverlap:false + formatter 控显)后，各图表文字
         # 标签应零重叠。每日自动跑一遍，一旦回归即产生重叠对并被记录告警；该步骤

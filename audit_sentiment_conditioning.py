@@ -35,7 +35,7 @@ from report import forecast_svg  # report.py 内含推演渲染核心
 BASE = os.path.dirname(os.path.abspath(__file__))
 # 情绪项目路径: 用相对布局推导(../sentiment/sentiment_v2.json), 不再写死过期绝对路径
 # —— 否则目录迁移后文件不存在会直接崩溃(与 R96 load_live_sentiment 同类坑)
-SENT_PATH = os.path.join(BASE, "..", "sentiment", "sentiment_v2.json")
+SENT_PATH = os.path.join(BASE, "sentiment", "sentiment_v2.json")  # 情绪模块随仓库内置(chanlun/sentiment/), 进入 CI 与所有读取环境
 
 H_TARGETS = (8, 30)
 ANCHOR_STEP = 15          # 锚点间隔(交易日)，与 R72 一致
