@@ -2114,9 +2114,11 @@ def main():
         {fs_svg}
         <div class="xh-tip" id="fctip-{sym}"></div>
       </div>
+      <div class="sec-foot">
       <div class="fc-note2" style="white-space:pre-line;font-size:13px;line-height:1.85;color:#475569;margin:10px 0">{fs_note}</div>
       {fs_legend}
       {path_hit_html(cls["scenario"], paths_bt[sym], fs_probs[0], fs_probs[1], fs_probs[2], horizon)}
+      </div>
     </section>""")
         conclusions.append(f'<li><b>{d["name"]}</b>：日线 {cls["scenario"]} / 周线 {wcls["scenario"]} —— {cls["detail"]} <a href="#sec-{sym}" data-sym="{sym}" data-jump style="font-size:12px;color:{BLUE}">[查看图解]</a></li>')
         forecast_info[sym] = {"p_main": fs_probs[0], "p_alt": fs_probs[1], "p_risk": fs_probs[2],
@@ -2212,7 +2214,7 @@ def main():
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
@@ -2362,10 +2364,10 @@ def main():
      目标：把宽屏优势用满——K线/推演左右并排、顶部与卡片竖向压缩、图表高度自适应矮视口，
      文本块(质量证书/免责/执行/表格/方法)统一收紧，避免横屏下大量无效滚动。 */
   @media (orientation: landscape) and (max-height: 560px) {{
-    body {{ padding: 6px 8px; }}
+    body {{ padding: 6px calc(8px + env(safe-area-inset-left)) 6px calc(8px + env(safe-area-inset-right)); -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }}
     .wrap {{ max-width: 100%; }}
-    header {{ padding: 10px 16px; border-radius: 12px; margin-bottom: 8px; }}
-    header h1 {{ font-size: 16px; letter-spacing: 0; }}
+    header {{ padding: 10px 16px !important; border-radius: 12px; margin-bottom: 8px !important; }}
+    header h1 {{ font-size: 16px !important; letter-spacing: 0; }}
     header p {{ font-size: 10.5px; line-height: 1.4; margin-top: 2px; max-height: 2.9em; overflow: hidden; }}
     /* 导航：横屏下转顶部横滑条，省竖向空间（不吸顶占屏） */
     nav.toc, nav.sym-rail {{
@@ -2382,6 +2384,7 @@ def main():
     /* 指数概览卡片：宽屏多列 + 收紧 */
     .cards {{ grid-template-columns: repeat(auto-fit, minmax(138px, 1fr)); gap: 6px; }}
     .card {{ padding: 9px 9px; }}
+    .card::before {{ margin: -9px -9px 8px !important; }}
     .price {{ font-size: 16px; margin: 4px 0; }}
     .sym {{ font-size: 10px; }}
     .kv {{ font-size: 11px; padding: 2px 0; }}
@@ -2393,6 +2396,7 @@ def main():
       grid-template-areas:
         "title fctitle"
         "kline fc"
+        "verdict verdict"
         "foot  foot";
       gap: 6px 10px; padding: 8px 10px; margin-bottom: 8px; align-items: start;
     }}
@@ -2400,11 +2404,8 @@ def main():
     section.panel > h3.fc-title {{ grid-area: fctitle; font-size: 12px; margin: 0; }}
     section.panel > .chartbox:first-of-type {{ grid-area: kline; }}
     section.panel > .chartbox.fcbox {{ grid-area: fc; }}
-    section.panel > .verdict,
-    section.panel > .fc-note2,
-    section.panel > .fc-note,
-    section.panel > .fc-legend,
-    section.panel > .pathcheck {{ grid-area: foot; }}
+    section.panel > .verdict {{ grid-area: verdict; }}
+    section.panel > .sec-foot {{ grid-area: foot; display: block; }}
     .verdict {{ margin-top: 0; font-size: 12px; }}
     .verdict p {{ line-height: 1.5; }}
     .fc-note2 {{ font-size: 11.5px; line-height: 1.6; margin: 6px 0; }}
@@ -2415,7 +2416,7 @@ def main():
     .pc-lab {{ width: 54px; }}
     /* 图表高度自适应横屏矮视口（!important 覆盖内联 640/440px）；
        dvh 计入移动端浏览器栏；封顶 280px 给底部解读留空间，下限 150px 防过小 */
-    .echart-main {{ height: calc(100vh - 232px) !important; height: calc(100dvh - 232px) !important; max-height: 280px; min-height: 150px; }}
+    .echart-main {{ height: calc(100vh - 200px) !important; height: calc(100dvh - 200px) !important; max-height: 300px; min-height: 160px; }}
     .echart-toolbar {{ font-size: 10.5px; padding: 4px 6px; }}
     /* 文本块统一收紧 */
     .qc-card {{ margin: 8px 0; padding: 10px 12px; }}
@@ -2431,7 +2432,10 @@ def main():
     details.method {{ font-size: 11.5px; }}
     .fc-title {{ font-size: 12px; margin: 3px 0; }}
     .tbl {{ font-size: 10.5px; }}
-    .tbl th, .tbl td {{ padding: 4px 5px; }}
+    .tbl th, .tbl td {{ padding: 4px 5px; white-space: nowrap; }}
+    .tablescroll {{ border-radius: 8px; }}
+    .tablescroll::-webkit-scrollbar {{ height: 6px; }}
+    .tablescroll::-webkit-scrollbar-thumb {{ background: #cbd5e1; border-radius: 3px; }}
   }}
 
   /* ===================== R134 深度美化增强层 =====================
@@ -2557,7 +2561,7 @@ def main():
   var sections = Array.from(links).map(function(a){{ return document.querySelector(a.getAttribute('href')); }}).filter(Boolean);
   function onScroll(){{
     if (!sections.length) return;
-    var y = window.scrollY + 90;
+    var y = window.scrollY + (window.matchMedia('(orientation: landscape) and (max-height: 560px)').matches ? 20 : 90);
     var cur = links[0];
     sections.forEach(function(sec, i){{ if (sec && sec.offsetTop <= y) cur = links[i]; }});
     links.forEach(function(a){{ a.classList.remove('active'); }});
@@ -2572,7 +2576,7 @@ def main():
 (function(){{
   var rail=document.getElementById('symRail');
   var CURRENT=null;
-  function offset(){{ return 108; }}
+  function offset(){{ return (window.matchMedia('(orientation: landscape) and (max-height: 560px)').matches) ? 8 : 108; }}
   function secs(){{ return Array.prototype.slice.call(document.querySelectorAll('[id^="sec-"]')); }}
   function setActive(sym, fromScroll){{
     CURRENT=sym;
