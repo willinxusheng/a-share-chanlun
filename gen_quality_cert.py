@@ -95,9 +95,12 @@ def main():
         regime_note += (" — 主路径『方向』在动量/震荡regime的短线命中不如抛硬币, "
                         "决策应以「置信区间(带)」为锚而非单一方向路径; 方向技能主要体现在中长线(T+30)且需结合regime")
 
-    worst_bias = max((statistics.median(tot[H]["bias_list"]) * 100)
+    # Bug 修复：用 max(abs(...)) 而非 max(...)，否则负偏置会被漏报，
+    # 可能把 bias_ok 误报为 True（与 R98 audit_forecast_calibration 同类 bug）
+    worst_bias = max((abs(statistics.median(tot[H]["bias_list"]) * 100))
                      for H in ac.H_TARGETS if tot[H]["bias_list"])
-    last_date = data[next(iter(data))]["meta"]["last_date"]
+    # 取所有标的最新日期的最大值（不同指数末根日期可能差 1 个交易日），避免只取首个标的偏低
+    last_date = max((data[s]["meta"]["last_date"] for s in data), default=None) if data else None
 
     cert = {
         "generated_at": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),

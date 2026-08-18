@@ -144,7 +144,12 @@ def validate(klines):
             exp = int(total_days / 365.25 * 244)  # A股年均约 244 个交易日
             if abs(len(dates) - exp) > max(5, exp * 0.04):
                 issues.append("交易日数量异常：实际%d 预计约%d" % (len(dates), exp))
-    return issues[:12]  # 只保留前12条
+    # 未来泄漏是硬失败信号，必须优先保留、不被截断吞掉
+    # （否则可能被≥12条其它问题挤到 12 名之外，绕过 main 的硬拦）
+    future = [x for x in issues if "未来日期" in x]
+    others = [x for x in issues if "未来日期" not in x]
+    issues = future + others
+    return issues[:12]  # 只保留前12条（未来泄漏已优先排在前面）
 
 
 def main():
@@ -195,9 +200,21 @@ def main():
         if fi:
             print("ERROR 检测到未来泄漏(数据异常), 拒绝写入 data.json:", sym, fi)
             sys.exit(1)
-    with open(os.path.join(_BASE, "data.json"), "w", encoding="utf-8") as f:
+    # Bug H 修复：上游 outage / 解析失败时 result 可能为空，若照常 json.dump({})
+    # 会把 data.json 覆写成 {}，污染所有只读机并导致线上推演崩溃。空结果直接拒绝落盘。
+    if not result:
+        print("ERROR 全部标的抓取失败(疑似上游 outage), 拒绝写入空 data.json 以保护既有数据",
+              file=sys.stderr)
+        sys.exit(1)
+    if len(result) < len(SYMBOLS):
+        print("WARN 仅抓到 %d/%d 标的, 仍写入(缺失标的将在看板标 N/A)" % (len(result), len(SYMBOLS)))
+    # 原子写：先写 .tmp 再 os.replace，避免写入途中崩溃留下半截损坏文件
+    out_path = os.path.join(_BASE, "data.json")
+    tmp_path = out_path + ".tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
         json.dump(result, f, ensure_ascii=False)
-    print("saved -> chanlun/data.json")
+    os.replace(tmp_path, out_path)
+    print("saved -> chanlun/data.json (%d 标的)" % len(result))
 
 
 if __name__ == "__main__":

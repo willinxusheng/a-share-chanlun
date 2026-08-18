@@ -39,21 +39,34 @@ jobs:
 
       - name: 抓取行情 + 生成报告（带重试）
         run: |
+          set -euo pipefail
+          ok=0
           for i in 1 2 3; do
-            python fetch_data.py && break || sleep 30
+            if python fetch_data.py; then ok=1; break; fi
+            echo "fetch attempt $i failed, retry in 30s"; sleep 30
           done
+          if [ "$ok" -ne 1 ]; then
+            # Bug 修复：连续 3 次抓取失败必须中止发布，否则空/坏 data.json
+            # 会被 report.py 渲染成损坏站点静默上线（fetch_data.py 现已拒写空数据，
+            # 此处再兜底，确保任务整体失败而非发布脏数据）
+            echo "ERROR: 行情抓取连续 3 次失败, 中止发布避免部署脏数据"
+            exit 1
+          fi
           python gen_quality_cert.py
           python report.py
           cp report.html index.html
 
       - name: 提交每日构建时间戳（keep-alive，防定时任务被停用）
         run: |
+          set -euo pipefail
           date -u +"%Y-%m-%dT%H:%M:%SZ" > last_build.txt
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          # 先拉取远端(变基)避免双定时并发/日构建造成的 non-fast-forward 被静默吞掉
+          git pull --rebase --autostash origin "${GITHUB_REF_NAME}" || true
           git add last_build.txt
           git commit -m "chore: daily build [skip ci]" || echo "no changes"
-          git push || echo "push skipped"
+          git push || echo "push skipped(keep-alive 推送失败不影响本次站点发布)"
 
       - name: 配置 Pages
         uses: actions/configure-pages@v6
