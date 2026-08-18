@@ -1286,7 +1286,8 @@ def forecast_echart(sym, fc_data):
     ],
     series: [
       {{ name: '历史', type: 'line', data: D.hist, symbol: 'none', smooth: true, lineStyle: {{ color: '#2b6cb0', width: 1.8 }} }},
-      {{ name: '统计中位路径', type: 'line', data: D.med, symbol: 'none', smooth: true, lineStyle: {{ color: '#e54545', width: 2.4 }}, z: 5 }},
+      {{ name: '统计中位路径', type: 'line', data: D.med, symbol: 'none', smooth: true, lineStyle: {{ color: '#e54545', width: 2.4 }}, z: 5,
+        markPoint: {{ data: D.startPoints, symbol: 'none', label: {{ show: false }}, animation: false }} }},
       {{ name: '结构演绎路径', type: 'line', data: D.main, symbol: 'none', smooth: true, lineStyle: {{ color: '#e54545', width: 1.4, type: 'dashed', opacity: 0.7 }}, z: 4 }},
       {{ name: '次路径', type: 'line', data: D.alt, symbol: 'none', smooth: true, lineStyle: {{ color: '#94a3b8', width: 1.6, type: 'dashed' }} }},
       {{ name: '风险路径', type: 'line', data: D.risk, symbol: 'none', smooth: true, lineStyle: {{ color: '#18a058', width: 1.6, type: 'dashed' }} }},
@@ -1301,7 +1302,7 @@ def forecast_echart(sym, fc_data):
       {{ name: '置信锥 P25–P75', type: 'line', data: D.f75h, stack: 'b75', symbol: 'none', lineStyle: {{ opacity: 0 }}, areaStyle: {{ color: 'rgba(229,69,69,0.12)' }}, tooltip: {{ show: false }}, silent: true }},
       {{ name: '参考', type: 'line', data: [], silent: true,
         markLine: {{ symbol: 'none', data: D.hlines.concat(D.vline), labelLayout: {{ moveOverlap: 'shiftY' }} }},
-        markPoint: {{ data: D.endPoints.concat(D.startPoints) }} }}
+        markPoint: {{ data: D.endPoints }} }}
     ]
   }};
   if (D.keyLevelsText) {{
