@@ -139,11 +139,16 @@ def check():
         nest_ok = True
         finite_ok = True
         for p in proj:
-            l95 = p.get("f95l"); u95 = p.get("f95l") + p.get("f95h", 0)
-            l75 = p.get("f75l"); u75 = p.get("f75l") + p.get("f75h", 0)
+            l95 = p.get("f95l"); fh95 = p.get("f95h")
+            l75 = p.get("f75l"); fh75 = p.get("f75h")
             med = p.get("med")
+            # 先判定字段齐全，避免在 f95l/f75l 为 None 时计算 None+number 直接 TypeError 崩溃
+            if any(v is None for v in (l95, fh95, l75, fh75, med)):
+                finite_ok = False
+                continue
+            u95 = l95 + fh95; u75 = l75 + fh75
             vals = [l95, l75, med, u75, u95]
-            if any(v is None or not math.isfinite(v) or v <= 0 for v in vals):
+            if any(not math.isfinite(v) or v <= 0 for v in vals):
                 finite_ok = False
                 continue
             tol = max(1.0, abs(med) * 0.005)

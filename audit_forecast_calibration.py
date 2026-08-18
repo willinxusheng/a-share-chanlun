@@ -204,7 +204,7 @@ def report(data, agg, cons, regime_agg=None):
     # 偏置监控(#预测精度·R74)：中线系统性偏置(稳健中位口径)超阈值即告警(可据需升级为硬门禁)。
     # 注：用「中位」而非「均值」口径——A股右偏肥尾会使均值口径虚高(看似偏高), 中位口径如实反映中心校准。
     BIAS_WARN = 5.0
-    worst_bias = max((statistics.median(tot[H]["bias_list"]) * 100) for H in H_TARGETS if tot[H]["bias_list"])
+    worst_bias = max((abs(statistics.median(tot[H]["bias_list"]) * 100)) for H in H_TARGETS if tot[H]["bias_list"])
     if abs(worst_bias) > BIAS_WARN:
         print("⚠️ 偏置告警: 全样本中线系统性偏置 %.1f%% 超阈值 ±%.1f%% —— 需检查置信带中心口径" % (worst_bias, BIAS_WARN))
     else:
@@ -237,19 +237,21 @@ def report(data, agg, cons, regime_agg=None):
         na = len(entries)
         if na == 0:
             continue
-        c_market = c_per = tot_per = 0
-        for mains, reals in entries:
-            cs = 1 if sum(mains) > 0 else (-1 if sum(mains) < 0 else 0)
-            if cs == 0:
-                continue
-            rs_market = 1 if sum(reals) > 0 else (-1 if sum(reals) < 0 else 0)
-            if cs == rs_market:
-                c_market += 1
-            for rj in reals:
-                tot_per += 1
-                if cs == rj:
-                    c_per += 1
-        acc_market = c_market / na * 100
+    c_market = c_per = tot_per = 0
+    na_used = 0
+    for mains, reals in entries:
+        cs = 1 if sum(mains) > 0 else (-1 if sum(mains) < 0 else 0)
+        if cs == 0:
+            continue
+        na_used += 1
+        rs_market = 1 if sum(reals) > 0 else (-1 if sum(reals) < 0 else 0)
+        if cs == rs_market:
+            c_market += 1
+        for rj in reals:
+            tot_per += 1
+            if cs == rj:
+                c_per += 1
+        acc_market = c_market / na_used * 100 if na_used else 0.0
         acc_per = c_per / tot_per * 100 if tot_per else 0
         baseline = tot[H]["dir_main"] / tot[H]["N"] * 100 if tot[H]["N"] else 0
         delta = acc_per - baseline
@@ -257,17 +259,20 @@ def report(data, agg, cons, regime_agg=None):
         print(f"{'T+'+str(H):>5}{na:>8}{acc_market:>11.1f}%{acc_per:>13.1f}%{baseline:>11.1f}%{delta:>+8.1f}pp")
     print("-" * 96)
     # 判定(#预测精度·R75): 要求"两个 horizon 都显著改善(>2pp)"才算有效, 避免单点 borderline 误导。
-    # 实测 T+8 反而 -2.2pp(更差)、T+30 +5.6pp(180样本≈1.5SE, 边际且被短horizon抵消) → 不稳健。
+    # 动态生成文案(不再硬编码历史数字); 且只有当两个 horizon 都有样本(deltas 覆盖 H_TARGETS)时才判"有效",
+    # 否则单 horizon 无样本时 len(eff)==len(deltas) 会误判为两 horizon 均有效。
+    both_have = len(deltas) == len(H_TARGETS)
     eff = [d for d in deltas.values() if d > 2.0]
-    if len(eff) == len(deltas) and deltas:
+    if both_have and len(eff) == len(H_TARGETS):
         print("共识有效: 跨指数方向投票在两个 horizon 均显著提升单指数方向命中(峰值 +%.1fpp), 看板可加共识徽标。" % max(deltas.values()))
     elif eff:
-        print("共识分化(弱信号): 仅长 horizon(T+30)边际改善 +%.1fpp(≈噪声), 短 horizon(T+8)反而 %+.1fpp 更差; "
-              "方向偏差主要为系统性(同模型同regime), 跨指数聚合仅边际、且短 horizon 无效 → 不新增共识徽标(避免误用弱信号)。"
-              % (max(deltas.values()), min(deltas.values())))
+        _parts = ", ".join("T+%d %+.1fpp" % (h, d) for h, d in sorted(deltas.items()))
+        print("共识分化(弱信号): 仅 %s 边际改善 (>2pp); 方向偏差主要为系统性(同模型同regime), "
+              "跨指数聚合仅边际、且未在两个 horizon 同时显著 → 不新增共识徽标(避免误用弱信号)。" % _parts)
     else:
-        print("共识中性: 跨指数投票未显著优于单指数(峰值 +%.1fpp) - 方向偏差为系统性(同模型同regime), "
-              "聚合无法分散误差; 故不新增共识徽标, 真正杠杆仍是 R74 的校准透明化。" % max(deltas.values()) if deltas else 0.0)
+        _parts = ", ".join("T+%d %+.1fpp" % (h, d) for h, d in sorted(deltas.items())) if deltas else "0.0"
+        print("共识中性: 跨指数投票未显著优于单指数(%s) - 方向偏差为系统性(同模型同regime), "
+              "聚合无法分散误差; 故不新增共识徽标, 真正杠杆仍是 R74 的校准透明化。" % _parts)
     print("=" * 96)
     print("解读: P05-P95 名义90%覆盖(实测≥此=偏保守安全); P25-P75 名义50%; 方向>50%优于抛硬币; "
           "中线偏误(稳健中位口径)>0=系统保守(低估), <0=系统激进(高估); 均值口径因右偏肥尾会虚高, 故用中位口径。")

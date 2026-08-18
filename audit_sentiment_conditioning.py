@@ -33,8 +33,9 @@ from chanlun import analyze, adaptive_horizon
 from report import forecast_svg  # report.py 内含推演渲染核心
 
 BASE = os.path.dirname(os.path.abspath(__file__))
-# 情绪项目绝对路径（与 chanlun 同机，跨目录读取）
-SENT_PATH = r"C:\Users\Administrator\WorkBuddy\2026-08-01-12-23-48\sentiment\sentiment_v2.json"
+# 情绪项目路径: 用相对布局推导(../sentiment/sentiment_v2.json), 不再写死过期绝对路径
+# —— 否则目录迁移后文件不存在会直接崩溃(与 R96 load_live_sentiment 同类坑)
+SENT_PATH = os.path.join(BASE, "..", "sentiment", "sentiment_v2.json")
 
 H_TARGETS = (8, 30)
 ANCHOR_STEP = 15          # 锚点间隔(交易日)，与 R72 一致
@@ -57,6 +58,9 @@ def find_proj(proj, tplus_target):
 
 
 def load_sentiment():
+    if not os.path.exists(SENT_PATH):
+        # 优雅降级: 情绪文件缺失时仅跑 baseline 对比(情绪条件化/纯情绪项全 N/A), 不崩溃
+        return {}, 20.0, 85.0
     d = json.load(open(SENT_PATH, encoding="utf-8"))
     hist = d.get("hist", [])
     # date -> score (row: [date, level, score, ...])
