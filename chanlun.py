@@ -1142,6 +1142,27 @@ def regime_factor(closes):
     return max(0.6, min(1.8, recent_sd / long_sd))
 
 
+def classify_regime(klines, win=60, bull=0.10, bear=-0.10):
+    """按锚点前 win 交易日累计对数收益, 把市场环境分三档(无前视):
+       牛(bull) > +10% | 熊(bear) < -10% | 其余震荡(range)。
+
+    单一来源(R108): report.forecast_svg 的 regime 自适应置信带带宽缩放 与
+    门禁(audit_tail_coverage / audit_forecast_calibration) 分 regime 覆盖分析(R80) 共用同一逻辑,
+    保证「算带时取用的 regime」与「门禁切片用的 regime」口径精确一致, 否则自适应 κ 的改善
+    会在门禁里测不到。klines 为含 'close' 键的 K 线列表; 取 anchor 之前 win 根, 无前视。"""
+    if len(klines) < win + 2:
+        return "range"
+    pre = klines[-(win + 1):-1]  # anchor 之前的 win 根
+    cum = 0.0
+    for j in range(1, len(pre)):
+        cum += math.log(pre[j]["close"] / pre[j - 1]["close"])
+    if cum > bull:
+        return "bull"
+    if cum < bear:
+        return "bear"
+    return "range"
+
+
 def realized_vol_annualized(closes, periods=244):
     """近 1 年(约 244 交易日)日对数收益率的标准差，年化（×√244），返回小数。
     作为专业度指标：量化指数近期波动剧烈程度，与缠论「结构健康/级别」互为补充。"""

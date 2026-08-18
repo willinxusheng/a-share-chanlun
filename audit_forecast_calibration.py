@@ -29,27 +29,14 @@ import statistics
 
 import math
 
-from chanlun import analyze, adaptive_horizon
+from chanlun import analyze, adaptive_horizon, classify_regime
 from report import forecast_svg  # report.py 内含推演渲染核心
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 
 
-def classify_regime(trunc, win=60, bull=0.10, bear=-0.10):
-    """按锚点前 win 交易日累计对数收益, 把市场环境分三档(无前视):
-       牛(bull) > +10% | 熊(bear) < -10% | 其余震荡(range)。
-       用于 R80 分 regime 覆盖分析, 暴露「全样本平均覆盖」掩盖的隐藏弱点。"""
-    if len(trunc) < win + 2:
-        return "range"
-    pre = trunc[-(win + 1):-1]  # anchor 之前的 win 根
-    cum = 0.0
-    for j in range(1, len(pre)):
-        cum += math.log(pre[j]["close"] / pre[j - 1]["close"])
-    if cum > bull:
-        return "bull"
-    if cum < bear:
-        return "bear"
-    return "range"
+# classify_regime 已迁移为 chanlun.classify_regime (单一来源, R108), 上方已从 chanlun 导入。
+# 门禁切片口径与 report.forecast_svg 的 regime 自适应 κ 取用的 regime 完全一致。
 H_TARGETS = (8, 30)
 ANCHOR_STEP = 15          # 锚点间隔(交易日)，越小样本越多越慢
 MIN_HISTORY = 800         # 截断后最少样本(满足 _WIN+horizon≈762)

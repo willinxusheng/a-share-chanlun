@@ -264,7 +264,6 @@ def main():
              ("SKIP" if not deep else "MON"),
              ("SKIP" if not deep else "MON"),
              ("SKIP" if not deep else "MON"),
-             ("SKIP" if not deep else "MON"),
              ("SKIP" if not deep else "MON")))
     allok = ok1 and ok2 and ok3 and (ok4 if deep else True) and (ok5 if deep else True) and (ok6 if deep else True) and (ok7 if deep else True) and (ok8 if deep else True) and (ok9 if deep else True) and (ok10 if deep else True) and (ok11 if deep else True) and (ok12 if deep else True) and (ok13 if deep else True) and (ok14 if deep else True) and (ok15 if deep else True) and (ok16 if deep else True)
     print("结论: %s" % ("✅ 全部通过" if allok else "❌ 存在失败项"))

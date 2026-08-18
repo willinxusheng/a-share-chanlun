@@ -5,7 +5,7 @@ import json
 import os
 import math
 from datetime import datetime, timedelta
-from chanlun import analyze, backtest_signals, MIN_BI_PCT_WEEK, health_score, forecast_confidence, forward_vol, adaptive_horizon, classify, realized_vol_annualized, KNOWN_PIVOTS, _date_diff, MIN_BI_PCT_MONTH, backtest_robustness, backtest_paths, _path_targets, market_breadth, regime_factor
+from chanlun import analyze, backtest_signals, MIN_BI_PCT_WEEK, health_score, forecast_confidence, forward_vol, adaptive_horizon, classify, realized_vol_annualized, KNOWN_PIVOTS, _date_diff, MIN_BI_PCT_MONTH, backtest_robustness, backtest_paths, _path_targets, market_breadth, regime_factor, classify_regime
 
 W, H_PRICE, H_VOL, H_MACD = 1060, 360, 64, 110
 PAD_L, PAD_R, PAD_T, PAD_B = 12, 78, 24, 26
@@ -870,8 +870,17 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
     # κ=1.4 时 f=1.0 聚合覆盖率仅 86.0%(系统性漏掉14%极端情形);κ=1.8 时精确命中名义 90%
     # (90.2%),且各指数均落在 89~91%。κ 用于补偿近窗口(732日≈672个非重叠60日样本)经验分位在
     # 5%/95%极分位的采样误差+长horizon非平稳性。√t 缩放假设亦经检验成立:覆盖率随 horizon 分桶
-    # 几乎均匀(f=0.25:89.9%→f=1.0:90.2%),无系统性失准,故维持单值 κ 即可(不引入 horizon 自适应复杂度)。
-    _kappa = 1.8
+    # 几乎均匀(f=0.25:89.9%→f=1.0:90.2%),无系统性失准。
+    # —— regime 自适应 κ(R108): 关15 实证固定 κ=1.8 在「熊市 T+30」漏覆盖 33.3%(LRuc=7.1, 拒绝99%),
+    # 即熊市极端下行富尾未被近3年经验分位充分捕获。故按当前市场环境分档缩放 κ:
+    #   牛/震荡 → 1.8(关15 已验证覆盖与名义一致, 维持不退化); 熊市 → 2.3(给下行尾部补安全垫)。
+    # κ 是「覆盖修正标量」(补偿极分位采样误差+非平稳), 仅放大经验分位带的缓冲倍数, 不改经验分位机制本身,
+    # 故【不构成注释③警告的「近窗口+regime 双重放大」】(那是指 regime_factor 波动放大, 此处未启用)。
+    # 单一来源 classify_regime 与关15 切片口径一致 → 改善可在门禁被实测到。熊市 N≈9 过小, 2.3 属
+    # 保守改善而非精确标定, 验证时若熊市样本仍小需注明置信局限。
+    _KAPPA = {"bull": 1.8, "range": 1.8, "bear": 2.3}
+    _rg = classify_regime(klines)
+    _kappa = _KAPPA.get(_rg, 1.8)
     _sp_up = (_q95 - _q50) * _kappa               # P95 上沿离散度(近窗口,无额外 regime 放大)
     _sp_dn = (_q50 - _q05) * _kappa               # P05 下沿离散度（左尾更宽，如实反映下行风险）
     _sp_up75 = (_q75 - _q50) * _kappa
@@ -949,7 +958,7 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
     )
     note = (f"主路径失效位：现价有效跌破 ZD {zd:.0f}（收盘确认）→ 主路径失效、风险路径概率上升；风险路径确认需同时满足「跌破 ZD + 周线笔转向下」。\n"
              f"红色阴影为基于<b>真实历史 {horizon} 日对数收益分布</b>推演的<b>经验分位扇形置信带</b>（P05–P95 外层 / P25–P75 内层）：与对称 ±σ 带不同，它直接由本指数历史兑现统计得出、天然包含 A 股肥尾与涨跌不对称，"
-        f"故<b>上下带非对称</b>——按真实历史经验分位分别给上下沿定宽（替代对称 ±1.645σ 等宽假设）：本指数近 3 年 {horizon} 日对数收益呈右偏，上行离散（P95–P50）约为下行的 1.5–2.5 倍，故<b>上行带更宽</b>，如实容纳单边急涨的肥尾。R57+R58 口径：① 校准窗口由全历史改为<b>近 3 年</b>，剔除 2015 股灾等早期崩溃收益导致的 era-shift 偏悲观；② 中心由中位改为<b>窗口均值（期望）</b>，A 股含正漂移、中位低估中枢，使方向判定正确率由约 36% 升至约 54%；③ 近窗口已含当前波动，<b>不再叠加 regime 因子</b>（此前双重放大使创业板带宽虚胖至 ±60%+）。覆盖修正系数 κ=1.4→<b>1.8</b>：经样本外黄金检验(逐时点滚动近窗口假装预测、5 指数共 6205 点)实测，κ=1.4 时 60 日聚合覆盖率仅 86.0%(系统性漏掉 14% 极端情形)，κ=1.8 时精确命中名义 90%(90.2%)、各指数均落 89~91%；√t 缩放假设亦检验成立(覆盖率随 horizon 分桶几乎均匀 f=0.25:89.9%→f=1.0:90.2%，无系统性失准)。中线路径为「实测漂移期望（均值）」而非手工情景路径，置信带中线统计诚实；带宽随时间按 √t 扩张（随机游走特性），近月不确定性即已显著，并非线性外推的针状。<b>代价</b>：创业板等超高波动指数 60 日 P05–P95 带宽达 ~119%，这是其真实波动的诚实反映，而非缺陷。\n"
+        f"故<b>上下带非对称</b>——按真实历史经验分位分别给上下沿定宽（替代对称 ±1.645σ 等宽假设）：本指数近 3 年 {horizon} 日对数收益呈右偏，上行离散（P95–P50）约为下行的 1.5–2.5 倍，故<b>上行带更宽</b>，如实容纳单边急涨的肥尾。R57+R58 口径：① 校准窗口由全历史改为<b>近 3 年</b>，剔除 2015 股灾等早期崩溃收益导致的 era-shift 偏悲观；② 中心由中位改为<b>窗口均值（期望）</b>，A 股含正漂移、中位低估中枢，使方向判定正确率由约 36% 升至约 54%；③ 近窗口已含当前波动，<b>不再叠加 regime 因子</b>（此前双重放大使创业板带宽虚胖至 ±60%+）。覆盖修正系数 κ=1.4→<b>1.8</b>：经样本外黄金检验(逐时点滚动近窗口假装预测、5 指数共 6205 点)实测，κ=1.4 时 60 日聚合覆盖率仅 86.0%(系统性漏掉 14% 极端情形)，κ=1.8 时精确命中名义 90%(90.2%)、各指数均落 89~91%；√t 缩放假设亦检验成立(覆盖率随 horizon 分桶几乎均匀 f=0.25:89.9%→f=1.0:90.2%，无系统性失准)。<b>κ 按市场环境自适应(R108)</b>：牛/震荡维持 <b>1.8</b>(关15 实证覆盖与名义一致、不退化)，<b>熊市放宽至 2.3</b>(关15 实证熊市 T+30 原 κ=1.8 漏覆盖 33.3%、LRuc=7.1 拒绝 99%，放宽后给下行富尾补安全垫——A 股熊市下跌更急更肥尾，近 3 年经验分位低估了极端下行)。中线路径为「实测漂移期望（均值）」而非手工情景路径，置信带中线统计诚实；带宽随时间按 √t 扩张（随机游走特性），近月不确定性即已显著，并非线性外推的针状。<b>代价</b>：创业板等超高波动指数 60 日 P05–P95 带宽达 ~119%，这是其真实波动的诚实反映，而非缺陷。\n"
              f"本图为目的（分类框架）而非点位预测：缠论给出的是「不跌破 ZD 则结构延续、跌破则转弱」的条件应对，不是对具体价位的预测。\n"
              f"趋势外推（青色虚线，对最近 {min(horizon,90)} 日收盘做对数线性回归外推 {horizon} 日）是与结构路径相互独立的验证方法，"
              + (f"但其拟合优度极低（R²={_r2:.2f}），该独立验证参考性很弱、近乎噪声，不宜据此增减仓位；"
@@ -1004,6 +1013,7 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
                      "f95l": round(l95, 2), "f95h": round(u95 - l95, 2),
                      "f75l": round(l75, 2), "f75h": round(u75 - l75, 2)})
     fc_data = {"hist": hist, "proj": proj, "p_main": p_main, "p_alt": p_alt, "p_risk": p_risk,
+               "regime": _rg, "kappa": round(_kappa, 3),
                "p_hold": round(_p_hold, 3),
                "path_dev": round(_dev, 4),
                "zd": round(zd, 2), "zg": round(zg, 2), "last": round(last, 2),
