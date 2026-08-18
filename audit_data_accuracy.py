@@ -12,10 +12,11 @@ audit_data_accuracy.py — A股缠论看板「数据准确性」总审计（一�
   关7 质量证书   : --deep 时委托 gen_quality_cert.py（聚合 R72 校准 + R78 漂移 + R76 情绪 + R80/R81 分regime覆盖/方向结论, 生成 quality_cert.json 供看板顶部证书区块；不阻断）
   关8 分regime方向: --deep 时委托 audit_regime_direction.py（把方向命中率按牛/熊/震荡切片, 暴露「全样本方向命中」掩盖的弱点——熊市常『方向看空可信/区间太窄』；监控门禁, 不阻断）
   关9 点前完整性 : --deep 时委托 audit_point_in_time.py（无未来泄漏/带宽抗污染/窗口充分性；未来日期泄漏的硬阻断由关1负责, 此处监控复核；不阻断）
+  关10 概率校准  : --deep 时委托 audit_probability_calibration.py（抓取每个锚点真实产出的 p_main, 比对后来主路径方向是否真对, 建可靠性表+Brier, 检验『说的65%是不是真65%』；监控门禁, 不阻断）
 
 用法:
   python audit_data_accuracy.py            # 关1+2+3（离线，约30~60s）
-  python audit_data_accuracy.py --deep     # 再加关4+关5+关6+关7（约10~20min）
+  python audit_data_accuracy.py --deep     # 再加关4+关5+关6+关7+关8+关9+关10（约15~30min）
   python audit_data_accuracy.py --online   # 关2 在线重算双源一致性（需网络）
 退出码: 0=全通过, 1=存在失败项
 """
@@ -177,6 +178,15 @@ def audit_point_in_time(deep):
     return r.returncode == 0  # 该脚本恒退出0, 仅打印门禁判定
 
 
+def audit_probability_calibration(deep):
+    if not deep:
+        return True
+    print("\n=== 关10 概率校准诚实性 (委托 audit_probability_calibration.py, 监控门禁不阻断) ===")
+    r = subprocess.run([sys.executable, "audit_probability_calibration.py"],
+                       cwd=os.path.dirname(os.path.abspath(__file__)))
+    return r.returncode == 0  # 该脚本恒退出0, 仅打印可靠性表+Brier
+
+
 def main():
     deep = "--deep" in sys.argv
     online = "--online" in sys.argv
@@ -191,16 +201,18 @@ def main():
     ok7 = audit_quality_cert(deep)
     ok8 = audit_regime_direction(deep)
     ok9 = audit_point_in_time(deep)
+    ok10 = audit_probability_calibration(deep)
     print("\n" + "=" * 60)
-    print("汇总: 关1历史完整性=%s  关2双源一致性=%s  关3预测归一化=%s  关4校准回测=%s  关5情绪条件化=%s  关6突变漂移=%s  关7质量证书=%s  关8分regime方向=%s  关9点前完整性=%s"
+    print("汇总: 关1历史完整性=%s  关2双源一致性=%s  关3预测归一化=%s  关4校准回测=%s  关5情绪条件化=%s  关6突变漂移=%s  关7质量证书=%s  关8分regime方向=%s  关9点前完整性=%s  关10概率校准=%s"
           % (["FAIL", "OK"][ok1], ["FAIL", "OK"][ok2], ["FAIL", "OK"][ok3],
              (["SKIP", "OK"][ok4] if deep else "SKIP"),
              (["SKIP", "OK"][ok5] if deep else "SKIP"),
              (["SKIP", "OK"][ok6] if deep else "SKIP"),
              (["SKIP", "OK"][ok7] if deep else "SKIP"),
              (["SKIP", "OK"][ok8] if deep else "SKIP"),
-             (["SKIP", "OK"][ok9] if deep else "SKIP")))
-    allok = ok1 and ok2 and ok3 and (ok4 if deep else True) and (ok5 if deep else True) and (ok6 if deep else True) and (ok7 if deep else True) and (ok8 if deep else True) and (ok9 if deep else True)
+             (["SKIP", "OK"][ok9] if deep else "SKIP"),
+             (["SKIP", "OK"][ok10] if deep else "SKIP")))
+    allok = ok1 and ok2 and ok3 and (ok4 if deep else True) and (ok5 if deep else True) and (ok6 if deep else True) and (ok7 if deep else True) and (ok8 if deep else True) and (ok9 if deep else True) and (ok10 if deep else True)
     print("结论: %s" % ("✅ 全部通过" if allok else "❌ 存在失败项"))
     sys.exit(0 if allok else 1)
 
