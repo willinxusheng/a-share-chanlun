@@ -1058,6 +1058,15 @@ def forecast_echart(sym, fc_data):
     lo = fc_data["lo"]
     ymax = round(lo + fc_data["span"], 2)
     tail_prices = [h[1] for h in hist]
+    # 推演图均线：历史真实收盘价 + 统计中位路径(基准预测) 拼接算 MA20/MA60，延伸至推演区，辅助判断预测是否站上/跌破均线。
+    _ma_base = [h[1] for h in hist] + [p["med"] for p in proj]
+    def _sma(vals, n):
+        out = []
+        for i in range(len(vals)):
+            out.append(None if i < n - 1 else round(sum(vals[i - n + 1:i + 1]) / n, 2))
+        return out
+    ma20_s = _sma(_ma_base, 20)
+    ma60_s = _sma(_ma_base, 60)
     core_prices = tail_prices + [last, zg, zd] + [p["main"] for p in proj] + [p["alt"] for p in proj] + [p["risk"] for p in proj] + [p["trend"] for p in proj] + [p["med"] for p in proj]
     core_lo = min(core_prices)
     core_hi = max(core_prices)
@@ -1106,6 +1115,7 @@ def forecast_echart(sym, fc_data):
         "keyLevelsText": key_levels_text,
         "xcats": xcats, "xfull": x_full, "n_hist": n_hist, "proj": proj,
         "hist": hist_s, "main": main_s, "alt": alt_s, "risk": risk_s, "trend": trend_s,
+        "ma20": ma20_s, "ma60": ma60_s,
         "lo": round(lo, 2), "ymax": ymax, "ymin_core": round(core_lo, 2), "ymax_core": round(core_hi, 2),
         "hlines": hlines, "vline": vline, "endPoints": end_points,
         "med": med_s, "f95l": f95l, "f95h": f95h, "f75l": f75l, "f75h": f75h,
@@ -1191,7 +1201,7 @@ def forecast_echart(sym, fc_data):
           + '<span style="color:#64748b">P25~P75 '+s75+'</span>';
       }}
     }},
-    legend: {{ data: ['历史','统计中位路径','结构演绎路径','次路径','风险路径','趋势外推','置信锥 P05–P95','置信锥 P25–P75'], top: 2, itemGap: 8, textStyle: {{ fontSize: 11 }} }},
+    legend: {{ data: ['历史','统计中位路径','结构演绎路径','次路径','风险路径','趋势外推','MA20','MA60','置信锥 P05–P95','置信锥 P25–P75'], top: 2, itemGap: 8, textStyle: {{ fontSize: 11 }} }},
     grid: {{ left: 96, right: 64, top: 44, bottom: 80 }},
     xAxis: {{ type: 'category', data: D.xcats, boundaryGap: false, axisTick: {{ show: false }}, axisLabel: {{ fontSize: 11, margin: 6, interval: 0, autoHide: false, hideOverlap: false, showMinLabel: true, showMaxLabel: false,
         formatter: __makeFcFormatter() }} }},
@@ -1208,6 +1218,8 @@ def forecast_echart(sym, fc_data):
       {{ name: '次路径', type: 'line', data: D.alt, symbol: 'none', smooth: true, lineStyle: {{ color: '#94a3b8', width: 1.6, type: 'dashed' }} }},
       {{ name: '风险路径', type: 'line', data: D.risk, symbol: 'none', smooth: true, lineStyle: {{ color: '#18a058', width: 1.6, type: 'dashed' }} }},
       {{ name: '趋势外推', type: 'line', data: D.trend, symbol: 'none', smooth: false, lineStyle: {{ color: '#0891b2', width: 1.3, type: 'dashed' }} }},
+      {{ name: 'MA20', type: 'line', data: D.ma20, symbol: 'none', smooth: false, lineStyle: {{ color: '#0ea5e9', width: 1, opacity: 0.9 }} }},
+      {{ name: 'MA60', type: 'line', data: D.ma60, symbol: 'none', smooth: false, lineStyle: {{ color: '#a855f7', width: 1, opacity: 0.9 }} }},
       {{ name: '置信锥 P05–P95', type: 'line', data: D.f95l, stack: 'b95', symbol: 'none', lineStyle: {{ opacity: 0 }}, areaStyle: {{ opacity: 0 }}, tooltip: {{ show: false }}, silent: true }},
       {{ name: '置信锥 P05–P95', type: 'line', data: D.f95h, stack: 'b95', symbol: 'none', lineStyle: {{ opacity: 0 }}, areaStyle: {{ color: 'rgba(229,69,69,0.06)' }}, tooltip: {{ show: false }}, silent: true }},
       {{ name: '置信锥 P25–P75', type: 'line', data: D.f75l, stack: 'b75', symbol: 'none', lineStyle: {{ opacity: 0 }}, areaStyle: {{ opacity: 0 }}, tooltip: {{ show: false }}, silent: true }},
