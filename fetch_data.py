@@ -102,11 +102,21 @@ def _date_gap(d1, d2):
 
 
 def validate(klines):
-    """K线合法性校验，返回问题列表"""
+    """K线合法性校验，返回问题列表。
+
+    R82 增强：除原有内部一致性(OHLC越界/重复/非升序/数量异常)外，
+    新增「点前完整性 / 无未来泄漏」硬校验——任意 bar 日期 > 今天即视为数据泄漏
+    （置信带向后取近3年窗口，唯一能造成未来泄漏的入口就是末根/某根 bar 本身是未来日期；
+    旧新鲜度护栏只查 last_date 比今天旧、对「未来日期」静默通过）。此项为硬失败，
+    命中即阻断部署，确保线上推演锚定的是真实「当下」而非虚构未来。
+    """
     issues = []
     seen = set()
+    _today = datetime.now().date().isoformat()
     for i, k in enumerate(klines):
         d = k["date"]
+        if d > _today:
+            issues.append("未来日期(数据泄漏) %s" % d)
         if d in seen:
             issues.append("重复日期 %s" % d)
         seen.add(d)
