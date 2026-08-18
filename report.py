@@ -951,7 +951,7 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
         band_ext.append(_bandf(_f, 1.645))   # 经验上沿(P95)
         band_ext.append(_bandf(_f, -1.645))  # 经验下沿(P05)
     band_ext.append(_medf(1.0))
-    all_prices = tail + [v for _, v in main_p + alt_p + risk_p] + [zg, zd] + band_ext + [trend_end] \
+    all_prices = tail + [v for _, v in main_p + alt_p + risk_p] + [zg, zd] + band_ext + [trend_end_price] \
         + [g["top"] for g in _gap_refs] + [g["bottom"] for g in _gap_refs]
     lo, hi = min(all_prices), max(all_prices)
     pad = (hi - lo) * 0.06
@@ -988,7 +988,8 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
     # 图例改为图表下方的 HTML 图例条（不再压住推演路径与时间轴）
     legend_html = (
         f'<div class="fc-legend">'
-        f'<span><i class="ln" style="background:{RED}"></i>统计期望路径 ≈ {p_main * 100:.0f}%（均值期望终点 {_medf(1.0):.0f}）</span>'
+        f'<span><i class="ln ln-dash" style="background:{RED}"></i>结构演绎主路径 ≈ {p_main * 100:.0f}%（终点 {main_p[-1][1]:.0f}）</span>'
+        f'<span><i class="ln" style="background:{RED}"></i>统计中位路径（均值期望终点 {_medf(1.0):.0f}）</span>'
         f'<span><i class="ln ln-dash" style="background:#94a3b8"></i>次路径：中枢内震荡 ≈ {p_alt * 100:.0f}%</span>'
         f'<span><i class="ln ln-dot" style="background:{GREEN}"></i>风险路径：跌破ZD转空 ≈ {p_risk * 100:.0f}%</span>'
         f'<span><i class="ln ln-band"></i>置信锥 经验分位 P05–P95 / P25–P75（真实分布·非对称）</span>'
@@ -1122,7 +1123,24 @@ def forecast_echart(sym, fc_data):
     for _arr in (ma20_s, ma60_s, ma120_s, ma250_s):
         for _i in range(n_hist, len(_arr)):
             _arr[_i] = None
-    core_prices = tail_prices + [last, zg, zd] + [p["main"] for p in proj] + [p["alt"] for p in proj] + [p["risk"] for p in proj] + [p["trend"] for p in proj] + [p["med"] for p in proj]
+    # R135 修复：置信锥(P05–P95/P25–P75)的上下沿必须纳入 y 轴范围，否则锥顶/锥底会被
+    # yAxis 的 min/max 裁切成平头。band 上沿 = f95l + f95h（堆叠后的真实顶部），下沿 = f95l。
+    # 此前 core_prices 只含结构路径(main/alt/risk/trend/med)与均线，不含置信锥，导致推演图
+    # 置信锥被 y 轴上沿截断（如 sh000001 锥顶 4765 远超结构路径高点 4263，被切成平头）。
+    band_top = []
+    band_bot = []
+    for _i in range(len(f95l)):
+        _lo = f95l[_i]
+        if _lo is None:
+            continue
+        band_bot.append(_lo)
+        _hi = f95h[_i]
+        if _hi is not None:
+            band_top.append(_lo + _hi)
+    core_prices = (tail_prices + [last, zg, zd]
+                   + [p["main"] for p in proj] + [p["alt"] for p in proj]
+                   + [p["risk"] for p in proj] + [p["trend"] for p in proj] + [p["med"] for p in proj]
+                   + band_top + band_bot)
     # R120c: 历史段 MA 极值纳入 yAxis 范围——MA 基于全量窗口(如 MA250 含比 tail 更早的低价)，
     # 否则长周期均线左端会低于 tail 极值被 yAxis 底部裁切（断头）。仅取历史段(索引<n_hist)，未来段已置 None。
     for _a in (ma20_s, ma60_s, ma120_s, ma250_s):
@@ -1157,7 +1175,10 @@ def forecast_echart(sym, fc_data):
     # markLine 默认绘制在该 series 所有数据之上；参考 series 位于 series 列表末端，故 vline 在所有预测线之上。
     vline = [{"xAxis": x_hist[-1], "lineStyle": {"type": "dashed", "color": "#334155", "width": 2.0},
               "label": {"show": False}}]
-    _em, _ea, _er = proj[-1]["med"], proj[-1]["alt"], proj[-1]["risk"]
+    # R135 修复：端点"主/次/风险"须与 tooltip 定义一致——"主"对应结构演绎路径(structural main)，
+    # 而非统计中位路径(med)。此前 _em 取 proj[-1]["med"]，使端点"主"标的是统计中位线、与 tooltip
+    # "主路径=结构演绎+p_main"自相矛盾。现改为 proj[-1]["main"]，三者即结构主/次/风险路径终点。
+    _em, _ea, _er = proj[-1]["main"], proj[-1]["alt"], proj[-1]["risk"]
     end_points = [
         {"coord": [xcats[-1], round(_em, 2)], "value": f"主 {_em:.0f}", "itemStyle": {"color": RED}, "symbol": "circle", "symbolSize": 6,
          "label": {"show": True, "position": "top", "color": RED, "fontSize": 11, "fontWeight": "bold"}},
