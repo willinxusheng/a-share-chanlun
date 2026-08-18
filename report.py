@@ -2358,6 +2358,65 @@ def main():
     .tbl {{ font-size: 11px; }}
     .tbl th, .tbl td {{ padding: 5px 6px; }}
   }}
+
+  /* ===================== R134 深度美化增强层 =====================
+     覆盖于基础样式之上，不改动任何 DOM 结构与 JS 交互；
+     仅通过更靠后的同选择器规则提升质感（现代专业金融仪表盘风格）。 */
+  :root {{
+    --bg1:#eef2f7; --bg2:#e6edf5;
+    --card:#ffffff; --panel:#ffffff;
+    --ink:#0f172a; --muted:#64748b;
+    --border:#e3e9f2; --border2:#cdd7e5;
+    --primary:#2b6cb0; --primary2:#60a5fa;
+    --up:#e54545; --down:#18a058;
+    --shadow-sm:0 1px 3px rgba(15,23,42,.06);
+    --shadow:0 6px 20px rgba(15,23,42,.08);
+    --shadow-lg:0 14px 38px rgba(15,23,42,.14);
+    --radius:14px;
+  }}
+  body {{ background:linear-gradient(180deg,#eef2f7 0%, #f7fafc 45%, #eef2f7 100%); color:var(--ink); }}
+  .wrap {{ max-width:1160px; }}
+
+  /* —— 顶部品牌 banner —— */
+  header {{ background:linear-gradient(120deg,#0f172a 0%, #1e3a5f 52%, #2b6cb0 100%); color:#fff; border-radius:18px; padding:22px 28px; margin-bottom:18px; box-shadow:var(--shadow-lg); position:relative; overflow:hidden; }}
+  header::after {{ content:""; position:absolute; right:-50px; top:-50px; width:220px; height:220px; background:radial-gradient(circle, rgba(255,255,255,.14), transparent 70%); pointer-events:none; }}
+  header h1 {{ color:#fff; font-size:28px; letter-spacing:.5px; }}
+  header p {{ color:rgba(255,255,255,.82); }}
+
+  /* —— 指数概览卡片 —— */
+  .card {{ border-radius:var(--radius); box-shadow:var(--shadow); border:1px solid var(--border); overflow:hidden; background:var(--card); }}
+  .card::before {{ content:""; display:block; height:4px; background:linear-gradient(90deg,var(--primary),var(--primary2)); margin:-14px -16px 12px; }}
+  .card:hover {{ box-shadow:var(--shadow-lg); transform:translateY(-3px); border-color:var(--border2); }}
+  .card-head .idx-name {{ letter-spacing:.3px; }}
+
+  /* —— 区块面板 —— */
+  .panel {{ border-radius:var(--radius); box-shadow:var(--shadow); border:1px solid var(--border); background:var(--panel); }}
+  .panel h2 {{ border-bottom:1px solid #f1f5f9; padding-bottom:9px; }}
+
+  /* —— KPI 指标卡 —— */
+  .kpi {{ border-radius:var(--radius); box-shadow:var(--shadow); border:1px solid var(--border); background:var(--card); }}
+  .kpi:hover {{ box-shadow:var(--shadow-lg); transform:translateY(-2px); }}
+  .kpi-v {{ letter-spacing:-.5px; }}
+
+  /* —— 表格 —— */
+  .tbl {{ border-radius:10px; overflow:hidden; box-shadow:var(--shadow-sm); }}
+  .tbl th {{ background:linear-gradient(180deg,#f8fafc,#eef2f7); }}
+  .tbl tbody tr:nth-child(even) td {{ background:#fafcfe; }}
+  .tbl tbody tr:hover td {{ background:#eef4fb; }}
+
+  /* —— 章节标题 —— */
+  h2.sec {{ background:linear-gradient(90deg, rgba(43,108,176,.10), transparent 55%); border-radius:0 10px 10px 0; padding:9px 16px; }}
+
+  /* —— 图表容器 —— */
+  .chartbox {{ box-shadow:var(--shadow-sm); border:1px solid #eef2f7; }}
+
+  /* —— 导航胶囊 —— */
+  nav.toc, nav.sym-rail {{ box-shadow:var(--shadow); }}
+  nav.toc a.active {{ background:linear-gradient(135deg,var(--primary),var(--primary2)); }}
+
+  /* —— 预测质量自检卡 —— */
+  .qc-card {{ box-shadow:var(--shadow); }}
+  .fc-note {{ background:#fffbeb; }}
 </style>
 </head>
 <body>
