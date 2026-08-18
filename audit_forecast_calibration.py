@@ -238,12 +238,14 @@ def report(data, agg, cons, regime_agg=None):
             tot_per += 1
             if cs == rj:
                 c_per += 1
-        acc_market = c_market / na_used * 100 if na_used else 0.0
-        acc_per = c_per / tot_per * 100 if tot_per else 0
         baseline = tot[H]["dir_main"] / tot[H]["N"] * 100 if tot[H]["N"] else 0
-        delta = acc_per - baseline
-        deltas[H] = delta
-        print(f"{'T+'+str(H):>5}{na:>8}{acc_market:>11.1f}%{acc_per:>13.1f}%{baseline:>11.1f}%{delta:>+8.1f}pp")
+    # R139 修复：原 print 误置于上方 for 循环内，导致每锚点刷一行中间态累积值(约35行)；
+    # 移至循环外，每个 horizon 仅输出一行最终汇总(累积口径不变)。
+    acc_market = c_market / na_used * 100 if na_used else 0.0
+    acc_per = c_per / tot_per * 100 if tot_per else 0
+    delta = acc_per - baseline
+    deltas[H] = delta
+    print(f"{'T+'+str(H):>5}{na:>8}{acc_market:>11.1f}%{acc_per:>13.1f}%{baseline:>11.1f}%{delta:>+8.1f}pp")
     print("-" * 96)
     # 判定(#预测精度·R75): 要求"两个 horizon 都显著改善(>2pp)"才算有效, 避免单点 borderline 误导。
     # 动态生成文案(不再硬编码历史数字); 且只有当两个 horizon 都有样本(deltas 覆盖 H_TARGETS)时才判"有效",
