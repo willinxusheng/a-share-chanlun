@@ -1174,16 +1174,17 @@ def forecast_echart(sym, fc_data):
     dedup_mark_labels(end_points, len(xcats), core_lo, core_hi, 1100 - 96 - 64, 440 - 44 - 74, 96, 44,
                       {xcats[-1]: len(xcats) - 1})
 
-    # R126/R129: 5 条预测线在今日虚线处完全重合（bridge 值均为 last_v），粗红线盖在其上，
-    # 导致肉眼只能看到红线贴今日、误以为其他虚线没挪过来。在今日处用超大 scatter 标记
-    # 垂直错开显示， unmistakably 证明 5 条线都从今日(idx=n_hist-1)起笔。
+    # R130: 5 条预测线数据上已全部桥接到今日(idx=n_hist-1)，但它们在今日 y 值完全重合，
+    # 粗红线(w2.4,z5)把其他虚线盖住，导致肉眼只能看到红线。在参考 series 的 markPoint 里
+    # 为每条预测线加一个带 symbolOffset 的大标记，垂直错开， unmistakably 证明 5 条线均从
+    # 今日起笔。markPoint 比 scatter 更稳定，SSR/浏览器都会渲染。
     _sp = round(last_v, 2)
     start_points = [
-        {"value": [xcats[n_hist - 1], _sp], "itemStyle": {"color": RED, "borderColor": "#fff", "borderWidth": 2, "shadowBlur": 4, "shadowColor": "rgba(0,0,0,0.25)"}, "symbol": "circle", "symbolSize": 16, "symbolOffset": [0, -22]},
-        {"value": [xcats[n_hist - 1], _sp], "itemStyle": {"color": RED, "opacity": 0.7, "borderColor": "#fff", "borderWidth": 2, "shadowBlur": 4, "shadowColor": "rgba(0,0,0,0.25)"}, "symbol": "diamond", "symbolSize": 14, "symbolOffset": [0, -11]},
-        {"value": [xcats[n_hist - 1], _sp], "itemStyle": {"color": "#94a3b8", "borderColor": "#fff", "borderWidth": 2, "shadowBlur": 4, "shadowColor": "rgba(0,0,0,0.25)"}, "symbol": "triangle", "symbolSize": 14, "symbolOffset": [0, 0]},
-        {"value": [xcats[n_hist - 1], _sp], "itemStyle": {"color": GREEN, "borderColor": "#fff", "borderWidth": 2, "shadowBlur": 4, "shadowColor": "rgba(0,0,0,0.25)"}, "symbol": "rect", "symbolSize": 14, "symbolOffset": [0, 11]},
-        {"value": [xcats[n_hist - 1], _sp], "itemStyle": {"color": "#0891b2", "borderColor": "#fff", "borderWidth": 2, "shadowBlur": 4, "shadowColor": "rgba(0,0,0,0.25)"}, "symbol": "roundRect", "symbolSize": 14, "symbolOffset": [0, 22]},
+        {"coord": [xcats[n_hist - 1], _sp], "itemStyle": {"color": RED, "borderColor": "#fff", "borderWidth": 2, "shadowBlur": 4, "shadowColor": "rgba(0,0,0,0.25)"}, "symbol": "circle", "symbolSize": 16, "symbolOffset": [0, -22], "label": {"show": False}},
+        {"coord": [xcats[n_hist - 1], _sp], "itemStyle": {"color": RED, "opacity": 0.7, "borderColor": "#fff", "borderWidth": 2, "shadowBlur": 4, "shadowColor": "rgba(0,0,0,0.25)"}, "symbol": "diamond", "symbolSize": 14, "symbolOffset": [0, -11], "label": {"show": False}},
+        {"coord": [xcats[n_hist - 1], _sp], "itemStyle": {"color": "#94a3b8", "borderColor": "#fff", "borderWidth": 2, "shadowBlur": 4, "shadowColor": "rgba(0,0,0,0.25)"}, "symbol": "triangle", "symbolSize": 14, "symbolOffset": [0, 0], "label": {"show": False}},
+        {"coord": [xcats[n_hist - 1], _sp], "itemStyle": {"color": GREEN, "borderColor": "#fff", "borderWidth": 2, "shadowBlur": 4, "shadowColor": "rgba(0,0,0,0.25)"}, "symbol": "rect", "symbolSize": 14, "symbolOffset": [0, 11], "label": {"show": False}},
+        {"coord": [xcats[n_hist - 1], _sp], "itemStyle": {"color": "#0891b2", "borderColor": "#fff", "borderWidth": 2, "shadowBlur": 4, "shadowColor": "rgba(0,0,0,0.25)"}, "symbol": "roundRect", "symbolSize": 14, "symbolOffset": [0, 22], "label": {"show": False}},
     ]
 
     fdata = {
@@ -1290,7 +1291,6 @@ def forecast_echart(sym, fc_data):
       {{ name: '次路径', type: 'line', data: D.alt, symbol: 'none', smooth: true, lineStyle: {{ color: '#94a3b8', width: 1.6, type: 'dashed' }} }},
       {{ name: '风险路径', type: 'line', data: D.risk, symbol: 'none', smooth: true, lineStyle: {{ color: '#18a058', width: 1.6, type: 'dashed' }} }},
       {{ name: '趋势外推', type: 'line', data: D.trend, symbol: 'none', smooth: false, lineStyle: {{ color: '#0891b2', width: 1.3, type: 'dashed' }} }},
-      {{ name: '预测起点', type: 'scatter', data: D.startPoints, z: 100, silent: true, tooltip: {{ show: false }} }},
       {{ name: 'MA20', type: 'line', data: D.ma20, symbol: 'none', smooth: false, lineStyle: {{ color: '#0ea5e9', width: 1, opacity: 0.9 }} }},
       {{ name: 'MA60', type: 'line', data: D.ma60, symbol: 'none', smooth: false, lineStyle: {{ color: '#a855f7', width: 1, opacity: 0.9 }} }},
       {{ name: 'MA120', type: 'line', data: D.ma120, symbol: 'none', smooth: false, lineStyle: {{ color: '#f59e0b', width: 1, opacity: 0.9 }} }},
@@ -1301,7 +1301,7 @@ def forecast_echart(sym, fc_data):
       {{ name: '置信锥 P25–P75', type: 'line', data: D.f75h, stack: 'b75', symbol: 'none', lineStyle: {{ opacity: 0 }}, areaStyle: {{ color: 'rgba(229,69,69,0.12)' }}, tooltip: {{ show: false }}, silent: true }},
       {{ name: '参考', type: 'line', data: [], silent: true,
         markLine: {{ symbol: 'none', data: D.hlines.concat(D.vline), labelLayout: {{ moveOverlap: 'shiftY' }} }},
-        markPoint: {{ data: D.endPoints }} }}
+        markPoint: {{ data: D.endPoints.concat(D.startPoints) }} }}
     ]
   }};
   if (D.keyLevelsText) {{
