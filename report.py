@@ -1046,7 +1046,7 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
                  f"{abs(_dev)*100:.1f}%，反映当前缠论结构判断相对纯历史统计更{'乐观' if _dev > 0 else '悲观'}；"
                  f"实际落点更可能靠近统计中位(期望)，主路径应视为「方向性目标」而非「概率中点」，结论宜保守看待。")
     # ---- 悬浮交互数据：历史区真实收盘价 + 投影区密集采样（供 JS initForecast）----
-    hist = [[_hd[i][5:10], round(tail[i], 2)] for i in range(len(tail))]
+    hist = [[_hd[i], round(tail[i], 2)] for i in range(len(tail))]
     proj = []
     for fi in range(0, 101):
         f = fi / 100.0
@@ -1088,9 +1088,9 @@ def forecast_echart(sym, fc_data):
     p_main, p_alt, p_risk = fc_data["p_main"], fc_data["p_alt"], fc_data["p_risk"]
     gaps = fc_data.get("gap_refs", [])
     x_hist = [h[0] for h in hist]
-    x_proj = [p["date"][-5:] for p in proj]   # "YY-MM-DD" -> "MM-DD"
+    x_proj = [p["date"] for p in proj]
     xcats = x_hist + x_proj
-    x_full = list(fc_data.get("hist_dates", [])) + [p["date"] for p in proj]
+    x_full = xcats
     n_hist = len(hist)
     n_proj = len(proj)
     hist_s = [h[1] for h in hist] + [None] * n_proj
