@@ -453,6 +453,39 @@ def echart_main(klines, r, sym, captured=None):
     __mainAxisVisible = Math.max(1, Math.floor(D.dates.length * (end - start) / 100));
     chart.setOption({{ xAxis: [{{}}, {{}}, {{ axisLabel: {{ interval: 0, autoHide: false, hideOverlap: false, formatter: __makeMainAxisFormatter() }} }}] }});
   }}
+  // 价格 y 轴按可见窗口动态重算范围：默认视图(近252日)与缩放后都填满纵向空间，
+  // 避免全历史 min/max 把近期 K 线压扁(沪深300 近期仅占全范围 32%)。含窗口内 OHLC 极值 +
+  // 四档均线 + 近价中枢(ZG/ZD)/Fib/缺口线，远史中枢阴影不纳入以免过度拉宽。防御式 try/catch 兜底。
+  function recomputeY() {{
+    try {{
+      var opt = chart.getOption();
+      var dz = (opt.dataZoom && opt.dataZoom[0]) || {{ start: 0, end: 100 }};
+      var s = dz.start || 0, e = dz.end || 100;
+      var a = Math.max(0, Math.floor(D.dates.length * s / 100));
+      var b = Math.min(D.dates.length - 1, Math.ceil(D.dates.length * e / 100));
+      var lo = Infinity, hi = -Infinity;
+      for (var i = a; i <= b; i++) {{
+        var o = D.ohlc[i]; if (!o) continue;
+        if (o[2] < lo) lo = o[2];
+        if (o[3] > hi) hi = o[3];
+        var mas = [D.ma20, D.ma60, D.ma120, D.ma250];
+        for (var mi = 0; mi < mas.length; mi++) {{
+          var mv = mas[mi] && mas[mi][i];
+          if (mv != null) {{ if (mv < lo) lo = mv; if (mv > hi) hi = mv; }}
+        }}
+      }}
+      function _inc(v) {{ if (v != null && !isNaN(v)) {{ if (v < lo) lo = v; if (v > hi) hi = v; }} }}
+      D.lastZsLines.forEach(function(x){{ _inc(x.yAxis); }});
+      D.fibLines.forEach(function(x){{ _inc(x.yAxis); }});
+      (D.gapAreas || []).forEach(function(p){{ _inc(p[0].yAxis); _inc(p[1].yAxis); }});
+      if (lo < hi) {{
+        var pad = (hi - lo) * 0.06;
+        var nmin = Math.floor((lo - pad) / 10) * 10;
+        var nmax = Math.ceil((hi + pad) / 10) * 10;
+        chart.setOption({{ yAxis: [{{ min: nmin, max: nmax }}, {{}}, {{}}] }});
+      }}
+    }} catch (err) {{}}
+  }}
   var option = {{
     animation: false,
     tooltip: {{
@@ -533,8 +566,10 @@ def echart_main(klines, r, sym, captured=None):
   }}
   chart.setOption(option);
   chart.on('dataZoom', updateMainAxisLabels);
+  chart.on('dataZoom', recomputeY);
   chart.on('dblclick', function(){{ chart.dispatchAction({{ type: 'dataZoom', start: 0, end: 100 }}); }});
   updateMainAxisLabels();
+  recomputeY();
 }})();
 </script>"""
 
