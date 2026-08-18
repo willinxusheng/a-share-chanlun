@@ -1081,6 +1081,13 @@ def forecast_echart(sym, fc_data):
         for _i in range(n_hist, len(_arr)):
             _arr[_i] = None
     core_prices = tail_prices + [last, zg, zd] + [p["main"] for p in proj] + [p["alt"] for p in proj] + [p["risk"] for p in proj] + [p["trend"] for p in proj] + [p["med"] for p in proj]
+    # R120c: 历史段 MA 极值纳入 yAxis 范围——MA 基于全量窗口(如 MA250 含比 tail 更早的低价)，
+    # 否则长周期均线左端会低于 tail 极值被 yAxis 底部裁切（断头）。仅取历史段(索引<n_hist)，未来段已置 None。
+    for _a in (ma20_s, ma60_s, ma120_s, ma250_s):
+        _hv = [_v for _v in _a[:n_hist] if _v is not None]
+        if _hv:
+            core_prices.append(min(_hv))
+            core_prices.append(max(_hv))
     core_lo = min(core_prices)
     core_hi = max(core_prices)
     core_pad = (core_hi - core_lo) * 0.03
