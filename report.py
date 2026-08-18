@@ -411,26 +411,23 @@ def echart_main(klines, r, sym, captured=None):
   // 主图时间轴标签动态密度：按可见窗口交易日常数选择日/周/月/季边界，避免固定季度标签在放大后"断断续续"。
   // 实现方式：interval 固定为 0 + autoHide 关闭，把"是否显示"的判断下沉到 formatter；彻底避免 ECharts 自动抽稀导致日期"错配"。
   var __mainAxisVisible = D.dates.length;
-  function __isMonthStart(idx) {{ return idx === 0 || D.dates[idx].slice(0,7) !== D.dates[idx-1].slice(0,7); }}
+  function __isMonthStart(idx) {{ var d = D.dates[idx]; return d && d.slice(8,10) === '01'; }}
   function __isQuarterStart(idx) {{
-    if (idx === 0) return true;
-    var c = D.dates[idx], p = D.dates[idx-1];
-    if (!c || !p) return false;
-    var cm = parseInt(c.slice(5,7),10), pm = parseInt(p.slice(5,7),10);
-    return c.slice(0,4) !== p.slice(0,4) || Math.floor((cm-1)/3) !== Math.floor((pm-1)/3);
+    var d = D.dates[idx];
+    if (!d || d.slice(8,10) !== '01') return false;
+    var m = parseInt(d.slice(5,7),10);
+    return m === 1 || m === 4 || m === 7 || m === 10;
   }}
   function __isMonday(idx) {{
-    if (idx === 0) return true;
     var parts = D.dates[idx].split('-');
     return new Date(parseInt(parts[0],10), parseInt(parts[1],10)-1, parseInt(parts[2],10)).getDay() === 1;
   }}
   function __mainAxisShowLabel(idx) {{
     var v = __mainAxisVisible;
-    if (v <= 10) return true;
     if (v <= 30) return true;
-    if (v <= 60) return idx === 0 || __isMonday(idx);
-    if (v <= 180) return idx === 0 || __isMonthStart(idx);
-    return idx === 0 || __isQuarterStart(idx);
+    if (v <= 60) return __isMonday(idx);
+    if (v <= 180) return __isMonthStart(idx);
+    return __isQuarterStart(idx);
   }}
   function __mainAxisFormatter(v, i) {{
     // ECharts dataZoom 后 formatter 的 i 可能是视觉索引而非数据索引；优先用 v 反查真实日期，避免缩放后显示 2021 这种错配。
@@ -439,10 +436,8 @@ def echart_main(klines, r, sym, captured=None):
     var d = (idx >= 0 && D.dates && D.dates[idx]) ? D.dates[idx] : v;
     if (!d || d.length < 7) return v;
     if (!__mainAxisShowLabel(idx)) return '';
-    var y = d.slice(0,4);
-    var prev = idx > 0 ? D.dates[idx-1] : null;
-    if (__mainAxisVisible <= 10) return d;  // 放大到极少 K 线时显示完整日期，避免只看 MM-DD 误判年份
-    if (idx === 0 || !prev || prev.slice(0,4) !== y) return y;
+    // R122: 可见天数较多时统一显示月-日，避免首标签年份与紧随其后的月日标签因间隔太近而水平重叠。
+    if (__mainAxisVisible <= 10) return d;
     return d.slice(5);
   }}
   function __makeMainAxisFormatter() {{ return function(v, i) {{ return __mainAxisFormatter(v, i); }}; }}
@@ -977,9 +972,14 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
     _last_dt = datetime.strptime(klines[-1]["date"], "%Y-%m-%d")
 
     def _fut(kk):
-        """从最后交易日往后推算 kk 个交易日对应的日历日期（跳过周末与法定节假日，
-        保留调休补班日），避免把中秋/国庆等长假当天误算为交易日导致投影日期偏差。"""
+        """从最后交易日的下一交易日开始推算 kk 个交易日对应的日历日期（跳过周末与法定节假日，
+        保留调休补班日）。kk=0 对应 T+1（明天），避免投影区第一天与历史最后一天重复导致
+        x 轴出现两个相同日期，并消除历史线与推演线在同一 x 位置被 vline 误认为"缺口"的视觉问题。"""
         dt = _last_dt
+        # 先推进到下一交易日（未来推演不包含当前日）
+        dt += timedelta(days=1)
+        while not _is_trading_day(dt):
+            dt += timedelta(days=1)
         while kk > 0:
             dt += timedelta(days=1)
             if _is_trading_day(dt):
@@ -1013,7 +1013,7 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
                       else f"其终点 ≈ {trend_end_price:.0f}，与主路径中点存在偏差（R²={_r2:.2f}），提示两种视角对后市节奏判断不完全一致，宜结合仓位管理；"))
              + f"若趋势外推也跌漏 ZD，则风险路径概率进一步上升。\n"
              f"主图叠加的斐波那契回调位（F38/F50/F62）与本路径上行目标、ZD 支撑相互印证：若回踩至 F61.8 附近获支撑，反弹结构更可靠；若直接跌漏 ZD，则风险路径概率上升。\n"
-             f"时间轴：左侧历史区为真实交易日（MM-DD）；右侧投影区日期按「从最后交易日往后推算相应交易日、跳过周末及法定节假日（A股日历）」得到，仅供参照。")
+             f"时间轴：左侧历史区为真实交易日（MM-DD）；右侧投影区从最后交易日的下一交易日（T+1）开始，按「往后推算相应交易日、跳过周末及法定节假日（A股日历）」得到，仅供参照。")
     note += (f"\n结构存续概率（锥模型·R59 与置信带同源）：由可见置信带自身参数（近窗口均值中心 + 非对称经验尾部离散度）直接反算「期末价 ≥ ZD {zd:.0f}」的概率 ≈ {_p_hold*100:.0f}%，与置信带 P05/P50/P95 标签严格自洽（ZD 落在带内对应分位即对应概率）。该概率与「主/次/风险」情景概率互为参照：情景概率衡量方向性演绎（续涨/震荡/跌），存续概率衡量「结构是否守住失效位」；两者现共用同一套置信带波动模型，口径一致、不再分裂。现价远高于 ZD 时存续概率天然偏高，不应与情景概率混为一谈。")
     if emp_wr is not None:
         _se = math.sqrt(emp_wr * (1 - emp_wr) / emp_n) if emp_n else 0
@@ -1040,19 +1040,21 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
     # ---- 悬浮交互数据：历史区真实收盘价 + 投影区密集采样（供 JS initForecast）----
     hist = [[_hd[i], round(tail[i], 2)] for i in range(len(tail))]
     proj = []
-    for fi in range(0, 101):
-        f = fi / 100.0
+    # R122: 采样点数与 horizon 交易日数严格一一对应，避免 101 个 f 映射到 horizon+1 个交易日造成
+    # 推演日期重复、x 轴出现两个相同标签，以及历史线与推演线被重复日期割裂成"缺口"。
+    for fi in range(0, horizon + 1):
+        f = fi / horizon if horizon > 0 else 0.0
         med = _interp(main_p, f)
         alt = _interp(alt_p, f)
         risk = _interp(risk_p, f)
-        kk = round(f * horizon)
+        kk = fi
         dt = _fut(kk)
         # 经验分位扇形（围绕实测漂移中位路径 medf）：P05/P95 外层、P25/P75 内层
         mdf = _medf(f)
         u95 = _bandf(f, 1.645); l95 = _bandf(f, -1.645)
         u75 = _bandf(f, 0.674); l75 = _bandf(f, -0.674)
         trend = round(last * math.exp(_main_slope * kk), 2)
-        proj.append({"f": round(f, 3), "tplus": kk, "date": dt,
+        proj.append({"f": round(f, 3), "tplus": kk + 1, "date": dt,
                      "main": round(med, 2), "alt": round(alt, 2), "risk": round(risk, 2),
                      "trend": trend, "med": round(mdf, 2),
                      "f95l": round(l95, 2), "f95h": round(u95 - l95, 2),
@@ -1157,7 +1159,8 @@ def forecast_echart(sym, fc_data):
         {"coord": [xcats[-1], round(_er, 2)], "value": f"风险 {_er:.0f}", "itemStyle": {"color": GREEN}, "symbol": "circle", "symbolSize": 6,
          "label": {"show": True, "position": "bottom", "color": GREEN, "fontSize": 11, "fontWeight": "bold"}},
     ]
-    f_kl = [f"{{zg|ZG {zg_v}}}", f"{{zd|ZD {zd_v}}}", f"{{last|现价 {last_v}}}"]
+    _year_label = x_hist[0][:4] if x_hist and len(x_hist[0]) >= 4 else ""
+    f_kl = [f"{{year|{_year_label}年}}", f"{{zg|ZG {zg_v}}}", f"{{zd|ZD {zd_v}}}", f"{{last|现价 {last_v}}}"]
     for _key, _lab in gap_chips:
         f_kl.append(f"{{{_key}|{_lab}}}")
     key_levels_text = "  ".join(f_kl)
@@ -1186,25 +1189,23 @@ def forecast_echart(sym, fc_data):
   (window.__charts = window.__charts || []).push(chart);
   // 推演图时间轴：与主图一致——interval 固定 0 + autoHide 关闭 + formatter 控制显示，杜绝 ECharts 自动抽稀造成的日期错配；并按 dataZoom 可见天数动态切日/周/月/季密度。
   var __fcVisible = D.xcats.length;
-  function __fcMonthStart(idx) {{ return idx === 0 || D.xcats[idx].slice(0,7) !== D.xcats[idx-1].slice(0,7); }}
+  function __fcMonthStart(idx) {{ var d = D.xcats[idx]; return d && d.slice(8,10) === '01'; }}
   function __fcQuarterStart(idx) {{
-    if (idx === 0) return true;
-    var c = D.xcats[idx], p = D.xcats[idx-1];
-    if (!c || !p) return false;
-    var cm = parseInt(c.slice(5,7),10), pm = parseInt(p.slice(5,7),10);
-    return c.slice(0,4) !== p.slice(0,4) || Math.floor((cm-1)/3) !== Math.floor((pm-1)/3);
+    var d = D.xcats[idx];
+    if (!d || d.slice(8,10) !== '01') return false;
+    var m = parseInt(d.slice(5,7),10);
+    return m === 1 || m === 4 || m === 7 || m === 10;
   }}
   function __fcMonday(idx) {{
-    if (idx === 0) return true;
     var parts = D.xcats[idx].split('-');
     return new Date(parseInt(parts[0],10), parseInt(parts[1],10)-1, parseInt(parts[2],10)).getDay() === 1;
   }}
   function __fcShowLabel(idx) {{
     var v = __fcVisible;
     if (v <= 30) return true;
-    if (v <= 60) return idx === 0 || __fcMonday(idx);
-    if (v <= 180) return idx === 0 || __fcMonthStart(idx);
-    return idx === 0 || __fcQuarterStart(idx);
+    if (v <= 60) return __fcMonday(idx);
+    if (v <= 180) return __fcMonthStart(idx);
+    return __fcQuarterStart(idx);
   }}
   function __fcFormatter(v, i) {{
     // ECharts dataZoom 后 formatter 的 i 可能是视觉索引而非数据索引；优先用 v 反查真实日期，避免推演图缩放后日期错配。
@@ -1213,10 +1214,9 @@ def forecast_echart(sym, fc_data):
     var d = (idx >= 0 && D.xcats && D.xcats[idx]) ? D.xcats[idx] : v;
     if (!d || d.length < 7) return v;
     if (!__fcShowLabel(idx)) return '';
-    if (__fcVisible <= 10) return d;  // 放大到极少 K 线时显示完整日期，与主图 R113 对齐，避免只看 MM-DD 误判年份
-    var y = d.slice(0,4);
-    var prev = idx > 0 ? D.xcats[idx-1] : null;
-    if (idx === 0 || !prev || prev.slice(0,4) !== y) return y;
+    // R122: 可见天数较多时只显示月-日，避免首标签年份(如"2026")与紧随其后的月日标签(如"03-02")
+    // 因间隔只有几个交易日而发生水平重叠。年份信息由顶部关键价位条的年份 chip 补充。
+    if (__fcVisible <= 10) return d;
     return d.slice(5);
   }}
   function __makeFcFormatter() {{ return function(v, i) {{ return __fcFormatter(v, i); }}; }}
@@ -1257,8 +1257,8 @@ def forecast_echart(sym, fc_data):
       }}
     }},
     legend: {{ data: ['历史','统计中位路径','结构演绎路径','次路径','风险路径','趋势外推','MA20','MA60','MA120','MA250','置信锥 P05–P95','置信锥 P25–P75'], top: 2, itemGap: 8, textStyle: {{ fontSize: 11 }} }},
-    grid: {{ left: 96, right: 64, top: 44, bottom: 80 }},
-    xAxis: {{ type: 'category', data: D.xcats, boundaryGap: false, axisTick: {{ show: false }}, axisLabel: {{ fontSize: 11, margin: 6, interval: 0, autoHide: false, hideOverlap: false, showMinLabel: true, showMaxLabel: false,
+    grid: {{ left: 96, right: 64, top: 64, bottom: 80 }},
+    xAxis: {{ type: 'category', data: D.xcats, boundaryGap: false, axisTick: {{ show: false }}, axisLabel: {{ fontSize: 11, margin: 6, interval: 0, autoHide: false, hideOverlap: false, showMinLabel: false, showMaxLabel: false,
         formatter: __makeFcFormatter() }} }},
     yAxis: {{ scale: false, min: D.ymin_core, max: D.ymax_core, splitNumber: 6, axisLine: {{ lineStyle: {{ color: '#cbd5e1' }} }}, splitLine: {{ lineStyle: {{ color: '#eef2f7' }} }}, axisLabel: {{ fontSize: 12, hideOverlap: true }} }},
     // 推演图默认展示历史最后 120 个交易日 + 全部推演窗口；避免首次打开落在多年前历史数据上。
@@ -1288,11 +1288,12 @@ def forecast_echart(sym, fc_data):
   }};
   if (D.keyLevelsText) {{
     option.graphic = [{{
-      type: 'text', left: 100, top: 30, z: 100, silent: true,
+      type: 'text', left: 100, top: 50, z: 100, silent: true,
       style: {{
         text: D.keyLevelsText,
         fontFamily: 'Microsoft YaHei', fontSize: 11,
         rich: {{
+          year:  {{ fill: '#64748b', fontSize: 10 }},
           zg:    {{ fill: '{GOLD}', fontWeight: 'bold' }},
           zd:    {{ fill: '{GOLD}', fontWeight: 'bold' }},
           last:  {{ fill: '#64748b', fontWeight: 'bold' }},
