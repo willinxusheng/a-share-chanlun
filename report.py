@@ -2349,27 +2349,46 @@ def main():
   @keyframes secflash {{ 0% {{ box-shadow: 0 0 0 0 rgba(43,108,176,0); }} 25% {{ box-shadow: 0 0 0 4px rgba(43,108,176,0.35); }} 100% {{ box-shadow: 0 1px 3px rgba(15,23,42,0.04); }} }}
   @media (max-width: 720px) {{ nav.sym-rail {{ top: 48px; }} nav.sym-rail .chip {{ padding: 4px 9px; font-size: 12px; }} }}
   /* ===== 手机横屏深度优化（宽>高，视口矮） ===== */
+  /* ===== 手机横屏深度优化（宽>高，视口矮） =====
+     目标：把宽屏优势用满——K线/推演左右并排、顶部与卡片竖向压缩、图表高度自适应矮视口，
+     文本块(质量证书/免责/执行/表格/方法)统一收紧，避免横屏下大量无效滚动。 */
   @media (orientation: landscape) and (max-height: 560px) {{
-    body {{ padding: 8px; }}
+    body {{ padding: 6px 8px; }}
     .wrap {{ max-width: 100%; }}
-    header h1 {{ font-size: 17px; }}
-    header p {{ font-size: 11px; line-height: 1.45; margin-top: 2px; }}
+    header {{ padding: 10px 16px; border-radius: 12px; margin-bottom: 8px; }}
+    header h1 {{ font-size: 16px; letter-spacing: 0; }}
+    header p {{ font-size: 10.5px; line-height: 1.4; margin-top: 2px; max-height: 2.9em; overflow: hidden; }}
+    /* 导航：横屏下转顶部横滑条，省竖向空间（不吸顶占屏） */
     nav.toc, nav.sym-rail {{
       position: static; flex-wrap: nowrap; overflow-x: auto; white-space: nowrap;
-      margin: 6px 0; padding: 4px 6px; gap: 4px; -webkit-overflow-scrolling: touch;
+      margin: 4px 0; padding: 4px 6px; gap: 4px; -webkit-overflow-scrolling: touch;
     }}
     nav.toc a, nav.sym-rail .chip {{ flex: 0 0 auto; }}
     nav.toc a .num {{ display: none; }}
-    h2.sec, .panel h2 {{ font-size: 15px; margin: 12px 0 8px; }}
-    .panel {{ padding: 10px 12px; margin-bottom: 10px; }}
-    /* 每指数：左K线 / 右推演 并排，解读与备注在下方整行 */
+    /* 顶部 KPI 行收紧 */
+    .hero {{ gap: 6px; margin: 8px 0 2px; }}
+    .kpi {{ min-width: 78px; padding: 6px 7px; }}
+    .kpi-v {{ font-size: 18px; }}
+    .kpi-l {{ font-size: 10.5px; }}
+    /* 指数概览卡片：宽屏多列 + 收紧 */
+    .cards {{ grid-template-columns: repeat(auto-fit, minmax(138px, 1fr)); gap: 6px; }}
+    .card {{ padding: 9px 9px; }}
+    .price {{ font-size: 16px; margin: 4px 0; }}
+    .sym {{ font-size: 10px; }}
+    .kv {{ font-size: 11px; padding: 2px 0; }}
+    .chips {{ gap: 4px; margin-top: 5px; }}
+    h2.sec {{ font-size: 14px; margin: 10px 0 6px; }}
+    /* 每指数：左=K线(标题)/右=推演(标题) 并排，解读与备注整行置底 */
     section.panel {{
-      display: grid; grid-template-columns: 1.5fr 1fr;
-      grid-template-areas: "title title" "kline fc" "foot foot";
-      gap: 8px 12px; align-items: stretch;
+      display: grid; grid-template-columns: 1.45fr 1fr;
+      grid-template-areas:
+        "title fctitle"
+        "kline fc"
+        "foot  foot";
+      gap: 6px 10px; padding: 8px 10px; margin-bottom: 8px; align-items: start;
     }}
-    section.panel > h2, section.panel > h3.fc-title {{ grid-area: title; }}
-    section.panel > h3.fc-title {{ margin: 2px 0 0; font-size: 13px; }}
+    section.panel > h2 {{ grid-area: title; font-size: 14px; margin: 0; }}
+    section.panel > h3.fc-title {{ grid-area: fctitle; font-size: 12px; margin: 0; }}
     section.panel > .chartbox:first-of-type {{ grid-area: kline; }}
     section.panel > .chartbox.fcbox {{ grid-area: fc; }}
     section.panel > .verdict,
@@ -2377,17 +2396,33 @@ def main():
     section.panel > .fc-note,
     section.panel > .fc-legend,
     section.panel > .pathcheck {{ grid-area: foot; }}
-    .verdict {{ margin-top: 0; }}
-    /* 图表高度自适应横屏矮视口（!important 覆盖内联 640/440px） */
-    .echart-main {{ height: calc(100vh - 150px) !important; height: calc(100dvh - 150px) !important; max-height: 380px; min-height: 200px; }}
-    .echart-toolbar {{ font-size: 11px; padding: 5px 8px; }}
-    .fc-title {{ font-size: 13px; margin: 4px 0; }}
-    .fc-legend {{ font-size: 11px; gap: 8px; }}
-    .cards {{ grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }}
-    .kpi {{ min-width: 92px; padding: 8px; }}
-    .kpi-v {{ font-size: 19px; }}
-    .tbl {{ font-size: 11px; }}
-    .tbl th, .tbl td {{ padding: 5px 6px; }}
+    .verdict {{ margin-top: 0; font-size: 12px; }}
+    .verdict p {{ line-height: 1.5; }}
+    .fc-note2 {{ font-size: 11.5px; line-height: 1.6; margin: 6px 0; }}
+    .fc-legend {{ font-size: 10.5px; gap: 7px; margin: 4px 0; }}
+    .fc-targets {{ font-size: 11px; }}
+    .pathcheck {{ padding: 7px 10px; margin-top: 6px; }}
+    .pathcheck > b, .pc-row, .pc-calib {{ font-size: 11.5px; }}
+    .pc-lab {{ width: 54px; }}
+    /* 图表高度自适应横屏矮视口（!important 覆盖内联 640/440px）；
+       dvh 计入移动端浏览器栏；封顶 280px 给底部解读留空间，下限 150px 防过小 */
+    .echart-main {{ height: calc(100vh - 232px) !important; height: calc(100dvh - 232px) !important; max-height: 280px; min-height: 150px; }}
+    .echart-toolbar {{ font-size: 10.5px; padding: 4px 6px; }}
+    /* 文本块统一收紧 */
+    .qc-card {{ margin: 8px 0; padding: 10px 12px; }}
+    .qc-head {{ font-size: 13px; }}
+    .qc-cell {{ flex: 1 1 86px; padding: 6px 7px; }}
+    .qc-v {{ font-size: 15px; }}
+    .qc-l {{ font-size: 10px; }}
+    .qc-foot {{ font-size: 11px; margin-top: 6px; padding-top: 5px; }}
+    .qc-regime-row {{ font-size: 11px; padding: 2px 0; }}
+    .quality, .disclaimer, .exec {{ padding: 10px 12px; font-size: 11.5px; line-height: 1.7; }}
+    .quality-grid {{ gap: 6px; }}
+    .qcard {{ padding: 8px 9px; }}
+    details.method {{ font-size: 11.5px; }}
+    .fc-title {{ font-size: 12px; margin: 3px 0; }}
+    .tbl {{ font-size: 10.5px; }}
+    .tbl th, .tbl td {{ padding: 4px 5px; }}
   }}
 
   /* ===================== R134 深度美化增强层 =====================
