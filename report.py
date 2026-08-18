@@ -407,7 +407,9 @@ def echart_main(klines, r, sym, captured=None):
   var chart = echarts.init(document.getElementById('{cid}'));
   (window.__charts = window.__charts || []).push(chart);
   // 主图时间轴标签动态密度：按可见窗口交易日常数选择日/周/月/季边界，避免固定季度标签在放大后"断断续续"。
+  // 实现方式：interval 固定为 0 + autoHide 关闭，把"是否显示"的判断下沉到 formatter；彻底避免 ECharts 自动抽稀导致日期"错配"。
   var __mainAxisVisible = D.dates.length;
+  var __mainAxisPrevYear = null;
   function __isMonthStart(idx) {{ return idx === 0 || D.dates[idx].slice(0,7) !== D.dates[idx-1].slice(0,7); }}
   function __isQuarterStart(idx) {{
     if (idx === 0) return true;
@@ -421,19 +423,29 @@ def echart_main(klines, r, sym, captured=None):
     var parts = D.dates[idx].split('-');
     return new Date(parseInt(parts[0],10), parseInt(parts[1],10)-1, parseInt(parts[2],10)).getDay() === 1;
   }}
-  function __mainAxisInterval(idx) {{
+  function __mainAxisShowLabel(idx) {{
     var v = __mainAxisVisible;
     if (v <= 30) return true;
     if (v <= 60) return idx === 0 || __isMonday(idx);
     if (v <= 180) return idx === 0 || __isMonthStart(idx);
     return idx === 0 || __isQuarterStart(idx);
   }}
+  function __mainAxisFormatter(v, i) {{
+    var d = (D.dates && D.dates[i]) ? D.dates[i] : v;
+    if (!d || d.length < 7) return v;
+    if (!__mainAxisShowLabel(i)) return '';
+    var y = d.slice(0,4);
+    if (i === 0 || y !== __mainAxisPrevYear) {{ __mainAxisPrevYear = y; return y; }}
+    return d.slice(5);
+  }}
+  function __makeMainAxisFormatter() {{ return function(v, i) {{ return __mainAxisFormatter(v, i); }}; }}
   function updateMainAxisLabels() {{
     var opt = chart.getOption();
     var dz = (opt.dataZoom && opt.dataZoom[0]) || {{ start: 0, end: 100 }};
     var start = dz.start || 0, end = dz.end || 100;
     __mainAxisVisible = Math.max(1, Math.floor(D.dates.length * (end - start) / 100));
-    chart.setOption({{ xAxis: [{{}}, {{}}, {{ axisLabel: {{ interval: __mainAxisInterval }} }}] }});
+    __mainAxisPrevYear = null;
+    chart.setOption({{ xAxis: [{{}}, {{}}, {{ axisLabel: {{ interval: 0, autoHide: false, hideOverlap: true, formatter: __makeMainAxisFormatter() }} }}] }});
   }}
   var option = {{
     animation: false,
@@ -461,9 +473,8 @@ def echart_main(klines, r, sym, captured=None):
     xAxis: [
       {{ type: 'category', data: D.dates, gridIndex: 0, axisLabel: {{ show: false }} }},
       {{ type: 'category', data: D.dates, gridIndex: 1, axisLabel: {{ show: false }} }},
-      {{ type: 'category', data: D.dates, gridIndex: 2, axisLabel: {{ fontSize: 11, margin: 6, hideOverlap: true, showMinLabel: true,
-        interval: __mainAxisInterval,
-        formatter: (function(){{ var _py = null; return function(v, i){{ var d = (D.dates && D.dates[i]) ? D.dates[i] : v; if (!d || d.length < 7) return v; var y = d.slice(0,4); if (i === 0 || y !== _py) {{ _py = y; return y; }} return d.slice(5); }}; }})() }} }}
+      {{ type: 'category', data: D.dates, gridIndex: 2, axisTick: {{ show: false }}, axisLabel: {{ fontSize: 11, margin: 6, interval: 0, autoHide: false, hideOverlap: true,
+        formatter: __makeMainAxisFormatter() }} }}
     ],
     yAxis: [
       {{ scale: false, min: D.yMin, max: D.yMax, gridIndex: 0, splitNumber: 6, axisLine: {{ lineStyle: {{ color: '#cbd5e1' }} }}, splitLine: {{ lineStyle: {{ color: '#eef2f7' }} }}, axisLabel: {{ fontSize: 12, hideOverlap: true }} }},
