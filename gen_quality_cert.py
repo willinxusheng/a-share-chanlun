@@ -114,7 +114,7 @@ def main():
             "note": "R76 情绪条件化: T+30 样本外 +8.9pp(极端区 31%→69%)但近期极端样本 N=10 不足, 未并入模型, 仅透明化",
         },
         "accuracy_status": "capped",
-        "accuracy_note": "预测准确性所有安全维度(R70-R84 多轮回测+监控)已到顶/证伪/落地; 数学层面已封顶, 证书仅作可见化与监控; 显示概率p_main校准诚实性由关10监控, 置信带锐度/不确定性校准由关11(audit_interval_score.py)监控",
+        "accuracy_note": "预测准确性所有安全维度(R70-R85 多轮回测+监控)已到顶/证伪/落地; 数学层面已封顶, 证书仅作可见化与监控; 显示概率p_main校准诚实性由关10监控, 置信带锐度/不确定性校准由关11(audit_interval_score.py)监控, 点预测水平(价位)偏置由关12(audit_point_bias.py)监控",
         "regime_coverage": regime_cov,
         "regime_warn": regime_warn,
         "regime_direction": regime_dir,
