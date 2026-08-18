@@ -1142,6 +1142,7 @@ def forecast_echart(sym, fc_data):
     var d = (D.xcats && D.xcats[i]) ? D.xcats[i] : v;
     if (!d || d.length < 7) return v;
     if (!__fcShowLabel(i)) return '';
+    if (__fcVisible <= 10) return d;  // 放大到极少 K 线时显示完整日期，与主图 R113 对齐，避免只看 MM-DD 误判年份
     var y = d.slice(0,4);
     var prev = i > 0 ? D.xcats[i-1] : null;
     if (i === 0 || !prev || prev.slice(0,4) !== y) return y;
@@ -2092,7 +2093,7 @@ def main():
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>A股缠论结构分析报告 · 2021-2026</title>
+<title>A股缠论结构分析报告 · 2021 至今</title>
 <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
 <style>
   * {{ box-sizing: border-box; margin: 0; padding: 0; }}
