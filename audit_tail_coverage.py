@@ -128,7 +128,7 @@ def run(max_anchors=None):
                 real = kl[i + H]["close"]
                 if real <= 0 or p05 <= 0 or p95 <= 0 or p95 <= p05:
                     continue
-                logret = math.log(max(real, 1e-9) / last_a)
+                logret = math.log(max(real, 1e-9) / max(last_a, 1e-9))
                 breach = (real < p05) or (real > p95)
                 down = real < p05
                 depth = ((p05 - real) / p05 * 100.0) if down else 0.0

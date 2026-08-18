@@ -131,8 +131,6 @@ SC_BULL = ("多头延续", "中枢震荡偏多", "高位整理未破前高", "�
 SC_BEAR = ("背驰见顶风险", "中枢震荡偏空", "弱势反弹", "反弹未回中枢", "空头延续")
 
 
-def _fmt(v, nd=2):
-    return ("%%.%df" % nd) % v
 
 
 def _smooth(pts, tension=1.0, nd=3):
@@ -605,7 +603,7 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
     # 否则低拟合度或方向分歧下"吻合"纯属巧合，据此 +2% 概率属虚增置信度。
     _main_mid = (main_p[0][1] + main_p[-1][1]) / 2
     _R2_TH = 0.25
-    trend_agree = bool(_main_mid and abs(trend_end - _main_mid) / _main_mid < 0.06
+    trend_agree = bool(_main_mid and abs(trend_end_price - _main_mid) / _main_mid < 0.06
                        and _r2 >= _R2_TH and _agree_dir)
     trend_weak = _r2 < _R2_TH
     # 趋势衰减提示（多窗口上行共识但主窗口加速度衰减）：背驰可能的量化信号，
@@ -878,37 +876,6 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
     def xp(f):
         return PAD_L + hist_w + proj_w * f
 
-    p = [f'<svg id="forecast-{sym}" viewBox="0 0 {W} {H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto;display:block;text-rendering:geometricPrecision;shape-rendering:geometricPrecision">',
-         f'<rect width="{W}" height="{H}" fill="#ffffff"/>',
-         f'<clipPath id="fc-{sym}"><rect x="{PAD_L}" y="{PAD_T3}" width="{plot_w}" height="{H - PAD_T3 - PAD_B3}"/></clipPath>']
-    p.append(f'<rect x="{PAD_L + hist_w:.1f}" y="{PAD_T3}" width="{proj_w:.1f}" height="{H - PAD_T3 - PAD_B3}" fill="#f8fafc"/>')
-    for i in range(9):
-        v = lo + span * i / 8
-        yy = y(v)
-        if i % 2 == 0:
-            p.append(f'<line x1="{PAD_L}" y1="{yy:.1f}" x2="{W - PAD_R}" y2="{yy:.1f}" stroke="#eef2f7"/>')
-            p.append(f'<text x="{W - PAD_R + 6}" y="{yy + 4:.1f}" font-size="13" font-weight="600" fill="{GRAY}">{v:.0f}</text>')
-        else:
-            p.append(f'<line x1="{PAD_L}" y1="{yy:.1f}" x2="{W - PAD_R}" y2="{yy:.1f}" stroke="#f4f7fb"/>')
-    _lv = sorted([(y(zg), f"ZG {zg:.0f}", GOLD), (y(zd), f"ZD {zd:.0f}", GOLD), (y(last), f"现价 {last:.0f}", "#64748b")])
-    _placed = []
-    for yy, lab, c in _lv:
-        for py in _placed:
-            if abs(yy - py) < 15:
-                yy = (py + 15) if yy >= py else (py - 15)
-        _placed.append(yy)
-        p.append(f'<line x1="{PAD_L}" y1="{yy:.1f}" x2="{W - PAD_R}" y2="{yy:.1f}" stroke="{c}" stroke-width="1" stroke-dasharray="5,4"/>')
-        p.append(f'<text x="{PAD_L + 6}" y="{yy - 4:.1f}" font-size="13" font-weight="600" fill="{c}">{lab}</text>')
-    # 缺口参考线（仅投影区，未来支撑/压力位）：灰色细虚线 + 标签，与 ZG/ZD 形成交叉验证
-    for g in _gap_refs:
-        _yy = y((g["top"] + g["bottom"]) / 2)
-        _c = RED if g["type"] == "up" else GREEN  # 涨红跌绿：向上缺口支撑/向下缺口压力（与主图红绿统一）
-        p.append(f'<line x1="{PAD_L + hist_w:.1f}" y1="{_yy:.1f}" x2="{W - PAD_R}" y2="{_yy:.1f}" stroke="{_c}" stroke-width="0.8" stroke-dasharray="1,5" stroke-opacity="0.55"/>')
-        _glab = ("缺口支撑" if g["type"] == "up" else "缺口压力") + f" {g['bottom']:.0f}-{g['top']:.0f}"
-        p.append(f'<text x="{PAD_L + hist_w + 4:.1f}" y="{_yy - 3:.1f}" font-size="10" font-weight="600" fill="{_c}">{_glab}</text>')
-    tail_d = _smooth([(xh(i), y(c)) for i, c in enumerate(tail)])
-    p.append(f'<path d="{tail_d}" fill="none" stroke="{BLUE}" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/>')
-    # ---- 时间轴：历史区(左)显示真实交易日日期；投影区(右)显示推算交易日日期 ----
     _hist_k = klines[-len(tail):]
     _hd = [k["date"] for k in _hist_k]
     _last_dt = datetime.strptime(klines[-1]["date"], "%Y-%m-%d")
@@ -922,77 +889,6 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
             if _is_trading_day(dt):
                 kk -= 1
         return dt.strftime("%Y-%m-%d")
-
-    # 历史区底部：真实交易日日期刻度（约 6 个，均匀且不贴边）
-    p.append(f'<text x="{PAD_L + 4:.1f}" y="{PAD_T3 - 10}" font-size="12" font-weight="700" fill="{GRAY}">近{len(tail)}日(交易日)</text>')
-    p.append(f'<line x1="{PAD_L + hist_w:.1f}" y1="{PAD_T3}" x2="{PAD_L + hist_w:.1f}" y2="{H - PAD_B3}" stroke="{INK}" stroke-width="1.2" stroke-dasharray="3,3"/>')
-    p.append(f'<text x="{PAD_L + hist_w:.1f}" y="{PAD_T3 - 10}" font-size="13" font-weight="700" fill="{INK}" text-anchor="middle">今日 T</text>')
-    # 投影区标题（与左侧"近N日"呼应）：标注推演跨度
-    p.append(f'<text x="{PAD_L + hist_w + proj_w / 2:.1f}" y="{PAD_T3 - 10}" font-size="12" font-weight="700" fill="{INK}" text-anchor="middle">未来推演 T+1→T+{horizon}（交易日）</text>')
-    L = len(tail)
-    _idxs = [max(1, min(L - 2, int(round(L * (j + 0.5) / 6)))) for j in range(6)]
-    for i in _idxs:
-        xx = xh(i)
-        p.append(f'<line x1="{xx:.1f}" y1="{PAD_T3}" x2="{xx:.1f}" y2="{H - PAD_B3}" stroke="#eef2f7"/>')
-        p.append(f'<text x="{xx:.1f}" y="{H - 12}" font-size="12" font-weight="600" fill="{GRAY}" text-anchor="middle">{_hd[i][5:10]}</text>')
-    # 投影区底部：推算交易日日期(T+X)
-    for f, kk in ((0.25, round(horizon * 0.25)), (0.5, round(horizon * 0.5)),
-                   (0.75, round(horizon * 0.75)), (1.0, horizon)):
-        p.append(f'<text x="{xp(f):.1f}" y="{H - 26}" font-size="11" font-weight="500" fill="{GRAY}" text-anchor="middle">T+{kk}</text>')
-        p.append(f'<text x="{xp(f):.1f}" y="{H - 12}" font-size="13" font-weight="700" fill="{INK}" text-anchor="middle">{_fut(kk)}</text>')
-
-    def draw_path(path, color, dash):
-        d = _smooth([(xp(f), y(v)) for f, v in path], tension=0.9)
-        p.append(f'<path d="{d}" fill="none" stroke="{color}" stroke-width="2" stroke-dasharray="{dash}" stroke-linejoin="round" stroke-linecap="round"/>')
-        p.append(f'<circle cx="{xp(path[-1][0]):.1f}" cy="{y(path[-1][1]):.1f}" r="3" fill="{color}"/>')
-
-    # ---- 置信锥（基于历史60日前向收益波动 σ={sigma*100:.1f}%）----
-    # 注：本函数最终返回的是 ECharts 交互图(forecast_echart)，其置信带由下方 fc_data 的
-    # f95/f75 经 _bandf 生成（已采用下文 R57 重写后的近窗口·均值中心·非对称口径）；
-    # 此处静态 SVG 的 band_poly 为历史遗留（当前报告未嵌入该 SVG，见 main L2459 仅嵌入 ECharts）。
-    frange = [i / 50 for i in range(0, 51)]
-
-    def band_poly(kmul):
-        up, lo = [], []
-        for f in frange:
-            med = _interp(main_p, f)
-            half = med * sigma * math.sqrt(f) * kmul
-            up.append((xp(f), y(med + half)))
-            lo.append((xp(f), y(med - half)))
-        return " ".join(f"{a:.1f},{b:.1f}" for a, b in up + lo[::-1])
-
-    # 置信锥裁剪到绘图区，避免 ±2σ 带超出图表边框被截断
-    p.append(f'<g clip-path="url(#fc-{sym})">')
-    p.append(f'<polygon points="{band_poly(2)}" fill="{RED}" fill-opacity="0.06" stroke="none"/>')
-    p.append(f'<polygon points="{band_poly(1)}" fill="{RED}" fill-opacity="0.12" stroke="none"/>')
-    p.append('</g>')
-
-    # 趋势外推（独立交叉验证）：对数线性回归外推 horizon 日，青色虚线叠加
-    p.append(f'<line x1="{PAD_L + hist_w:.1f}" y1="{y(last):.1f}" x2="{xp(1):.1f}" y2="{y(trend_end_price):.1f}" stroke="#0891b2" stroke-width="1.3" stroke-dasharray="2,5" stroke-opacity="0.85"/>')
-    p.append(f'<circle cx="{xp(1):.1f}" cy="{y(trend_end):.1f}" r="2.8" fill="#0891b2"/>')
-
-    draw_path(main_p, RED, "none")
-    draw_path(alt_p, "#94a3b8", "6,4")
-    draw_path(risk_p, GREEN, "2,3")
-    # 路径末端就近标签（主/次/风险 + 目标位数值）：放大推演图时下方图例条常已滚出视野，
-    # 末端直接标注目标价位可就近读数，解决该盲区；白描边使标签在密集线条上仍清晰；
-    # 垂直防重叠间距放宽到 18px，三条路径末端 x 相同仍能清晰区分
-    _ends = []
-    for _p, _t, _c in ((main_p, "主", RED), (alt_p, "次", "#94a3b8"), (risk_p, "风险", GREEN)):
-        _ends.append((y(_p[-1][1]), f"{_t} {_p[-1][1]:.0f}", _c, xp(_p[-1][0])))
-    _ends.sort(key=lambda t: t[0])
-    _ly = -1e9
-    for _yy, _lab, _c, _xx in _ends:
-        if abs(_yy - _ly) < 18:
-            _yy = _ly + 18 if _yy >= _ly else _ly - 18
-        _ly = _yy
-        p.append(f'<text x="{_xx - 8:.1f}" y="{_yy - 6:.1f}" font-size="12" font-weight="700" fill="{_c}" text-anchor="end" opacity="0.95" paint-order="stroke" stroke="#ffffff" stroke-width="3">{_lab}</text>')
-    # ---- hover 交互元素（默认隐藏，由 JS initForecast 驱动）----
-    p.append(f'<line id="fccx-{sym}" x1="{PAD_L}" y1="{PAD_T3}" x2="{PAD_L}" y2="{H - PAD_B3}" stroke="{INK}" stroke-width="1" stroke-dasharray="3,3" opacity="0"/>')
-    p.append(f'<circle id="fcm-{sym}" r="3.6" fill="{RED}" opacity="0"/>')
-    p.append(f'<circle id="fca-{sym}" r="3.6" fill="#94a3b8" opacity="0"/>')
-    p.append(f'<circle id="fcr-{sym}" r="3.6" fill="{GREEN}" opacity="0"/>')
-    p.append("</svg>")
     # 图例改为图表下方的 HTML 图例条（不再压住推演路径与时间轴）
     legend_html = (
         f'<div class="fc-legend">'
@@ -1005,7 +901,7 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
         f'<div class="fc-targets">结构演绎目标(主路径终点) ≈ <b>{main_p[-1][1]:.0f}</b> · '
         f'均值期望终点 ≈ <b>{_medf(1.0):.0f}</b> · '
         f'风险止损位(风险路径终点) ≈ <b>{risk_p[-1][1]:.0f}</b> · '
-        f'趋势外推位 ≈ <b>{trend_end:.0f}</b> · '
+        f'趋势外推位 ≈ <b>{trend_end_price:.0f}</b> · '
         f'主路径失效位(有效跌破ZD) ≈ <b>{zd:.0f}</b> · '
         f'结构存续概率(锥) ≈ <b>{_p_hold*100:.0f}%</b></div>'
     )
@@ -1018,7 +914,7 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
                 if trend_weak
                 else ("其终点与主路径吻合（误差<6%）且拟合较稳（R²={_r2:.2f}），两法指向同一区间，预测可信度更高；"
                       if trend_agree
-                      else f"其终点 ≈ {trend_end:.0f}，与主路径中点存在偏差（R²={_r2:.2f}），提示两种视角对后市节奏判断不完全一致，宜结合仓位管理；"))
+                      else f"其终点 ≈ {trend_end_price:.0f}，与主路径中点存在偏差（R²={_r2:.2f}），提示两种视角对后市节奏判断不完全一致，宜结合仓位管理；"))
              + f"若趋势外推也跌漏 ZD，则风险路径概率进一步上升。\n"
              f"主图叠加的斐波那契回调位（F38/F50/F62）与本路径上行目标、ZD 支撑相互印证：若回踩至 F61.8 附近获支撑，反弹结构更可靠；若直接跌漏 ZD，则风险路径概率上升。\n"
              f"时间轴：左侧历史区为真实交易日（MM-DD）；右侧投影区日期按「从最后交易日往后推算相应交易日、跳过周末及法定节假日（A股日历）」得到，仅供参照。")
@@ -1080,10 +976,7 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
 def forecast_echart(sym, fc_data):
     """用 ECharts 重绘缠论未来走势推演图（路径+置信锥+标注），对标主图细腻度、放大矢量清晰。"""
     hist = fc_data["hist"]
-    def _norm4(s):
-        # 归一化推演日期为四位年： "26-09-25" -> "2026-09-25"，避免 x 轴 formatter 取到 "-25" 负号
-        return ("20" + s) if (len(s) == 8 and s[2] == "-") else s
-    proj = [dict(p, date=_norm4(p["date"])) for p in fc_data["proj"]]
+    proj = [dict(p) for p in fc_data["proj"]]
     zg, zd, last = fc_data["zg"], fc_data["zd"], fc_data["last"]
     p_main, p_alt, p_risk = fc_data["p_main"], fc_data["p_alt"], fc_data["p_risk"]
     gaps = fc_data.get("gap_refs", [])
@@ -1607,14 +1500,17 @@ def rr_table(data, results, recent_n=8):
             _qc = {"优": RED, "良": GREEN, "中": "#64748b", "差": "#b45309", "—": "#94a3b8"}.get(_q, "#94a3b8")
             _dir_col = RED if s["dir"] == 1 else GREEN
             _vc = "✓" if s.get("vol_confirm") else "—"
-            _rr = ("%.1f" % s["rr"]) if s.get("rr") else "—"
+            _rr = ("%.1f" % s["rr"]) if s.get("rr") is not None else "—"
+            _price = ("%.1f" % s["price"]) if s.get("price") is not None else "—"
+            _stop = ("%.1f" % s["stop"]) if s.get("stop") is not None else "—"
+            _target = ("%.1f" % s["target"]) if s.get("target") is not None else "—"
             rows.append(f"""<tr data-sym="{sym}" class="linkrow" data-jump>
               <td><b>{d["name"]}</b></td>
               <td style="color:{_dir_col};font-weight:600">{s["kind"]}</td>
               <td>{s["date"]}</td>
-              <td class="tac">{s["price"]:.1f}</td>
-              <td class="tac">{s["stop"]:.1f}</td>
-              <td class="tac">{s["target"]:.1f}</td>
+              <td class="tac">{_price}</td>
+              <td class="tac">{_stop}</td>
+              <td class="tac">{_target}</td>
               <td class="tac" style="color:{INK};font-weight:700">{_rr}</td>
               <td class="tac">{badge(_q, _qc)}</td>
               <td class="tac">{_vc}</td>
@@ -2325,74 +2221,9 @@ def main():
 </div>
 <script>
 var FC_DATA = {json.dumps(fc_blob, ensure_ascii=False)};
-function initForecast(sym){{
-  var svg=document.getElementById('forecast-'+sym);
-  if(!svg) return;
-  var tip=document.getElementById('fctip-'+sym);
-  if(!tip) return;
-  var box=svg.closest('.chartbox');
-  var PAD_L=12, PAD_R=78, W=1060, plot_w=W-PAD_L-PAD_R;
-  var hist_w=plot_w*0.40, proj_w=plot_w*0.60;
-  var PAD_T3=30, PAD_B3=34, H=300;
-  var D=FC_DATA[sym];
-  if(!D) return;
-  var cx=document.getElementById('fccx-'+sym);
-  var cm=document.getElementById('fcm-'+sym);
-  var ca=document.getElementById('fca-'+sym);
-  var cr=document.getElementById('fcr-'+sym);
-  var lo=D.lo, span=D.span;
-  function yf(v){{ return PAD_T3+(H-PAD_T3-PAD_B3)*(1-(v-lo)/span); }}
-  function showDots(xf,f){{
-    var p=D.proj[Math.max(0,Math.min(D.proj.length-1,Math.round(f*100)))];
-    cm.setAttribute('cx',xf); cm.setAttribute('cy',yf(p.main)); cm.setAttribute('opacity','1');
-    ca.setAttribute('cx',xf); ca.setAttribute('cy',yf(p.alt)); ca.setAttribute('opacity','1');
-    cr.setAttribute('cx',xf); cr.setAttribute('cy',yf(p.risk)); cr.setAttribute('opacity','1');
-  }}
-  function hideDots(){{ cm.setAttribute('opacity','0'); ca.setAttribute('opacity','0'); cr.setAttribute('opacity','0'); }}
-  function move(ev){{
-    var ce=ev.touches?ev.touches[0]:ev;
-    if(!ce) return;
-    var pt=svg.createSVGPoint(); pt.x=ce.clientX; pt.y=ce.clientY;
-    var loc=pt.matrixTransform(svg.getScreenCTM().inverse());
-    if(loc.x<PAD_L||loc.x>W-PAD_R||loc.y<PAD_T3||loc.y>H-PAD_B3){{
-      tip.style.display='none'; cx.setAttribute('opacity','0'); hideDots(); return;
-    }}
-    cx.setAttribute('x1',loc.x); cx.setAttribute('x2',loc.x); cx.setAttribute('opacity','0.5');
-    var html, idx;
-    if(loc.x<=PAD_L+hist_w){{
-      idx=Math.round((loc.x-PAD_L)/hist_w*(D.hist.length-1));
-      idx=Math.max(0,Math.min(D.hist.length-1,idx));
-      var h=D.hist[idx];
-      html='<b>历史 · '+h[0]+'</b><br>收盘 <b>'+h[1].toFixed(2)+'</b>';
-      hideDots();
-    }} else {{
-      var f=(loc.x-(PAD_L+hist_w))/proj_w;
-      idx=Math.max(0,Math.min(D.proj.length-1,Math.round(f*100)));
-      var p=D.proj[idx];
-      var red='#e54545', gray='#94a3b8', grn='#18a058';
-      html='<b>推演 · T+'+p.tplus+' ('+p.date+')</b><br>'
-        +'<span style="color:'+red+'">主路径 '+p.main.toFixed(2)+'</span>　'+Math.round(D.p_main*100)+'%<br>'
-        +'<span style="color:'+gray+'">次路径 '+p.alt.toFixed(2)+'</span>　'+Math.round(D.p_alt*100)+'%<br>'
-        +'<span style="color:'+grn+'">风险路径 '+p.risk.toFixed(2)+'</span>　'+Math.round(D.p_risk*100)+'%<br>'
-        +'<span style="color:#0891b2">趋势外推 '+p.trend.toFixed(2)+'</span><br>'
-        +'<span style="color:#64748b">±1σ '+p.b1l.toFixed(0)+'~'+p.b1u.toFixed(0)+'</span><br>'
-        +'<span style="color:#64748b">±2σ '+p.b2l.toFixed(0)+'~'+p.b2u.toFixed(0)+'</span>';
-      showDots(PAD_L+hist_w+proj_w*f, f);
-    }}
-    tip.innerHTML=html; tip.style.display='block';
-    var rect=box.getBoundingClientRect();
-    var x=ev.clientX-rect.left+14, y=ev.clientY-rect.top+14;
-    if(x+tip.offsetWidth>rect.width) x=rect.width-tip.offsetWidth-6;
-    if(y+tip.offsetHeight>rect.height) y=rect.height-tip.offsetHeight-6;
-    tip.style.left=x+'px'; tip.style.top=y+'px';
-  }}
-  function leave(){{ tip.style.display='none'; cx.setAttribute('opacity','0'); hideDots(); }}
-  svg.addEventListener('mousemove',move);
-  svg.addEventListener('mouseleave',leave);
   svg.addEventListener('touchmove',function(e){{move(e);}},{{passive:true}});
   svg.addEventListener('touchend',leave);
 }}
-{"".join(f'initForecast("{sym}");' for sym in data)}
 (function(){{
   var links = document.querySelectorAll('nav.toc a');
   var sections = Array.from(links).map(function(a){{ return document.querySelector(a.getAttribute('href')); }}).filter(Boolean);

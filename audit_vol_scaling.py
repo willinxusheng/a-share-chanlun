@@ -85,7 +85,9 @@ def std_by_horizon_regime(kl, returns, horizons):
     n = len(returns)
     for h in horizons:
         for i in range(0, n - h + 1):
-            window = kl[:i + h]  # 锚点 = i+h-1
+            if i < 60:  # regime 须基于 return 区间之前的完整窗口, 避免用被解释变量本身判定 regime 造成前视污染
+                continue
+            window = kl[:i]  # 仅取 return 区间(i..i+h-1)之前的数据判定 regime
             rg = classify_regime(window)
             out[rg][h].append(sum(returns[i:i + h]))
     res = {}

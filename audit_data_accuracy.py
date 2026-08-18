@@ -250,19 +250,19 @@ def main():
     print("\n" + "=" * 60)
     print("汇总: 关1历史完整性=%s  关2双源一致性=%s  关3预测归一化=%s  关4校准回测=%s  关5情绪条件化=%s  关6突变漂移=%s  关7质量证书=%s  关8分regime方向=%s  关9点前完整性=%s  关10概率校准=%s  关11区间锐度=%s  关12水平偏置=%s  关13数值自洽=%s  关14路径形态=%s  关15尾部覆盖=%s  关16扩散标度=%s"
           % (["FAIL", "OK"][ok1], ["FAIL", "OK"][ok2], ["FAIL", "OK"][ok3],
-             (["SKIP", "OK"][ok4] if deep else "SKIP"),
-             (["SKIP", "OK"][ok5] if deep else "SKIP"),
-             (["SKIP", "OK"][ok6] if deep else "SKIP"),
-             (["SKIP", "OK"][ok7] if deep else "SKIP"),
-             (["SKIP", "OK"][ok8] if deep else "SKIP"),
-             (["SKIP", "OK"][ok9] if deep else "SKIP"),
-             (["SKIP", "OK"][ok10] if deep else "SKIP"),
-             (["SKIP", "OK"][ok11] if deep else "SKIP"),
-             (["SKIP", "OK"][ok12] if deep else "SKIP"),
-             (["SKIP", "OK"][ok13] if deep else "SKIP"),
-             (["SKIP", "OK"][ok14] if deep else "SKIP"),
-             (["SKIP", "OK"][ok15] if deep else "SKIP"),
-             (["SKIP", "OK"][ok16] if deep else "SKIP")))
+             (("SKIP" if not deep else ("FAIL", "OK")[ok4])),
+             (("SKIP" if not deep else ("FAIL", "OK")[ok5])),
+             (("SKIP" if not deep else ("FAIL", "OK")[ok6])),
+             (("SKIP" if not deep else ("FAIL", "OK")[ok7])),
+             (("SKIP" if not deep else ("FAIL", "OK")[ok8])),
+             (("SKIP" if not deep else ("FAIL", "OK")[ok9])),
+             (("SKIP" if not deep else ("FAIL", "OK")[ok10])),
+             (("SKIP" if not deep else ("FAIL", "OK")[ok11])),
+             (("SKIP" if not deep else ("FAIL", "OK")[ok12])),
+             (("SKIP" if not deep else ("FAIL", "OK")[ok13])),
+             (("SKIP" if not deep else ("FAIL", "OK")[ok14])),
+             (("SKIP" if not deep else ("FAIL", "OK")[ok15])),
+             (("SKIP" if not deep else ("FAIL", "OK")[ok16]))))
     allok = ok1 and ok2 and ok3 and (ok4 if deep else True) and (ok5 if deep else True) and (ok6 if deep else True) and (ok7 if deep else True) and (ok8 if deep else True) and (ok9 if deep else True) and (ok10 if deep else True) and (ok11 if deep else True) and (ok12 if deep else True) and (ok13 if deep else True) and (ok14 if deep else True) and (ok15 if deep else True) and (ok16 if deep else True)
     print("结论: %s" % ("✅ 全部通过" if allok else "❌ 存在失败项"))
     sys.exit(0 if allok else 1)

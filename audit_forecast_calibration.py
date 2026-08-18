@@ -111,6 +111,8 @@ def run():
                 row = find_proj(proj, H)
                 if row is None:
                     continue
+                if i + H >= len(kl):
+                    continue
                 real = kl[i + H]["close"]
                 main_v, med_v = row["main"], row["med"]
                 p05, p95 = row["f95l"], row["f95l"] + row["f95h"]
@@ -132,17 +134,17 @@ def run():
                 s["bias_list"].append((real - med_v) / med_v)
                 # R80: 按该 sym 自身市场环境分桶累加
                 rg = classify_regime(trunc)
-                rs = regime_agg[rg][H]
-                rs["N"] += 1
+                rg_agg = regime_agg[rg][H]
+                rg_agg["N"] += 1
                 if p05 <= real <= p95:
-                    rs["in95"] += 1
+                    rg_agg["in95"] += 1
                 if p25 <= real <= p75:
-                    rs["in75"] += 1
+                    rg_agg["in75"] += 1
                 if ms * (real - last_a) > 0:
-                    rs["dir_main"] += 1
+                    rg_agg["dir_main"] += 1
                 if (med_v - last_a) * (real - last_a) > 0:
-                    rs["dir_med"] += 1
-                rs["bias_list"].append((real - med_v) / med_v)
+                    rg_agg["dir_med"] += 1
+                rg_agg["bias_list"].append((real - med_v) / med_v)
                 anchor[H]["m"].append(ms)
                 anchor[H]["r"].append(rs)
         if cons_ok and all(len(anchor[H]["m"]) >= 3 for H in H_TARGETS):
@@ -152,7 +154,7 @@ def run():
     return data, agg, cons, regime_agg
 
 
-def report(data, agg, cons):
+def report(data, agg, cons, regime_agg=None):
     print("=" * 96)
     print("R72 滚动样本外回测 — 缠论推演预测准确性(锚点每%d交易日, 截断跑真实 forecast_svg)" % ANCHOR_STEP)
     print("=" * 96)
@@ -208,6 +210,23 @@ def report(data, agg, cons):
     else:
         print("✅ 偏置监控: 全样本中线偏置 %.1f%% 在 ±%.1f%% 阈值内(中心校准良好)" % (worst_bias, BIAS_WARN))
     print("=" * 96)
+    # R80 分市场环境覆盖（此前计算但 report 未输出）：按牛/熊/震荡分桶打印 P05-P95/P25-P75 覆盖
+    if regime_agg:
+        print("R80 分市场环境覆盖（区间套按牛/熊/震荡分桶）:")
+        print("-" * 96)
+        for rg in ("bull", "bear", "range"):
+            print("%s:" % rg)
+            for H in H_TARGETS:
+                s = regime_agg[rg][H]
+                if s["N"] == 0:
+                    print(f"  T+{H}: 样本不足")
+                    continue
+                c95 = s["in95"] / s["N"] * 100
+                c75 = s["in75"] / s["N"] * 100
+                dm = s["dir_main"] / s["N"] * 100
+                bias = statistics.median(s["bias_list"]) * 100 if s["bias_list"] else 0.0
+                print(f"  T+{H}: N={s['N']:>4} P05-P95={c95:5.1f}%  P25-P75={c75:5.1f}%  方向{dm:5.1f}%  中线偏置{bias:+.1f}%")
+    print("=" * 96)
     # === 跨指数方向共识(R75新增) ===
     print("R75 跨指数方向共识回测 - 5指数主路径方向投票是否优于单指数(锚点每%d交易日)" % ANCHOR_STEP)
     print("-" * 96)
@@ -256,4 +275,4 @@ def report(data, agg, cons):
 
 if __name__ == "__main__":
     data, agg, cons, regime_agg = run()
-    report(data, agg, cons)
+    report(data, agg, cons, regime_agg)

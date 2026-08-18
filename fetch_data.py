@@ -2,6 +2,7 @@
 """拉取 A 股主要指数日线+周线数据，含完整性校验与新浪交叉验证"""
 import json
 import os
+import sys
 import urllib.request
 from datetime import datetime, timedelta
 
@@ -54,6 +55,7 @@ def fetch_sina_series(symbol, datalen=2000):
             out[row["day"]] = float(row["close"])
         return out
     except Exception as e:
+        print("WARN 新浪校验拉取失败(双源一致性将标 N/A):", e)
         return {}
 
 
@@ -149,6 +151,9 @@ def main():
     result = {}
     for sym, name in SYMBOLS.items():
         day = fetch_tx(sym, "day")
+        if not day:
+            print("WARN %s 无日线数据, 跳过该标的" % name)
+            continue
         week = fetch_tx(sym, "week")
         month = fetch_tx(sym, "month")
         issues = validate(day)
@@ -183,6 +188,13 @@ def main():
             len(issues), cc["n"],
             ("%.3f%%" % (cc["max_rel_dev"] * 100)) if cc["max_rel_dev"] is not None else "N/A",
             cc_status))
+    # 写盘前整体硬拦：任一指数含未来泄漏即拒绝落盘，避免脏数据进入线上推演
+    # （validate 的"未来日期"为硬失败，命中即阻断部署；其余校验问题仅记录不阻断）
+    for sym, res in result.items():
+        fi = [x for x in res["meta"]["issues"] if "未来日期" in x]
+        if fi:
+            print("ERROR 检测到未来泄漏(数据异常), 拒绝写入 data.json:", sym, fi)
+            sys.exit(1)
     with open(os.path.join(_BASE, "data.json"), "w", encoding="utf-8") as f:
         json.dump(result, f, ensure_ascii=False)
     print("saved -> chanlun/data.json")
