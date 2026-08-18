@@ -1995,6 +1995,19 @@ def main():
     # 预测质量自检证书(R79): 读 quality_cert.json 渲染顶部常驻区块, 让准确性可见可验
     cert_html = build_quality_cert_html(_base)
     _breadth_bias = (_bull_cnt / _total - 0.5) * 2 * 8  # 全看多 +8 / 全看空 -8（0-100 置信度刻度）
+    # 关键修复(R136)：在「算 scores / 画 card / 推演」之前，统一用周线 classify 重算日线 classify，
+    # 使 interval_nesting / ma_alignment 等字段在 health_score / forecast_confidence / forecast_svg
+    # 全链路口径一致。此前 scores 在重算之前计算，导致 health/conf 不含 nest、与 p_main 的 nest
+    # 增益(+0.03)分裂；且卡片「均线排列」与交叉验证惩罚逻辑所用 classify 与推演所用不一致。
+    for sym, d in data.items():
+        _r = results[sym]
+        _old_cls = _r["classify"]
+        _r["classify"] = classify(_r["bis"], _r["zhongshu"], _r["beichi"],
+                                  d["klines"][-1]["close"], results_week[sym]["classify"],
+                                  _r["segments"], _r["seg_beichi"], results_month[sym]["classify"])
+        # classify() 返回字典不含 ma_alignment（均线排列由 analyze 单独计算），重算会丢弃它——
+        # 回写以恢复卡片「均线排列」显示与 health/forecast 的「均线多空排列交叉验证」惩罚逻辑。
+        _r["classify"]["ma_alignment"] = _old_cls.get("ma_alignment")
     scores = {sym: (health_score(d["klines"], results[sym], results_week[sym]["classify"]),
                     forecast_confidence(results[sym], results_week[sym]["classify"], backtests[sym], breadth_bias=_breadth_bias))
               for sym, d in data.items()}
@@ -2060,17 +2073,8 @@ def main():
         wcls = wcls_full["classify"]
         mcls = results_month[sym]["classify"]
         m_color = SCENARIO_COLOR.get(mcls["scenario"], BLUE)
-        # 关键修复：用周线 classify 重算日线 classify，使"日×周区间套"共振判断真正生效
-        # （analyze 内部 classify 调用未传 wcls，nest 此前永远为空）。区间套只影响 classify 的
-        # interval_nesting/detail 字段，不改变 scenario 与 last_bi_dir，下游 forecast/card 行为不受影响。
-        _old_cls = r["classify"]
-        r["classify"] = classify(r["bis"], r["zhongshu"], r["beichi"],
-                                 d["klines"][-1]["close"], wcls, r["segments"], r["seg_beichi"],
-                                 results_month[sym]["classify"])
-        # 关键修复：classify() 的返回字典不含 ma_alignment（均线排列由 analyze 单独计算），
-        # 此处重赋值会把它丢弃——导致卡片「均线排列」显示"—"、且 health_score/forecast_confidence
-        # 里的「均线多空排列交叉验证」惩罚逻辑沦为死代码。回写以恢复显示与交叉验证。
-        r["classify"]["ma_alignment"] = _old_cls.get("ma_alignment")
+        # 注：日线 classify 已在此前预扫描中用周/月线重算（含 interval_nesting / ma_alignment 回写），
+        # 此处 r["classify"] 即为统一口径，下游 card / forecast 行为一致。
         health, conf = scores[sym]
         horizon = adaptive_horizon(r["bis"], r["merged"])
         sigma = forward_vol([k["close"] for k in d["klines"]], horizon)
