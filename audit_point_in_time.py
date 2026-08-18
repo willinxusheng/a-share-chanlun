@@ -129,7 +129,7 @@ def main():
         print("结论: ⚠ WARN — %s(均为监控项, 不阻断)" % " / ".join(_rs))
     else:
         print("结论: ✅ 点前完整 / 无未来泄漏 / 带宽未被污染 / 窗口充分")
-    print("注: 本门禁退出码恒0(与关5~关8一致, 监控不阻断); 未来泄漏的硬阻断由关1(fd.validate)负责。")
+    print("注: 未来泄漏硬阻断由关1(fd.validate)负责。")
     sys.exit(0)
 
 

@@ -230,7 +230,7 @@ def diagnose(recs):
                 if any_warn else
                 "✅ 区间锐度合理 + 不确定性已校准(宽带对应大波动, 窄带仍覆盖≈90%)"))
     print("结论:", verdict)
-    print("注: 本门禁退出码恒0(监控不阻断); 若未来要升级为硬门禁, 以『窄半覆盖<80%』为唯一 CRITICAL 触发。")
+    print("注: 升级硬门禁触发=窄半覆盖<80%。")
     sys.exit(0)
 
 

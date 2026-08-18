@@ -1,30 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-audit_data_accuracy.py — A股缠论看板「数据准确性」总审计（一键四关）
+audit_data_accuracy.py — A股缠论看板「数据准确性」总审计（一键16关）。
 
-把 R70~R73 四轮审计验证过的方法固化成单次可复跑的资产：
-  关1 历史完整性 : fetch_data.validate(klines) -> issues（OHLC越界/重复/非升序/异常缺口）
-  关2 双源一致性 : meta.consistency_status（fetch_data 已算；--online 可在线重算腾讯qfq↔新浪裸价）
-  关3 预测归一化 : 复刻 main() 每符号推演管线，断言 p_main+p_alt+p_risk≈1.00 且 fc['trend'] 为真实价格(非~1.0)
-  关4 校准回测   : --deep 时委托 audit_forecast_calibration.py（walk-forward 样本外, 验证风险带/方向技能）
-  关5 情绪条件化 : --deep 时委托 audit_sentiment_conditioning.py（验证 H5 情绪指数条件化能否提升方向命中；监控门禁, 不阻断）
-  关6 突变漂移   : --deep 时委托 audit_forecast_drift.py（监控相邻刷新预测移动 vs 行情移动, 检测过拟合/数据异常；不阻断）
-  关7 质量证书   : --deep 时委托 gen_quality_cert.py（聚合 R72 校准 + R78 漂移 + R76 情绪 + R80/R81 分regime覆盖/方向结论, 生成 quality_cert.json 供看板顶部证书区块；不阻断）
-  关8 分regime方向: --deep 时委托 audit_regime_direction.py（把方向命中率按牛/熊/震荡切片, 暴露「全样本方向命中」掩盖的弱点——熊市常『方向看空可信/区间太窄』；监控门禁, 不阻断）
-  关9 点前完整性 : --deep 时委托 audit_point_in_time.py（无未来泄漏/带宽抗污染/窗口充分性；未来日期泄漏的硬阻断由关1负责, 此处监控复核；不阻断）
-  关10 概率校准  : --deep 时委托 audit_probability_calibration.py（抓取每个锚点真实产出的 p_main, 比对后来主路径方向是否真对, 建可靠性表+Brier, 检验『说的65%是不是真65%』；监控门禁, 不阻断）
-  关11 区间锐度  : --deep 时委托 audit_interval_score.py（用区间评分 Interval Score 同时衡量覆盖与宽度, 检验置信带『诚实且锐利(有用)』还是『只靠够宽才盖住(废带)』；含锐度过宽/IS比/不确定性校准/窄半覆盖四诊断；监控门禁, 不阻断）
-  关12 水平偏置  : --deep 时委托 audit_point_bias.py（测主路径目标main 与 统计中位期望med 相对真实收盘的水平偏置, 做符号检验查系统性乐观/悲观; 关8只验方向/关11只验带宽/关10只验概率, 本门禁正交地验『价位目标准不准』；监控门禁, 不阻断）
-  关13 数值自洽  : --deep 时委托 audit_forecast_consistency.py（验证看板「显示的预测数字彼此不自相矛盾」: ①存续概率p_hold↔置信带分位自洽(声明核验) ②置信带单调嵌套 ③带有限非负 ④文本终点↔图series一致；监控门禁, 不阻断）
-  关14 路径形态保真: --deep 时委托 audit_path_shape.py（把结构主路径 main 逐交易日形态与后来真实收盘形态比对, 检验『画出来的路形状对不对』——逐段方向吻合度+Spearmanρ; 暴露端点/带都OK但『途中弯法错』的盲区; 与关8/12端点方向、关11带覆盖、关10概率正交; 监控门禁, 不阻断）
-  关15 极端尾部覆盖: --deep 时委托 audit_tail_coverage.py（Kupiec POF 无条件覆盖回测 + 下行尾部条件覆盖 + 最差十分位条件击穿; 检验『暴跌时95%带兜没兜住』——关11无条件IS掩盖的灾难性击穿盲区; 熊市单独切片; 监控门禁, 不阻断）
-  关16 波动率扩散标度: --deep 时委托 audit_vol_scaling.py（验证模型置信带核心假设 √f 法则——日对数收益 horizon 扩散 ∝√f; 检验A纯数据roll log-log回归斜率应≈0.5且分regime切片, 检验C walk-forward 取模型95%带半宽 vs 锚点后真实h日扩散比 bias; 暴露『全样本√f成立但regime内亚线性→长horizon带虚胖』盲区; 监控门禁, 不阻断）
-
-用法:
-  python audit_data_accuracy.py            # 关1+2+3（离线，约30~60s）
-  python audit_data_accuracy.py --deep     # 再加关4+关5+关6+关7+关8+关9+关10+关11+关12+关13+关14+关15+关16（约15~30min）
-  python audit_data_accuracy.py --online   # 关2 在线重算双源一致性（需网络）
-退出码: 0=全通过, 1=存在失败项
+关1-3 离线(历史完整性/双源一致性/预测归一化); 关4-16 需 --deep(校准回测/情绪条件化/突变漂移/质量证书/分regime方向/点前完整性/概率校准/区间锐度/水平偏置/数值自洽/路径形态保真/极端尾部覆盖/波动率扩散标度)。
+用法: python audit_data_accuracy.py [--deep] [--online]; 退出码 0=全通过 1=失败项。
 """
 import json, sys, os, subprocess
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
