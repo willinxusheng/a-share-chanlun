@@ -183,7 +183,11 @@ def diagnose(recs):
             [interval_score(L, U, y) for L, U, y in zip(Ls, Us, reals)])
         resid = sorted(abs(y - m) for m, y in zip(meds, reals))
         c90 = resid[int(0.90 * (len(resid) - 1))]
-        baseline_is = 2.0 * c90   # 基线带半宽=c90, 覆盖≈90%, 几乎无惩罚 → IS≈2*c90
+        # 基线: 同口径常数对称带 [med-c90, med+c90](半宽=c90, 名义覆盖≈90%),
+        # 其 IS 必须含越界惩罚项(约10%锚点超出), 与 model_is 同口径才公平;
+        # 旧版 baseline_is=2*c90 漏算惩罚 → is_ratio 虚高 → 误报"IS过宽"。
+        baseline_is = statistics.mean(
+            [interval_score(m - c90, m + c90, y) for m, y in zip(meds, reals)])
         is_ratio = model_is / baseline_is if baseline_is else float("inf")
         # ③ 不确定性校准: 带宽 vs 真实 |real-med| 的 Spearman
         real_disp = [abs(y - m) for m, y in zip(meds, reals)]

@@ -25,9 +25,9 @@ import math
 from datetime import datetime, timedelta
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+BASE = os.path.dirname(os.path.abspath(__file__))
 from chanlun import analyze, adaptive_horizon
 from report import _is_trading_day
-import fetch_data as fd
 
 SYMS = ["sh000001", "sh000300", "sz399001", "sz399006", "sh000905"]
 WIN = 3 * 244          # 与 report.py forecast_svg 的 _WIN 一致(近3年≈732交易日)
@@ -37,7 +37,7 @@ LR_CORRUPT = 0.30      # |日对数收益|≥此值: 远超任何真实指数单
 
 def main():
     print("R82 关9 点前完整性 + 无未来泄漏 + 带宽抗污染守卫 (监控门禁, 不阻断)")
-    data = json.load(open("data.json", encoding="utf-8"))
+    data = json.load(open(os.path.join(BASE, "data.json"), encoding="utf-8"))
     today = datetime.now().date()
     today_s = today.isoformat()
     any_critical = False

@@ -28,6 +28,7 @@ import math
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from report import analyze, adaptive_horizon, forecast_svg
+from chanlun import classify_regime
 import audit_forecast_calibration as ac
 
 # 生产看板使用的 5 大指数(与 report.py main 路径一致)
@@ -44,11 +45,13 @@ def load():
     return kls
 
 
-_KAPPA = 1.8  # 与 report.py forecast_svg 内覆盖修正系数一致
+_KAPPA = {"bull": 1.8, "range": 1.8, "bear": 2.3}  # 与 report.py forecast_svg 内覆盖修正系数一致(关15 regime 自适应)
 
 
-def recompute_p_hold(closes, zd, horizon):
-    """独立用 forecast_svg 同款口径重算 结构存续概率 P(期末价≥ZD)."""
+def recompute_p_hold(closes, zd, horizon, regime="range"):
+    """独立用 forecast_svg 同款口径重算 结构存续概率 P(期末价≥ZD).
+    regime 用于选取与 forecast_svg 完全一致的覆盖修正 κ(牛/震荡=1.8, 熊=2.3)，
+    否则在熊市(κ=2.3)会虚假 Δ>3pp 误报自洽性 WARN。"""
     n = len(closes)
     _WIN = 3 * 244
     _wc = closes[-(_WIN + horizon):] if len(closes) >= _WIN + horizon else closes
@@ -63,8 +66,9 @@ def recompute_p_hold(closes, zd, horizon):
         return _rets[f0] * (c0 - k) + _rets[c0] * (k - f0)
     _q50 = _q(0.5); _q05 = _q(0.05); _q95 = _q(0.95)
     _mean = sum(_rets) / len(_rets)
-    _sp_up = (_q95 - _q50) * _KAPPA
-    _sp_dn = (_q50 - _q05) * _KAPPA
+    _kappa = _KAPPA.get(regime, 1.8)
+    _sp_up = (_q95 - _q50) * _kappa
+    _sp_dn = (_q50 - _q05) * _kappa
     last = closes[-1]
     if not (last > 0 and zd > 0):
         return None
@@ -122,9 +126,10 @@ def check():
         zs = r["zhongshu"][-1] if r["zhongshu"] else None
         zd = zs["zd"] if zs else last * 0.95
 
-        # ① 存续概率自洽
+        # ① 存续概率自洽(用与 forecast_svg 完全一致的 regime κ 重算, 避免熊市误报)
         disp = parse_note_p_hold(_note)
-        recomp = recompute_p_hold(closes, zd, horizon)
+        rg = classify_regime(kl)
+        recomp = recompute_p_hold(closes, zd, horizon, rg)
         ph_txt = "OK"
         if disp is None or recomp is None:
             ph_txt = "无值"

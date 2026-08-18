@@ -120,9 +120,9 @@ def run():
             warn = (p95_e > DRIFT_WARN) or (n_anom / len(ex) > ANOM_RATE_WARN)
             overall_warn = overall_warn or warn
             verdict = "⚠️WARN" if warn else "OK"
-            print(f"{nm:<12}{'T+'+str(H):>5}{len(ex):>6}{med_e*100:>11.1f}%"
-                  f"{p95_e*100:>11.1f}%{max_e*100:>11.1f}%{n_anom:>8}d"
-                  f"{(n_anom/len(ex)*100):>6.1f}%{verdict:>8}")
+        print(f"{nm:<12}{'T+'+str(H):>5}{len(ex):>6}{med_e*100:>11.1f}%"
+              f"{p95_e*100:>11.1f}%{max_e*100:>11.1f}%{n_anom:>8}"
+              f"{(n_anom/len(ex)*100):>6.1f}%{verdict:>8}")
     print("-" * 96)
     if overall_warn:
         print("【门禁判定】⚠️ 检测到预测突变漂移超阈值 — 可能存在过拟合/数据异常/结构频繁切换。")

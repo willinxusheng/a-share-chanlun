@@ -7,6 +7,7 @@ audit_data_accuracy.py — A股缠论看板「数据准确性」总审计（一�
 """
 import json, sys, os, subprocess
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+BASE = os.path.dirname(os.path.abspath(__file__))
 from chanlun import (analyze, adaptive_horizon, classify, forward_vol,
                      health_score, forecast_confidence, backtest_signals,
                      market_breadth, MIN_BI_PCT_WEEK, MIN_BI_PCT_MONTH)
@@ -18,7 +19,7 @@ TOL_SUM = 0.001  # 概率和偏离容忍（归一化代码保证=1.00，此处�
 
 
 def load():
-    return json.load(open("data.json", encoding="utf-8"))
+    return json.load(open(os.path.join(BASE, "data.json"), encoding="utf-8"))
 
 
 def audit_history(data):

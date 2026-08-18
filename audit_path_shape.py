@@ -156,10 +156,10 @@ def run(max_anchors=None):
                 if i + H >= len(kl):
                     continue
                 # 构建 t=0..H 的整数路径
-                fc_path = [main_d[t][1] if t in main_d else None for t in range(0, H + 1)]
+                fc_path = [main_d[t][1] if t in main_d else None for t in range(1, H + 1)]
                 if any(v is None for v in fc_path):
                     continue
-                real_path = [kl[i + t]["close"] for t in range(0, H + 1)]
+                real_path = [kl[i + t]["close"] for t in range(1, H + 1)]
                 if any(v is None or v <= 0 for v in real_path):
                     continue
                 sa = step_agreement(fc_path, real_path)
