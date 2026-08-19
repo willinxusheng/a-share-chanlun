@@ -2497,6 +2497,76 @@ def main():
   .qc-card {{ box-shadow:var(--shadow); }}
   .fc-note {{ background:#fffbeb; }}
 
+  /* ===== R153 全站深度美化增强层（桌面/竖屏基准，置于 R134 之后、R152 横屏层之前） =====
+     在 R134 基础上做更深的专业化打磨：排版层级、分层阴影令牌、卡片质感、图表容器、表格、章节标题、提示块、过渡与入场动画。
+     横屏由随后的 R152 媒体层覆盖，本层作为全站基准（非媒体，桌面/竖屏生效）。 */
+  :root {{
+    --surface:#ffffff;
+    --surface-2:#f7fafc;
+    --shadow-md: 0 12px 32px rgba(15,23,42,.10);
+    --shadow-sm2: 0 2px 10px rgba(15,23,42,.05);
+    --grad-accent: linear-gradient(135deg, var(--primary), var(--primary2));
+    --radius-lg: 18px;
+    --radius-md: 14px;
+    --radius-sm: 10px;
+  }}
+
+  /* 排版：数据等宽数字 + 标题字距 + 抗锯齿 */
+  body {{ font-feature-settings: "tnum" 1; text-rendering: optimizeLegibility; }}
+  h1, h2, h3, h4 {{ letter-spacing: .2px; }}
+  .kpi-v, .price, .qc-v, .tbl td, .tbl th, .pc-p, .pc-h {{ font-variant-numeric: tabular-nums; }}
+
+  /* 指数概览卡：渐变顶条 + 悬停彩色阴影 + 价格强调 */
+  .card {{ border-radius: var(--radius-md); box-shadow: var(--shadow-md); border: 1px solid var(--border); transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease; }}
+  .card::before {{ height: 4px; background: var(--grad-accent); margin: -14px -16px 12px; }}
+  .card:hover {{ box-shadow: 0 18px 44px rgba(43,108,176,.20); transform: translateY(-4px); border-color: var(--primary2); }}
+  .card .price {{ font-weight: 800; letter-spacing: -.3px; }}
+  .card .sym {{ letter-spacing: .4px; }}
+
+  /* 区块面板：圆角 + 分层阴影 */
+  .panel {{ border-radius: var(--radius-lg); box-shadow: var(--shadow-md); border: 1px solid var(--border); }}
+  .panel h2 {{ border-bottom: 1px solid #eef2f7; padding-bottom: 10px; color: var(--ink); }}
+
+  /* KPI 卡：渐变顶饰 + 悬停微抬 */
+  .kpi {{ border-radius: var(--radius-md); box-shadow: var(--shadow-sm2); border: 1px solid var(--border); background: var(--surface); transition: transform .18s ease, box-shadow .18s ease; }}
+  .kpi:hover {{ transform: translateY(-3px); box-shadow: var(--shadow-md); }}
+  .kpi-v {{ letter-spacing: -.6px; }}
+
+  /* 图表容器：圆角 + 内描边 + 柔和底色 */
+  .chartbox {{ border-radius: var(--radius-md); box-shadow: var(--shadow-sm2); border: 1px solid #eef2f7; overflow: hidden; background: linear-gradient(180deg,#ffffff,#fbfdff); }}
+  .echart-toolbar {{ border-radius: var(--radius-sm); background: var(--surface-2); }}
+
+  /* 章节标题：渐变胶囊 + 左主色强调 */
+  h2.sec {{ background: linear-gradient(90deg, rgba(43,108,176,.12), rgba(43,108,176,.02) 62%, transparent); border-radius: 0 12px 12px 0; padding: 11px 18px; font-weight: 800; color: #1e3a5f; box-shadow: inset 3px 0 0 var(--primary); }}
+
+  /* 表格：圆角 + 表头渐变 + 隔行柔色 + 悬停高亮 + 数字对齐 */
+  .tbl {{ border-radius: var(--radius-md); overflow: hidden; box-shadow: var(--shadow-sm2); font-variant-numeric: tabular-nums; }}
+  .tbl th {{ background: linear-gradient(180deg,#f1f5f9,#e6edf5); color: #334155; font-weight: 700; letter-spacing: .3px; }}
+  .tbl tbody tr:nth-child(even) td {{ background: #fafcfe; }}
+  .tbl tbody tr:hover td {{ background: #eaf2fb; }}
+  .tbl td, .tbl th {{ padding: 9px 12px; }}
+
+  /* 顶部导航胶囊：激活态强化 */
+  nav.toc a.active {{ background: var(--grad-accent); color:#fff; box-shadow: 0 4px 12px rgba(43,108,176,.30); }}
+
+  /* 提示/结论块：左侧强调边 + 柔色底 */
+  .exec {{ background: linear-gradient(180deg,#eff6ff,#f6faff); border: 1px solid #bfdbfe; border-left: 4px solid var(--primary); border-radius: var(--radius-md); }}
+  .disclaimer {{ background: #f8fafc; border: 1px solid #e2e8f0; border-left: 4px solid #94a3b8; border-radius: var(--radius-md); color: #475569; }}
+  .conclusion {{ border-left: 4px solid var(--primary); }}
+  .verdict {{ background: linear-gradient(180deg,#f0f6ff,#f7faff); border-left: 4px solid var(--primary); border-radius: 0 8px 8px 0; }}
+
+  /* 预测质量自检卡 */
+  .qc-card {{ box-shadow: var(--shadow-md); border-radius: var(--radius-md); }}
+
+  /* 通用柔和过渡 */
+  .card, .kpi, .panel, nav.toc a, nav.sym-rail .chip {{ transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease; }}
+
+  /* 入场动画（仅 .card / .qc-card，避免与 section.panel 的 sec-flash 冲突）；尊重减弱动效偏好 */
+  @media (prefers-reduced-motion: no-preference) {{
+    .card, .qc-card {{ animation: rise .55s ease both; }}
+    @keyframes rise {{ from {{ opacity:0; transform: translateY(12px); }} to {{ opacity:1; transform:none; }} }}
+  }}
+
   /* ===== R152 横屏深度美化增强层 =====
      置于 R134 美化层之后，仅 (orientation:landscape)&(max-height:560px) 生效；
      源码靠后 => 同优先级下天然覆盖 R134，把横屏做成专业交易终端观感。 */
