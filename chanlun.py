@@ -592,7 +592,9 @@ def classify(bis, zss, beichis, close, wcls=None, segments=None, seg_beichi=None
             mdesc = "月线方向待明(%s)" % m_scen
         nest = (nest + "；" + mdesc) if nest else mdesc
 
-    if bc_top and last["dir"] == 1:
+    if bc_top:  # R155: 背驰信号优先于 last 笔方向——底/顶背驰后必有反向笔(last 已回调/反弹)，
+                # 若再加 last.dir 约束会把最标准的「底背驰+反弹」「顶背驰+回调」结构错判为多头/空头延续，
+                # 实证 5 指数中 4 个底背驰因此被忽略、看板失真。去掉约束让背驰优先显示。
         # R140 修复：detail 面积比须取「顶背驰」类型，而非 recent_bc[-1]——当 recent_bc 混合
         # top/bottom 且最后一支是 bottom 时，recent_bc[-1] 会张冠李戴显示底背驰面积比。
         _ar = next((b["area_ratio"] for b in reversed(recent_bc) if b["type"] == "top"), 0.0)
@@ -602,7 +604,7 @@ def classify(bis, zss, beichis, close, wcls=None, segments=None, seg_beichi=None
             detail += "，且走势段级别同步出现顶背驰"
         detail += ("，构成顶背驰%s。短线警惕一类卖点确认，回落目标先看最近中枢ZG(%.1f)。"
                    % (_bc_qual, last_zs["zg"] if last_zs else close))
-    elif bc_bot and last["dir"] == -1:
+    elif bc_bot:  # R155: 同上，背驰信号优先于 last 笔方向
         _ar = next((b["area_ratio"] for b in reversed(recent_bc) if b["type"] == "bottom"), 0.0)
         scenario = "背驰见底机会"
         detail = "最近向下笔价格创新低但MACD绿柱面积明显萎缩（面积比 %.2f）" % _ar

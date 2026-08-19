@@ -11,7 +11,7 @@ BASE = os.path.dirname(os.path.abspath(__file__))
 from chanlun import (analyze, adaptive_horizon, classify, forward_vol,
                      health_score, forecast_confidence, backtest_signals,
                      market_breadth, MIN_BI_PCT_WEEK, MIN_BI_PCT_MONTH)
-from report import forecast_svg, SC_BULL
+from report import forecast_svg, SC_BULL, SC_BEAR
 import fetch_data as fd
 
 SYMS = ["sh000001", "sh000300", "sz399001", "sz399006", "sh000905"]
@@ -83,8 +83,11 @@ def audit_forecast(data):
     _month_sc = [results_month[s]["classify"]["scenario"] for s in data]
     bd = market_breadth(_daily_sc, _week_sc, _month_sc)
     _bull_cnt = sum(1 for s in data if results[s]["classify"]["scenario"] in SC_BULL)
+    _bear_cnt = sum(1 for s in data if results[s]["classify"]["scenario"] in SC_BEAR)
     _total = len(data)
-    _breadth_bias = (_bull_cnt / _total - 0.5) * 2 * 8
+    # R155: 同步 report.main 口径 (bull-bear)/total*8；旧式 (bull/total-0.5)*2*8 在含中性情景时
+    # 会把中性错误当偏空，致审计算出的 forecast_confidence 与生产主流程不一致、巡检结论误导。
+    _breadth_bias = (_bull_cnt - _bear_cnt) / _total * 8
 
     ok = True
     for sym, d in data.items():
