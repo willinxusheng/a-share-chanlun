@@ -97,11 +97,16 @@ def main():
 
     # 取 T8/T30 中 |中位偏置| 最大者(signed)作为最差口径: 用于证书标红判定(bias_ok)与
     # 展示(bias_worst)同口径, 避免「标红用 worst、显示却用 T8 偏置」的口径分裂误导用户
-    worst = max(((H, statistics.median(tot[H]["bias_list"]) * 100)
-                 for H in ac.H_TARGETS if tot[H]["bias_list"]),
-                key=lambda kv: abs(kv[1]))
-    worst_bias = abs(worst[1])
-    worst_bias_signed = round(worst[1], 2)
+    _nonempty = [H for H in ac.H_TARGETS if tot[H]["bias_list"]]
+    if _nonempty:
+        worst = max(((H, statistics.median(tot[H]["bias_list"]) * 100)
+                     for H in _nonempty),
+                    key=lambda kv: abs(kv[1]))
+        worst_bias = abs(worst[1])
+        worst_bias_signed = round(worst[1], 2)
+    else:  # R156 防御: 退化数据(全样本 bias_list 为空)时 max() 会抛 ValueError 致证书生成崩溃
+        worst_bias = 0.0
+        worst_bias_signed = 0.0
     # 取所有标的最新日期的最大值（不同指数末根日期可能差 1 个交易日），避免只取首个标的偏低
     last_date = max((data[s]["meta"]["last_date"] for s in data), default=None) if data else None
 

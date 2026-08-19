@@ -1975,7 +1975,9 @@ def main():
     _bull_cnt = sum(1 for s in data if results[s]["classify"]["scenario"] in SC_BULL)
     _bear_cnt = sum(1 for s in data if results[s]["classify"]["scenario"] in SC_BEAR)
     _total = len(data)
-    last_date = next(iter(data.values()))["meta"]["last_date"]
+    # R156: 取所有指数末根日期的最大值(而非首个symbol), 与 gen_quality_cert 口径一致——
+    # 各指数末根可能差 1 个交易日, 取首个会令数据新鲜度护栏锚定偏早日期、误报滞后。
+    last_date = max(d["meta"]["last_date"] for d in data.values())
     # 数据新鲜度护栏：推演完全基于截至 last_date 的行情，若严重滞后应醒目预警，
     # 避免用户拿过期数据得出的预测当作当下结论（过期行情→结构/概率全失真）。
     _last_d = datetime.strptime(last_date, "%Y-%m-%d").date()

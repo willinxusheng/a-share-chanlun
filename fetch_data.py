@@ -103,7 +103,14 @@ def _date_gap(d1, d2):
     return (b - a).days
 
 
-def validate(klines):
+# 各周期正常相邻最大间隔(天)与年均 bar 数——validate 原按日线假设写死(14天/244),
+# 直接套周/月线会误报"间隔异常/数量异常"(月线相邻~30天必触发 dd>14)。R156 改为按 period 参数化,
+# 使同一校验函数可正确服务于日/周/月三线, 避免扩展校验周月时产生虚假问题。
+_GAP_MAX = {"day": 14, "week": 21, "month": 45}
+_PER_YEAR = {"day": 244, "week": 52, "month": 12}
+
+
+def validate(klines, period="day"):
     """K线合法性校验，返回问题列表。
 
     R82 增强：除原有内部一致性(OHLC越界/重复/非升序/数量异常)外，
@@ -130,18 +137,20 @@ def validate(klines):
             issues.append("%s 开盘价超出高低范围" % d)
         if k["close"] <= 0:
             issues.append("%s 收盘价非正" % d)
-    # 交易日连续性 / 缺失检测（#6）
+    # 交易日连续性 / 缺失检测（#6）——按 period 取对应阈值, 避免周/月线被日线假设误判
+    _gap_max = _GAP_MAX.get(period, 14)
+    _per_year = _PER_YEAR.get(period, 244)
     if len(klines) >= 2:
         dates = [k["date"] for k in klines]
         for i in range(1, len(dates)):
             dd = _date_gap(dates[i - 1], dates[i])
             if dd <= 0:
                 issues.append("日期非递增 %s→%s" % (dates[i - 1], dates[i]))
-            elif dd > 14:  # 超过最长法定长假（国庆/春节约 11 天），疑似漏数据而非休市
+            elif dd > _gap_max:  # 超过该周期正常相邻最大间隔, 疑似漏数据而非休市
                 issues.append("间隔异常(疑似缺失交易日) %s→%s(%d天)" % (dates[i - 1], dates[i], dd))
         total_days = _date_gap(dates[0], dates[-1])
         if total_days > 0:
-            exp = int(total_days / 365.25 * 244)  # A股年均约 244 个交易日
+            exp = int(total_days / 365.25 * _per_year)  # 按周期年均 bar 数估算
             if abs(len(dates) - exp) > max(5, exp * 0.04):
                 issues.append("交易日数量异常：实际%d 预计约%d" % (len(dates), exp))
     # 未来泄漏是硬失败信号，必须优先保留、不被截断吞掉
@@ -161,7 +170,15 @@ def main():
             continue
         week = fetch_tx(sym, "week")
         month = fetch_tx(sym, "month")
-        issues = validate(day)
+        # R156: 周/月线此前完全未校验——report.py 会 analyze 周/月线(1963-1964)并 feeding market_breadth,
+        # 若不校验, 周/月线的未来日期泄漏/OHLC 违规会无声流入看板, 而 R82 硬拦只查日线 issues。
+        # 现按 period 校验周/月线, 并将其问题(尤其未来日期)并入 meta.issues, 使硬拦覆盖三线。
+        issues_day = validate(day, "day")
+        issues_week = validate(week, "week")
+        issues_month = validate(month, "month")
+        issues = (issues_day
+                  + [("周线:" + x) for x in issues_week]
+                  + [("月线:" + x) for x in issues_month])
         # 全序列抽样比值一致性校验（腾讯 qfq ↔ 新浪 裸价）
         sina_series = fetch_sina_series(sym)
         cc = cross_validate(day, sina_series)
