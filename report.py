@@ -2371,11 +2371,13 @@ def main():
     header {{ padding: 10px 16px !important; border-radius: 12px; margin-bottom: 8px !important; }}
     header h1 {{ font-size: 16px !important; letter-spacing: 0; }}
     header p {{ font-size: 10.5px; line-height: 1.4; margin-top: 2px; max-height: 2.9em; overflow: hidden; }}
-    /* 导航：横屏下转顶部横滑条，省竖向空间（不吸顶占屏） */
+    /* 导航：横屏下转顶部横滑条并吸顶冻结（sticky），滚动时保持可点 */
     nav.toc, nav.sym-rail {{
-      position: static; flex-wrap: nowrap; overflow-x: auto; white-space: nowrap;
-      margin: 4px 0; padding: 4px 6px; gap: 4px; -webkit-overflow-scrolling: touch;
+      position: sticky; flex-wrap: nowrap; overflow-x: auto; white-space: nowrap;
+      margin: 4px 0; padding: 4px 6px; gap: 4px; -webkit-overflow-scrolling: touch; z-index: 50;
     }}
+    nav.toc {{ top: calc(env(safe-area-inset-top, 0px)); }}
+    nav.sym-rail {{ top: calc(env(safe-area-inset-top, 0px) + 40px); }}
     nav.toc a, nav.sym-rail .chip {{ flex: 0 0 auto; }}
     nav.toc a .num {{ display: none; }}
     /* 顶部 KPI 行收紧 */
@@ -2587,13 +2589,16 @@ def main():
     header p {{ font-size: 10px; line-height: 1.35; margin: 1px 0 0; max-height: 2.6em; overflow: hidden; color: rgba(255,255,255,.82) !important; }}
     header::before {{ content:""; position:absolute; left:0; top:10px; bottom:10px; width:4px; background:linear-gradient(180deg,#60a5fa,#2b6cb0); border-radius:4px; }}
 
-    /* 顶部导航：磨砂胶囊横滑条 */
+    /* 顶部导航：磨砂胶囊横滑条 + 吸顶冻结（sticky） */
     nav.toc, nav.sym-rail {{
-      position: static; flex-wrap: nowrap; overflow-x: auto; white-space: nowrap;
-      margin: 3px 0; padding: 5px 9px; gap: 5px; -webkit-overflow-scrolling: touch;
+      position: sticky; flex-wrap: nowrap; overflow-x: auto; white-space: nowrap;
+      margin: 3px 0; padding: 5px 9px; gap: 5px; -webkit-overflow-scrolling: touch; z-index: 50;
       background: rgba(255,255,255,.82); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
       border: 1px solid #e2e8f0; border-radius: 12px; box-shadow: 0 4px 14px rgba(15,23,42,.05);
     }}
+    nav.toc {{ top: calc(env(safe-area-inset-top, 0px)); }}
+    nav.sym-rail {{ top: calc(env(safe-area-inset-top, 0px) + 40px); }}
+    h2.sec, section.panel {{ scroll-margin-top: calc(env(safe-area-inset-top, 0px) + 84px); }}
     nav.toc a, nav.sym-rail .chip {{ flex: 0 0 auto; border-radius: 999px; transition: all .15s ease; }}
     nav.toc a .num {{ display: none; }}
     nav.toc a.active {{ background: linear-gradient(135deg,var(--primary),var(--primary2)); color:#fff; box-shadow: 0 2px 8px rgba(43,108,176,.3); }}
@@ -2730,12 +2735,13 @@ def main():
   </div>
 </div>
 <script>
+function navH(){{ var t=document.querySelector('nav.toc'), r=document.getElementById('symRail'); var h=(t?t.offsetHeight:0)+(r?r.offsetHeight:0); return h + 10; }}
 (function(){{
   // 防御式：link+sec 配对数组，避免某 TOC 链接目标缺失时 filter(Boolean) 使 links[i] 与 sections[i] 索引错位而标错 active。
   var toc = Array.prototype.map.call(document.querySelectorAll('nav.toc a'), function(a){{ return {{ link: a, sec: document.querySelector(a.getAttribute('href')) }}; }}).filter(function(p){{ return p.sec; }});
   function onScroll(){{
     if (!toc.length) return;
-    var y = window.scrollY + (window.matchMedia('(orientation: landscape) and (max-height: 560px)').matches ? 20 : 90);
+    var y = window.scrollY + (window.matchMedia('(orientation: landscape) and (max-height: 560px)').matches ? navH() : 90);
     var cur = toc[0].link;
     toc.forEach(function(p){{ if (p.sec && p.sec.offsetTop <= y) cur = p.link; }});
     toc.forEach(function(p){{ p.link.classList.remove('active'); }});
@@ -2750,7 +2756,7 @@ def main():
 (function(){{
   var rail=document.getElementById('symRail');
   var CURRENT=null;
-  function offset(){{ return (window.matchMedia('(orientation: landscape) and (max-height: 560px)').matches) ? 8 : 108; }}
+  function offset(){{ return (window.matchMedia('(orientation: landscape) and (max-height: 560px)').matches) ? navH() : 108; }}
   function secs(){{ return Array.prototype.slice.call(document.querySelectorAll('[id^="sec-"]')); }}
   function setActive(sym, fromScroll){{
     CURRENT=sym;
