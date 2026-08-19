@@ -2561,9 +2561,11 @@ def main():
   /* 通用柔和过渡 */
   .card, .kpi, .panel, nav.toc a, nav.sym-rail .chip {{ transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease; }}
 
-  /* 入场动画（仅 .card / .qc-card，避免与 section.panel 的 sec-flash 冲突）；尊重减弱动效偏好 */
+  /* 入场动画（仅 .card / .qc-card，避免与 section.panel 的 sec-flash 冲突）；尊重减弱动效偏好。
+     关键：fill-mode 用 backwards 而非 both——both 会把 to 帧的 transform:none 持久钉住(动画优先级高于普通 :hover 规则)，
+     导致 .card:hover{{transform:translateY(-4px)}} 悬停抬升被废掉；backwards 仅动画前防闪烁、结束后不钉 transform，悬停抬升恢复。 */
   @media (prefers-reduced-motion: no-preference) {{
-    .card, .qc-card {{ animation: rise .55s ease both; }}
+    .card, .qc-card {{ animation: rise .55s ease backwards; }}
     @keyframes rise {{ from {{ opacity:0; transform: translateY(12px); }} to {{ opacity:1; transform:none; }} }}
   }}
 
@@ -2727,14 +2729,14 @@ def main():
 </div>
 <script>
 (function(){{
-  var links = document.querySelectorAll('nav.toc a');
-  var sections = Array.from(links).map(function(a){{ return document.querySelector(a.getAttribute('href')); }}).filter(Boolean);
+  // 防御式：link+sec 配对数组，避免某 TOC 链接目标缺失时 filter(Boolean) 使 links[i] 与 sections[i] 索引错位而标错 active。
+  var toc = Array.prototype.map.call(document.querySelectorAll('nav.toc a'), function(a){{ return {{ link: a, sec: document.querySelector(a.getAttribute('href')) }}; }}).filter(function(p){{ return p.sec; }});
   function onScroll(){{
-    if (!sections.length) return;
+    if (!toc.length) return;
     var y = window.scrollY + (window.matchMedia('(orientation: landscape) and (max-height: 560px)').matches ? 20 : 90);
-    var cur = links[0];
-    sections.forEach(function(sec, i){{ if (sec && sec.offsetTop <= y) cur = links[i]; }});
-    links.forEach(function(a){{ a.classList.remove('active'); }});
+    var cur = toc[0].link;
+    toc.forEach(function(p){{ if (p.sec && p.sec.offsetTop <= y) cur = p.link; }});
+    toc.forEach(function(p){{ p.link.classList.remove('active'); }});
     if (cur) cur.classList.add('active');
   }}
   window.addEventListener('scroll', onScroll, {{passive:true}});
