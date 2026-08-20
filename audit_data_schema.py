@@ -11,6 +11,7 @@ R168 审计指出: 13 道 audit_* 门禁 + verify_overlap.js 没有任何一道�
 用法: python audit_data_schema.py  (也可被 audit_data_accuracy.py 以 ads.run() 调用)
 """
 import json
+import math
 import os
 import re
 import sys
@@ -33,7 +34,9 @@ def china_today():
 
 
 def _is_num(x):
-    return isinstance(x, (int, float)) and not isinstance(x, bool)
+    # R170: 加 math.isfinite 拦截 NaN/Inf —— 否则 float("NaN") 会穿透 _is_num 与下方
+    # OHLC 比较(nan<=0 / nan<nan 均为 False), 使坏源注入的 NaN/Inf 漏过契约校验。
+    return isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x)
 
 
 def _check_series(name, bars, today, problems):
@@ -69,6 +72,10 @@ def _check_series(name, bars, today, problems):
                 problems.append("%s[%d]: high<low" % (name, i))
             if h < max(o, c) or l > min(o, c):
                 problems.append("%s[%d]: OHLC 不合理(high<max(o,c) 或 low>min(o,c))" % (name, i))
+        # R170: 成交量非负校验(此前漏检, 负/异常 volume 会污染 breadth 与渲染)
+        v = bar.get("volume")
+        if _is_num(v) and v < 0:
+            problems.append("%s[%d]: volume<0" % (name, i))
 
 
 def run():

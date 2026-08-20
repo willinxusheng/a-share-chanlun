@@ -69,6 +69,8 @@ def run():
                            "bias_list": []} for h in H_TARGETS} for rg in REGIMES}
     # 跨指数方向共识(R75): 每个锚点收集 5 指数主路径方向符号 + 真实方向符号, 事后投票
     cons = {h: [] for h in H_TARGETS}
+    nfail = 0          # R170: 静默丢弃计数器(analyze/forecast_svg 抛异常被 continue 吞掉)
+    ntotal = 0         #       失败常集中于高波动/熊市极端段, 会乐观高估覆盖率, 故统计失败率告警
     i = MIN_HISTORY
     while i < n_base - 35:
         date_i = base[i]["date"]
@@ -81,6 +83,7 @@ def run():
                 continue
             trunc = kl[:i + 1]
             last_a = trunc[-1]["close"]
+            ntotal += 1
             try:
                 r = analyze(trunc)
                 horizon = adaptive_horizon(r["bis"], r["merged"])
@@ -90,6 +93,7 @@ def run():
                     trunc, r, r["classify"], 50.0, 0.0, sym, horizon)
             except Exception:
                 cons_ok = False
+                nfail += 1
                 continue
             proj = fc["proj"]
             for H in H_TARGETS:
@@ -138,6 +142,17 @@ def run():
             for H in H_TARGETS:
                 cons[H].append((anchor[H]["m"], anchor[H]["r"]))
         i += ANCHOR_STEP
+    # R170: 静默丢弃透明度——坏锚点被 continue 吞掉会低估分母、乐观高估覆盖率;
+    #       失败率>5% 时明确告警(仅打印, 不改统计口径), 供审计人工核查。
+    if ntotal:
+        _rate = nfail / ntotal * 100
+        if _rate > 5.0:
+            print("⚠️ 回测引擎: %d/%d(%.1f%%) 锚点×指数在 analyze/forecast_svg 抛异常被静默丢弃 "
+                  "—— 失败常集中于高波动/熊市极端段, 会乐观高估覆盖率, 失败率超5%%阈值, 建议核查!"
+                  % (nfail, ntotal, _rate))
+        else:
+            print("ℹ️ 回测引擎静默丢弃锚点: %d/%d(%.1f%%), 在 5%% 阈值内(不影响覆盖率口径)"
+                  % (nfail, ntotal, _rate))
     return data, agg, cons, regime_agg
 
 

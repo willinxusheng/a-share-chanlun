@@ -135,8 +135,15 @@ def main():
         "bias_ok": bias_ok,
         "bias_worst": worst_bias_signed,  # 与 bias_ok 同口径(最差), 消费端优先显示, 消除口径分裂误导
         "drift": {
-            "status": "healthy",
-            "note": "R78 突变漂移监控: 五指数×T8/T30 的 P95|超额|≤0.7%(阈值10%), 零异常 — 预测随行情平滑移动, 无过拟合/数据异常",
+            # R170: 原硬编码 "healthy" 改为由实际偏置派生(与 bias_ok/worst_bias 同口径),
+            # 使证书不谎称健康——当存在 |中位乘性偏置|>5%(N>=20) 时如实标 warn。
+            # (突变漂移维度由 audit_forecast_drift 门禁在 CI 实时监测, 此处锚定系统性偏置口径)
+            "status": "warn" if not bias_ok else "healthy",
+            "note": ("R78/R170 漂移监控: 系统性乘性偏置最差 %.1f%%(阈值±5%%, N>=20) — %s"
+                     % (worst_bias,
+                        "超阈值! 模型存在系统性高估/低估, 见 regime_coverage 板块"
+                        if not bias_ok
+                        else "在阈值内, 预测随行情平滑移动无系统性漂移; 突变漂移维度由 CI 门禁实时监测")),
         },
         "sentiment": {
             "status": "monitor_only",

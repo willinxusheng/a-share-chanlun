@@ -167,7 +167,7 @@ def validate(klines, period="day"):
 
 def main():
     result = {}
-    _today = datetime.now().date().isoformat()
+    _today = datetime.now(timezone(timedelta(hours=8))).date().isoformat()  # R170: 与下方 :176 中国时区守卫一致, 避免 UTC runner 跨日使 _today 偏差致末根半截 bar 误判
     for sym, name in SYMBOLS.items():
         try:
             day = fetch_tx(sym, "day")
