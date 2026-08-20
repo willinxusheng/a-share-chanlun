@@ -33,15 +33,19 @@ def fetch_tx(symbol, period):
     klines = data.get("qfqday") or data.get("qfqweek") or data.get("qfqmonth") or data.get("day") or data.get("week") or data.get("month") or []
     out = []
     for row in klines:
-        # [日期, 开, 收, 高, 低, 量]
-        out.append({
-            "date": row[0],
-            "open": float(row[1]),
-            "close": float(row[2]),
-            "high": float(row[3]),
-            "low": float(row[4]),
-            "volume": float(row[5]) if len(row) > 5 else 0.0,
-        })
+        try:
+            # [日期, 开, 收, 高, 低, 量]
+            out.append({
+                "date": row[0],
+                "open": float(row[1]),
+                "close": float(row[2]),
+                "high": float(row[3]),
+                "low": float(row[4]),
+                "volume": float(row[5]) if len(row) > 5 else 0.0,
+            })
+        except (ValueError, IndexError, TypeError):
+            # R164: 脏 bar(缺字段/空值/类型错)跳过, 不中断整标的抓取
+            continue
     return out
 
 
@@ -163,53 +167,62 @@ def validate(klines, period="day"):
 
 def main():
     result = {}
+    _today = datetime.now().date().isoformat()
     for sym, name in SYMBOLS.items():
-        day = fetch_tx(sym, "day")
-        if not day:
-            print("WARN %s 无日线数据, 跳过该标的" % name)
+        try:
+            day = fetch_tx(sym, "day")
+            # R164 防御: 今日未收盘(15:00 前)时源端可能返回进行中当日 bar,
+            # 丢弃末根避免未来泄漏(置信带锚定虚构"当下")。已收盘(>=15:00)则保留完整当日 bar。
+            if day and day[-1]["date"] == _today and datetime.now().hour < 15:
+                day = day[:-1]
+            if not day:
+                print("WARN %s 无日线数据, 跳过该标的" % name)
+                continue
+            week = fetch_tx(sym, "week")
+            month = fetch_tx(sym, "month")
+            # R156: 周/月线此前完全未校验——report.py 会 analyze 周/月线(1963-1964)并 feeding market_breadth,
+            # 若不校验, 周/月线的未来日期泄漏/OHLC 违规会无声流入看板, 而 R82 硬拦只查日线 issues。
+            # 现按 period 校验周/月线, 并将其问题(尤其未来日期)并入 meta.issues, 使硬拦覆盖三线。
+            issues_day = validate(day, "day")
+            issues_week = validate(week, "week")
+            issues_month = validate(month, "month")
+            issues = (issues_day
+                      + [("周线:" + x) for x in issues_week]
+                      + [("月线:" + x) for x in issues_month])
+            # 全序列抽样比值一致性校验（腾讯 qfq ↔ 新浪 裸价）
+            sina_series = fetch_sina_series(sym)
+            cc = cross_validate(day, sina_series)
+            # 双源一致性提升为“可见门禁”：缺校验/超阈值明确标出，避免静默当“干净”
+            if cc["n"] == 0:
+                cc_status = "N/A(新浪未校验)"
+            elif cc["max_rel_dev"] is not None and cc["max_rel_dev"] > 0.02:
+                cc_status = "WARN(偏离%.2f%%)" % (cc["max_rel_dev"] * 100)
+            else:
+                cc_status = "OK"
+            result[sym] = {
+                "name": name,
+                "klines": day,
+                "week_klines": week,
+                "month_klines": month,
+                "meta": {
+                    "count": len(day),
+                    "week_count": len(week),
+                    "month_count": len(month),
+                    "first_date": day[0]["date"],
+                    "last_date": day[-1]["date"],
+                    "issues": issues,
+                    "consistency": cc,
+                    "consistency_status": cc_status,
+                },
+            }
+            print("%s: 日线%d(%s~%s) 周线%d 校验问题%d 双源比值稳定度 样本%d 最大偏离%s 一致性:%s" % (
+                name, len(day), day[0]["date"], day[-1]["date"], len(week),
+                len(issues), cc["n"],
+                ("%.3f%%" % (cc["max_rel_dev"] * 100)) if cc["max_rel_dev"] is not None else "N/A",
+                cc_status))
+        except Exception as e:
+            print("WARN %s 抓取/校验失败, 跳过该标的(保留其余已成功标的): %s" % (name, e))
             continue
-        week = fetch_tx(sym, "week")
-        month = fetch_tx(sym, "month")
-        # R156: 周/月线此前完全未校验——report.py 会 analyze 周/月线(1963-1964)并 feeding market_breadth,
-        # 若不校验, 周/月线的未来日期泄漏/OHLC 违规会无声流入看板, 而 R82 硬拦只查日线 issues。
-        # 现按 period 校验周/月线, 并将其问题(尤其未来日期)并入 meta.issues, 使硬拦覆盖三线。
-        issues_day = validate(day, "day")
-        issues_week = validate(week, "week")
-        issues_month = validate(month, "month")
-        issues = (issues_day
-                  + [("周线:" + x) for x in issues_week]
-                  + [("月线:" + x) for x in issues_month])
-        # 全序列抽样比值一致性校验（腾讯 qfq ↔ 新浪 裸价）
-        sina_series = fetch_sina_series(sym)
-        cc = cross_validate(day, sina_series)
-        # 双源一致性提升为“可见门禁”：缺校验/超阈值明确标出，避免静默当“干净”
-        if cc["n"] == 0:
-            cc_status = "N/A(新浪未校验)"
-        elif cc["max_rel_dev"] is not None and cc["max_rel_dev"] > 0.02:
-            cc_status = "WARN(偏离%.2f%%)" % (cc["max_rel_dev"] * 100)
-        else:
-            cc_status = "OK"
-        result[sym] = {
-            "name": name,
-            "klines": day,
-            "week_klines": week,
-            "month_klines": month,
-            "meta": {
-                "count": len(day),
-                "week_count": len(week),
-                "month_count": len(month),
-                "first_date": day[0]["date"],
-                "last_date": day[-1]["date"],
-                "issues": issues,
-                "consistency": cc,
-                "consistency_status": cc_status,
-            },
-        }
-        print("%s: 日线%d(%s~%s) 周线%d 校验问题%d 双源比值稳定度 样本%d 最大偏离%s 一致性:%s" % (
-            name, len(day), day[0]["date"], day[-1]["date"], len(week),
-            len(issues), cc["n"],
-            ("%.3f%%" % (cc["max_rel_dev"] * 100)) if cc["max_rel_dev"] is not None else "N/A",
-            cc_status))
     # 写盘前整体硬拦：任一指数含未来泄漏即拒绝落盘，避免脏数据进入线上推演
     # （validate 的"未来日期"为硬失败，命中即阻断部署；其余校验问题仅记录不阻断）
     for sym, res in result.items():
@@ -228,9 +241,14 @@ def main():
     # 原子写：先写 .tmp 再 os.replace，避免写入途中崩溃留下半截损坏文件
     out_path = os.path.join(_BASE, "data.json")
     tmp_path = out_path + ".tmp"
-    with open(tmp_path, "w", encoding="utf-8") as f:
-        json.dump(result, f, ensure_ascii=False)
-    os.replace(tmp_path, out_path)
+    try:
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(result, f, ensure_ascii=False)
+        os.replace(tmp_path, out_path)
+    except Exception:
+        # 写盘失败清理 .tmp (safe-delete shim 拦 Python 删除, 用 shell rm)
+        os.system("rm -f " + tmp_path)
+        raise
     print("saved -> chanlun/data.json (%d 标的)" % len(result))
 
 

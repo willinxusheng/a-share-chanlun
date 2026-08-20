@@ -18,7 +18,7 @@ import audit_forecast_calibration as ac  # noqa: E402
 
 def main():
     base = os.path.dirname(os.path.abspath(__file__))
-    data, agg, cons, regime_agg = ac.run()  # 复用 R72 walk-forward 引擎(截断跑真实 forecast_svg)
+    data, agg, _, regime_agg = ac.run()  # 复用 R72 walk-forward 引擎(截断跑真实 forecast_svg)
 
     # 聚合五指数 -> 总计(与 R72 report() 同口径)
     tot = {h: {"N": 0, "in95": 0, "in75": 0, "dir_main": 0, "dir_med": 0,
@@ -64,8 +64,9 @@ def main():
             dmed = round(s["dir_med"] / n * 100, 1) if n else None
             bias = round(statistics.median(s["bias_list"]) * 100, 2) if s["bias_list"] else None
             # R80 覆盖维度
+            raw_cov = s["in95"] / s["N"] * 100 if n else None
             regime_cov[rg]["T%d" % H] = {"N": n, "cover95": cov, "bias_median": bias}
-            if cov is not None and cov < 85.0:   # 任一 regime 覆盖<85% 即预警(真实值常破带=区间不可信)
+            if raw_cov is not None and raw_cov < 85.0:   # 任一 regime 覆盖<85% 即预警(真实值常破带=区间不可信); 用原始比值与 weak_cov 同口径
                 regime_warn = True
             # R81 方向维度(与覆盖解耦): 方向<50%=不如抛硬币=该环境方向不可信
             regime_dir[rg]["T%d" % H] = {"N": n, "dir_main": dm, "dir_med": dmed}
@@ -126,7 +127,7 @@ def main():
             "note": "R76 情绪条件化: T+30 样本外 +8.9pp(极端区 31%→69%)但近期极端样本 N=10 不足, 未并入模型, 仅透明化",
         },
         "accuracy_status": "capped",
-        "accuracy_note": "预测准确性16道监控门禁(R70-R89)已全部落地, 数学层面封顶: 覆盖良好(关11); 方向/概率/路径形态无技能(关8/关10/关14, 不可作信号); 价位无偏(关12); 数值自洽(关13); 极端尾部平静市兜住、熊市T+30漏覆盖33%(关15); 波动率√f全样本成立但regime内亚线性致长horizon带虚胖(关16)。决策仍锚置信带区间+中位路径价位, 熊市自加安全垫。",
+        "accuracy_note": "预测准确性16道监控门禁(R70-R89)已全部落地, 数学层面封顶: 覆盖良好(关11); 方向/概率/路径形态无技能(关8/关10/关14, 不可作信号); 价位无偏(关12); 数值自洽(关13); 极端尾部平静市兜住、熊市T+30漏覆盖33%(关15全历史回测口径; 当前小样本见regime_coverage板块); 波动率√f全样本成立但regime内亚线性致长horizon带虚胖(关16)。决策仍锚置信带区间+中位路径价位, 熊市自加安全垫。",
         "regime_coverage": regime_cov,
         "regime_warn": regime_warn,
         "regime_direction": regime_dir,

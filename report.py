@@ -1627,7 +1627,8 @@ def strategy_text(cls, zs):
         return f"顶背驰确认中，减仓防守；支撑看 ZG {zs['zg']:.0f}"
     if sc == "背驰见底机会":
         return f"底背驰确认中，分批布局；压力看 ZD {zs['zd']:.0f}"
-    return f"空头格局，反抽不过 ZD {zs['zd']:.0f} 减仓"
+    # 其余(无中枢·向上/向下笔等中性/未知情景)给中性观望建议, 不再误标「空头格局减仓」(R164)
+    return f"结构中性（{sc}），观望为主；突破 ZG {zs['zg']:.0f} 转多，跌破 ZD {zs['zd']:.0f} 转空"
 
 
 def levels_table(data, results, results_week, results_month, scores):
@@ -2069,9 +2070,11 @@ def main():
     n_multi = sum(1 for s in data if results[s]["classify"]["scenario"] in ("多头延续",))
     # R160 补全: 背驰见底机会(底背驰·看多)此前不计入任何 KPI 档——当前 5 指数中 4 个是它,
     # 导致市场概览显示"多头1/震荡0/空头0"严重失真(漏掉 4 个见底信号)。归入"震荡偏多"(偏多类)。
-    n_osc = sum(1 for s in data if results[s]["classify"]["scenario"] in ("中枢震荡偏多", "高位整理未破前高", "背驰见底机会"))
+    # R164: 计数统一引用单一来源 SC_BULL（排除明确多头延续，余者归震荡偏多类），杜绝漏计复发
+    n_osc = sum(1 for s in data if results[s]["classify"]["scenario"] in SC_BULL and results[s]["classify"]["scenario"] != "多头延续")
     # R160 补全: 背驰见顶风险(顶背驰·看空)同理归入"空头/偏弱"。
-    n_bear = sum(1 for s in data if results[s]["classify"]["scenario"] in ("空头延续", "中枢震荡偏空", "弱势反弹", "反弹未回中枢", "背驰见顶风险"))
+    # R164: 计数统一引用单一来源 SC_BEAR，杜绝漏计复发
+    n_bear = sum(1 for s in data if results[s]["classify"]["scenario"] in SC_BEAR)
     n_div = len(divergent)
     avg_health = sum(v[0] for v in scores.values()) / len(scores)
     avg_conf = sum(v[1] for v in scores.values()) / len(scores)

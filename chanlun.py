@@ -984,23 +984,22 @@ def _path_targets(scenario, zg, zd, mid, last, move=0.05):
         # 与 report.forecast_svg「多头延续」主路径终点 (up_tgt*1.03) 严格一致，避免校准锚与展示路径错位
         up_tgt = max(zg * 1.01, last * (1 + move)) * 1.03
         risk_level = zd * 0.94
-        main_dir = 1
     elif scenario in ("中枢震荡偏多", "高位整理未破前高"):
         up_tgt = zg * 1.03
         risk_level = zd * 0.94
-        main_dir = 1
     elif scenario == "背驰见底机会":
         up_tgt = zg * 1.02
         risk_level = zd * 0.93
-        main_dir = 1
     elif scenario in SC_BEAR:
         up_tgt = mid * 0.99   # 主路径=回落/中枢内，向上空间有限
         risk_level = zd * 0.92
-        main_dir = -1
     else:
+        # 未命中任一已知情景(含 SC_BULL 未来新增成员)时, 用中性目标位兜底,
+        # 但方向仍由下方 SC_BULL/SC_BEAR 单一来源判定, 杜绝「静默错方向」(R164)
         up_tgt = mid
         risk_level = zd * 0.99
-        main_dir = 0
+    # R164: 主路径方向统一由单一来源常量判定, 避免分类成员变动时方向静默错判
+    main_dir = 1 if scenario in SC_BULL else (-1 if scenario in SC_BEAR else 0)
     return up_tgt, risk_level, main_dir
 
 
