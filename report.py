@@ -2067,8 +2067,11 @@ def main():
 
     # 市场概览 KPI
     n_multi = sum(1 for s in data if results[s]["classify"]["scenario"] in ("多头延续",))
-    n_osc = sum(1 for s in data if results[s]["classify"]["scenario"] in ("中枢震荡偏多", "高位整理未破前高"))
-    n_bear = sum(1 for s in data if results[s]["classify"]["scenario"] in ("空头延续", "中枢震荡偏空", "弱势反弹", "反弹未回中枢"))
+    # R160 补全: 背驰见底机会(底背驰·看多)此前不计入任何 KPI 档——当前 5 指数中 4 个是它,
+    # 导致市场概览显示"多头1/震荡0/空头0"严重失真(漏掉 4 个见底信号)。归入"震荡偏多"(偏多类)。
+    n_osc = sum(1 for s in data if results[s]["classify"]["scenario"] in ("中枢震荡偏多", "高位整理未破前高", "背驰见底机会"))
+    # R160 补全: 背驰见顶风险(顶背驰·看空)同理归入"空头/偏弱"。
+    n_bear = sum(1 for s in data if results[s]["classify"]["scenario"] in ("空头延续", "中枢震荡偏空", "弱势反弹", "反弹未回中枢", "背驰见顶风险"))
     n_div = len(divergent)
     avg_health = sum(v[0] for v in scores.values()) / len(scores)
     avg_conf = sum(v[1] for v in scores.values()) / len(scores)

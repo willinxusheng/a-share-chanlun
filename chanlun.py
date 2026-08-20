@@ -697,8 +697,11 @@ def classify(bis, zss, beichis, close, wcls=None, segments=None, seg_beichi=None
         else:
             trend_type = "盘整/扩张走势"
     # 一致性护栏：走势类型不得与即时分类方向硬冲突（避免自相矛盾呈现）
-    _up_sc = scenario in ("多头延续", "高位整理未破前高", "背驰见底机会")
-    _dn_sc = scenario in ("空头延续", "反弹未回中枢", "背驰见顶风险")
+    # R160 补全: _up_sc/_dn_sc 此前漏「中枢震荡偏多」「中枢震荡偏空」「弱势反弹」,
+    # 会导致这些情景与反向趋势类型硬冲突时不降级、呈现「震荡偏多+下跌走势」式自相矛盾。
+    # 现与 SC_BULL/SC_BEAR 全集对齐。
+    _up_sc = scenario in ("多头延续", "中枢震荡偏多", "高位整理未破前高", "背驰见底机会")
+    _dn_sc = scenario in ("背驰见顶风险", "中枢震荡偏空", "弱势反弹", "反弹未回中枢", "空头延续")
     if _up_sc and trend_type == "下跌走势(趋势)":
         trend_type = "盘整/扩张走势"
     if _dn_sc and trend_type == "上涨走势(趋势)":
