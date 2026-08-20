@@ -560,7 +560,7 @@ def echart_main(klines, r, sym, captured=None):
   chart.setOption(option);
   chart.on('dataZoom', updateMainAxisLabels);
   chart.on('dataZoom', recomputeY);
-  chart.on('dblclick', function(){{ chart.dispatchAction({{ type: 'dataZoom', start: 0, end: 100 }}); }});
+  chart.on('dblclick', function(){{ chart.dispatchAction({{ type: 'dataZoom', start: Math.max(0, (D.dates.length - 252) / D.dates.length * 100), end: 100 }}); }});  /* R167: 双击复位回初始窗口(最近约1年), 非全量历史 */
   updateMainAxisLabels();
   recomputeY();
 }})();
@@ -1342,7 +1342,7 @@ def forecast_echart(sym, fc_data):
   }}
   chart.setOption(option);
   chart.on('dataZoom', updateForecastLabels);
-  chart.on('dblclick', function(){{ chart.dispatchAction({{ type: 'dataZoom', start: 0, end: 100 }}); }});
+  chart.on('dblclick', function(){{ chart.dispatchAction({{ type: 'dataZoom', start: Math.max(0, (D.n_hist - 120) / D.xcats.length * 100), end: 100 }}); }});  /* R167: 双击复位回初始推演窗口(最近约120日), 非全量历史 */
   updateForecastLabels();
 }})();
 </script>'''
@@ -2282,7 +2282,7 @@ def main():
   .qc-regime-cov.bad {{ color: #b91c1c; font-weight: 700; }}
   .qc-regime-cov i {{ color: #94a3b8; font-style: normal; font-size: 11px; }}
   i.dot {{ display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }}
-  h2.sec {{ font-size: 19px; margin: 26px 0 12px; padding-left: 12px; border-left: 4px solid {BLUE}; line-height: 1.3; }}
+  h2.sec {{ font-size: 19px; margin: 26px 0 12px; padding-left: 12px; border-left: 4px solid {BLUE}; line-height: 1.3; scroll-margin-top: calc(env(safe-area-inset-top, 0px) + 96px); }}  /* R167: TOC 锚点跳转偏移, 避免被 sticky 导航(toc+sym-rail)遮挡 */
   nav.toc {{ position: sticky; top: 8px; z-index: 50; background: rgba(255,255,255,0.98); backdrop-filter: blur(8px); border: 1px solid #e2e8f0; border-radius: 999px; padding: 6px 10px; margin: 18px 0 24px; display: flex; flex-wrap: wrap; justify-content: center; gap: 4px; font-size: 13px; box-shadow: 0 4px 14px rgba(15,23,42,0.06); width: 100%; max-width: 100%; }}
   nav.toc a {{ color: #475569; text-decoration: none; padding: 6px 12px; border-radius: 999px; font-weight: 500; transition: all .15s ease; white-space: nowrap; display: inline-flex; align-items: center; flex: 1; justify-content: center; }}
   nav.toc a:hover {{ background: #f1f5f9; color: #1e293b; }}

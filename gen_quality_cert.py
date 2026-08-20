@@ -114,7 +114,9 @@ def main():
     for _rg, _hs in regime_cov.items():
         for _h, _v in _hs.items():
             _b = _v.get("bias_median")
-            if _b is not None and abs(_b) > abs(_regime_worst):
+            # R167: 仅当该 regime 样本充足(N>=20, 与 direction 同阈值)才计入偏置,
+            # 避免 N<20 的统计噪声(如实跑熊市 T+30 N=9)污染全局 bias_ok 致误报红标。
+            if _b is not None and _v.get("N", 0) >= 20 and abs(_b) > abs(_regime_worst):
                 _regime_worst = _b
     if abs(_regime_worst) > abs(worst_bias_signed):
         worst_bias_signed = round(_regime_worst, 2)

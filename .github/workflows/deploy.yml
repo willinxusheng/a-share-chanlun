@@ -66,11 +66,13 @@ jobs:
       - name: 标签重叠诊断（非阻塞护栏，仅告警 + 上传 artifact）
         # 实证守卫：R100 日期轴修复(hideOverlap:false + formatter 控显)后，各图表文字
         # 标签应零重叠。每日自动跑一遍，一旦回归即产生重叠对并被记录告警；该步骤
-        # 永不阻断发布(continue-on-error + || true)，诊断产物上传 artifact 供回溯。
+        # 非阻断发布(continue-on-error)但移除 || true——R167 修复: 此前 || true 把门禁
+        # 真实失败也静默吞掉, 无法告警; 现保留 continue-on-error 使发布不被阻断,
+        # 同时让真实重叠失败以 step 告警可见, 诊断产物上传 artifact 供回溯。
         continue-on-error: true
         run: |
           npm install echarts@^5 --no-save --silent 2>/dev/null || true
-          node verify_overlap.js || true
+          node verify_overlap.js
           echo "—— 标签重叠诊断报告(重叠对数见 total=) ——"
           cat _ov.txt 2>/dev/null || echo "(_ov.txt 未生成)"
 

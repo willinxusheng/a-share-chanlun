@@ -4,7 +4,7 @@ import json
 import os
 import sys
 import urllib.request
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 SYMBOLS = {
     "sh000001": "上证指数",
@@ -125,7 +125,7 @@ def validate(klines, period="day"):
     """
     issues = []
     seen = set()
-    _today = datetime.now().date().isoformat()
+    _today = datetime.now(timezone(timedelta(hours=8))).date().isoformat()  # R167: 中国时区(UTC+8), 避免 UTC 服务器跨日窗口把中国"今日"bar 误判为未来日期泄漏
     for i, k in enumerate(klines):
         d = k["date"]
         if d > _today:
@@ -173,7 +173,7 @@ def main():
             day = fetch_tx(sym, "day")
             # R164 防御: 今日未收盘(15:00 前)时源端可能返回进行中当日 bar,
             # 丢弃末根避免未来泄漏(置信带锚定虚构"当下")。已收盘(>=15:00)则保留完整当日 bar。
-            if day and day[-1]["date"] == _today and datetime.now().hour < 15:
+            if day and day[-1]["date"] == _today and datetime.now(timezone(timedelta(hours=8))).hour < 15:  # R167: 显式中国时区, 不再依赖服务器本地 TZ(UTC runner 会误判 15:00 收盘致误丢/误留当日 bar)
                 day = day[:-1]
             if not day:
                 print("WARN %s 无日线数据, 跳过该标的" % name)
