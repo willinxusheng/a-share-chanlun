@@ -1375,13 +1375,28 @@ def forecast_confidence(r, wcls, bt, breadth_bias=0):
         bull = cls["scenario"] in ("多头延续", "中枢震荡偏多", "高位整理未破前高", "背驰见底机会")
         if (ma["alignment"] == "空头排列" and bull) or (ma["alignment"] == "多头排列" and not bull):
             c -= 10
+    # 方向感知胜率校准（R158）：按当前结构方向选对应买卖点 20 日同向胜率，避免方向错配——
+    # 底背驰(看多)用一类买、顶背驰(看空)用一类卖，无背驰按趋势方向选。此前固定优先"一类买"，
+    # 顶背驰指数会错用看多胜率，使看空置信度被错误抬升/压低（latent：当前 5 指数均底背驰/无背驰故未触发）。
+    _bc_top0 = any(b["type"] == "top" for b in recent_bc)
+    _bc_bot0 = any(b["type"] == "bottom" for b in recent_bc)
+    _sc0 = cls["scenario"]
+    _bull_sc = _sc0 in ("多头延续", "中枢震荡偏多", "高位整理未破前高", "背驰见底机会")
+    _bear_sc = _sc0 in ("背驰见顶风险", "中枢震荡偏空", "弱势反弹", "反弹未回中枢", "空头延续")
+    if _bc_bot0 or (_bull_sc and not _bc_top0):
+        _want_kind = "一类买"
+    elif _bc_top0 or _bear_sc:
+        _want_kind = "一类卖"
+    else:
+        _want_kind = None
     wr = None
-    for kind in ("一类买", "一类卖"):
-        if kind in bt and 20 in bt[kind]:
-            st = bt[kind][20]
-            if st["n"] >= 3:
-                wr = st["win_rate"]
-                break
+    if _want_kind is not None and _want_kind in bt and 20 in bt[_want_kind]:
+        st = bt[_want_kind][20]
+        # 贝叶斯收缩（R158）：小样本高/低胜率不可靠，向 50%(无信息先验)收缩，避免小样本过拟合——
+        # n=5 的 100% 胜率若直接 (wr-0.5)*40=+20 会虚高置信度。8 伪样本先验，收缩系数 n/(n+8)。
+        if st["n"] >= 3:
+            _n = st["n"]
+            wr = 0.5 + (st["win_rate"] - 0.5) * (_n / (_n + 8.0))
     if wr is not None:
         c += (wr - 0.5) * 40
     # ADX 趋势强度交叉验证（#专业度）：低 ADX(弱势震荡)→方向性信号可靠性下降，推演置信度下调；
@@ -1394,13 +1409,11 @@ def forecast_confidence(r, wcls, bt, breadth_bias=0):
             c += 4
     # 量能确认（缠论核心确认条件）：最近背驰若伴随量能萎缩（量价背离），
     # 方向性信号更可信——缩量背驰比放量背驰可靠性更高（放量背驰常是出货而非转折）。
-    _bc_top = any(b["type"] == "top" for b in recent_bc)
-    _bc_bot = any(b["type"] == "bottom" for b in recent_bc)
     _bc_vol_confirmed = any(b.get("vol_confirm") for b in recent_bc)
     if recent_bc:
-        if _bc_bot and _bc_vol_confirmed:
+        if _bc_bot0 and _bc_vol_confirmed:
             c += 5   # 底背驰+缩量：量价背离确认底部夯实，见底可信度提升
-        if _bc_top and _bc_vol_confirmed:
+        if _bc_top0 and _bc_vol_confirmed:
             c -= 5   # 顶背驰+缩量：量价背离确认顶部，见顶风险提升
     c += breadth_bias  # 跨指数市场宽度：全市场同向时调升/调降推演置信度（系统性环境对齐度）
     return max(0, min(100, int(c)))
