@@ -8,6 +8,12 @@ MIN_BI_PCT = 0.018       # 日线单笔最小幅度过滤
 MIN_BI_PCT_WEEK = 0.04   # 周线单笔最小幅度过滤
 MIN_BI_PCT_MONTH = 0.08  # 月线单笔最小幅度过滤（月线波动更大，阈值相应提高）
 
+# 牛/熊情景集合（与 report.SC_BULL/SC_BEAR 对齐）。R161 上移至模块顶部作单一来源，
+# 供 classify/forecast_confidence/_polarity 等处引用，杜绝多处内联定义造成的口径分裂
+# （历史上因集合不完整已修 3 处 bug：R159 _base_p、R160 KPI 与 trend_type 护栏）。
+SC_BULL = ("多头延续", "中枢震荡偏多", "高位整理未破前高", "背驰见底机会")
+SC_BEAR = ("背驰见顶风险", "中枢震荡偏空", "弱势反弹", "反弹未回中枢", "空头延续")
+
 
 # ---------- MACD ----------
 def ema(values, period):
@@ -580,9 +586,9 @@ def classify(bis, zss, beichis, close, wcls=None, segments=None, seg_beichi=None
         mdir = mcls.get("last_bi_dir")
         m_scen = mcls.get("scenario", "")
         # 月线背景方向以「月线自身情景分类」判定（比单看 last_bi_dir 更稳健，能区分震荡与趋势）
-        if m_scen in ("多头延续", "中枢震荡偏多", "高位整理未破前高", "背驰见底机会"):
+        if m_scen in SC_BULL:
             month_dir = 1
-        elif m_scen in ("背驰见顶风险", "中枢震荡偏空", "弱势反弹", "反弹未回中枢", "空头延续"):
+        elif m_scen in SC_BEAR:
             month_dir = -1
         if mdir == 1:
             mdesc = "月线处多头背景(%s)" % m_scen
@@ -700,8 +706,8 @@ def classify(bis, zss, beichis, close, wcls=None, segments=None, seg_beichi=None
     # R160 补全: _up_sc/_dn_sc 此前漏「中枢震荡偏多」「中枢震荡偏空」「弱势反弹」,
     # 会导致这些情景与反向趋势类型硬冲突时不降级、呈现「震荡偏多+下跌走势」式自相矛盾。
     # 现与 SC_BULL/SC_BEAR 全集对齐。
-    _up_sc = scenario in ("多头延续", "中枢震荡偏多", "高位整理未破前高", "背驰见底机会")
-    _dn_sc = scenario in ("背驰见顶风险", "中枢震荡偏空", "弱势反弹", "反弹未回中枢", "空头延续")
+    _up_sc = scenario in SC_BULL
+    _dn_sc = scenario in SC_BEAR
     if _up_sc and trend_type == "下跌走势(趋势)":
         trend_type = "盘整/扩张走势"
     if _dn_sc and trend_type == "上涨走势(趋势)":
@@ -800,16 +806,11 @@ def known_pivot_capture(r):
 
 
 # ---------- 8f. 结论稳健度 / 信号成熟度（鲁棒性外部校验） ----------
-# 牛/熊情景集合（与 report.SC_BULL/SC_BEAR 对齐，供极性判定）
-_SC_BULL = ("多头延续", "中枢震荡偏多", "高位整理未破前高", "背驰见底机会")
-_SC_BEAR = ("背驰见顶风险", "中枢震荡偏空", "弱势反弹", "反弹未回中枢", "空头延续")
-
-
 def _polarity(sc):
     """情景多空极性：1=多头 / -1=空头 / 0=中性（数据不足等）。"""
-    if sc in _SC_BULL:
+    if sc in SC_BULL:
         return 1
-    if sc in _SC_BEAR:
+    if sc in SC_BEAR:
         return -1
     return 0
 
@@ -919,16 +920,16 @@ def market_breadth(daily_sc, week_sc, month_sc):
     而非单一分数，避免误导。"""
 
     def _cnt(sc_list):
-        bull = sum(1 for x in sc_list if x in _SC_BULL)
-        bear = sum(1 for x in sc_list if x in _SC_BEAR)
+        bull = sum(1 for x in sc_list if x in SC_BULL)
+        bear = sum(1 for x in sc_list if x in SC_BEAR)
         return {"bull": bull, "bear": bear, "neutral": len(sc_list) - bull - bear, "total": len(sc_list)}
 
     def _pol(sc_list):
         s = 0
         for x in sc_list:
-            if x in _SC_BULL:
+            if x in SC_BULL:
                 s += 1
-            elif x in _SC_BEAR:
+            elif x in SC_BEAR:
                 s -= 1
         return s / len(sc_list) if sc_list else 0
 
@@ -992,7 +993,7 @@ def _path_targets(scenario, zg, zd, mid, last, move=0.05):
         up_tgt = zg * 1.02
         risk_level = zd * 0.93
         main_dir = 1
-    elif scenario in ("背驰见顶风险", "中枢震荡偏空", "弱势反弹", "空头延续", "反弹未回中枢"):
+    elif scenario in SC_BEAR:
         up_tgt = mid * 0.99   # 主路径=回落/中枢内，向上空间有限
         risk_level = zd * 0.92
         main_dir = -1
@@ -1375,7 +1376,7 @@ def forecast_confidence(r, wcls, bt, breadth_bias=0):
     # 均线多空排列交叉验证：与缠论结构结论冲突时降权（#4）
     ma = cls.get("ma_alignment")
     if ma and ma["alignment"] != "纠缠":
-        bull = cls["scenario"] in ("多头延续", "中枢震荡偏多", "高位整理未破前高", "背驰见底机会")
+        bull = cls["scenario"] in SC_BULL
         if (ma["alignment"] == "空头排列" and bull) or (ma["alignment"] == "多头排列" and not bull):
             c -= 10
     # 方向感知胜率校准（R158）：按当前结构方向选对应买卖点 20 日同向胜率，避免方向错配——
@@ -1384,8 +1385,8 @@ def forecast_confidence(r, wcls, bt, breadth_bias=0):
     _bc_top0 = any(b["type"] == "top" for b in recent_bc)
     _bc_bot0 = any(b["type"] == "bottom" for b in recent_bc)
     _sc0 = cls["scenario"]
-    _bull_sc = _sc0 in ("多头延续", "中枢震荡偏多", "高位整理未破前高", "背驰见底机会")
-    _bear_sc = _sc0 in ("背驰见顶风险", "中枢震荡偏空", "弱势反弹", "反弹未回中枢", "空头延续")
+    _bull_sc = _sc0 in SC_BULL
+    _bear_sc = _sc0 in SC_BEAR
     if _bc_bot0 or (_bull_sc and not _bc_top0):
         _want_kind = "一类买"
     elif _bc_top0 or _bear_sc:

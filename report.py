@@ -5,7 +5,7 @@ import json
 import os
 import math
 from datetime import datetime, timedelta
-from chanlun import analyze, backtest_signals, MIN_BI_PCT_WEEK, health_score, forecast_confidence, forward_vol, adaptive_horizon, classify, realized_vol_annualized, KNOWN_PIVOTS, _date_diff, MIN_BI_PCT_MONTH, backtest_robustness, backtest_paths, _path_targets, market_breadth, regime_factor, classify_regime
+from chanlun import analyze, backtest_signals, MIN_BI_PCT_WEEK, health_score, forecast_confidence, forward_vol, adaptive_horizon, classify, realized_vol_annualized, KNOWN_PIVOTS, _date_diff, MIN_BI_PCT_MONTH, backtest_robustness, backtest_paths, _path_targets, market_breadth, regime_factor, classify_regime, SC_BULL, SC_BEAR
 
 W, H_PRICE, H_VOL, H_MACD = 1060, 360, 64, 110
 PAD_L, PAD_R, PAD_T, PAD_B = 12, 78, 24, 26
@@ -126,9 +126,7 @@ SCENARIO_COLOR = {
     "无中枢·向上笔": RED, "无中枢·向下笔": GREEN,
 }
 
-# 牛/熊情景集合（用于跨指数市场宽度统计与系统性环境判断）
-SC_BULL = ("多头延续", "中枢震荡偏多", "高位整理未破前高", "背驰见底机会")
-SC_BEAR = ("背驰见顶风险", "中枢震荡偏空", "弱势反弹", "反弹未回中枢", "空头延续")
+# 牛/熊情景集合：单一来源为 chanlun.SC_BULL/SC_BEAR（见文件头 import），此处不再重复定义。
 
 
 
@@ -668,7 +666,7 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
         main_lab = "主路径：底背驰反弹（向中枢上沿回升）"
         alt_p = [(0, last), (0.3, mid), (1.0, mid)]
         risk_p = [(0, last), (0.25, zd * 0.99), (1.0, zd * 0.93)]
-    elif sc in ("背驰见顶风险", "中枢震荡偏空", "弱势反弹", "空头延续"):
+    elif sc in SC_BEAR:
         main_p = [(0, last), (0.2, zg), (0.5, mid), (1.0, mid * 0.99)]
         main_lab = "主路径：回落中枢震荡"
         alt_p = [(0, last), (0.3, zd * 1.01), (1.0, zd * 0.98)]
@@ -709,8 +707,8 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
     # 经验校准（#1）：优先用本指数"最近且样本足够"的真实信号类型做锚，而非按情景猜一类买/卖。
     # 关键修正：锚点必须与第一/二类买卖方向一致——牛市情景只锚「买点」类信号、熊市只锚「卖点」类，
     # 否则会出现「多头延续的指数却用卖点胜率校准」的方向错配，既削弱准确率又产生自相矛盾的结论文字。
-    _bull = sc in ("多头延续", "中枢震荡偏多", "高位整理未破前高", "背驰见底机会")
-    _bear = sc in ("背驰见顶风险", "中枢震荡偏空", "弱势反弹", "反弹未回中枢", "空头延续")
+    _bull = sc in SC_BULL
+    _bear = sc in SC_BEAR
     _main_dir = 1 if _bull else (-1 if _bear else 0)
     _buy_kinds = ("一类买", "二类买", "三类买")
     _sell_kinds = ("一类卖", "二类卖", "三类卖")
