@@ -45,12 +45,12 @@ def load():
     return kls
 
 
-_KAPPA = {"bull": 1.8, "range": 1.8, "bear": 2.3}  # 与 report.py forecast_svg 内覆盖修正系数一致(关15 regime 自适应)
+_KAPPA = {"bull": 1.5, "range": 1.4, "bear": 2.3}  # 与 report.py forecast_svg 内覆盖修正系数一致(R168+R171 标定: 牛1.5/震荡1.4/熊2.3)
 
 
 def recompute_p_hold(closes, zd, horizon, regime="range"):
     """独立用 forecast_svg 同款口径重算 结构存续概率 P(期末价≥ZD).
-    regime 用于选取与 forecast_svg 完全一致的覆盖修正 κ(牛/震荡=1.8, 熊=2.3)，
+    regime 用于选取与 forecast_svg 完全一致的覆盖修正 κ(牛=1.5, 震荡=1.4, 熊=2.3)，
     否则在熊市(κ=2.3)会虚假 Δ>3pp 误报自洽性 WARN。"""
     n = len(closes)
     _WIN = 3 * 244
@@ -66,7 +66,7 @@ def recompute_p_hold(closes, zd, horizon, regime="range"):
         return _rets[f0] * (c0 - k) + _rets[c0] * (k - f0)
     _q50 = _q(0.5); _q05 = _q(0.05); _q95 = _q(0.95)
     _mean = sum(_rets) / len(_rets)
-    _kappa = _KAPPA.get(regime, 1.8)
+    _kappa = _KAPPA.get(regime, 1.4)
     _sp_up = (_q95 - _q50) * _kappa
     _sp_dn = (_q50 - _q05) * _kappa
     last = closes[-1]
