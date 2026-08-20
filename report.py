@@ -995,16 +995,16 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
     # 图例改为图表下方的 HTML 图例条（不再压住推演路径与时间轴）
     legend_html = (
         f'<div class="fc-legend">'
-        f'<span><i class="ln ln-dash" style="background:{RED}"></i>结构演绎主路径 ≈ {p_main * 100:.0f}%（终点 {main_p[-1][1]:.0f}）</span>'
-        f'<span><i class="ln" style="background:{RED}"></i>统计中位路径（均值期望终点 {_medf(1.0):.0f}）</span>'
+        f'<span><i class="ln ln-dash" style="background:{RED}"></i>结构演绎主路径 ≈ {p_main * 100:.0f}%（目标 {main_p[-1][1]:.0f}，{((main_p[-1][1]/last-1)*100):+.1f}%）</span>'
+        f'<span><i class="ln" style="background:{RED}"></i>统计中位路径（均值期望 {_medf(1.0):.0f}，{((_medf(1.0)/last-1)*100):+.1f}%）</span>'
         f'<span><i class="ln ln-dash" style="background:#94a3b8"></i>次路径：中枢内震荡 ≈ {p_alt * 100:.0f}%</span>'
         f'<span><i class="ln ln-dot" style="background:{GREEN}"></i>风险路径：跌破ZD转空 ≈ {p_risk * 100:.0f}%</span>'
         f'<span><i class="ln ln-band"></i>置信锥 经验分位 P05–P95 / P25–P75（真实分布·非对称）</span>'
         f'<span><i class="ln ln-trend"></i>趋势外推 {trend_end_price:.0f}（R²={_r2:.2f}{"，弱拟合" if trend_weak else ""}）</span>'
         f'</div>'
-        f'<div class="fc-targets">结构演绎目标(主路径终点) ≈ <b>{main_p[-1][1]:.0f}</b> · '
-        f'均值期望终点 ≈ <b>{_medf(1.0):.0f}</b> · '
-        f'风险止损位(风险路径终点) ≈ <b>{risk_p[-1][1]:.0f}</b> · '
+        f'<div class="fc-targets">结构演绎目标(主路径终点) ≈ <b>{main_p[-1][1]:.0f}</b>（<b style="color:{RED}">{((main_p[-1][1]/last-1)*100):+.1f}%</b>） · '
+        f'均值期望终点 ≈ <b>{_medf(1.0):.0f}</b>（{((_medf(1.0)/last-1)*100):+.1f}%） · '
+        f'风险止损位(风险路径终点) ≈ <b>{risk_p[-1][1]:.0f}</b>（{((risk_p[-1][1]/last-1)*100):+.1f}%） · '
         f'趋势外推位 ≈ <b>{trend_end_price:.0f}</b> · '
         f'主路径失效位(有效跌破ZD) ≈ <b>{zd:.0f}</b> · '
         f'结构存续概率(锥) ≈ <b>{_p_hold*100:.0f}%</b></div>'
@@ -1186,12 +1186,14 @@ def forecast_echart(sym, fc_data):
     # 而非统计中位路径(med)。此前 _em 取 proj[-1]["med"]，使端点"主"标的是统计中位线、与 tooltip
     # "主路径=结构演绎+p_main"自相矛盾。现改为 proj[-1]["main"]，三者即结构主/次/风险路径终点。
     _em, _ea, _er = proj[-1]["main"], proj[-1]["alt"], proj[-1]["risk"]
+    # R162: 端点标注加涨跌幅(%)——此前仅纯数字"主 4212", 用户看不出方向幅度、易被统计中位线(平)带偏。
+    # 现主路径标注"主目标 4212 (+6%)", 醒目呈现方向与空间; 次/风险同样加涨跌幅保持一致。
     end_points = [
-        {"coord": [xcats[-1], round(_em, 2)], "value": f"主 {_em:.0f}", "itemStyle": {"color": RED}, "symbol": "circle", "symbolSize": 6,
-         "label": {"show": True, "position": "top", "color": RED, "fontSize": 11, "fontWeight": "bold"}},
-        {"coord": [xcats[-1], round(_ea, 2)], "value": f"次 {_ea:.0f}", "itemStyle": {"color": "#94a3b8"}, "symbol": "circle", "symbolSize": 6,
+        {"coord": [xcats[-1], round(_em, 2)], "value": f"主目标 {_em:.0f} ({(_em/last-1)*100:+.0f}%)", "itemStyle": {"color": RED}, "symbol": "pin", "symbolSize": 26,
+         "label": {"show": True, "position": "top", "color": RED, "fontSize": 12, "fontWeight": "bold"}},
+        {"coord": [xcats[-1], round(_ea, 2)], "value": f"次 {_ea:.0f} ({(_ea/last-1)*100:+.0f}%)", "itemStyle": {"color": "#94a3b8"}, "symbol": "circle", "symbolSize": 6,
          "label": {"show": True, "position": "bottom", "color": "#94a3b8", "fontSize": 11, "fontWeight": "bold"}},
-        {"coord": [xcats[-1], round(_er, 2)], "value": f"风险 {_er:.0f}", "itemStyle": {"color": GREEN}, "symbol": "circle", "symbolSize": 6,
+        {"coord": [xcats[-1], round(_er, 2)], "value": f"风险 {_er:.0f} ({(_er/last-1)*100:+.0f}%)", "itemStyle": {"color": GREEN}, "symbol": "circle", "symbolSize": 6,
          "label": {"show": True, "position": "bottom", "color": GREEN, "fontSize": 11, "fontWeight": "bold"}},
     ]
     _year_label = x_hist[0][:4] if x_hist and len(x_hist[0]) >= 4 else ""
