@@ -13,6 +13,8 @@ from chanlun import (analyze, adaptive_horizon, classify, forward_vol,
                      market_breadth, MIN_BI_PCT_WEEK, MIN_BI_PCT_MONTH)
 from report import forecast_svg, SC_BULL, SC_BEAR
 import fetch_data as fd
+import audit_data_schema as ads          # R169: data.json 结构契约门禁(阻断)
+import audit_report_runtime as art        # R169: 报告 NaN/Infinity 护栏门禁(阻断)
 
 SYMS = ["sh000001", "sh000300", "sz399001", "sz399006", "sh000905"]
 TOL_SUM = 0.001  # 概率和偏离容忍（归一化代码保证=1.00，此处防回归）
@@ -242,9 +244,11 @@ def main():
     online = "--online" in sys.argv
     print("A股缠论看板 数据准确性总审计  (deep=%s online=%s)" % (deep, online))
     data = load()
+    ok_schema = ads.run()                  # R169: data.json 结构契约(阻断)
     ok1 = audit_history(data)
     ok2 = audit_consistency(data, online)
     ok3 = audit_forecast(data)
+    ok_rt = art.run()                     # R169: 报告 NaN/Infinity 护栏(阻断)
     ok4 = audit_calibration(deep)
     ok5 = audit_sentiment(deep)
     ok6 = audit_drift(deep)
@@ -276,7 +280,9 @@ def main():
              ("SKIP" if not deep else "MON"),
              ("SKIP" if not deep else "MON"),
              ("SKIP" if not deep else "MON")))
-    allok = ok1 and ok2 and ok3 and (ok4 if deep else True) and (ok5 if deep else True) and (ok6 if deep else True) and (ok7 if deep else True) and (ok8 if deep else True) and (ok9 if deep else True) and (ok10 if deep else True) and (ok11 if deep else True) and (ok12 if deep else True) and (ok13 if deep else True) and (ok14 if deep else True) and (ok15 if deep else True) and (ok16 if deep else True)
+    print("离线门禁补充: 关S数据schema=%s  关R报告运行时=%s" % (
+        ["FAIL", "OK"][ok_schema], ["FAIL", "OK"][ok_rt]))
+    allok = ok_schema and ok_rt and ok1 and ok2 and ok3 and (ok4 if deep else True) and (ok5 if deep else True) and (ok6 if deep else True) and (ok7 if deep else True) and (ok8 if deep else True) and (ok9 if deep else True) and (ok10 if deep else True) and (ok11 if deep else True) and (ok12 if deep else True) and (ok13 if deep else True) and (ok14 if deep else True) and (ok15 if deep else True) and (ok16 if deep else True)
     print("结论: %s" % ("✅ 全部通过" if allok else "❌ 存在失败项"))
     sys.exit(0 if allok else 1)
 

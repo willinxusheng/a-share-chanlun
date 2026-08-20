@@ -1142,16 +1142,18 @@ def adaptive_horizon(bis, merged=None):
     """
     if not bis or len(bis) < 4:
         return 60
-    if merged is not None:
-        durs = []
-        for b in bis[-8:]:
+    durs = []
+    for b in bis[-8:]:
+        # R169: merged 为空列表或索引越界(退化输入)时退回简单笔内索引差估计,
+        # 避免 merged[b["start"]] 抛 IndexError(原 merged is not None 不挡空/短列表)。
+        if merged and b["start"] < len(merged) and b["end"] < len(merged):
             a = merged[b["start"]]["idx_start"]
             e = merged[b["end"]]["idx_end"]
             if e < a:
                 a, e = e, a
             durs.append(e - a + 1)
-    else:
-        durs = [abs(b["end"] - b["start"]) + 1 for b in bis[-8:]]
+        else:
+            durs.append(abs(b["end"] - b["start"]) + 1)
     avg = sum(durs) / len(durs)
     return max(30, min(90, round(avg * 1.6)))
 

@@ -59,12 +59,14 @@ def main():
         for H in ac.H_TARGETS:
             s = regime_agg[rg][H]
             n = s["N"]
-            cov = round(s["in95"] / n * 100, 1) if n else None
+            # R169: 覆盖率维度补 N>=20 下限(与 R167 C2 的 bias/direction 同口径);
+            # N<20 视为统计噪声, cover95 置 None(报告渲染为"-"+⚠️样本不足), 不再写虚假高精度。
+            cov = round(s["in95"] / n * 100, 1) if (n and n >= 20) else None
             dm = round(s["dir_main"] / n * 100, 1) if n else None
             dmed = round(s["dir_med"] / n * 100, 1) if n else None
             bias = round(statistics.median(s["bias_list"]) * 100, 2) if s["bias_list"] else None
             # R80 覆盖维度
-            raw_cov = s["in95"] / s["N"] * 100 if n else None
+            raw_cov = s["in95"] / s["N"] * 100 if (n and n >= 20) else None
             regime_cov[rg]["T%d" % H] = {"N": n, "cover95": cov, "bias_median": bias}
             if raw_cov is not None and raw_cov < 85.0:   # 任一 regime 覆盖<85% 即预警(真实值常破带=区间不可信); 用原始比值与 weak_cov 同口径
                 regime_warn = True
@@ -80,7 +82,7 @@ def main():
     for rg in ("bull", "bear", "range"):
         for H in ac.H_TARGETS:
             s = regime_agg[rg][H]
-            if s["N"] and s["in95"] / s["N"] * 100 < 85.0:
+            if s["N"] and s["N"] >= 20 and s["in95"] / s["N"] * 100 < 85.0:
                 weak_cov.append((rg, H, s["N"]))
             if s["N"] >= 20 and s["dir_main"] / s["N"] * 100 < 50.0:
                 weak_dir.append((rg, H, s["N"]))
