@@ -21,3 +21,8 @@ Thumbs.db
 # ===== verify_overlap.js 标签重叠诊断工具临时产物（不入库）=====
 _ov.txt
 _c*.svg
+
+# ===== 本地报告/数据快照（各轮对比遗留，一次性，不入仓）=====
+report_today_*.html
+report_r*.html
+*.bak
