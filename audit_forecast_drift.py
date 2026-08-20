@@ -24,6 +24,7 @@ audit_forecast_drift.py  —  缠论推演「预测突变漂移」监控门禁�
 import json
 import os
 import statistics
+import sys
 
 from chanlun import analyze, adaptive_horizon
 from report import forecast_svg
@@ -47,7 +48,7 @@ def find_proj(proj, tplus_target):
     return best
 
 
-def run():
+def run(quick=None):
     data = json.load(open(os.path.join(BASE, "data.json"), encoding="utf-8"))
     symbols = list(data.keys())
     kls = {sym: sorted(data[sym]["klines"], key=lambda k: k["date"]) for sym in symbols}
@@ -57,8 +58,11 @@ def run():
         kl = kls[sym]
         n = len(kl)
         seq = []  # (idx, last_close, {H: med})
+        _ac = 0   # R166: --quick 锚点上限计数
         i = MIN_HISTORY
         while i < n - 35:
+            if quick is not None and _ac >= quick:
+                break
             trunc = kl[:i + 1]
             last_a = trunc[-1]["close"]
             try:
@@ -79,6 +83,7 @@ def run():
                     continue
                 d[H] = row["med"]
             seq.append((i, last_a, d))
+            _ac += 1
             i += ANCHOR_STEP
         # 相邻锚点比较
         for k in range(1, len(seq)):
@@ -134,4 +139,11 @@ def run():
 
 
 if __name__ == "__main__":
-    raise SystemExit(run())
+    _quick = None
+    if "--quick" in sys.argv:
+        idx = sys.argv.index("--quick")
+        try:
+            _quick = int(sys.argv[idx + 1])
+        except (IndexError, ValueError):
+            _quick = 30
+    raise SystemExit(run(_quick))

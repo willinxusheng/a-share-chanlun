@@ -541,8 +541,16 @@ def find_signals(bis, zss, beichis, klines=None, merged=None):
 # ---------- 7. 分类推演 ----------
 def classify(bis, zss, beichis, close, wcls=None, segments=None, seg_beichi=None, mcls=None):
     if not bis:
+        # R166: 早返回必须补齐正常路径(约L721-726)的全部键，否则下游
+        # classification_stability()(L855 base["last_bi_dir"]) / health_score()
+        # (L1353 cls["last_bi_dir"]) 直接下标访问会 KeyError 崩溃(退化/空 bis 输入)。
+        # 补中性默认值，保证键齐备、下游安全。
         return {"scenario": "数据不足", "detail": "",
-                "seg_bc_bottom": False, "seg_bc_top": False, "interval_nesting": ""}
+                "seg_bc_bottom": False, "seg_bc_top": False, "interval_nesting": "",
+                "position": "无中枢", "last_bi_dir": 0, "last_bi_pct": 0.0,
+                "month_context": "", "trend_type": "", "month_dir": 0, "week_dir": 0,
+                "week_scenario": "数据不足", "month_scenario": "数据不足",
+                "resonance": ""}
     last = bis[-1]
     last_zs = zss[-1] if zss else None
     recent_bc = [b for b in beichis if b["bi_index"] >= len(bis) - 3]
@@ -950,6 +958,12 @@ def market_breadth(daily_sc, week_sc, month_sc):
         label = "偏空"
     else:
         label = "空头主导"
+    # R166: 三级别情景列表全空时, m_cnt["bull"]>=m_cnt["total"]*0.6 退化为
+    # 0>=0 恒真, 会误触发"月多+周偏空+日反弹"矛盾结论。全空则直接返回数据不足。
+    if d_cnt["total"] == w_cnt["total"] == m_cnt["total"] == 0:
+        return {"daily": d_cnt, "week": w_cnt, "month": m_cnt,
+                "composite": {"score": 0.0, "label": "数据不足"},
+                "conclusion": "数据不足（无情景样本，无法综合研判）。"}
     # 跨级别背离识别（结论比单一分数更诚实）
     m_bull = m_cnt["bull"] >= m_cnt["total"] * 0.6
     w_bear = w_cnt["bear"] >= w_cnt["total"] * 0.6

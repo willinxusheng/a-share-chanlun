@@ -26,13 +26,31 @@ global.document = {
 global.window.addEventListener = () => {};
 global.window.devicePixelRatio = 1;
 global.navigator = { userAgent: 'node', platform: 'node' };
-global.echarts = undefined;
-const echarts = require('echarts');
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 
-const html = fs.readFileSync('report.html', 'utf8');
+// R166: 让门禁在 echarts 未置于脚本目录 node_modules 时仍能解析(从 NODE_PATH / 工作区兜底)。
+// 此前在 chanlun/ 下 require('echarts') 解析不到 managed 工作区的 echarts, 致门禁崩溃且被 `|| true` 静默吞掉。
+function loadEcharts() {
+  const candidates = ['echarts'];
+  if (process.env.NODE_PATH) candidates.push(path.join(process.env.NODE_PATH, 'echarts'));
+  const wb = process.env.WORKBUDDY_NODE_MODULES ||
+    path.join(process.env.USERPROFILE || process.env.HOME || '', '.workbuddy', 'binaries', 'node', 'workspace', 'node_modules');
+  if (wb) candidates.push(path.join(wb, 'echarts'));
+  for (const c of candidates) {
+    try { const e = require(c); if (e) return e; } catch (e) {}
+  }
+  return null;
+}
+const echarts = loadEcharts();
+if (!echarts) {
+  console.error('[verify_overlap] SKIP: echarts 不可用 (请 npm install echarts 或设置 NODE_PATH)。');
+  process.exit(0);
+}
+global.echarts = echarts;
+
+const html = fs.readFileSync(path.join(__dirname, 'report.html'), 'utf8');
 const realInit = echarts.init;
 global.echarts = echarts;
 
