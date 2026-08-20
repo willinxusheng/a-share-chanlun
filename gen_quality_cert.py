@@ -108,6 +108,18 @@ def main():
     else:  # R156 防御: 退化数据(全样本 bias_list 为空)时 max() 会抛 ValueError 致证书生成崩溃
         worst_bias = 0.0
         worst_bias_signed = 0.0
+    # R165: bias_ok 须覆盖 regime 级偏置——全样本最差偏置(约0.86%)会掩盖某 regime 超阈
+    # (如实跑熊市T+30偏置8.34%>5%), 否则证书自相矛盾(标 bias_ok=True 却 regime 漏报偏置)。
+    _regime_worst = 0.0
+    for _rg, _hs in regime_cov.items():
+        for _h, _v in _hs.items():
+            _b = _v.get("bias_median")
+            if _b is not None and abs(_b) > abs(_regime_worst):
+                _regime_worst = _b
+    if abs(_regime_worst) > abs(worst_bias_signed):
+        worst_bias_signed = round(_regime_worst, 2)
+    worst_bias = abs(worst_bias_signed)
+    bias_ok = worst_bias <= 5.0
     # 取所有标的最新日期的最大值（不同指数末根日期可能差 1 个交易日），避免只取首个标的偏低
     last_date = max((data[s]["meta"]["last_date"] for s in data), default=None) if data else None
 
@@ -116,7 +128,7 @@ def main():
         "data_last_date": last_date,
         "calibration": cal,
         "bias_warn": 5.0,
-        "bias_ok": worst_bias <= 5.0,
+        "bias_ok": bias_ok,
         "bias_worst": worst_bias_signed,  # 与 bias_ok 同口径(最差), 消费端优先显示, 消除口径分裂误导
         "drift": {
             "status": "healthy",

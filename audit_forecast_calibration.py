@@ -191,7 +191,9 @@ def report(data, agg, cons, regime_agg=None):
     # 偏置监控(#预测精度·R74)：中线系统性偏置(稳健中位口径)超阈值即告警(可据需升级为硬门禁)。
     # 注：用「中位」而非「均值」口径——A股右偏肥尾会使均值口径虚高(看似偏高), 中位口径如实反映中心校准。
     BIAS_WARN = 5.0
-    worst_bias = max((abs(statistics.median(tot[H]["bias_list"]) * 100)) for H in H_TARGETS if tot[H]["bias_list"])
+    # R165: 所有 horizon 的 bias_list 均为空时生成器为空→max() 抛 ValueError; 退化为 0(无偏样本)
+    _nonempty_h = [H for H in H_TARGETS if tot[H]["bias_list"]]
+    worst_bias = max((abs(statistics.median(tot[H]["bias_list"]) * 100)) for H in _nonempty_h) if _nonempty_h else 0.0
     if abs(worst_bias) > BIAS_WARN:
         print("⚠️ 偏置告警: 全样本中线系统性偏置 %.1f%% 超阈值 ±%.1f%% —— 需检查置信带中心口径" % (worst_bias, BIAS_WARN))
     else:
@@ -224,28 +226,28 @@ def report(data, agg, cons, regime_agg=None):
         na = len(entries)
         if na == 0:
             continue
-    c_market = c_per = tot_per = 0
-    na_used = 0
-    for mains, reals in entries:
-        cs = 1 if sum(mains) > 0 else (-1 if sum(mains) < 0 else 0)
-        if cs == 0:
-            continue
-        na_used += 1
-        rs_market = 1 if sum(reals) > 0 else (-1 if sum(reals) < 0 else 0)
-        if cs == rs_market:
-            c_market += 1
-        for rj in reals:
-            tot_per += 1
-            if cs == rj:
-                c_per += 1
+        c_market = c_per = tot_per = 0
+        na_used = 0
+        for mains, reals in entries:
+            cs = 1 if sum(mains) > 0 else (-1 if sum(mains) < 0 else 0)
+            if cs == 0:
+                continue
+            na_used += 1
+            rs_market = 1 if sum(reals) > 0 else (-1 if sum(reals) < 0 else 0)
+            if cs == rs_market:
+                c_market += 1
+            for rj in reals:
+                tot_per += 1
+                if cs == rj:
+                    c_per += 1
+        # R165 修复: 原 c_market/na_used/内层循环/deltas[H] 整段误退到 for H 循环外(缩进截断),
+        # 导致仅处理最后 H=T+30、T+8 跨指数共识被静默丢弃、both_have 恒 False。现整体缩进进循环体。
         baseline = tot[H]["dir_main"] / tot[H]["N"] * 100 if tot[H]["N"] else 0
-    # R139 修复：原 print 误置于上方 for 循环内，导致每锚点刷一行中间态累积值(约35行)；
-    # 移至循环外，每个 horizon 仅输出一行最终汇总(累积口径不变)。
-    acc_market = c_market / na_used * 100 if na_used else 0.0
-    acc_per = c_per / tot_per * 100 if tot_per else 0
-    delta = acc_per - baseline
-    deltas[H] = delta
-    print(f"{'T+'+str(H):>5}{na:>8}{acc_market:>11.1f}%{acc_per:>13.1f}%{baseline:>11.1f}%{delta:>+8.1f}pp")
+        acc_market = c_market / na_used * 100 if na_used else 0.0
+        acc_per = c_per / tot_per * 100 if tot_per else 0
+        delta = acc_per - baseline
+        deltas[H] = delta
+        print(f"{'T+'+str(H):>5}{na:>8}{acc_market:>11.1f}%{acc_per:>13.1f}%{baseline:>11.1f}%{delta:>+8.1f}pp")
     print("-" * 96)
     # 判定(#预测精度·R75): 要求"两个 horizon 都显著改善(>2pp)"才算有效, 避免单点 borderline 误导。
     # 动态生成文案(不再硬编码历史数字); 且只有当两个 horizon 都有样本(deltas 覆盖 H_TARGETS)时才判"有效",

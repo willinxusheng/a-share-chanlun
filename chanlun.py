@@ -11,12 +11,17 @@ MIN_BI_PCT_MONTH = 0.08  # 月线单笔最小幅度过滤（月线波动更大�
 # 牛/熊情景集合（与 report.SC_BULL/SC_BEAR 对齐）。R161 上移至模块顶部作单一来源，
 # 供 classify/forecast_confidence/_polarity 等处引用，杜绝多处内联定义造成的口径分裂
 # （历史上因集合不完整已修 3 处 bug：R159 _base_p、R160 KPI 与 trend_type 护栏）。
-SC_BULL = ("多头延续", "中枢震荡偏多", "高位整理未破前高", "背驰见底机会")
-SC_BEAR = ("背驰见顶风险", "中枢震荡偏空", "弱势反弹", "反弹未回中枢", "空头延续")
+# R165: 补全「无中枢·向上/向下笔」(classify 在 pos==无中枢 时产出, detail 明确"暂按笔级别多/空头对待"),
+# 此前漏进常量→_polarity/_path_targets 静默返回中性(main_dir=0), 与文字意图矛盾。统一单一来源。
+SC_BULL = ("多头延续", "中枢震荡偏多", "高位整理未破前高", "背驰见底机会", "无中枢·向上笔")
+SC_BEAR = ("背驰见顶风险", "中枢震荡偏空", "弱势反弹", "反弹未回中枢", "空头延续", "无中枢·向下笔")
 
 
 # ---------- MACD ----------
 def ema(values, period):
+    # R165: 空序列防御——analyze([]) 等退化输入会令 values[0] 抛 IndexError; 空入空出保持下游安全
+    if not values:
+        return []
     k = 2.0 / (period + 1)
     out = []
     e = values[0]
