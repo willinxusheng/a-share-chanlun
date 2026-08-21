@@ -22,7 +22,7 @@ import json
 import sys
 import os
 import math
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 BASE = os.path.dirname(os.path.abspath(__file__))
@@ -38,7 +38,7 @@ LR_CORRUPT = 0.30      # |日对数收益|≥此值: 远超任何真实指数单
 def main():
     print("R82 关9 点前完整性 + 无未来泄漏 + 带宽抗污染守卫 (监控门禁, 不阻断)")
     data = json.load(open(os.path.join(BASE, "data.json"), encoding="utf-8"))
-    today = datetime.now().date()
+    today = datetime.now(timezone(timedelta(hours=8))).date()
     today_s = today.isoformat()
     any_critical = False
     warn_stale = False

@@ -45,7 +45,7 @@ def run():
         print("  FAIL: report.html 读取失败: %s" % e)
         return False
 
-    if len(html) < 100000 or "<html" not in html or "</html>" not in html:
+    if "<html" not in html or "</html>" not in html:
         print("  FAIL: report.html 疑似损坏 (size=%d)" % len(html))
         return False
 

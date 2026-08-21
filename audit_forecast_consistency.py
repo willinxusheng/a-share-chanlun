@@ -67,8 +67,8 @@ def recompute_p_hold(closes, zd, horizon, regime="range"):
     _q50 = _q(0.5); _q05 = _q(0.05); _q95 = _q(0.95)
     _mean = sum(_rets) / len(_rets)
     _kappa = _KAPPA.get(regime, 1.4)
-    _sp_up = (_q95 - _q50) * _kappa
-    _sp_dn = (_q50 - _q05) * _kappa
+    _sp_up = max((_q95 - _q50) * _kappa, 1e-9)
+    _sp_dn = max((_q50 - _q05) * _kappa, 1e-9)
     last = closes[-1]
     if not (last > 0 and zd > 0):
         return None
@@ -167,17 +167,17 @@ def check():
         # ④ 文本终点 ↔ 图 series 末点
         ep_ok = True
         ep_detail = []
-        med_ep = parse_note_endpoint(_note, "均值期望终点")
+        med_ep = parse_note_endpoint(_leg, "均值期望终点")
         if med_ep is not None and proj:
             if abs(med_ep - proj[-1]["med"]) / max(1.0, proj[-1]["med"]) > 0.01:
                 ep_ok = False
                 ep_detail.append("med")
-        tr_ep = parse_note_endpoint(_note, "趋势外推位")
+        tr_ep = parse_note_endpoint(_leg, "趋势外推位")
         if tr_ep is not None and proj:
             if abs(tr_ep - proj[-1]["trend"]) / max(1.0, proj[-1]["trend"]) > 0.01:
                 ep_ok = False
                 ep_detail.append("trend")
-        zd_ep = parse_note_endpoint(_note, "主路径失效位(有效跌破ZD)")
+        zd_ep = parse_note_endpoint(_leg, "主路径失效位(有效跌破ZD)")
         if zd_ep is not None:
             if abs(zd_ep - zd) / max(1.0, zd) > 0.01:
                 ep_ok = False

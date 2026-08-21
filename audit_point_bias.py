@@ -100,6 +100,8 @@ def run():
                 row = find_proj(proj, H)
                 if row is None:
                     continue
+                if i + H >= len(kl):
+                    continue
                 real = kl[i + H]["close"]
                 main_v, med_v = row["main"], row["med"]
                 if main_v and med_v:

@@ -79,7 +79,8 @@ def run():
                 horizon = adaptive_horizon(r["bis"], r["merged"])
                 # R173: 传 bt_paths(全量历史口径) → 走 _w_dir>0 经验锚分支, 检验真实 p_main 校准度
                 _svg, _note, _probs, _leg, fc = forecast_svg(
-                    trunc, r, r["classify"], 50.0, 0.0, sym, horizon, bt_paths_all.get(sym))
+                    trunc, r, r["classify"], 50.0, 0.0, sym, horizon,
+                    bt_paths=bt_paths_all.get(sym))
             except Exception:
                 continue
             p_main = _probs[0]

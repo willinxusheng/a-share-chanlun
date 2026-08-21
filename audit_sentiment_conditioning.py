@@ -126,12 +126,14 @@ def run():
                     trunc, r, r["classify"], 50.0, 0.0, sym, horizon)
             except Exception:
                 continue
-            proj = fc["proj"]
+            proj = fc.get("proj") or []
             for H in H_TARGETS:
                 if H > horizon:
                     continue
                 row = find_proj(proj, H)
                 if row is None:
+                    continue
+                if i + H >= len(kl):
                     continue
                 real = kl[i + H]["close"]
                 main_v = row["main"]
@@ -293,7 +295,7 @@ def report(data, rec, buy_th, sell_th):
         ext_sh_base = pct(s["ext_sh_base"], s["ext_sh_N"])
         ext_sh_cond = pct(s["ext_sh_cond"], s["ext_sh_N"])
         ext_sh_delta = ext_sh_cond - ext_sh_base
-        enough = s["ext_sh_N"] >= 20  # 极端区近期样本需足够
+        enough = s["ext_sh_N"] >= 30  # 极端区近期样本需足够(与文档 N>=30 对齐)
         # 决策: 近期极端区翻转增益显著(>10pp) 且 全样本近期Δ为正
         oos_gain = (ext_sh_delta > 10.0) and (sh_delta > 0)
         if oos_gain and enough:

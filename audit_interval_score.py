@@ -137,8 +137,10 @@ def run():
             for H in H_TARGETS:
                 if H > horizon:
                     continue
-                row = find_proj(fc["proj"], H)
+                row = find_proj(fc.get("proj") or [], H)
                 if row is None:
+                    continue
+                if i + H >= len(kl):
                     continue
                 L = row["f95l"]
                 U = row["f95l"] + row["f95h"]
