@@ -1867,10 +1867,22 @@ def load_live_sentiment():
         import os as _os
         p = _os.environ.get("SENTIMENT_V2_PATH")
         if not p:
-            # 部署布局：情绪看板与本报告同工作区、位于 chanlun 的同级 sentiment/ 目录。
-            # 用相对脚本目录推导，避免写死过期绝对路径导致兜底永远失效（此前指向已删除的 08-01 工作区）。
+            # R175: 修正情绪模块路径——它随仓库内置在 chanlun/sentiment/(calc_v2.py 写入、
+            # audit_sentiment_conditioning.py 读取均在此), 此前写死 "../sentiment/" 指向 chanlun 的
+            # 同级目录, 仓库内实为子目录, 致文件永远找不到、load_live_sentiment 静默降级 None,
+            # 线上 R76 极端区情绪透明化提示从未生效。优先用内置子目录路径, 兼容部署同级布局作 fallback。
             _base = _os.path.dirname(_os.path.abspath(__file__))
-            p = _os.path.join(_base, "..", "sentiment", "sentiment_v2.json")
+            _candidates = [
+                _os.path.join(_base, "sentiment", "sentiment_v2.json"),
+                _os.path.join(_base, "..", "sentiment", "sentiment_v2.json"),
+            ]
+            p = None
+            for _c in _candidates:
+                if _os.path.exists(_c):
+                    p = _c
+                    break
+            if p is None:
+                p = _candidates[0]  # 仍给默认, 下方 exists 检查会 return None
         if not _os.path.exists(p):
             return None
         d = json.load(open(p, encoding="utf-8"))

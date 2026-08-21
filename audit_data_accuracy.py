@@ -10,7 +10,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 BASE = os.path.dirname(os.path.abspath(__file__))
 from chanlun import (analyze, adaptive_horizon, classify, forward_vol,
                      health_score, forecast_confidence, backtest_signals,
-                     market_breadth, MIN_BI_PCT_WEEK, MIN_BI_PCT_MONTH)
+                     backtest_paths, market_breadth, MIN_BI_PCT_WEEK, MIN_BI_PCT_MONTH)
 from report import forecast_svg, SC_BULL, SC_BEAR
 import fetch_data as fd
 import audit_data_schema as ads          # R169: data.json 结构契约门禁(阻断)
@@ -104,9 +104,14 @@ def audit_forecast(data):
         health, conf = (health_score(d["klines"], r, wcls),
                         forecast_confidence(r, wcls, backtests[sym], breadth_bias=_breadth_bias))
         sigma = forward_vol([k["close"] for k in d["klines"]], horizon)
+        # R175: 复刻 report.main 口径——paths_bt 用全量历史 backtest_paths 喂 forecast_svg 的
+        # bt_paths 槽(经验锚分支), 此前传 None 致关3 打印的 p_main 与生产线上用户看到的 p_main
+        # 不一致(未校准), 审计失去意义。必须与原管线对齐。
+        _paths = backtest_paths(d["klines"], horizon=horizon,
+                                step=max(15, horizon // 2), with_stability=False)
         _svg, _note, probs, _leg, fc = forecast_svg(
             d["klines"], r, wcls, conf, sigma, sym, horizon,
-            backtests[sym], None, breadth_score=bd["composite"]["score"])
+            backtests[sym], _paths, breadth_score=bd["composite"]["score"])
         p_main, p_alt, p_risk = probs
         s = p_main + p_alt + p_risk
         trend = fc["trend"]
