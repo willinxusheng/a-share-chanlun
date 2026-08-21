@@ -244,7 +244,7 @@ def _fmt_slope(sl):
     return "%.3f%s" % (sl, flag)
 
 
-def check(deep=True):
+def check(deep=True, quick_n=None):
     print("=" * 96)
     print("关16 波动率扩散标度检验 — 模型置信带核心假设 √f 法则(日对数收益 ∝ √horizon)")
     print("=" * 96)
@@ -263,7 +263,7 @@ def check(deep=True):
     # 检验C
     if deep:
         print("检验C  锚点级 模型95%带半宽 vs 真实h日扩散 (walk-forward, bias=模型σ/真实σ, ≈1对齐)")
-        res = run_deep()
+        res = run_deep(quick_n)
         print("  %-8s%-8s%-10s%-8s" % ("regime", "窗口", "bias", "N"))
         for rg in REGIMES:
             for H in H_TARGETS:
@@ -330,4 +330,4 @@ if __name__ == "__main__":
                 pass
     # 检验C(walk-forward) 在默认 / --quick N / --deep 下跑; --no-deep 才跳过只跑检验A
     deep = "--no-deep" not in sys.argv
-    check(deep=deep)
+    check(deep=deep, quick_n=quick_n)
