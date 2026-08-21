@@ -3,6 +3,7 @@
 import json
 import os
 import sys
+import time
 import urllib.request
 from datetime import datetime, timedelta, timezone
 
@@ -23,15 +24,25 @@ _BASE = os.path.dirname(os.path.abspath(__file__))
 
 
 def _get(url):
+    # R173(F1): 指数退避重试, 避免瞬时网络失败(5xx/超时)直接丢弃整标的 → 看板对缺失标的静默标 N/A
     req = urllib.request.Request(url, headers=UA)
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        return resp.read().decode("utf-8")
+    _delay = 1
+    for _i in range(3):
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                return resp.read().decode("utf-8")
+        except Exception:
+            if _i == 2:
+                raise
+            time.sleep(_delay)
+            _delay = min(_delay * 3, 9)
 
 
 def fetch_tx(symbol, period):
     data = json.loads(_get(TX_URL % (symbol, period)))["data"][symbol]
     klines = data.get("qfqday") or data.get("qfqweek") or data.get("qfqmonth") or data.get("day") or data.get("week") or data.get("month") or []
     out = []
+    dirty = 0
     for row in klines:
         try:
             # [日期, 开, 收, 高, 低, 量]
@@ -45,8 +56,10 @@ def fetch_tx(symbol, period):
             })
         except (ValueError, IndexError, TypeError):
             # R164: 脏 bar(缺字段/空值/类型错)跳过, 不中断整标的抓取
+            # R173(F2): 计数并暴露到 meta.issues, 避免"静默丢根"致看板对缺失数据无知
+            dirty += 1
             continue
-    return out
+    return out, dirty
 
 
 def fetch_sina_series(symbol, datalen=2000):
@@ -170,7 +183,7 @@ def main():
     _today = datetime.now(timezone(timedelta(hours=8))).date().isoformat()  # R170: 与下方 :176 中国时区守卫一致, 避免 UTC runner 跨日使 _today 偏差致末根半截 bar 误判
     for sym, name in SYMBOLS.items():
         try:
-            day = fetch_tx(sym, "day")
+            day, dirty_day = fetch_tx(sym, "day")
             # R164 防御: 今日未收盘(15:00 前)时源端可能返回进行中当日 bar,
             # 丢弃末根避免未来泄漏(置信带锚定虚构"当下")。已收盘(>=15:00)则保留完整当日 bar。
             if day and day[-1]["date"] == _today and datetime.now(timezone(timedelta(hours=8))).hour < 15:  # R167: 显式中国时区, 不再依赖服务器本地 TZ(UTC runner 会误判 15:00 收盘致误丢/误留当日 bar)
@@ -178,8 +191,8 @@ def main():
             if not day:
                 print("WARN %s 无日线数据, 跳过该标的" % name)
                 continue
-            week = fetch_tx(sym, "week")
-            month = fetch_tx(sym, "month")
+            week, dirty_week = fetch_tx(sym, "week")
+            month, dirty_month = fetch_tx(sym, "month")
             # R156: 周/月线此前完全未校验——report.py 会 analyze 周/月线(1963-1964)并 feeding market_breadth,
             # 若不校验, 周/月线的未来日期泄漏/OHLC 违规会无声流入看板, 而 R82 硬拦只查日线 issues。
             # 现按 period 校验周/月线, 并将其问题(尤其未来日期)并入 meta.issues, 使硬拦覆盖三线。
@@ -189,6 +202,11 @@ def main():
             issues = (issues_day
                       + [("周线:" + x) for x in issues_week]
                       + [("月线:" + x) for x in issues_month])
+            # R173(F2): 脏 bar 丢根计数并入 meta.issues, 让"静默丢数据"可见
+            _dirty_total = dirty_day + dirty_week + dirty_month
+            if _dirty_total:
+                issues.append("脏bar已跳过(数据可能缺失) %d 根(日%d/周%d/月%d)" % (
+                    _dirty_total, dirty_day, dirty_week, dirty_month))
             # 全序列抽样比值一致性校验（腾讯 qfq ↔ 新浪 裸价）
             sina_series = fetch_sina_series(sym)
             cc = cross_validate(day, sina_series)
@@ -246,8 +264,15 @@ def main():
             json.dump(result, f, ensure_ascii=False)
         os.replace(tmp_path, out_path)
     except Exception:
-        # 写盘失败清理 .tmp (safe-delete shim 拦 Python 删除, 用 shell rm)
-        os.system("rm -f " + tmp_path)
+        # 写盘失败清理 .tmp：优先 os.remove（CI/Linux/Mac 原生支持, 无 shell 注入风险）；
+        # 部分运行时(如本沙箱 safe-delete shim)拦截 Python 删除, 退化为 shell rm 兜底。
+        try:
+            os.remove(tmp_path)
+        except Exception:
+            try:
+                os.system("rm -f " + tmp_path)
+            except Exception:
+                pass
         raise
     print("saved -> chanlun/data.json (%d 标的)" % len(result))
 

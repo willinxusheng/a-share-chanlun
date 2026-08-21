@@ -553,7 +553,9 @@ def classify(bis, zss, beichis, close, wcls=None, segments=None, seg_beichi=None
                 "resonance": ""}
     last = bis[-1]
     last_zs = zss[-1] if zss else None
-    recent_bc = [b for b in beichis if b["bi_index"] >= len(bis) - 3]
+    # R173(BUG4): beichi["bi_index"] 指向 bis_done(=bis[:-1]); 用 len(bis)-3 会漏判倒数第3支已完成笔的背驰。
+    # 阈值改用 len(bis)-4(=len(bis_done)-3), 使"近3笔背驰"覆盖最后3支已完成笔。
+    recent_bc = [b for b in beichis if b["bi_index"] >= len(bis) - 4]
 
     pos = "无中枢"
     if last_zs:
@@ -965,9 +967,10 @@ def market_breadth(daily_sc, week_sc, month_sc):
                 "composite": {"score": 0.0, "label": "数据不足"},
                 "conclusion": "数据不足（无情景样本，无法综合研判）。"}
     # 跨级别背离识别（结论比单一分数更诚实）
-    m_bull = m_cnt["bull"] >= m_cnt["total"] * 0.6
-    w_bear = w_cnt["bear"] >= w_cnt["total"] * 0.6
-    d_bull = d_cnt["bull"] >= d_cnt["total"] * 0.6
+    # R173(BUG3): 单层 total==0 时 0>=0 恒真会伪造该层偏多/偏空; 空层视为中性(不计入方向主导)。
+    m_bull = (m_cnt["total"] > 0 and m_cnt["bull"] >= m_cnt["total"] * 0.6)
+    w_bear = (w_cnt["total"] > 0 and w_cnt["bear"] >= w_cnt["total"] * 0.6)
+    d_bull = (d_cnt["total"] > 0 and d_cnt["bull"] >= d_cnt["total"] * 0.6)
     if m_bull and w_bear and d_bull:
         conclusion = ("月线多头 + 周线偏空 + 日线反弹 → 当前日线上涨在更大级别上属<b>反弹而非主升浪</b>；"
                       "周线 4/5 偏空显示周线级调整尚未结束，反弹需<b>周线底分型确认</b>才能升级为反转，"
@@ -1049,9 +1052,9 @@ def backtest_paths(klines, min_bi_pct=MIN_BI_PCT, horizon=60, step=20, with_stab
          使校准更贴近当前市场状态、提升样本外稳健性；n/main/alt/risk 均为加权累计(浮点)。"""
     n = len(klines)
     by_sc = {}
-    by_dir = {1: {"n": 0.0, "main": 0.0, "alt": 0.0, "risk": 0.0},
-              -1: {"n": 0.0, "main": 0.0, "alt": 0.0, "risk": 0.0},
-              0: {"n": 0.0, "main": 0.0, "alt": 0.0, "risk": 0.0}}
+    by_dir = {1: {"n": 0.0, "main": 0.0, "alt": 0.0, "risk": 0.0, "dir_main": 0.0, "dir_n": 0.0},
+              -1: {"n": 0.0, "main": 0.0, "alt": 0.0, "risk": 0.0, "dir_main": 0.0, "dir_n": 0.0},
+              0: {"n": 0.0, "main": 0.0, "alt": 0.0, "risk": 0.0, "dir_main": 0.0, "dir_n": 0.0}}
     tot = {"n": 0.0, "main": 0.0, "alt": 0.0, "risk": 0.0}
     t = 260
     while t + horizon < n:
@@ -1104,6 +1107,15 @@ def backtest_paths(klines, min_bi_pct=MIN_BI_PCT, horizon=60, step=20, with_stab
         d = by_dir[main_dir]
         d["n"] += w
         d[hit] += w
+        # 方向命中率(R172): 真实 net 方向与主路径方向一致的比例, 用于 p_main 上限诚实锚定。
+        # 此前 p_main 上限锚的是「路径目标价命中率」(high/low 触及, 偏高), 而看板把 p_main 当
+        # 方向概率展示; 实际方向命中更低, 导致高 p_main bin 系统性过自信。故单独累计方向命中率。
+        if main_dir != 0:
+            _real = klines[t + horizon]["close"]
+            _rdir = 1 if _real > last else (-1 if _real < last else 0)
+            d["dir_n"] += w
+            if _rdir == main_dir:
+                d["dir_main"] += w
         tot["n"] += w
         tot[hit] += w
         t += step
@@ -1240,7 +1252,7 @@ def bias_indicator(closes):
     n = len(closes)
     if n < 20:
         return None
-    ma20 = sum(closes[-20:]) / 20
+    ma20 = sum(closes[-20:]) / 20 or 1e-9  # R173(BUG2): 退化全0价 ma20==0 时避免 ZeroDivisionError
     ma60 = (sum(closes[-60:]) / 60) if n >= 60 else ma20
     close = closes[-1]
     bias20 = (close - ma20) / ma20
@@ -1374,7 +1386,7 @@ def health_score(klines, r, wcls):
         s += 15
     else:
         s -= 10
-    recent_bc = [b for b in r["beichi"] if b["bi_index"] >= len(r["bis"]) - 3]
+    recent_bc = [b for b in r["beichi"] if b["bi_index"] >= len(r["bis"]) - 4]  # R173(BUG4)
     if any(b["type"] == "top" for b in recent_bc):
         s -= 10
     if any(b["type"] == "bottom" for b in recent_bc):
@@ -1388,7 +1400,7 @@ def forecast_confidence(r, wcls, bt, breadth_bias=0):
     cls = r["classify"]
     aligned = cls.get("last_bi_dir") == wcls.get("last_bi_dir")
     c += 20 if aligned else -10
-    recent_bc = [b for b in r["beichi"] if b["bi_index"] >= len(r["bis"]) - 3]
+    recent_bc = [b for b in r["beichi"] if b["bi_index"] >= len(r["bis"]) - 4]  # R173(BUG4)
     if any(b["type"] == "top" for b in recent_bc):
         c -= 15
     if any(b["type"] == "bottom" for b in recent_bc):
@@ -1444,7 +1456,20 @@ def forecast_confidence(r, wcls, bt, breadth_bias=0):
 
 
 def analyze(klines, min_bi_pct=MIN_BI_PCT, with_stability=True):
-    merged = merge_inclusion(klines)
+    if not klines:
+        # R173(BUG1): 空入空出——下游多处依赖 closes[-1]/bis, 空序列必须早退, 否则 IndexError。
+        # 返回最小安全骨架(与 classify 空守卫同口径), 调用方应避免传入空序列。
+        return {"classify": {"scenario": "数据不足", "detail": "", "position": "无中枢",
+                             "last_bi_dir": 0, "last_bi_pct": 0.0, "seg_bc_bottom": False,
+                             "seg_bc_top": False, "interval_nesting": "", "month_context": "",
+                             "trend_type": "", "month_dir": 0, "week_dir": 0,
+                             "week_scenario": "数据不足", "month_scenario": "数据不足",
+                             "resonance": ""},
+                "bis": [], "merged": [], "zss": [], "beichi": [], "stability": None,
+                "bias": None, "adx": None, "mdd": None, "vol_trend": None,
+                "ma_alignment": None, "capture_rate": 0.0,
+                "agreement": {"rate": 0.0, "ok": 0, "tot": 0}}
+    merged = merge_inclusion(klines)  # R173(BUG1 修复回归): 早退块误删此行, 致 happy path NameError
     bis = build_bi(merged, min_bi_pct)
     zss = build_zhongshu(bis)
     closes = [k["close"] for k in klines]

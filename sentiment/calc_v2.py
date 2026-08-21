@@ -66,6 +66,12 @@ for r in sh:
     data.append({"date": r["date"], "close": r["close"], "amount": amt,
                  "to": to, "ratio": ratio})
 n = len(data)
+# R173(F4): 四源合并后为空(行情文件日期未对齐/全行格式异常)时, data[0]/data[-1] 会 IndexError,
+# 且下游 valid[-1]/fwd 等会连环崩溃 → 直接退出让上层使用已提交的兜底 sentiment_v2.json,
+# 避免写出空/损坏产物或静默用旧数据。
+if not data:
+    raise SystemExit("ERROR: 四源合并后无有效行(行情文件日期未对齐/全行格式异常), "
+                     "无法生成 sentiment_v2.json; 将使用已提交的兜底产物。")
 print("merged:", n, data[0]["date"], "~", data[-1]["date"])
 
 closes = [d["close"] for d in data]
@@ -75,9 +81,11 @@ def ma(arr, i, w):
         return None
     return sum(arr[i - w + 1: i + 1]) / w
 
+# R173(F5): closes 来自原始行情 txt, 理论上 close>0, 但脏数据可能出现 0 → 除零崩溃。
+# 对 mom20 / vol20 的除数做 0 守卫, 触发时置 None(下游分位/信号已容错 None)。
 for i, d in enumerate(data):
-    d["mom20"] = (closes[i] / closes[i - 20] - 1) * 100 if i >= 20 else None
-    if i >= 20:
+    d["mom20"] = (closes[i] / closes[i - 20] - 1) * 100 if (i >= 20 and closes[i - 20] != 0) else None
+    if i >= 20 and all(closes[j - 1] != 0 for j in range(i - 19, i + 1)):
         rets = [closes[j] / closes[j - 1] - 1 for j in range(i - 19, i + 1)]
         m = sum(rets) / 20
         d["vol20"] = math.sqrt(sum((x - m) ** 2 for x in rets) / 20) * 100
@@ -128,6 +136,11 @@ for i, d in enumerate(data):
         d["score"] = None
 
 valid = [d for d in data if d["score"] is not None]
+# R173(F4 扩展): 有效分位样本为空(数据不足120日或全行无分位)时, valid[-1] 会 IndexError。
+# 同样退化为已提交兜底产物, 不写出损坏 json。
+if not valid:
+    raise SystemExit("ERROR: 有效分位样本为空(数据不足120日或全行无分位), "
+                     "无法生成 sentiment_v2.json; 将使用已提交的兜底产物。")
 scores = [d["score"] for d in valid]
 for i, d in enumerate(valid):
     d["ma5s"] = ma(scores, i, 5)
@@ -179,6 +192,9 @@ def gen_signals(buy_th, sell_th):
 def fwd(i, days):
     j = i + days
     if j >= len(valid):
+        return None
+    # R173(F5 扩展): 除数 close==0(脏数据)时置 None, 避免 ZeroDivisionError 连环崩溃。
+    if valid[i]["close"] == 0 or valid[j]["close"] == 0:
         return None
     return round((valid[j]["close"] / valid[i]["close"] - 1) * 100, 2)
 

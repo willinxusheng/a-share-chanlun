@@ -27,7 +27,7 @@ import os
 import statistics
 import sys
 
-from chanlun import analyze, adaptive_horizon
+from chanlun import analyze, adaptive_horizon, backtest_paths
 from report import forecast_svg
 
 BASE = os.path.dirname(os.path.abspath(__file__))
@@ -53,6 +53,18 @@ def run():
     n_base = len(base)
     # rec[sym][H] = [(p_main, correct), ...]
     rec = {sym: {h: [] for h in H_TARGETS} for sym in symbols}
+    # R173(P0): 用全量历史计算 bt_paths(与 live 看板口径一致), 使门禁真正检验用户看到的 p_main
+    # (forecast_svg 的 _w_dir>0 经验锚分支), 而非仅 _base 启发式下限——修复此前"假绿"(测错代码路径)。
+    # analyze/realized 方向仍严格截断无前视, 仅校准锚用全量历史(=live 行为)。
+    bt_paths_all = {}
+    for sym in symbols:
+        try:
+            _kl = kls[sym]
+            _r = analyze(_kl)
+            _hz = adaptive_horizon(_r["bis"], _r["merged"])
+            bt_paths_all[sym] = backtest_paths(_kl, horizon=_hz, step=max(15, _hz // 2), with_stability=False)
+        except Exception:
+            bt_paths_all[sym] = None
     i = MIN_HISTORY
     while i < n_base - 35:
         date_i = base[i]["date"]
@@ -65,9 +77,9 @@ def run():
             try:
                 r = analyze(trunc)
                 horizon = adaptive_horizon(r["bis"], r["merged"])
-                # bt=None/breadth=None: 与关4一致, 仅抓取几何+概率(不影响 p_main 的命中率夹逼口径)
+                # R173: 传 bt_paths(全量历史口径) → 走 _w_dir>0 经验锚分支, 检验真实 p_main 校准度
                 _svg, _note, _probs, _leg, fc = forecast_svg(
-                    trunc, r, r["classify"], 50.0, 0.0, sym, horizon)
+                    trunc, r, r["classify"], 50.0, 0.0, sym, horizon, bt_paths_all.get(sym))
             except Exception:
                 continue
             p_main = _probs[0]

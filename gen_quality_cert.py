@@ -62,9 +62,10 @@ def main():
             # R169: 覆盖率维度补 N>=20 下限(与 R167 C2 的 bias/direction 同口径);
             # N<20 视为统计噪声, cover95 置 None(报告渲染为"-"+⚠️样本不足), 不再写虚假高精度。
             cov = round(s["in95"] / n * 100, 1) if (n and n >= 20) else None
-            dm = round(s["dir_main"] / n * 100, 1) if n else None
-            dmed = round(s["dir_med"] / n * 100, 1) if n else None
-            bias = round(statistics.median(s["bias_list"]) * 100, 2) if s["bias_list"] else None
+            # R173(F7): 方向/偏置维度与覆盖同口径——N<20 视为统计噪声, 不显精确百分比(避免假精度)。
+            dm = round(s["dir_main"] / n * 100, 1) if (n and n >= 20) else None
+            dmed = round(s["dir_med"] / n * 100, 1) if (n and n >= 20) else None
+            bias = round(statistics.median(s["bias_list"]) * 100, 2) if (s["bias_list"] and n >= 20) else None
             # R80 覆盖维度
             raw_cov = s["in95"] / s["N"] * 100 if (n and n >= 20) else None
             regime_cov[rg]["T%d" % H] = {"N": n, "cover95": cov, "bias_median": bias}
@@ -82,15 +83,20 @@ def main():
     for rg in ("bull", "bear", "range"):
         for H in ac.H_TARGETS:
             s = regime_agg[rg][H]
-            if s["N"] and s["N"] >= 20 and s["in95"] / s["N"] * 100 < 85.0:
+            # R173(F8): 收集覆盖<85% 的所有 regime(不限 N>=20), 使下方"样本偏小"提示对 N<20 也可达,
+            # 修复此前 weak_cov 仅含 N>=20 导致该分支恒为 False 的死代码。
+            if s["N"] and s["in95"] / s["N"] * 100 < 85.0:
                 weak_cov.append((rg, H, s["N"]))
             if s["N"] >= 20 and s["dir_main"] / s["N"] * 100 < 50.0:
                 weak_dir.append((rg, H, s["N"]))
+    # R173(F8): 小样本判定基于全部 regime 的 N, 不再依赖 weak_cov(后者不含 N<20)。
+    _small_n = [(rg, H, regime_agg[rg][H]["N"]) for rg in ("bull", "bear", "range") for H in ac.H_TARGETS
+                if regime_agg[rg][H]["N"] < 20]
     if weak_cov:
         parts = ["%s T+%d 覆盖<85%%(N=%d)" % (rg, H, n) for rg, H, n in weak_cov]
         regime_note += "覆盖异常: " + "; ".join(parts)
-        if any(n < 20 for _, _, n in weak_cov):
-            regime_note += (" — 触发regime样本偏小(N<20, 或系统计噪声), 暂不改模型避免过拟合, "
+        if _small_n:
+            regime_note += (" — 部分 regime 样本偏小(N<20, 或系统计噪声), 暂不改模型避免过拟合, "
                             "待积累熊市样本(延长历史/下次熊市)后定点加固 T+30 带宽")
     if weak_dir:
         parts = ["%s T+%d 方向命中<50%%(N=%d)" % (rg, H, n) for rg, H, n in weak_dir]
@@ -127,6 +133,10 @@ def main():
     # 取所有标的最新日期的最大值（不同指数末根日期可能差 1 个交易日），避免只取首个标的偏低
     last_date = max((data[s]["meta"]["last_date"] for s in data), default=None) if data else None
 
+    # R173(F9): 诚实分级——方向逆相关或全 regime 样本不足(N<20)时降级标 warn/review
+    _any_insufficient = any(regime_agg[rg][H]["N"] < 20
+                            for rg in ("bull", "bear", "range") for H in ac.H_TARGETS)
+
     cert = {
         "generated_at": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "data_last_date": last_date,
@@ -149,7 +159,11 @@ def main():
             "status": "monitor_only",
             "note": "R76 情绪条件化: T+30 样本外 +8.9pp(极端区 31%→69%)但近期极端样本 N=10 不足, 未并入模型, 仅透明化",
         },
-        "accuracy_status": "capped",
+        # R173(F9): 诚实分级——方向逆相关(命中<50%, n>=20)比覆盖略窄更严重(作为信号有害), 至少 warn;
+        # 全 regime 样本不足(N<20)无法验证校准, 显式 review; 其余 healthy。
+        # R172: accuracy_status 由实际回测结果派生, 不再写死 "capped"
+        "accuracy_status": ("warn" if (not bias_ok or regime_warn or regime_dir_warn)
+                            else ("review" if _any_insufficient else "healthy")),
         "accuracy_note": "预测准确性16道监控门禁(R70-R89)已全部落地, 数学层面封顶: 覆盖良好(关11); 方向/概率/路径形态无技能(关8/关10/关14, 不可作信号); 价位无偏(关12); 数值自洽(关13); 极端尾部平静市兜住、熊市T+30漏覆盖33%(关15全历史回测口径; 当前小样本见regime_coverage板块); 波动率√f全样本成立但regime内亚线性致长horizon带虚胖(关16)。决策仍锚置信带区间+中位路径价位, 熊市自加安全垫。",
         "regime_coverage": regime_cov,
         "regime_warn": regime_warn,

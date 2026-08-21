@@ -748,7 +748,11 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
         _dir_main = _dir["main"] / _dir_n
         _dir_alt = _dir["alt"] / _dir_n
         _dir_risk = _dir["risk"] / _dir_n
-        p_main = _base * (1 - _w_dir) + _dir_main * _w_dir
+        # R172: 方向命中率(真实方向与主路径方向一致比)用于上限诚实锚定, 避免高 p_main bin 过自信
+        _dir_dir = (_dir["dir_main"] / _dir["dir_n"]) if (_dir.get("dir_n", 0.0) > 0.0) else None
+        # R172: 经验锚统一用「方向命中率」(_dir_dir), 使 p_main 如实反映方向概率(此前用目标价命中率偏高)
+        _anchor = _dir_dir if _dir_dir is not None else _dir_main
+        p_main = _base * (1 - _w_dir) + _anchor * _w_dir
     elif _w > 0:
         _emp_p = 0.5 + (emp_wr - 0.5) * 0.7
         p_main = _base * (1 - _w) + _emp_p * _w
@@ -849,14 +853,12 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
     # 被路径历史命中率(_dir_main)夹逼——命中率低的情景不允许被微调抬到高位，命中率高的允许上探，
     # 使概率由经验真值主导而非拍脑袋微调。
     if _w_dir > 0:
-        # R138 校准修复：p_main 必须紧贴经验真值 _dir_main（路径历史命中率），仅留 ±0.06 的
+        # R138 校准修复：p_main 必须紧贴经验真值(方向命中率)对称夹逼, 仅留 ±0.06 的
         # 二阶修正余量（< 自校验告警阈值 0.08），杜绝结构微调把主路径概率系统性抬到经验命中率
-        # 之上造成"偏乐观"过拟合。此前 _cap = 0.42 + _dir_main*0.42 含 +0.42 截距，给上行留 ~0.10
-        # 余量，叠加多项正修正后 p_main 实际高出 _dir_main 达 8~9pt，既与"经验真值主导"设计意图
-        # 相悖，又持续触发 path_hit_html 的"偏乐观"误告警。改为围绕 _dir_main 对称夹逼，使自校验
-        # 只在真实背离时报警，概率更诚实。
-        _cap = min(0.72, _dir_main + 0.06)
-        _floor = max(0.30, _dir_main - 0.06)
+        # 之上造成"偏乐观"过拟合。R172 起经验真值由「目标价命中率」升级为「方向命中率」(_anchor),
+        # 使 p_main 如实反映方向概率(path_hit_html 自校验同步改比方向命中率, 三者一致无伪告警)。
+        _cap = min(0.72, _anchor + 0.06)
+        _floor = max(0.30, _anchor - 0.06)
         p_main = max(_floor, min(p_main, _cap))
     # 市场广度方向门控（#预测优化·D）：系统性环境真正约束结构推演，不止装饰性微调。
     # 高层级(月/周加权)明确偏空时，买点主路径上限压 0.50；偏多反向放开（不重复增益，避免双计）。
@@ -1478,7 +1480,18 @@ def path_hit_html(scenario, pb, p_main, p_alt, p_risk, horizon=60):
     if not e or e["n"] < 8:
         e = pb["total"]
     n = e["n"]
-    mr = e["main"] / n * 100 if n else 0
+    if n < 8:
+        # R173: 样本不足(N<8)时回退 total 也可能为 0 → mr=0 → dev<-8 必判"偏乐观",
+        # 这与 R172 消除伪告警的初衷相悖; 此时不对照方向, 直接告知样本不足。
+        return ('<div class="pathcheck"><b>推演路径命中率自校验</b>'
+                '<span class="pc-sub">历史同类方向结构样本不足(N={n})，不做方向校准对照，'
+                '本条不判定偏乐观/偏保守。</span></div>').format(n=n)
+    # R172: 自校验改比「方向命中率」(dir_main/dir_n) 而非目标价命中率(main/n), 与 p_main 经验锚一致,
+    # 否则方向技能高的环境(牛/熊)会被误报"偏乐观"。total 无方向命中率时回退目标价命中率。
+    if e.get("dir_n", 0.0) > 0.0:
+        mr = e["dir_main"] / e["dir_n"] * 100
+    else:
+        mr = e["main"] / n * 100 if n else 0
     ar = e["alt"] / n * 100 if n else 0
     rr = e["risk"] / n * 100 if n else 0
     rows = (("主路径", mr, p_main * 100, RED),
@@ -1901,6 +1914,10 @@ def build_quality_cert_html(base):
     drift = c.get("drift", {}).get("note", "")
     sent = c.get("sentiment", {}).get("note", "")
     acc = c.get("accuracy_note", "")
+    # R173: R172 把 accuracy_status 由写死改为派生, 但此前报告从不读它 → 派生结果在看板不可见。
+    # 此处渲染为顶部徽标, 让"预测准确性自检结论"真正对用户可见可验。
+    acc_status = c.get("accuracy_status", "healthy")
+    _acc_color = {"healthy": "#0891b2", "review": "#d97706", "warn": "#dc2626"}.get(acc_status, "#0891b2")
     warn_cls = "" if bias_ok else " warn"
     bias_cell = (f'<div class="qc-cell{warn_cls}"><div class="qc-v">{bias_val}%</div>'
                  f'<div class="qc-l">中线偏置(中位)</div></div>')
@@ -1947,6 +1964,7 @@ def build_quality_cert_html(base):
     html = (
         f'<div class="qc-card{" warn" if regime_warn else ""}">'
         f'<div class="qc-head">📊 预测质量自检证书'
+        f' <span style="color:{_acc_color};font-weight:700">[{acc_status}]</span>'
         f'{" ⚠️" if regime_warn else ""}'
         f'<span class="qc-sub">数据截至 {c.get("data_last_date")} · 生成 {c.get("generated_at")}</span></div>'
         + '<div class="qc-grid">'
@@ -2095,31 +2113,32 @@ def main():
     forecast_info = {}
     paths_bt = {}
     for sym, d in data.items():
-        r = results[sym]
-        # 推演路径历史命中率回测（预测准确性自校验）：horizon 与推演图自适应 horizon 对齐，
-        # 使「路径命中率自校验」对照的是同一时间尺度（此前固定 h=60，而锥图用 30~90 自适应，
-        # 口径不一致会让校准对照失真）。step 取 horizon//2 保证样本窗基本不重叠、统计独立。
-        horizon = adaptive_horizon(r["bis"], r["merged"])
-        _step = max(15, horizon // 2)
-        paths_bt[sym] = backtest_paths(d["klines"], horizon=horizon, step=_step, with_stability=False)
-        wcls_full = results_week[sym]
-        wcls = wcls_full["classify"]
-        mcls = results_month[sym]["classify"]
-        m_color = SCENARIO_COLOR.get(mcls["scenario"], BLUE)
-        # 注：日线 classify 已在此前预扫描中用周/月线重算（含 interval_nesting / ma_alignment 回写），
-        # 此处 r["classify"] 即为统一口径，下游 card / forecast 行为一致。
-        health, conf = scores[sym]
-        horizon = adaptive_horizon(r["bis"], r["merged"])
-        sigma = forward_vol([k["close"] for k in d["klines"]], horizon)
-        cards.append(card_html(sym, d["name"], d["klines"], r, wcls, health, conf))
-        cls = r["classify"]
-        sc_color = SCENARIO_COLOR.get(cls["scenario"], BLUE)
-        w_color = SCENARIO_COLOR.get(wcls["scenario"], BLUE)
-        fs_svg, fs_note, fs_probs, fs_legend, fc_data = forecast_svg(d["klines"], r, wcls, conf, sigma, sym, horizon, backtests[sym], paths_bt[sym], breadth_score=bd["composite"]["score"])
-        div_txt = ('⚠️ 周线向下笔运行中，以上路径的兑现以周线底分型确认为前提；若周线续创新低，风险路径概率上升。'
-                   if cls.get("last_bi_dir") != wcls.get("last_bi_dir")
-                   else "日周级别共振，主路径置信度较高。")
-        sections.append(f"""
+        try:
+            r = results[sym]
+            # 推演路径历史命中率回测（预测准确性自校验）：horizon 与推演图自适应 horizon 对齐，
+            # 使「路径命中率自校验」对照的是同一时间尺度（此前固定 h=60，而锥图用 30~90 自适应，
+            # 口径不一致会让校准对照失真）。step 取 horizon//2 保证样本窗基本不重叠、统计独立。
+            horizon = adaptive_horizon(r["bis"], r["merged"])
+            _step = max(15, horizon // 2)
+            paths_bt[sym] = backtest_paths(d["klines"], horizon=horizon, step=_step, with_stability=False)
+            wcls_full = results_week[sym]
+            wcls = wcls_full["classify"]
+            mcls = results_month[sym]["classify"]
+            m_color = SCENARIO_COLOR.get(mcls["scenario"], BLUE)
+            # 注：日线 classify 已在此前预扫描中用周/月线重算（含 interval_nesting / ma_alignment 回写），
+            # 此处 r["classify"] 即为统一口径，下游 card / forecast 行为一致。
+            health, conf = scores[sym]
+            horizon = adaptive_horizon(r["bis"], r["merged"])
+            sigma = forward_vol([k["close"] for k in d["klines"]], horizon)
+            cards.append(card_html(sym, d["name"], d["klines"], r, wcls, health, conf))
+            cls = r["classify"]
+            sc_color = SCENARIO_COLOR.get(cls["scenario"], BLUE)
+            w_color = SCENARIO_COLOR.get(wcls["scenario"], BLUE)
+            fs_svg, fs_note, fs_probs, fs_legend, fc_data = forecast_svg(d["klines"], r, wcls, conf, sigma, sym, horizon, backtests[sym], paths_bt[sym], breadth_score=bd["composite"]["score"])
+            div_txt = ('⚠️ 周线向下笔运行中，以上路径的兑现以周线底分型确认为前提；若周线续创新低，风险路径概率上升。'
+                       if cls.get("last_bi_dir") != wcls.get("last_bi_dir")
+                       else "日周级别共振，主路径置信度较高。")
+            sections.append(f"""
     <section class="panel" id="sec-{sym}">
       <h2>{d["name"]}（{sym}）{badge(f'日线：{cls["scenario"]}', sc_color)}{badge(f'周线：{wcls["scenario"]}', w_color)}{badge(f'月线：{mcls["scenario"]}', m_color)}{badge(f'健康 {health}', RED)}{badge(f'置信 {conf}', BLUE)}</h2>
       <div class="chartbox">
@@ -2138,14 +2157,25 @@ def main():
       {path_hit_html(cls["scenario"], paths_bt[sym], fs_probs[0], fs_probs[1], fs_probs[2], horizon)}
       </div>
     </section>""")
-        conclusions.append(f'<li><b>{d["name"]}</b>：日线 {cls["scenario"]} / 周线 {wcls["scenario"]} —— {cls["detail"]} <a href="#sec-{sym}" data-sym="{sym}" data-jump style="font-size:12px;color:{BLUE}">[查看图解]</a></li>')
-        forecast_info[sym] = {"p_main": fs_probs[0], "p_alt": fs_probs[1], "p_risk": fs_probs[2],
-                              "p_hold": fc_data["p_hold"],
-                              "zd": (r["zhongshu"][-1]["zd"] if r["zhongshu"] else d["klines"][-1]["close"] * 0.95),
-                              "stable": r["stability"]["stable"],
-                              "level": r["stability"].get("level", "稳健"),
-                              "last_bi_bars": r["stability"].get("last_bi_bars", 0),
-                              "sigma": sigma, "fc": fc_data}
+            conclusions.append(f'<li><b>{d["name"]}</b>：日线 {cls["scenario"]} / 周线 {wcls["scenario"]} —— {cls["detail"]} <a href="#sec-{sym}" data-sym="{sym}" data-jump style="font-size:12px;color:{BLUE}">[查看图解]</a></li>')
+            forecast_info[sym] = {"p_main": fs_probs[0], "p_alt": fs_probs[1], "p_risk": fs_probs[2],
+                                  "p_hold": fc_data["p_hold"],
+                                  "zd": (r["zhongshu"][-1]["zd"] if r["zhongshu"] else d["klines"][-1]["close"] * 0.95),
+                                  "stable": r["stability"]["stable"],
+                                  "level": r["stability"].get("level", "稳健"),
+                                  "last_bi_bars": r["stability"].get("last_bi_bars", 0),
+                                  "sigma": sigma, "fc": fc_data}
+        except Exception as _e:
+            # R173: 单指数计算异常(脏数据/边界)不再中断整份报告, 降级为该指数占位卡, 其余照常渲染。
+            import traceback as _tb
+            print("WARN 指数 %s 渲染失败, 降级占位: %s" % (sym, _e))
+            _tb.print_exc()
+            sections.append(f"""
+    <section class="panel" id="sec-{sym}">
+      <h2>{d["name"]}（{sym}）{badge('数据缺失', '#dc2626')}</h2>
+      <div class="verdict"><b>结构解读：</b><p>该指数本轮渲染异常（已降级占位，不影响其余指数）。</p></div>
+    </section>""")
+            conclusions.append(f'<li><b>{d["name"]}</b>（{sym}）：渲染异常，已降级占位。</li>')
 
     fc_blob = {sym: forecast_info[sym]["fc"] for sym in data}
     diverge_note = ""
@@ -2219,7 +2249,7 @@ def main():
       <h4>一句话结论</h4>
       <ul>
         <li><b>市场格局：</b>{pat}{stance}。</li>
-        <li><b>推演结论：</b>各指数主路径概率约 {int(min((forecast_info[s]['p_main'] for s in data))*100)}%~{int(max((forecast_info[s]['p_main'] for s in data))*100)}%；跌破中枢 ZD 即主路径失效。详见<a href="#s3">第三节</a>。</li>
+        <li><b>推演结论：</b>各指数主路径概率约 {int(round(min((forecast_info[s]['p_main'] for s in forecast_info))*100))}%~{int(round(max((forecast_info[s]['p_main'] for s in forecast_info))*100))}%；跌破中枢 ZD 即主路径失效。详见<a href="#s3">第三节</a>。</li>
       </ul>
     </div>"""
 
@@ -2819,8 +2849,13 @@ function navH(){{ var t=document.querySelector('nav.toc'), r=document.getElement
 </body>
 </html>"""
 
-    with open(os.path.join(_base, "report.html"), "w", encoding="utf-8") as f:
+    # R173: 原子写——先写 .tmp 再 os.replace, 避免任一指数计算异常导致本次不写文件、
+    # 磁盘残留上一次成功的陈旧 report.html 被误当最新。
+    _out = os.path.join(_base, "report.html")
+    _tmp = _out + ".tmp"
+    with open(_tmp, "w", encoding="utf-8") as f:
         f.write(html)
+    os.replace(_tmp, _out)
     print("saved -> chanlun/report.html")
 
 
