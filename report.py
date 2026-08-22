@@ -2049,26 +2049,6 @@ def _sent_thermometer_html(final, zone, zlabel, zcolor, buy_th, sell_th, final_p
     </div>"""
 
 
-def _sent_dimensions_html(dimensions):
-    """维度拆解表: 名称 | 子分 | 明细。"""
-    if not dimensions:
-        return ""
-    rows = ""
-    for d in dimensions:
-        sub = d.get("sub")
-        sub_txt = "—" if sub is None else ("%+.2f" % sub)
-        sub_color = RED if (sub or 0) > 0 else (GREEN if (sub or 0) < 0 else "#64748b")
-        pct = d.get("pct")
-        pct_txt = "—" if pct is None else ("%g" % pct)
-        rows += (f'<tr><td>{d.get("name", "—")}</td>'
-                 f'<td class="tac"><b style="color:{sub_color}">{sub_txt}</b></td>'
-                 f'<td class="tar"><span style="color:#64748b">{d.get("detail", "")}</span></td></tr>')
-    return (f'<div class="sent-dim-card">'
-            f'<div class="sent-dim-title">维度</div>'
-            f'<table class="sent-dim-tbl"><thead><tr><th>维度</th><th class="tac">子分</th><th class="tar">明细</th></tr></thead>'
-            f'<tbody>{rows}</tbody></table></div>')
-
-
 def _sent_main_chart(forecast, hist, buy_th, sell_th):
     """情绪走势与未来预测合一主图: 历史情绪(蓝实线) + 预测情绪(橙虚线) + 今日竖线 + 机会/危险区背景 + dataZoom。
     对齐参考图: 一条连续曲线, 今日为界, 左侧实线右侧虚线, 80以上红色风险区、20以下绿色机会区。"""
@@ -2187,9 +2167,7 @@ def sentiment_board_html(base, data, results, results_week, scores, last_date):
         final_pct = None if not isinstance(final_pct, (int, float)) else float(final_pct)
         hist = sent.get("hist") or []
         forecast = sent.get("forecast")
-        dimensions = sent.get("dimensions") or []
         header = _sent_thermometer_html(final, zone, zlabel, zcolor, buy_th, sell_th, final_pct, ma5s, ma20s)
-        dim_table = _sent_dimensions_html(dimensions)
         main_chart = _sent_main_chart(forecast, hist, buy_th, sell_th)
         index_chart = _sent_index_chart(hist)
         return f"""
@@ -2202,13 +2180,8 @@ def sentiment_board_html(base, data, results, results_week, scores, last_date):
         情绪数据由仓库内置 <code>sentiment/calc_v2.py</code> 基于提交的指数日K计算（asof <b>{asof}</b>），
         更新节奏独立于行情数据（截至 {last_date}）；情绪仅作环境参考，不进入推演数学（R76 监控中）。</p>
       {header}
-      <div class="sent-layout">
-        <div class="sent-col-left">{dim_table}</div>
-        <div class="sent-col-right">
-          <div class="sent-chart-card">{main_chart}</div>
-          <div class="sent-chart-card">{index_chart}</div>
-        </div>
-      </div>
+      <div class="sent-chart-card">{main_chart}</div>
+      <div class="sent-chart-card">{index_chart}</div>
       <p class="sent-footnote">代理情绪温度（monitor_only）：由上证量能/动量/波动/牛熊位置 + 宽基与跨市场广度合成，非全市场涨跌家数；量能维度受数据源 volume 单位差异影响，仅供研判参考，不参与任何概率/方向计算。history 为全部可用交易日逐日回算；forecast 由 KNN 历史轨迹派生，为路径派生预测而非因子预测。</p>
     </section>"""
     except Exception as _e:
@@ -2731,34 +2704,26 @@ def main():
   .xh-tip b {{ color: #fbbf24; }}
   .tablescroll {{ width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }}
   /* R178 市场情绪板块（对齐 sentiment-dashboard 视觉语言） */
-  .sent-head {{ background: #f8fafc; border: 1px solid #e5e9f0; border-radius: 12px; padding: 16px 18px; margin-bottom: 14px; }}
+  .sent-head {{ background: #fff; border: 1px solid #e5e9f0; border-radius: 14px; padding: 18px 20px; margin-bottom: 14px; box-shadow: 0 1px 3px rgba(15,23,42,.04); }}
   .sent-head-row {{ display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }}
   .sent-title-wrap {{ display: flex; align-items: center; gap: 10px; }}
-  .sent-main-title {{ font-size: 18px; font-weight: 800; color: #1e293b; }}
-  .sent-tag {{ font-size: 12px; color: #fff; padding: 3px 12px; border-radius: 999px; font-weight: 700; }}
+  .sent-main-title {{ font-size: 18px; font-weight: 800; color: #1e293b; letter-spacing: -.2px; }}
+  .sent-tag {{ font-size: 12px; color: #fff; padding: 4px 12px; border-radius: 999px; font-weight: 700; box-shadow: 0 1px 2px rgba(0,0,0,.08); }}
   .sent-score-wrap {{ display: flex; align-items: baseline; gap: 10px; }}
-  .sent-big-score {{ font-size: 42px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }}
-  .sent-score-meta {{ display: flex; flex-direction: column; align-items: flex-start; gap: 2px; font-size: 12px; color: #64748b; }}
-  .sent-pct {{ font-variant-numeric: tabular-nums; }}
-  .sent-trend {{ font-weight: 700; }}
-  .sent-bar-wrap {{ margin-top: 12px; }}
-  .sent-bar-track {{ position: relative; height: 10px; border-radius: 5px; background: linear-gradient(90deg, #22c55e 0%, #22c55e 25%, #f59e0b 50%, #ef4444 75%, #ef4444 100%); overflow: visible; }}
-  .sent-bar-fill {{ position: absolute; left: 0; top: -2px; height: 14px; border-radius: 7px; box-shadow: 0 0 0 3px rgba(255,255,255,.85), 0 2px 6px rgba(0,0,0,.2); min-width: 4px; max-width: 100%; transition: width .6s ease; }}
-  .sent-bar-tick {{ position: absolute; top: -3px; width: 2px; height: 16px; background: rgba(255,255,255,.9); border-radius: 1px; box-shadow: 0 1px 2px rgba(0,0,0,.25); }}
+  .sent-big-score {{ font-size: 44px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; letter-spacing: -1px; }}
+  .sent-score-meta {{ display: flex; flex-direction: column; align-items: flex-start; gap: 3px; font-size: 12px; color: #64748b; }}
+  .sent-pct {{ font-variant-numeric: tabular-nums; background: #f1f5f9; padding: 1px 6px; border-radius: 4px; font-size: 11px; }}
+  .sent-trend {{ font-weight: 700; font-variant-numeric: tabular-nums; }}
+  .sent-bar-wrap {{ margin-top: 14px; }}
+  .sent-bar-track {{ position: relative; height: 10px; border-radius: 5px; background: linear-gradient(90deg, #22c55e 0%, #22c55e 28%, #f59e0b 50%, #ef4444 72%, #ef4444 100%); overflow: visible; }}
+  .sent-bar-fill {{ position: absolute; left: 0; top: -2px; height: 14px; border-radius: 7px; box-shadow: 0 0 0 3px rgba(255,255,255,.9), 0 2px 6px rgba(0,0,0,.18); min-width: 4px; max-width: 100%; transition: width .6s ease; }}
+  .sent-bar-tick {{ position: absolute; top: -3px; width: 2px; height: 16px; background: rgba(255,255,255,.95); border-radius: 1px; box-shadow: 0 1px 2px rgba(0,0,0,.25); }}
   .sent-bar-labels {{ display: flex; justify-content: space-between; font-size: 11px; color: #64748b; margin-top: 6px; text-align: center; }}
   .sent-bar-labels small {{ font-size: 10px; opacity: .8; }}
   .sent-head-note {{ font-size: 12px; color: #64748b; margin-top: 10px; line-height: 1.5; }}
-  .sent-layout {{ display: grid; grid-template-columns: 300px 1fr; gap: 14px; align-items: start; }}
-  .sent-dim-card {{ background: #fff; border: 1px solid #e5e9f0; border-radius: 12px; overflow: hidden; }}
-  .sent-dim-title {{ font-size: 13px; font-weight: 700; color: #334155; padding: 12px 14px; background: #f8fafc; border-bottom: 1px solid #eef2f7; }}
-  .sent-dim-tbl {{ width: 100%; border-collapse: collapse; font-size: 13px; }}
-  .sent-dim-tbl th {{ text-align: left; font-weight: 600; color: #475569; background: #f1f5f9; padding: 9px 12px; border-bottom: 1px solid #eef2f7; }}
-  .sent-dim-tbl td {{ padding: 10px 12px; border-bottom: 1px solid #f1f5f9; color: #334155; }}
-  .sent-dim-tbl tbody tr:last-child td {{ border-bottom: none; }}
-  .sent-dim-tbl .tac {{ text-align: center; }}
-  .sent-dim-tbl .tar {{ text-align: right; }}
-  .sent-chart-card {{ background: #fff; border: 1px solid #e5e9f0; border-radius: 12px; padding: 10px 12px 12px; margin-bottom: 12px; }}
+  .sent-chart-card {{ background: #fff; border: 1px solid #e5e9f0; border-radius: 14px; padding: 10px 12px 12px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(15,23,42,.04); }}
   .sent-chart-card:last-child {{ margin-bottom: 0; }}
+  .sent-chart-card .echart-toolbar {{ font-size: 12px; color: #475569; font-weight: 700; padding: 4px 2px 8px; line-height: 1.4; }}
   .sent-footnote {{ font-size: 11px; color: #94a3b8; line-height: 1.7; margin-top: 12px; padding: 10px 12px; background: #f8fafc; border-radius: 8px; }}
 
   @media (max-width: 720px) {{
@@ -2777,12 +2742,9 @@ def main():
     nav.toc a {{ padding: 5px 8px; }}
     nav.toc a .num {{ width: 16px; height: 16px; font-size: 10px; margin-right: 4px; }}
     .hero {{ gap: 8px; }}
-    .sent-layout {{ grid-template-columns: 1fr; }}
     .sent-head {{ padding: 12px 14px; }}
     .sent-big-score {{ font-size: 34px; }}
     .sent-head-row {{ gap: 10px; }}
-    .sent-dim-tbl {{ font-size: 12px; }}
-    .sent-dim-tbl th, .sent-dim-tbl td {{ padding: 8px 10px; }}
   }}
   /* ===== 模块互联互通 ===== */
   nav.sym-rail {{ position: sticky; top: 54px; z-index: 49; background: rgba(255,255,255,0.97); backdrop-filter: blur(8px); border: 1px solid #e2e8f0; border-radius: 12px; padding: 6px 10px; margin: 10px 0 18px; display: flex; flex-wrap: wrap; gap: 6px; box-shadow: 0 4px 14px rgba(15,23,42,0.05); }}
