@@ -2207,6 +2207,11 @@ def _sent_main_chart(forecast, hist, buy_th, sell_th, acc=None):
         "lineStyle:{color:'#2b6cb0',width:2},z:4,"
         "markArea:{silent:true,data:D.markAreaData},"
         "markLine:{symbol:'none',data:yearML}},"
+        # 预测置信带(p25-p75, 逐日κ重标定至名义50%覆盖): 蓝系半透明面积, 与主体视觉一致(R191 移除黄带后本轮恢复)
+        "{name:'预测区间下沿',type:'line',data:D.band_lo,stack:'bsent',symbol:'none',"
+        "lineStyle:{opacity:0},areaStyle:{opacity:0},tooltip:{show:false},silent:true,z:3},"
+        "{name:'预测区间',type:'line',data:D.band_hi,stack:'bsent',symbol:'none',"
+        "lineStyle:{opacity:0},areaStyle:{color:'rgba(124,58,237,0.12)'},tooltip:{show:false},silent:true,z:3},"
         "{name:'预测情绪',type:'line',data:D.yfc,symbol:'none',smooth:true,"
         "lineStyle:{color:'#7c3aed',width:2,type:'dashed'},z:5},"
         "]};}"
@@ -2215,7 +2220,7 @@ def _sent_main_chart(forecast, hist, buy_th, sell_th, acc=None):
                 '<span class="zc zc-g">▾ 绿带=机会区(&lt;%.0f)</span>'
                 '<span class="zc zc-r">▴ 红带=风险区(&gt;%.0f)</span>'
                 '<span class="zc zc-w">▦ 灰带=数据预热期(样本不足, 非断线)</span>'
-                '<span class="zc">蓝实线=历史情绪　紫虚线=未来KNN预测　年份/月份在 x 轴　·　滚轮拖拽缩放</span>'
+                '<span class="zc">蓝实线=历史情绪　紫虚线=未来KNN预测　紫色阴影=预测区间(p25–p75, κ 重标定)　年份/月份在 x 轴　·　滚轮拖拽缩放</span>'
                 '</div>') % (buy_th, sell_th)
     return _sent_echart("echart-sent-main",
                         "情绪走势与未来预测（KNN 路径派生）",
