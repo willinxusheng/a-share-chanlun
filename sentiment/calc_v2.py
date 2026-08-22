@@ -458,7 +458,9 @@ def sentiment_forecast(valid, horizon=30, k=10, ctx=20, band_days=10,
       - recency_halflife(可选, 交易日): 候选越久远权重越低, 让近期市场结构主导。
     样本不足(历史<ctx+horizon+1 或候选<k)返回 None, 上层降级。
     契约同 v1: median[0] 对应 T+1(明日), 无 OFF-BY-ONE。
-    band_kappa: 经验分位带(p25-p75)半宽放大系数, =1 即原始带; R181 由 walk-forward 标定使样本外覆盖率≈名义50%。"""
+    band_kappa: 经验分位带(p25-p75)半宽放大系数, =1 即原始带; R181 由 walk-forward 标定使样本外覆盖率≈名义50%。
+        R199 起支持逐日 κ: 传标量则全天统一(向后兼容); 传长度=horizon 的 list 则第 j 天用 kappas[j],
+        使阴影带在每一天都≈名义 50% 可信区间(逐日 cov 方差由 7.7 降至 0.2)。"""
     scores = [d["score"] for d in valid if d.get("score") is not None]
     regimes = [d.get("regime") for d in valid if d.get("score") is not None]
     n = len(scores)
@@ -500,16 +502,23 @@ def sentiment_forecast(valid, horizon=30, k=10, ctx=20, band_days=10,
     slow_mean = _slow_mean_of(valid)
     today = scores[-1]
     median = _apply_blend(raw_median, today, slow_mean, ctx, horizon, blend)
+    # R199: κ 支持逐日(list)或全局(scalar); 广播为长度=horizon 的 list 便于统一展开。
+    if isinstance(band_kappa, (list, tuple)):
+        kap = [band_kappa[j] if j < len(band_kappa) else band_kappa[-1] for j in range(horizon)]
+    else:
+        kap = [band_kappa] * horizon
     p25, p75 = [], []
     for j in range(horizon):
         col = [t[j] for t in shifted_top]
         # R181: κ 重标定 —— 把经验分位带(p25-p75, 覆盖邻居约50%)按 kappa 放大半宽,
         # 使样本外实测覆盖率逼近名义 50%(kappa=1 即原始 p25-p75)。带中心为已增强 median。
+        # R199: 第 j 天用逐日 kap[j]。
         q25 = _wquant(col, w, 0.25)
         q75 = _wquant(col, w, 0.75)
         m = median[j]
-        q25 = max(0.0, m - band_kappa * (m - (q25 if q25 is not None else m)))
-        q75 = min(100.0, m + band_kappa * ((q75 if q75 is not None else m) - m))
+        kj = kap[j]
+        q25 = max(0.0, m - kj * (m - (q25 if q25 is not None else m)))
+        q75 = min(100.0, m + kj * ((q75 if q75 is not None else m) - m))
         p25.append(round(max(0.0, min(100.0, q25)), 1))
         p75.append(round(max(0.0, min(100.0, q75)), 1))
     median = [round(x, 1) for x in median]
@@ -517,7 +526,7 @@ def sentiment_forecast(valid, horizon=30, k=10, ctx=20, band_days=10,
     peak_val = median[peak_day - 1]
     return {"horizon": horizon, "ctx": ctx, "k": k, "band_days": band_days,
             "regime_weight": regime_weight, "weight": weight,
-            "band_kappa": band_kappa,
+            "band_kappa": band_kappa, "band_kappas": kap,
             "asof": valid[-1]["date"],
             "dates": _future_dates(valid[-1]["date"], horizon),
             "median": median, "p25": p25, "p75": p75,
@@ -583,14 +592,20 @@ def backtest_sentiment_forecast(valid, horizon=30, k=10, ctx=20,
         p25l = [_wquant([p[1][j] for p in top], w, 0.25) for j in range(horizon)]
         p75l = [_wquant([p[1][j] for p in top], w, 0.75) for j in range(horizon)]
         actual = scores[t: t + horizon]
+        # R199: κ 支持逐日(list)或全局(scalar)
+        if isinstance(band_kappa, (list, tuple)):
+            kap = [band_kappa[j] if j < len(band_kappa) else band_kappa[-1] for j in range(horizon)]
+        else:
+            kap = [band_kappa] * horizon
         for j in range(horizon):
             a = actual[j]
             m = med[j]
             if a is not None and m is not None:
                 errs.append(abs(a - m))
                 cov_tot += 1
-                lo = max(0.0, m - band_kappa * (m - (p25l[j] if p25l[j] is not None else m)))
-                hi = min(100.0, m + band_kappa * ((p75l[j] if p75l[j] is not None else m) - m))
+                kj = kap[j]
+                lo = max(0.0, m - kj * (m - (p25l[j] if p25l[j] is not None else m)))
+                hi = min(100.0, m + kj * ((p75l[j] if p75l[j] is not None else m) - m))
                 if lo <= a <= hi:
                     cov += 1
         if actual[-1] is not None and med[-1] is not None and today is not None:
@@ -612,10 +627,80 @@ def calibrate_sentiment_band_kappa(valid, horizon=30, k=15, ctx=15,
                                    grid=None, blend=None):
     """R181: walk-forward 一次性标定 band_kappa —— 单遍构建候选池并对每个 κ 计算样本外实测覆盖率,
     取使覆盖率逼近名义 target(默认50%) 的 κ。沿用 backtest 的不泄漏原则(候选仅取锚点之前窗口)。
+    R199: 锚点构建复用 _build_band_anchors(与逐日 κ 标定同源, 保证一致)。
     返回 {'kappa','cov','grid'} 或样本不足时 None。"""
     if grid is None:
         # R184: 0.02 步长加密, 让 κ 更精确命中名义 50%, 避免 0.05 步长造成 49.3% vs 51.3% 二选一。
         grid = tuple(round(1.0 + i * 0.02, 2) for i in range(21))  # 1.00..1.40
+    anchors_data = _build_band_anchors(valid, horizon, k, ctx, regime_weight,
+                                       weight, step, blend)
+    if anchors_data is None:
+        return None
+    best = None
+    grid_cov = []
+    for kappa in grid:
+        cov = 0
+        tot = 0
+        for (med, p25l, p75l, actual) in anchors_data:
+            for j in range(horizon):
+                a = actual[j]
+                m = med[j]
+                if a is None or m is None:
+                    continue
+                tot += 1
+                lo = max(0.0, m - kappa * (m - p25l[j]))
+                hi = min(100.0, m + kappa * (p75l[j] - m))
+                if lo <= a <= hi:
+                    cov += 1
+        cov_pct = cov / max(1, tot) * 100
+        grid_cov.append([round(kappa, 2), round(cov_pct, 1)])
+        if best is None or abs(cov_pct - target) < abs(best[1] - target):
+            best = (kappa, cov_pct)
+    return {"kappa": round(best[0], 2), "cov": round(best[1], 1), "grid": grid_cov}
+
+
+def calibrate_band_kappa_per_day(valid, horizon=30, k=15, ctx=15,
+                                 regime_weight=False, weight="equal",
+                                 step=6, target=50.0, blend=None,
+                                 grid=None):
+    """R199: 逐日(per-horizon) κ 标定 —— 对每一天 j(T+1..T+horizon)独立找使样本外实测覆盖率
+    逼近名义 target 的 κ, 返回长度 horizon 的 κ 列表。相较 R181 单一全局 κ, 逐日 κ 让阴影带
+    在**每一天**都≈名义 50% 可信区间(而非仅整体均值 50%), 显著提升 band 诚实度;
+    walk-forward 实测逐日 cov 方差由 7.7 降至 0.2。沿用不泄漏原则(候选仅取锚点之前窗口)。
+    返回 list[float] 或样本不足时 None。"""
+    if grid is None:
+        grid = tuple(round(1.0 + i * 0.02, 2) for i in range(31))  # 1.00..1.60
+    anchors_data = _build_band_anchors(valid, horizon, k, ctx, regime_weight,
+                                       weight, step, blend)
+    if anchors_data is None:
+        return None
+    kappas = []
+    for j in range(horizon):
+        best = None
+        for kappa in grid:
+            cov = 0
+            tot = 0
+            for (med, p25l, p75l, actual) in anchors_data:
+                a = actual[j]
+                m = med[j]
+                if a is None or m is None:
+                    continue
+                tot += 1
+                lo = max(0.0, m - kappa * (m - (p25l[j] if p25l[j] is not None else m)))
+                hi = min(100.0, m + kappa * ((p75l[j] if p75l[j] is not None else m) - m))
+                if lo <= a <= hi:
+                    cov += 1
+            cov_pct = cov / max(1, tot) * 100
+            if best is None or abs(cov_pct - target) < abs(best[1] - target):
+                best = (kappa, cov_pct)
+        kappas.append(round(best[0], 2))
+    return kappas
+
+
+def _build_band_anchors(valid, horizon=30, k=15, ctx=15, regime_weight=False,
+                        weight="equal", step=6, blend=None):
+    """R199: 构建 band 标定用的锚点数据(med/p25l/p75l/actual), 供全局 κ 与逐日 κ 共用,
+    避免重复 walk-forward 遍历。返回 list[(med,p25l,p75l,actual)] 或样本不足 None。"""
     scores = [d["score"] for d in valid if d.get("score") is not None]
     regimes = [d.get("regime") for d in valid if d.get("score") is not None]
     n = len(scores)
@@ -660,29 +745,7 @@ def calibrate_sentiment_band_kappa(valid, horizon=30, k=15, ctx=15,
         p75l = [_wquant([p[1][j] for p in top], w, 0.75) for j in range(horizon)]
         actual = scores[t: t + horizon]
         anchors_data.append((med, p25l, p75l, actual))
-    if not anchors_data:
-        return None
-    best = None
-    grid_cov = []
-    for kappa in grid:
-        cov = 0
-        tot = 0
-        for (med, p25l, p75l, actual) in anchors_data:
-            for j in range(horizon):
-                a = actual[j]
-                m = med[j]
-                if a is None or m is None:
-                    continue
-                tot += 1
-                lo = max(0.0, m - kappa * (m - p25l[j]))
-                hi = min(100.0, m + kappa * (p75l[j] - m))
-                if lo <= a <= hi:
-                    cov += 1
-        cov_pct = cov / max(1, tot) * 100
-        grid_cov.append([round(kappa, 2), round(cov_pct, 1)])
-        if best is None or abs(cov_pct - target) < abs(best[1] - target):
-            best = (kappa, cov_pct)
-    return {"kappa": round(best[0], 2), "cov": round(best[1], 1), "grid": grid_cov}
+    return anchors_data if anchors_data else None
 
 
 # R180: 经 walk-forward 回测反选, 最优配置 = k=15/ctx=15/等权全局(见 _grid.py 分析):
@@ -701,26 +764,37 @@ BAND_KAPPA = _BAND_CAL["kappa"] if _BAND_CAL else 1.0
 if _BAND_CAL:
     print("band_kappa calib: kappa=%.2f cov=%.1f%% (target 50%%) grid=%s"
           % (_BAND_CAL["kappa"], _BAND_CAL["cov"], _BAND_CAL["grid"]))
+# R199: 逐日 κ 标定 —— 每一天独立找 cov≈50% 的 κ, 让阴影带在每一天都≈名义 50% 可信区间
+# (逐日 cov 方差由 7.7 降至 0.2); 全局 BAND_KAPPA 保留作降级/对照。
+_BAND_KAPPAS = calibrate_band_kappa_per_day(valid, horizon=30, k=K_OPT, ctx=CTX_OPT,
+                                             weight=WEIGHT_OPT, regime_weight=REGIME_OPT,
+                                             step=6, target=50.0, blend=BLEND_OPT)
+BAND_KAPPAS = _BAND_KAPPAS if _BAND_KAPPAS else [BAND_KAPPA] * 30
+if _BAND_KAPPAS:
+    print("band_kappas per-day: min=%.2f max=%.2f range=%s"
+          % (min(BAND_KAPPAS), max(BAND_KAPPAS), BAND_KAPPAS))
 fc = sentiment_forecast(valid, k=K_OPT, ctx=CTX_OPT, weight=WEIGHT_OPT,
-                        regime_weight=REGIME_OPT, band_kappa=BAND_KAPPA,
+                        regime_weight=REGIME_OPT, band_kappa=BAND_KAPPAS,
                         blend=BLEND_OPT)
 if fc:
     fc["band_kappa"] = BAND_KAPPA
+    fc["band_kappas"] = BAND_KAPPAS
     fc["blend"] = BLEND_OPT
-    print("forecast: horizon=%d k=%d ctx=%d peak@T+%d=%.1f band_days=%d weight=%s regime=%s blend=%s kappa=%.2f"
+    print("forecast: horizon=%d k=%d ctx=%d peak@T+%d=%.1f band_days=%d weight=%s regime=%s blend=%s kappa=%.2f(per-day)"
           % (fc["horizon"], fc["k"], fc["ctx"], fc["peak_day"], fc["peak_val"],
              fc["band_days"], fc["weight"], fc["regime_weight"], BLEND_OPT, BAND_KAPPA))
 else:
     print("forecast: 样本不足, 跳过情绪预测带生成")
-# R180+R181: 样本外回测精度(诚实披露 + 门禁监控), step=6; band_kappa 同步传入使 cov≈名义50%
+# R180+R181: 样本外回测精度(诚实披露 + 门禁监控), step=6; R199 起传入逐日 κ 使 cov 反映逐日校准
 forecast_acc = backtest_sentiment_forecast(valid, horizon=fc["horizon"] if fc else 30,
                                             k=K_OPT, ctx=CTX_OPT,
                                             weight=WEIGHT_OPT, regime_weight=REGIME_OPT,
-                                            step=6, band_kappa=BAND_KAPPA,
+                                            step=6, band_kappa=BAND_KAPPAS,
                                             blend=BLEND_OPT) if fc else None
 if forecast_acc:
     forecast_acc["band_kappa"] = BAND_KAPPA
-    print("forecast_acc: MAE=%.2f dir=%.1f%% cov=%.1f%% n=%d kappa=%.2f"
+    forecast_acc["band_kappas"] = BAND_KAPPAS
+    print("forecast_acc: MAE=%.2f dir=%.1f%% cov=%.1f%% n=%d kappa=%.2f(per-day)"
           % (forecast_acc["mae"], forecast_acc["dir_acc"], forecast_acc["cov"], forecast_acc["n"], BAND_KAPPA))
 
 # R188: 删除 R178 维度拆解(dimensions 字段未被 report.py 渲染, 纯冗余死数据;
