@@ -2274,7 +2274,8 @@ def _sent_index_chart(hist, forecast=None):
                         300, fdata, opt_js) + cap
 
 
-def sentiment_board_html(base, data, results, results_week, scores, last_date):
+def sentiment_board_html(base, data, results, results_week, scores, last_date,
+                          idx_proj=None, idx_last=None):
     """R178 市场情绪板块：温度计头图 + 维度拆解表 + 情绪走势与未来预测主图 + 情绪vs上证指数副图。
     删除旧版的仪表盘/六因子卡/弹性共振/互联矩阵/历史信号/背离记录，仅保留截图所示核心结构。
     情绪数据缺失时降级为提示条（不阻断主报告）。"""
@@ -2325,6 +2326,39 @@ def sentiment_board_html(base, data, results, results_week, scores, last_date):
                         + zone_line).format(
                 n=acc.get("n", 0), cov=acc.get("cov", 0),
                 d=acc.get("dir_acc", 0), m=acc.get("mae", 0))
+        # R203: 情绪×指数背离提示(展示层, 不并入预测数学, 合规 R76)
+        # 触发: 情绪预测未来窗口内任一日处于恐惧区(<buy_th) 且 同期上证推演主情景(main)仍 > 当前价(idx_last)
+        diverge_html = ""
+        if isinstance(forecast, dict) and idx_proj and idx_last is not None:
+            _fdates = forecast.get("dates") or []
+            _fmed = forecast.get("median") or []
+            # 建 日期->main 映射(上证推演按 tplus 日期)
+            _idx_main = {p.get("date"): p.get("main") for p in idx_proj if isinstance(p, dict)}
+            _hit = None
+            for _j in range(min(len(_fdates), len(_fmed))):
+                _dt, _mv = _fdates[_j], _fmed[_j]
+                if _mv is None:
+                    continue
+                _im = _idx_main.get(_dt)
+                if _im is not None and _mv < buy_th and _im > idx_last:
+                    _hit = (_dt, _mv, _im)
+                    break
+            if _hit:
+                _dt, _mv, _im = _hit
+                _p25 = forecast.get("p25") or []
+                _p75 = forecast.get("p75") or []
+                _p25v = _p25[_j] if _j < len(_p25) else None
+                _p75v = _p75[_j] if _j < len(_p75) else None
+                _band = ""
+                if _p25v is not None and _p75v is not None:
+                    _band = "（p25–p75 区间 %.0f–%.0f，外推远端不确定性大）" % (_p25v, _p75v)
+                diverge_html = (
+                    '<div class="sent-acc sent-diverge">'
+                    '⚠ <b>情绪×指数背离</b>：未来 <b>%s</b> 情绪预测处于冰点（<b>%.1f</b> 分，&lt;%.0f 恐惧区）'
+                    '，但同期上证推演主情景仍上行至 <b>%.0f</b>（当前 %.0f）——'
+                    '背离非"指数真强"，而是价格维度弱上行与情绪冰点并存；主情景非确定值（另含 alt/risk 更低情景），'
+                    '谨慎追高、逆向关注恐慌区机会%s。</div>'
+                    % (_dt, _mv, buy_th, _im, idx_last, _band))
         return f"""
     <section class="panel" id="sentiment-board" style="border-left:4px solid {zcolor}; --sent-accent:{zcolor};">
       <h2 class="sec" id="s2">二、市场情绪
@@ -2337,6 +2371,7 @@ def sentiment_board_html(base, data, results, results_week, scores, last_date):
       {header}
       <div class="sent-chart-card">{main_chart}</div>
       {acc_html}
+      {diverge_html}
       <div class="sent-chart-card">{index_chart}</div>
       <p class="sent-footnote">代理情绪温度（monitor_only）：由上证量能/动量/波动/牛熊位置 + 宽基与跨市场广度合成，非全市场涨跌家数；量能维度受数据源 volume 单位差异影响，仅供研判参考，不参与任何概率/方向计算。history 为全部可用交易日逐日回算；forecast 由 KNN 历史轨迹派生（k=15/ctx=15 等权全局，经 walk-forward 回测反选），紫色虚线为未来预测中值（κ 重标定，样本外实测覆盖率≈名义 50% 的 p25–p75 区间）；预测为路径派生，非因子预测，仅供参考。主图含预测可缩放联动自身历史/预测；副图（情绪 vs 上证）为纯历史近180日独立切片，不与主图联动。</p>
     </section>"""
@@ -2737,7 +2772,9 @@ def main():
                 + ''.join(f'<a class="chip" href="#sec-{sym}" data-sym="{sym}" data-jump>{d["name"]}</a>' for sym, d in data.items())
                 + '</nav>')
     # R177: 市场情绪板块（与决策总览 KPI / 分指数 panel 徽章 / 情绪×结构矩阵互联; 数据缺失时内部降级为提示条）
-    sent_board = sentiment_board_html(_base, data, results, results_week, scores, last_date)
+    sent_board = sentiment_board_html(_base, data, results, results_week, scores, last_date,
+                                     idx_proj=fc_blob.get("sh000001", {}).get("proj"),
+                                     idx_last=fc_blob.get("sh000001", {}).get("last"))
 
     html = f"""<!DOCTYPE html>
 <html lang="zh-CN">
@@ -2893,6 +2930,8 @@ def main():
   .sent-acc-sub {{ margin-top: -8px; background: #f8fafc; border-color: #e2e8f0; border-left-color: #cbd5e1; font-size: 11.5px; }}
   .sent-acc-sub .zc {{ color: #64748b; margin-right: 14px; white-space: nowrap; }}
   .sent-acc-sub .zc b {{ color: #475569; }}
+  .sent-diverge {{ background: #fff7ed; border-color: #fdba74; border-left-color: #ea580c; }}
+  .sent-diverge b {{ color: #c2410c; }}
   .sent-zone-cap {{ display: flex; flex-wrap: wrap; gap: 14px; font-size: 11px; color: #64748b; margin-top: 6px; padding: 0 2px; line-height: 1.6; }}
   .sent-zone-cap .zc-g {{ color: #18a058; font-weight: 600; }}
   .sent-zone-cap .zc-r {{ color: #e54545; font-weight: 600; }}
