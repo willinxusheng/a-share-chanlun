@@ -1946,9 +1946,10 @@ def _sent_trend(ma5s, ma20s):
     return "回暖 ↑" if ma5s > ma20s else ("降温 ↓" if ma5s < ma20s else "持平 →")
 
 
-def _sent_spark_svg(hist, w=430, h=100):
-    """情绪走势多线图: 情绪分(绿主) + MA5(蓝) + MA20(灰)。
-    hist 行 = [date, close, score, ma5s, ma20s, bull_flag, elasticity]（calc_v2 产出契约）。"""
+def _sent_spark_svg(hist, w=430, h=100, buy_th=None, sell_th=None):
+    """情绪走势多线图: 情绪分(绿主) + MA5(蓝) + MA20(灰) + 买入/卖出阈值参考线(绿/红虚线)。
+    hist 行 = [date, close, score, ma5s, ma20s, bull_flag, elasticity]（calc_v2 产出契约）。
+    buy_th/sell_th 为 0-100 分位阈值, 与情绪线同坐标系, 可直读「情绪相对买卖线的位置」。"""
     rows = [r for r in (hist or []) if isinstance(r, (list, tuple)) and len(r) >= 5]
     if len(rows) < 2:
         return ""
@@ -1968,8 +1969,11 @@ def _sent_spark_svg(hist, w=430, h=100):
     lo, hi = lo - pad, hi + pad
     sw, sh = w - 8, h - 16
 
+    def _y(v):
+        return h - 8 - sh * (v - lo) / (hi - lo)
+
     def _path(pts, color, dash=None):
-        coords = [(4 + sw * i / (n - 1), h - 8 - sh * (v - lo) / (hi - lo))
+        coords = [(4 + sw * i / (n - 1), _y(v))
                   for i, v in enumerate(pts) if v is not None]
         if len(coords) < 2:
             return ""
@@ -1981,9 +1985,17 @@ def _sent_spark_svg(hist, w=430, h=100):
     ticks = "".join(
         f'<text x="{4 + sw * i / (n - 1):.0f}" y="{h - 2}" font-size="9" fill="#94a3b8" text-anchor="middle">{rows[i][0][5:]}</text>'
         for i in (0, n // 2, n - 1))
-    # 收盘阈值参考线(买入线/卖出线在 0-100 分位坐标系下与情绪线同刻度, 可直读)
+    # 买卖线参考线(0-100 分位同坐标系; 阈值超出视野时裁剪到边缘, 避免 SVG 溢出)
+    th_lines = ""
+    for _th, _lab, _c in ((buy_th, "买", GREEN), (sell_th, "卖", RED)):
+        if _th is None:
+            continue
+        _yy = max(4.0, min(h - 8.0, _y(float(_th))))
+        th_lines += (f'<line x1="4" y1="{_yy:.1f}" x2="{w - 4}" y2="{_yy:.1f}" '
+                     f'stroke="{_c}" stroke-width="1" stroke-dasharray="5 4" opacity="0.55"/>'
+                     f'<text x="6" y="{_yy - 3:.1f}" font-size="9" fill="{_c}" opacity="0.85">{_lab}{float(_th):.0f}</text>')
     return (f'<svg viewBox="0 0 {w} {h}" width="100%" xmlns="http://www.w3.org/2000/svg">'
-            + _path(sc, GREEN) + _path(m5, BLUE, "4 3") + _path(m20, GRAY)
+            + th_lines + _path(sc, GREEN) + _path(m5, BLUE, "4 3") + _path(m20, GRAY)
             + ticks + "</svg>")
 
 
@@ -2129,6 +2141,22 @@ def sentiment_board_html(base, data, results, results_week, scores, last_date):
                     f'买入信号后 20 日平均 <b style="color:{_b_c}">{_b_txt}</b>'
                     f'（N={len(_buys)}） · 卖出信号后 20 日平均 <b style="color:{_s_c}">{_s_txt}</b>'
                     f'（N={len(_sells)}）—— 情绪逆向指标在恐惧区买入、贪婪区卖出的历史统计基准。</p>')
+        # 分市况信号表现（regime_stats 由 calc_v2 产出: 牛/熊市况下买卖信号后20日平均, 直接消费不重算）
+        _rs = sent.get("regime_stats") or {}
+        _reg_txt = ""
+        _reg_parts = []
+        for _rg, _lab in (("bull", "牛市"), ("bear", "熊市")):
+            _rgd = _rs.get(_rg) or {}
+            _rb = _rgd.get("buy") or {}
+            _rss = _rgd.get("sell") or {}
+            if not (_rb.get("n") or _rss.get("n")):
+                continue
+            _bp = ("买 %+.2f%%（N=%d）" % (_rb["avg"], _rb["n"])) if _rb.get("n") else "买 —"
+            _sp = ("卖 %+.2f%%（N=%d）" % (_rss["avg"], _rss["n"])) if _rss.get("n") else "卖 —"
+            _reg_parts.append("%s：%s / %s" % (_lab, _bp, _sp))
+        if _reg_parts:
+            _reg_txt = ('<p class="sent-summary">分市况信号表现（信号后 20 日平均涨跌）: '
+                        + "　".join(_reg_parts) + '</p>')
         # —— 顶底背离记录（按日期倒序）——
         divs = sorted([d2 for d2 in (sent.get("divs") or [])
                        if isinstance(d2, dict) and d2.get("date")],
@@ -2169,9 +2197,9 @@ def sentiment_board_html(base, data, results, results_week, scores, last_date):
           <p class="sent-note" style="font-size:11px;color:#94a3b8;margin-top:6px">波动率分位为负权重（波动飙升=恐惧折扣）；其余因子高分位=情绪偏热。</p>
         </div>
         <div class="sent-card sent-card-wide">
-          <div class="sent-card-t">情绪走势（近 120 交易日）</div>
-          {_sent_spark_svg(sent.get("hist") or [])}
-          <div class="sent-legend"><span><i style="background:{GREEN}"></i>情绪分</span><span><i style="background:{BLUE}"></i>MA5</span><span><i style="background:{GRAY}"></i>MA20</span></div>
+          <div class="sent-card-t">情绪走势（近 120 交易日 · 绿/红虚线为买入线/卖出线）</div>
+          {_sent_spark_svg(sent.get("hist") or [], buy_th=buy_th, sell_th=sell_th)}
+          <div class="sent-legend"><span><i style="background:{GREEN}"></i>情绪分</span><span><i style="background:{BLUE}"></i>MA5</span><span><i style="background:{GRAY}"></i>MA20</span><span><i style="background:{GREEN};opacity:.55"></i>买线{buy_th:.0f}</span><span><i style="background:{RED};opacity:.55"></i>卖线{sell_th:.0f}</span></div>
         </div>
         <div class="sent-card">
           <div class="sent-card-t">弹性与共振</div>
@@ -2192,6 +2220,7 @@ def sentiment_board_html(base, data, results, results_week, scores, last_date):
         <thead><tr><th class="tac" style="width:12%">日期</th><th class="tac" style="width:14%">信号</th><th class="tac" style="width:10%">触发分</th><th class="tac" style="width:10%">市况</th><th class="tac" style="width:12%">后 5 日</th><th class="tac" style="width:12%">后 10 日</th><th class="tac" style="width:12%">后 20 日</th></tr></thead>
         <tbody>{sig_html}</tbody></table></div>
       {_eff}
+      {_reg_txt}
       <h3 class="fc-title">顶底背离记录
         <span class="fc-sub">按日期倒序（最新在前）· 60 日窗口顶/底背离</span></h3>
       <div class="tablescroll"><table class="tbl">

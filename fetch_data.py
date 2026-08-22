@@ -76,6 +76,98 @@ def fetch_sina_series(symbol, datalen=2000):
         return {}
 
 
+# ===== 情绪引擎数据源（R177b: 情绪 txt 接每日行情, 根治 asof 落后） =====
+# calc_v2.py 消费 4 个 txt(上证/深成/上证50/中证1000)的 8 列: date|open|last|high|low|volume|amount|exchange。
+# 腾讯 fqkline 接口仅 6 列(无成交额/换手率), 而 calc_v2 的量能.25/换手.20/大小票分层.15 因子强依赖
+# amount 与 exchange → 情绪 txt 改用东方财富日线接口(11 列含 f57 成交额 / f61 换手率, 免 key 公开,
+# 数据截至当日 UTC+8)。任一指数拉取失败仅跳过该文件(保留旧值), 不阻断主数据管线。
+SENTIMENT_SYMBOLS = {  # 东财 secid 映射
+    "sh000001": "1.000001",
+    "sz399001": "0.399001",
+    "sh000016": "1.000016",
+    "sh000852": "1.000852",
+}
+_SENT_FILES = {
+    "sh000001": "sh_long.txt",
+    "sz399001": "sz_long.txt",
+    "sh000016": "sh50.txt",
+    "sh000852": "zz1000.txt",
+}
+EM_URL = ("http://push2his.eastmoney.com/api/qt/stock/kline/get?secid=%s&fields1=f1,f2,f3,f4,f5,f6&"
+          "fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61&klt=101&fqt=1&beg=20210101&end=20500101")
+# R177b: 东财接口必须走 http 明文——https(CONNECT 隧道)在部分网络/代理环境会被
+# 截断 chunked 响应(实测沙箱内 https 全失败、http 双 host 全通); 双 host 互为镜像兜底。
+EM_HOSTS = ["push2his.eastmoney.com", "92.push2his.eastmoney.com"]
+
+
+def fetch_em(secid):
+    """东方财富前复权日线: 返回正序 [(date, open, close, high, low, volume, amount, turnover)]。
+    https 隧道在部分网络被截断, 故用 http 明文 + 双 host 逐次尝试; 全部失败由调用方降级。"""
+    last_err = None
+    for host in EM_HOSTS:
+        try:
+            u = (EM_URL % secid).replace("push2his.eastmoney.com", host)
+            data = json.loads(_get(u))["data"]
+            if not data or not data.get("klines"):
+                return []
+            out = []
+            dirty = 0
+            for row in data["klines"]:
+                c = row.split(",")
+                if len(c) < 11:
+                    dirty += 1
+                    continue
+                try:
+                    out.append((c[0], float(c[1]), float(c[2]), float(c[3]), float(c[4]),
+                                float(c[5]), float(c[6]), float(c[10])))
+                except (ValueError, IndexError):
+                    dirty += 1
+            if out:
+                return out, dirty
+        except Exception as e:
+            last_err = e
+    if last_err:
+        raise last_err
+    return []
+
+
+def update_sentiment_txts():
+    """把 4 指数日线刷新为 calc_v2 消费的 txt(8列 | 分隔, 含成交额/换手率)。
+    失败降级: 任一指数异常仅跳过该文件(保留旧值); 全部失败打印 WARN —— 情绪新鲜度
+    是增强项, 绝不允许拖垮主行情管线(fetch_data 的主职责是 data.json)。"""
+    _dir = os.path.join(_BASE, "sentiment")
+    try:
+        os.makedirs(_dir, exist_ok=True)
+    except Exception:
+        pass
+    ok = 0
+    for sym, secid in SENTIMENT_SYMBOLS.items():
+        try:
+            rows, dirty = fetch_em(secid)
+            if len(rows) < 100:
+                print("WARN 情绪数据源 %s 拉取异常(仅%d行), 跳过更新保留旧txt" % (sym, len(rows)))
+                continue
+            fname = os.path.join(_dir, _SENT_FILES[sym])
+            # 临时文件原子写, 避免中断留下半截 txt 被 calc_v2 解析出脏数据
+            _tmp = fname + ".tmp"
+            with open(_tmp, "w", encoding="utf-8") as f:
+                f.write("| date | open | last | high | low | volume | amount | exchange |\n")
+                f.write("| --- | --- | --- | --- | --- | --- | --- | --- |\n")
+                for (d, o, c, h, l, v, a, t) in rows:
+                    f.write("| %s | %.2f | %.2f | %.2f | %.2f | %.0f | %.0f | %.2f |\n"
+                            % (d, o, c, h, l, v, a, t))
+            os.replace(_tmp, fname)
+            ok += 1
+            print("情绪txt更新 %s -> %s (%d行, 末根 %s%s)" % (
+                sym, _SENT_FILES[sym], len(rows), rows[-1][0],
+                (" 脏%d" % dirty) if dirty else ""))
+        except Exception as e:
+            print("WARN 情绪txt %s 更新失败(保留旧值): %s" % (sym, e))
+    if ok == 0:
+        print("WARN 全部情绪txt更新失败, 情绪数据保持旧快照(不影响主报告)")
+    return ok
+
+
 def cross_validate(tx_klines, sina_close_map):
     """腾讯(qfq) 与新浪(裸价) 收盘价<b>比值稳定性</b>校验。
 
@@ -275,6 +367,11 @@ def main():
                 pass
         raise
     print("saved -> chanlun/data.json (%d 标的)" % len(result))
+    # R177b: 情绪引擎数据源随每日行情刷新(东财接口含成交额/换手率; 失败仅跳过, 不阻断主管线)
+    try:
+        update_sentiment_txts()
+    except Exception as e:
+        print("WARN 情绪txt更新异常(忽略, 不影响主报告): %s" % e)
 
 
 if __name__ == "__main__":

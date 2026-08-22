@@ -53,15 +53,12 @@ jobs:
             exit 1
           fi
           python gen_quality_cert.py
+          # R177b: 情绪指数必须在 report.py 之前重算——fetch_data 已刷新 4 个情绪 txt
+          # (东财源, 含成交额/换手率, 数据截至当日), 先跑 calc_v2 使情绪板块 asof 与行情同步;
+          # 失败不阻断(已提交兜底 sentiment_v2.json 仍生效, report 读旧值但板块不崩)。
+          python sentiment/calc_v2.py || echo "WARN: 情绪指数再生失败, 使用已提交的兜底 sentiment_v2.json"
           python report.py
           cp report.html index.html
-
-      - name: 生成情绪指数 sentiment_v2.json（本地 calc_v2，无需联网；守卫式）
-        # 情绪模块随仓库内置(chanlun/sentiment/)：用提交的原始行情 txt 本地重算情绪指数,
-        # 供关5 情绪条件化门禁消费。失败不阻断发布(已提交兜底 sentiment_v2.json 仍生效)。
-        continue-on-error: true
-        run: |
-          python sentiment/calc_v2.py || echo "WARN: 情绪指数再生失败, 使用已提交的兜底 sentiment_v2.json"
 
       - name: 标签重叠诊断（非阻塞护栏，仅告警 + 上传 artifact）
         # 实证守卫：R100 日期轴修复(hideOverlap:false + formatter 控显)后，各图表文字
