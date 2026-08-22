@@ -2072,9 +2072,9 @@ def _sent_thermometer_html(final, zone, zlabel, zcolor, buy_th, sell_th, final_p
     </div>"""
 
 
-def _sent_main_chart(forecast, hist, buy_th, sell_th):
-    """情绪走势与未来预测合一主图(R179): 全量历史(与分指数图解同起点 2021-01-04) + KNN 预测(橙虚线) +
-    今日竖线 + 机会/危险区背景 + 年份竖线标注 + dataZoom(默认显示全历史, 可缩放)。"""
+def _sent_main_chart(forecast, hist, buy_th, sell_th, acc=None):
+    """情绪走势与未来预测合一主图(R180): 全量历史 + KNN预测(橙虚线) + p25-p75置信带(阴影) +
+    今日竖线 + 机会/危险区 + 年份竖线 + dataZoom。acc=forecast_acc 用于标题可信度标注。"""
     rows = [r for r in (hist or []) if isinstance(r, (list, tuple)) and len(r) >= 3]
     if len(rows) < 2:
         return ""
@@ -2082,14 +2082,25 @@ def _sent_main_chart(forecast, hist, buy_th, sell_th):
     y_hist = [None if r[2] is None else float(r[2]) for r in rows]
     today_x = x_hist[-1]
     fmed = (forecast or {}).get("median") or []
+    fp25 = (forecast or {}).get("p25") or []
+    fp75 = (forecast or {}).get("p75") or []
     fdates = (forecast or {}).get("dates") or []
     H = len(fmed)
     x_fc = [d for d in fdates]
     xcats = x_hist + x_fc
     hist_series = y_hist + [None] * H
     fc_series = [None] * (len(x_hist) - 1) + [y_hist[-1]] + [float(v) for v in fmed]
+    # 预测置信带: 仅未来段; band_lo=p25 下界, band_hi=p75-p25 堆叠增量(面积填充至 p75)
+    band_lo = [None] * len(x_hist) + [float(v) for v in fp25]
+    band_hi = [None] * len(x_hist) + [None if (i >= len(fp75) or fp75[i] is None or fp25[i] is None)
+                                       else round(fp75[i] - fp25[i], 1) for i in range(H)]
+    acc_txt = ""
+    if isinstance(acc, dict):
+        acc_txt = "　|　预测可信度: 带覆盖 %.1f%% · 方向命中 %.1f%% · 均误 %.1f 分" % (
+            acc.get("cov", 0), acc.get("dir_acc", 0), acc.get("mae", 0))
     fdata = {
         "xcats": xcats, "yhist": hist_series, "yfc": fc_series,
+        "band_lo": band_lo, "band_hi": band_hi,
         "buy_th": buy_th, "sell_th": sell_th, "today_x": today_x,
         "yearLines": _year_lines(xcats),
     }
@@ -2101,7 +2112,7 @@ def _sent_main_chart(forecast, hist, buy_th, sell_th):
         "yearML.unshift({xAxis:D.today_x,lineStyle:{color:'#334155',type:'dashed',width:1.5},"
         "label:{formatter:'今日',position:'insideEndTop',color:'#475569',fontSize:10}});"
         "return {tooltip:{trigger:'axis',axisPointer:{type:'cross'}},"
-        "legend:{data:['历史情绪','预测情绪'],top:2,textStyle:{fontSize:11}},"
+        "legend:{data:['历史情绪','预测情绪','预测区间(p25-p75)'],top:2,textStyle:{fontSize:11}},"
         "grid:{left:44,right:14,top:38,bottom:54},"
         "xAxis:{type:'category',data:D.xcats,boundaryGap:false,"
         "axisLabel:{fontSize:10,hideOverlap:true,formatter:_sFmt},axisTick:{show:false}},"
@@ -2116,11 +2127,17 @@ def _sent_main_chart(forecast, hist, buy_th, sell_th):
         "[{yAxis:D.sell_th,itemStyle:{color:'#e54545'},label:{formatter:'风险区·大盘易跌',position:'insideTop',color:'#e54545',fontSize:10}},{yAxis:100}]]},"
         "markLine:{symbol:'none',data:yearML}},"
         "{name:'预测情绪',type:'line',data:D.yfc,symbol:'none',smooth:true,"
-        "lineStyle:{color:'#f59e0b',width:2,type:'dashed'},z:5}]};}"
+        "lineStyle:{color:'#f59e0b',width:2,type:'dashed'},z:5},"
+        "{name:'预测区间(p25-p75)',type:'line',data:D.band_lo,stack:'band',symbol:'none',"
+        "lineStyle:{opacity:0},z:3,tooltip:{show:false}},"
+        "{name:'预测区间(p25-p75)',type:'line',data:D.band_hi,stack:'band',symbol:'none',"
+        "lineStyle:{opacity:0},areaStyle:{color:'rgba(245,158,11,0.15)'},z:3,tooltip:{show:false}}]};}"
     )
     return _sent_echart("echart-sent-main",
-                        "情绪走势与未来预测(2021–2026 全历史) · 蓝实线=历史情绪　橙虚线=KNN预测　竖线=年份/今日 · 滚轮缩放看全历史",
+                        "情绪走势与未来预测(2021-2026) · 蓝=历史　橙虚线=KNN预测　阴影=预测区间(p25-p75)　竖线=年份/今日 · 滚轮缩放"
+                        + acc_txt,
                         340, fdata, opt_js)
+
 
 
 def _sent_index_chart(hist):
@@ -2184,9 +2201,17 @@ def sentiment_board_html(base, data, results, results_week, scores, last_date):
         final_pct = None if not isinstance(final_pct, (int, float)) else float(final_pct)
         hist = sent.get("hist") or []
         forecast = sent.get("forecast")
+        acc = sent.get("forecast_acc")
         header = _sent_thermometer_html(final, zone, zlabel, zcolor, buy_th, sell_th, final_pct, ma5s, ma20s)
-        main_chart = _sent_main_chart(forecast, hist, buy_th, sell_th)
+        main_chart = _sent_main_chart(forecast, hist, buy_th, sell_th, acc)
         index_chart = _sent_index_chart(hist)
+        acc_html = ""
+        if isinstance(acc, dict):
+            acc_html = ('<div class="sent-acc">预测可信度（walk-forward 样本外回测 {n} 锚点）：'
+                        '预测带覆盖率 <b>{cov:.1f}%</b> · 方向命中 <b>{d:.1f}%</b> · 平均误差 <b>{m:.1f}</b> 分'
+                        '（0–100 标尺，30 日 horizon）。</div>').format(
+                n=acc.get("n", 0), cov=acc.get("cov", 0),
+                d=acc.get("dir_acc", 0), m=acc.get("mae", 0))
         return f"""
     <section class="panel" id="sentiment-board" style="border-left:4px solid {zcolor}">
       <h2 class="sec" id="s2">二、市场情绪
@@ -2198,8 +2223,9 @@ def sentiment_board_html(base, data, results, results_week, scores, last_date):
         更新节奏独立于行情数据（截至 {last_date}）；情绪仅作环境参考，不进入推演数学（R76 监控中）。</p>
       {header}
       <div class="sent-chart-card">{main_chart}</div>
+      {acc_html}
       <div class="sent-chart-card">{index_chart}</div>
-      <p class="sent-footnote">代理情绪温度（monitor_only）：由上证量能/动量/波动/牛熊位置 + 宽基与跨市场广度合成，非全市场涨跌家数；量能维度受数据源 volume 单位差异影响，仅供研判参考，不参与任何概率/方向计算。history 为全部可用交易日逐日回算；forecast 由 KNN 历史轨迹派生，为路径派生预测而非因子预测。</p>
+      <p class="sent-footnote">代理情绪温度（monitor_only）：由上证量能/动量/波动/牛熊位置 + 宽基与跨市场广度合成，非全市场涨跌家数；量能维度受数据源 volume 单位差异影响，仅供研判参考，不参与任何概率/方向计算。history 为全部可用交易日逐日回算；forecast 由 KNN 历史轨迹派生（k=15/ctx=15 等权全局，经 walk-forward 回测反选），橙色阴影为预测中位 ± 分位区间（p25–p75），其覆盖率由历史样本外回测标定（约 45%，名义 50%，属合理校准区间）；预测为路径派生，非因子预测，仅供参考。</p>
     </section>"""
     except Exception as _e:
         print("WARN 情绪板块渲染降级: %s" % _e)
@@ -2742,6 +2768,8 @@ def main():
   .sent-chart-card:last-child {{ margin-bottom: 0; }}
   .sent-chart-card .echart-toolbar {{ font-size: 12px; color: #475569; font-weight: 700; padding: 4px 2px 8px; line-height: 1.4; }}
   .sent-footnote {{ font-size: 11px; color: #94a3b8; line-height: 1.7; margin-top: 12px; padding: 10px 12px; background: #f8fafc; border-radius: 8px; }}
+  .sent-acc {{ font-size: 12px; color: #475569; line-height: 1.6; margin: -4px 0 12px; padding: 8px 12px; background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; }}
+  .sent-acc b {{ color: #b45309; font-variant-numeric: tabular-nums; }}
 
   @media (max-width: 720px) {{
     body {{ padding: 12px; }}

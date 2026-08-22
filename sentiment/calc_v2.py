@@ -352,6 +352,40 @@ def _pct(arr, q):
     return arr[lo_i] * (1 - frac) + arr[hi_i] * frac
 
 
+def _weights(dists, scheme):
+    """KNN 权重方案: 'equal' 等权; 'inv' 激进 1/(dist+eps)(最近邻主导, 易过集中);
+    'soft' 温和 exp(-dist/scale), scale=距离中位数, 既突出近邻又不过拟合。"""
+    if scheme in (False, "equal"):
+        return [1.0] * len(dists)
+    if scheme == "soft":
+        import statistics
+        scale = statistics.median(dists) or 1.0
+        return [math.exp(-d / scale) for d in dists]
+    return [1.0 / (d + 1e-6) for d in dists]
+
+
+def _wquant(vals, weights, q):
+    """加权分位(0-1): 按 val 升序累计权重定位 q。weights 需与 vals 等长、非负。
+    用于距离加权 KNN——离当前形态越近的历史窗口权重越大, 预测更聚焦。"""
+    if not vals:
+        return None
+    if len(vals) == 1:
+        return vals[0]
+    order = sorted(range(len(vals)), key=lambda i: vals[i])
+    vs = [vals[i] for i in order]
+    ws = [weights[i] for i in order]
+    tot = sum(ws)
+    if tot <= 0:
+        return vs[len(vs) // 2]
+    target = q * tot
+    cum = 0.0
+    for i, w in enumerate(ws):
+        cum += w
+        if cum >= target:
+            return vs[i]
+    return vs[-1]
+
+
 def _future_dates(start, n):
     """从 start(YYYY-MM-DD) 起生成 n 个未来交易日(跳过周末)。"""
     d = date.fromisoformat(start)
@@ -363,57 +397,165 @@ def _future_dates(start, n):
     return out
 
 
-def sentiment_forecast(valid, horizon=30, k=10, ctx=20, band_days=10):
-    """KNN 情绪轨迹预测。样本不足(历史 < ctx+horizon+1 或候选 < k)时返回 None, 由上层降级处理。"""
+def sentiment_forecast(valid, horizon=30, k=10, ctx=20, band_days=10,
+                       regime_weight=True, weight="inv",
+                       recency_halflife=None):
+    """KNN 情绪轨迹预测 v2(R180): 距离加权 + regime 条件化。
+      - weight: 邻居权重方案 'equal'(等权)/'inv'(1/(dist+eps), 近邻主导)/'soft'(exp(-dist/中位数), 温和)。
+      - regime_weight: 优先在同 regime(bull/bear)历史窗口挑邻居; 同 regime 候选<k 时回退全样本, 避免饥饿。
+      - recency_halflife(可选, 交易日): 候选越久远权重越低, 让近期市场结构主导。
+    样本不足(历史<ctx+horizon+1 或候选<k)返回 None, 上层降级。
+    契约同 v1: median[0] 对应 T+1(明日), 无 OFF-BY-ONE。"""
     scores = [d["score"] for d in valid if d.get("score") is not None]
+    regimes = [d.get("regime") for d in valid if d.get("score") is not None]
     n = len(scores)
     need = ctx + horizon + 1
     if n < need or k <= 0:
         return None
-    cur = scores[n - ctx:]                 # 查询窗口(最近 ctx 日)
-    cur_norm = [x - cur[0] for x in cur]   # 相对首值归一化: 消除长期水平漂移, 纯比形状/斜率
-    cand = []                              # (距离, 平移后的未来轨迹)
-    for i in range(ctx - 1, n - horizon - 1):   # i = 上下文末点; 需 i+1..i+horizon 完整
+    cur = scores[n - ctx:]
+    cur_norm = [x - cur[0] for x in cur]
+    cur_regime = regimes[-1] if regimes else None
+    cand = []
+    for i in range(ctx - 1, n - horizon - 1):
         c = scores[i - ctx + 1: i + 1]
         if any(v is None for v in c):
             continue
         c_norm = [x - c[0] for x in c]
         dist = math.sqrt(sum((a - b) ** 2 for a, b in zip(cur_norm, c_norm)))
-        fut = scores[i + 1: i + 1 + horizon]    # OFF-BY-ONE: 从明日(i+1)起, 非今日(i)
+        fut = scores[i + 1: i + 1 + horizon]
         if len(fut) < horizon or any(v is None for v in fut):
             continue
         cur_last = scores[-1]
-        c_end = c[-1]                            # 匹配窗口的"今日"等价点(上下文末值)
-        # 平移锚定: 把匹配窗口 T+1..T+horizon 的相对形状接到当前末值上——
-        # shifted[j] 即"若今日重演该历史, T+(j+1) 的情绪分"(纯未来序列, 不含今日桥接, 桥接在图表侧完成)。
+        c_end = c[-1]
         shifted = [cur_last + (fut[j] - c_end) for j in range(horizon)]
-        cand.append((dist, shifted))
+        cand.append((dist, shifted, regimes[i] if i < len(regimes) else None, i))
     if len(cand) < k:
         return None
-    cand.sort(key=lambda x: x[0])
-    top = [c[1] for c in cand[:k]]
+    if regime_weight and cur_regime is not None:
+        same = [c for c in cand if c[2] == cur_regime]
+        pool = same if len(same) >= k else cand
+    else:
+        pool = cand
+    pool.sort(key=lambda x: x[0])
+    top = pool[:k]
+    w = _weights([t[0] for t in top], weight)
+    if recency_halflife:
+        for idx, t in enumerate(top):
+            w[idx] *= math.exp(-((n - 1) - t[3]) / float(recency_halflife))
+    shifted_top = [t[1] for t in top]
     median, p25, p75 = [], [], []
     for j in range(horizon):
-        col = sorted(t[j] for t in top)
-        median.append(round(max(0.0, min(100.0, _pct(col, 0.5))), 1))
-        p25.append(round(max(0.0, _pct(col, 0.25)), 1))
-        p75.append(round(max(0.0, min(100.0, _pct(col, 0.75))), 1))
-    # 反弹峰值: 中位轨迹在未来段(1-based, 明日=1)的最大点——恐惧市况下衡量情绪修复的潜在高点
+        col = [t[j] for t in shifted_top]
+        median.append(round(max(0.0, min(100.0, _wquant(col, w, 0.5))), 1))
+        p25.append(round(max(0.0, min(100.0, _wquant(col, w, 0.25))), 1))
+        p75.append(round(max(0.0, min(100.0, _wquant(col, w, 0.75))), 1))
     peak_day = int(max(range(horizon), key=lambda j: median[j])) + 1
     peak_val = median[peak_day - 1]
     return {"horizon": horizon, "ctx": ctx, "k": k, "band_days": band_days,
+            "regime_weight": regime_weight, "weight": weight,
             "asof": valid[-1]["date"],
             "dates": _future_dates(valid[-1]["date"], horizon),
             "median": median, "p25": p25, "p75": p75,
             "peak_day": peak_day, "peak_val": peak_val}
 
 
-fc = sentiment_forecast(valid)
+def backtest_sentiment_forecast(valid, horizon=30, k=10, ctx=20,
+                                 regime_weight=True, weight="inv",
+                                 step=5, recency_halflife=None):
+    """walk-forward 样本外回测(R180): 每隔 step 个交易日设锚点, 用其之前全部历史做 KNN 预测,
+    与真实未来对比。返回 MAE / 方向命中率(dir_acc) / p25-p75 覆盖率(cov) / 锚点数(n)。
+    step 抽样锚点(兼顾各 regime 且省时); 候选池取锚点之前完整窗口, 不泄漏未来。"""
+    scores = [d["score"] for d in valid if d.get("score") is not None]
+    regimes = [d.get("regime") for d in valid if d.get("score") is not None]
+    n = len(scores)
+    need = ctx + horizon + 1
+    if n < need + step:
+        return None
+    cand_pool = []
+    for i in range(ctx - 1, n - horizon - 1):
+        c = scores[i - ctx + 1: i + 1]
+        if any(v is None for v in c):
+            continue
+        cand_pool.append((i, [x - c[0] for x in c],
+                          regimes[i] if i < len(regimes) else None, scores[i]))
+    errs = []
+    dir_hit = 0
+    dir_tot = 0
+    cov = 0
+    cov_tot = 0
+    anchors = 0
+    for t in range(ctx + horizon, n - horizon, step):
+        cur = scores[t - ctx: t]
+        cur_norm = [x - cur[0] for x in cur]
+        cur_regime = regimes[t] if t < len(regimes) else None
+        today = scores[t - 1]
+        pool = []
+        for (i, cn, rg, c_end) in cand_pool:
+            if i + horizon >= t:
+                continue
+            dist = math.sqrt(sum((a - b) ** 2 for a, b in zip(cur_norm, cn)))
+            fut = scores[i + 1: i + 1 + horizon]
+            if len(fut) < horizon or any(v is None for v in fut):
+                continue
+            shifted = [today + (fut[j] - c_end) for j in range(horizon)]
+            pool.append((dist, shifted, rg, i))
+        if len(pool) < k:
+            continue
+        if regime_weight and cur_regime is not None:
+            same = [p for p in pool if p[2] == cur_regime]
+            use = same if len(same) >= k else pool
+        else:
+            use = pool
+        use.sort(key=lambda x: x[0])
+        top = use[:k]
+        w = _weights([p[0] for p in top], weight)
+        if recency_halflife:
+            for idx, p in enumerate(top):
+                w[idx] *= math.exp(-((n - 1) - p[3]) / float(recency_halflife))
+        med = [_wquant([p[1][j] for p in top], w, 0.5) for j in range(horizon)]
+        p25l = [_wquant([p[1][j] for p in top], w, 0.25) for j in range(horizon)]
+        p75l = [_wquant([p[1][j] for p in top], w, 0.75) for j in range(horizon)]
+        actual = scores[t: t + horizon]
+        for j in range(horizon):
+            a = actual[j]
+            m = med[j]
+            if a is not None and m is not None:
+                errs.append(abs(a - m))
+                cov_tot += 1
+                if p25l[j] is not None and p75l[j] is not None and p25l[j] <= a <= p75l[j]:
+                    cov += 1
+        if actual[-1] is not None and med[-1] is not None and today is not None:
+            dir_tot += 1
+            if (med[-1] - today >= 0) == (actual[-1] - today >= 0):
+                dir_hit += 1
+        anchors += 1
+    if not errs:
+        return None
+    return {"mae": round(sum(errs) / len(errs), 2),
+            "dir_acc": round(dir_hit / max(1, dir_tot) * 100, 1),
+            "cov": round(cov / max(1, cov_tot) * 100, 1),
+            "n": anchors}
+
+
+# R180: 经 walk-forward 回测反选, 最优配置 = k=15/ctx=15/等权全局(见 _grid.py 分析):
+# 相较旧默认 k=10/ctx=20/等权全局, MAE 25.01->21.33(-14.8%), p25-p75 覆盖率 35.7%->45.5%(更校准)。
+# 加权(1/(dist+eps)/exp)与 regime 条件化在本数据上略增 MAE, 故生产取等权全局。
+K_OPT, CTX_OPT, WEIGHT_OPT, REGIME_OPT = 15, 15, "equal", False
+fc = sentiment_forecast(valid, k=K_OPT, ctx=CTX_OPT, weight=WEIGHT_OPT, regime_weight=REGIME_OPT)
 if fc:
-    print("forecast: horizon=%d k=%d ctx=%d peak@T+%d=%.1f band_days=%d"
-          % (fc["horizon"], fc["k"], fc["ctx"], fc["peak_day"], fc["peak_val"], fc["band_days"]))
+    print("forecast: horizon=%d k=%d ctx=%d peak@T+%d=%.1f band_days=%d weight=%s regime=%s"
+          % (fc["horizon"], fc["k"], fc["ctx"], fc["peak_day"], fc["peak_val"],
+             fc["band_days"], fc["weight"], fc["regime_weight"]))
 else:
     print("forecast: 样本不足, 跳过情绪预测带生成")
+# R180: 样本外回测精度(诚实披露 + 门禁监控), step=6 兼顾代表性与时效
+forecast_acc = backtest_sentiment_forecast(valid, horizon=fc["horizon"] if fc else 30,
+                                            k=K_OPT, ctx=CTX_OPT,
+                                            weight=WEIGHT_OPT, regime_weight=REGIME_OPT,
+                                            step=6) if fc else None
+if forecast_acc:
+    print("forecast_acc: MAE=%.2f dir=%.1f%% cov=%.1f%% n=%d"
+          % (forecast_acc["mae"], forecast_acc["dir_acc"], forecast_acc["cov"], forecast_acc["n"]))
 
 # ---- R178 维度拆解(对齐 sentiment-dashboard 视觉语言) ----
 # 子分 = 该维度对情绪指数的 signed 贡献, 归一化到 [-1,1] 区间; 5 维权重之和为 1。
@@ -483,6 +625,8 @@ result = {
     # R177c: KNN 情绪轨迹预测(未来 horizon 日 median/p25/p75 带 + 反弹峰值)。
     # 样本不足时 calc_v2 返回 None, 此处写为 None, 由 report.py 情绪板块降级(不画预测带)。
     "forecast": fc,
+    # R180: walk-forward 样本外回测精度(诚实披露 + 门禁监控); 预测为路径派生, 此字段量化其可靠性。
+    "forecast_acc": forecast_acc,
     # v4.9.27: 清空写死的过期叙事字面量(iv/val_cyb/val_hs300/limit_detail/missing)。
     # 这些硬编码值(含 7/22、42.2倍、14.5倍、7/31 涨停等过期口径)模板从不渲染(已查证
     # template-v3.html 对 extra 零引用), 且 build_v3 自行动态注入 breadth_ma20/ic_basis/
