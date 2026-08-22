@@ -2012,7 +2012,7 @@ def _sent_echart(cid, toolbar, height, fdata, opt_js):
     """情绪 ECharts 容器块: 数据 json.dumps 注入, option 由 JS 构建(支持 formatter 函数/年份标注)。
     图表统一 push 到 window.__charts 由全局 resizeAll 接管缩放。"""
     js = ("(function(){var D=" + json.dumps(fdata, ensure_ascii=False) + ";"
-          "var chart=echarts.init(document.getElementById('" + cid + "'), null, {group:'sentGroup'});"
+          "var chart=echarts.init(document.getElementById('" + cid + "'));"
           "(window.__charts=window.__charts||[]).push(chart);"
           + _SENT_DATE_FMT +
           "chart.setOption((" + opt_js + ")(D,chart));})();")
@@ -2157,6 +2157,8 @@ def _sent_main_chart(forecast, hist, buy_th, sell_th, acc=None):
         "buy_th": buy_th, "sell_th": sell_th, "today_x": today_x,
         "yearLines": _year_lines(x_hist),
         "markAreaData": _ma,
+        # R193: 默认缩放起点用绝对日期(历史末90日), 替代百分比 start:62, 数据长度变化不再漂移
+        "zoomStart": x_hist[-90] if len(x_hist) > 90 else x_hist[0],
     }
     opt_js = (
         "function(D,chart){"
@@ -2171,8 +2173,8 @@ def _sent_main_chart(forecast, hist, buy_th, sell_th, acc=None):
         "xAxis:{type:'category',data:D.xcats,boundaryGap:false,"
         "axisLabel:{fontSize:10,hideOverlap:true,position:'bottom',interval:0,formatter:function(v,i){return _sFmt(v,i);}},axisTick:{show:false}},"
         "yAxis:{type:'value',min:0,max:100,axisLabel:{fontSize:11},splitLine:{lineStyle:{color:'#eef2f7'}}},"
-        "dataZoom:[{type:'inside',xAxisIndex:0,start:62,end:100},"
-        "{type:'slider',xAxisIndex:0,height:18,bottom:14,start:62,end:100,showDetail:false,"
+        "dataZoom:[{type:'inside',xAxisIndex:0,startValue:D.zoomStart,end:100},"
+        "{type:'slider',xAxisIndex:0,height:18,bottom:14,startValue:D.zoomStart,end:100,showDetail:false,"
         "handleStyle:{color:'#2b6cb0'},borderColor:'#e2e8f0',fillerColor:'rgba(43,108,176,0.12)',"
         "dataBackground:{lineStyle:{color:'#cbd5e1'},areaStyle:{color:'rgba(203,213,225,0.25)'}},"
         "selectedDataBackground:{lineStyle:{color:'#2b6cb0'},areaStyle:{color:'rgba(43,108,176,0.25)'}}}],"
@@ -2197,25 +2199,23 @@ def _sent_main_chart(forecast, hist, buy_th, sell_th, acc=None):
 
 
 def _sent_index_chart(hist, forecast=None):
-    """情绪 vs 上证指数(R179): 双 Y 轴, 全量历史(与分指数图解同起点), 年份竖线标注 + dataZoom。
-    R192: xcat 与主图统一为 历史+预测(预测段 sc/cl 补 None), 默认缩放 start/end 与主图一致, 两图时间轴对齐联动。"""
+    """情绪 vs 上证指数(R193): 双 Y 轴, 纯历史近期切片(近180交易日), 不含预测空段, 独立展示不联动主图。
+    对齐斐波那契看板 sentVsChart 逻辑: 副图只做近期历史对照, 无 dataZoom/无 connect, 从同一历史起点对齐,
+    与主图(含预测)互不联动, 彻底消除 R192 预测段 None 造成的右端空白错配。"""
     rows = [r for r in (hist or []) if isinstance(r, (list, tuple)) and len(r) >= 3]
     if len(rows) < 2:
         return ""
     x_hist = [r[0] for r in rows]
     sc_hist = [None if r[2] is None else float(r[2]) for r in rows]
     cl_hist = [None if r[1] is None else float(r[1]) for r in rows]
-    # R192: 与主图统一 xcat(历史+预测), 预测段补 None, 使两图时间轴长度/刻度完全一致
-    x_fc = (forecast or {}).get("dates") or []
-    H = len(x_fc)
-    if H > 0:
-        xcats = x_hist + list(x_fc)
-        sc = sc_hist + [None] * H
-        cl = cl_hist + [None] * H
-    else:
-        xcats, sc, cl = x_hist, sc_hist, cl_hist
+    # R193: 纯历史近期切片(近180交易日), 不含预测空段 → 无右端空白; 独立展示, 不联动主图
+    N = max(2, min(180, len(x_hist)))
+    xs = x_hist[-N:]
+    sc = sc_hist[-N:]
+    cl = cl_hist[-N:]
+    xcats = xs
     _wb = _sent_warm_band(sc, xcats)
-    fdata = {"xcats": xcats, "sc": sc, "cl": cl, "yearLines": _year_lines(x_hist),
+    fdata = {"xcats": xcats, "sc": sc, "cl": cl, "yearLines": _year_lines(xcats),
              "markAreaData": _sent_warm_markarea(_wb)}
     opt_js = (
         "function(D,chart){"
@@ -2224,17 +2224,12 @@ def _sent_index_chart(hist, forecast=None):
         "label:{show:false}};});"
         "return {tooltip:{trigger:'axis',axisPointer:{type:'cross'}},"
         "legend:{data:['情绪温度','上证指数'],top:2,textStyle:{fontSize:11}},"
-        "grid:{left:46,right:58,top:42,bottom:62},"
+        "grid:{left:46,right:58,top:42,bottom:34},"
         "xAxis:{type:'category',data:D.xcats,boundaryGap:false,"
-        "axisLabel:{fontSize:10,hideOverlap:true,position:'bottom',interval:0,formatter:function(v,i){return _sFmt(v,i);}},axisTick:{show:false}},"
+        "axisLabel:{fontSize:10,hideOverlap:true,position:'bottom',formatter:function(v,i){return _sFmt(v,i);}},axisTick:{show:false}},"
         "yAxis:[{type:'value',min:0,max:100,position:'left',"
         "axisLabel:{fontSize:11,color:'#2b6cb0'},splitLine:{lineStyle:{color:'#eef2f7'}},name:'温度'},"
         "{type:'value',position:'right',scale:true,axisLabel:{fontSize:11,color:'#b45309'},name:'上证'}],"
-        "dataZoom:[{type:'inside',xAxisIndex:0,start:62,end:100},"
-        "{type:'slider',xAxisIndex:0,height:18,bottom:14,start:62,end:100,showDetail:false,"
-        "handleStyle:{color:'#2b6cb0'},borderColor:'#e2e8f0',fillerColor:'rgba(43,108,176,0.12)',"
-        "dataBackground:{lineStyle:{color:'#cbd5e1'},areaStyle:{color:'rgba(203,213,225,0.25)'}},"
-        "selectedDataBackground:{lineStyle:{color:'#2b6cb0'},areaStyle:{color:'rgba(43,108,176,0.25)'}}}],"
         "series:[{name:'情绪温度',type:'line',data:D.sc,symbol:'none',smooth:true,"
         "lineStyle:{color:'#2b6cb0',width:2},yAxisIndex:0,markArea:{silent:true,data:D.markAreaData},markLine:{symbol:'none',data:yearML}},"
         "{name:'上证指数',type:'line',data:D.cl,symbol:'none',smooth:true,"
@@ -2242,7 +2237,7 @@ def _sent_index_chart(hist, forecast=None):
     )
     cap = ('<div class="sent-zone-cap">'
            '<span class="zc zc-w">▦ 灰带=数据预热期(样本不足, 非断线)</span>'
-           '<span class="zc">蓝=情绪温度　棕=上证指数　滚轮拖拽缩放（与主图时间轴联动）</span>'
+           '<span class="zc">蓝=情绪温度　棕=上证指数　纯历史近180日切片·独立展示（不与主图联动）</span>'
            '</div>')
     return _sent_echart("echart-sent-index",
                         "情绪温度 vs 上证指数",
@@ -2301,8 +2296,7 @@ def sentiment_board_html(base, data, results, results_week, scores, last_date):
       <div class="sent-chart-card">{main_chart}</div>
       {acc_html}
       <div class="sent-chart-card">{index_chart}</div>
-      <script>if(window.echarts){{ try{{echarts.connect('sentGroup');}}catch(e){{}} }}</script>
-      <p class="sent-footnote">代理情绪温度（monitor_only）：由上证量能/动量/波动/牛熊位置 + 宽基与跨市场广度合成，非全市场涨跌家数；量能维度受数据源 volume 单位差异影响，仅供研判参考，不参与任何概率/方向计算。history 为全部可用交易日逐日回算；forecast 由 KNN 历史轨迹派生（k=15/ctx=15 等权全局，经 walk-forward 回测反选），紫色虚线为未来预测中值（κ 重标定，样本外实测覆盖率≈名义 50% 的 p25–p75 区间）；预测为路径派生，非因子预测，仅供参考。</p>
+      <p class="sent-footnote">代理情绪温度（monitor_only）：由上证量能/动量/波动/牛熊位置 + 宽基与跨市场广度合成，非全市场涨跌家数；量能维度受数据源 volume 单位差异影响，仅供研判参考，不参与任何概率/方向计算。history 为全部可用交易日逐日回算；forecast 由 KNN 历史轨迹派生（k=15/ctx=15 等权全局，经 walk-forward 回测反选），紫色虚线为未来预测中值（κ 重标定，样本外实测覆盖率≈名义 50% 的 p25–p75 区间）；预测为路径派生，非因子预测，仅供参考。主图含预测可缩放联动自身历史/预测；副图（情绪 vs 上证）为纯历史近180日独立切片，不与主图联动。</p>
     </section>"""
     except Exception as _e:
         print("WARN 情绪板块渲染降级: %s" % _e)
