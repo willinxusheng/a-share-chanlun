@@ -1986,14 +1986,14 @@ def _sent_x_struct(sc, zone, score):
 
 
 # ================= R178 情绪板块（对齐 sentiment-dashboard 视觉语言: 温度计 + 维度表 + 走势预测 + 情绪vs指数） =================
-# R179: 情绪图共用的时间轴年份标注 + 自适应密度标签 formatter(沿用 forecast_echart 的反抽稀逻辑,
-# 杜绝缩放后日期错配; 按全量类目数切 日/周/月/季 密度, 年份由竖线标注补充)。
+# R179/R183: 情绪图共用的时间轴年份/月份标注 + 自适应密度标签 formatter(沿用 forecast_echart 的反抽稀逻辑,
+# 杜绝缩放后日期错配; 按全量类目数切 日/周/月/季 密度, 年份由 x 轴标签显示, 竖线仅作今日参考)。
 _SENT_DATE_FMT = """
 function _sMonStart(i){var d=D.xcats[i];return d&&d.slice(8,10)==='01';}
 function _sQuarterStart(i){var d=D.xcats[i];if(!d||d.slice(8,10)!=='01')return false;var m=parseInt(d.slice(5,7),10);return m===1||m===4||m===7||m===10;}
 function _sMonDay(i){var p=D.xcats[i].split('-');return new Date(+p[0],+p[1]-1,+p[2]).getDay()===1;}
 function _sShowLabel(i){var n=D.xcats.length;if(n<=30)return true;if(n<=60)return _sMonDay(i);if(n<=180)return _sMonStart(i);return _sQuarterStart(i);}
-function _sFmt(v,i){var idx=D.xcats.indexOf(v);if(idx<0)idx=i;var d=(idx>=0&&D.xcats[idx])?D.xcats[idx]:v;if(!d||d.length<7)return v;if(!_sShowLabel(idx))return '';if(D.xcats.length<=10)return d;return d.slice(5);}
+function _sFmt(v,i){var idx=D.xcats.indexOf(v);if(idx<0)idx=i;var d=(idx>=0&&D.xcats[idx])?D.xcats[idx]:v;if(!d||d.length<7)return v;if(!_sShowLabel(idx))return '';if(D.xcats.length<=10)return d;var y=d.slice(0,4),m=+d.slice(5,7),day=+d.slice(8,10);if(m===1&&day===1)return y+'年'+m+'月';if(_sQuarterStart(idx))return m+'月';return d.slice(5);}
 """
 
 
@@ -2104,8 +2104,7 @@ def _sent_main_chart(forecast, hist, buy_th, sell_th, acc=None):
     opt_js = (
         "function(D,chart){"
         "var yearML=(D.yearLines||[]).map(function(o){return {xAxis:o.x,"
-        "lineStyle:{color:'#cbd5e1',type:'dashed',width:1},"
-        "label:{formatter:o.y+'年',position:'insideEndTop',color:'#64748b',fontSize:10}};});"
+        "lineStyle:{color:'#cbd5e1',type:'dashed',width:1}};});"
         "yearML.unshift({xAxis:D.today_x,lineStyle:{color:'#334155',type:'dashed',width:1.5},"
         "label:{formatter:'今日',position:'insideEndTop',color:'#475569',fontSize:10}});"
         "return {tooltip:{trigger:'axis',axisPointer:{type:'cross'}},"
@@ -2135,10 +2134,10 @@ def _sent_main_chart(forecast, hist, buy_th, sell_th, acc=None):
     zone_cap = ('<div class="sent-zone-cap">'
                 '<span class="zc zc-g">▾ 绿带=机会区(&lt;%.0f·大盘易涨)</span>'
                 '<span class="zc zc-r">▴ 红带=风险区(&gt;%.0f·大盘易跌)</span>'
-                '<span class="zc">竖线=年份/今日　·　阴影=50%%置信带　·　滚轮/拖拽缩放</span>'
+                '<span class="zc">竖线=今日参考　·　年份/月份在 x 轴标注　·　阴影=50%%置信带　·　滚轮/拖拽缩放</span>'
                 '</div>') % (buy_th, sell_th)
     return _sent_echart("echart-sent-main",
-                        "情绪走势与未来预测(2021–2026)　蓝=历史　橙虚线=KNN预测　阴影=50%置信带　竖线=年份/今日",
+                        "情绪走势与未来预测(2021–2026)　蓝=历史　橙虚线=KNN预测　阴影=50%置信带　竖线=今日参考",
                         340, fdata, opt_js) + zone_cap
 
 
@@ -2155,8 +2154,7 @@ def _sent_index_chart(hist):
     opt_js = (
         "function(D,chart){"
         "var yearML=(D.yearLines||[]).map(function(o){return {xAxis:o.x,"
-        "lineStyle:{color:'#cbd5e1',type:'dashed',width:1},"
-        "label:{formatter:o.y+'年',position:'insideEndTop',color:'#64748b',fontSize:10}};});"
+        "lineStyle:{color:'#cbd5e1',type:'dashed',width:1}};});"
         "return {tooltip:{trigger:'axis',axisPointer:{type:'cross'}},"
         "legend:{data:['情绪温度','上证指数'],top:2,textStyle:{fontSize:11}},"
         "grid:{left:46,right:58,top:42,bottom:62},"
@@ -2176,7 +2174,7 @@ def _sent_index_chart(hist):
         "lineStyle:{color:'#b45309',width:1.6},yAxisIndex:1}]};}"
     )
     return _sent_echart("echart-sent-index",
-                        "情绪 vs 上证指数(2021–2026 全历史) · 蓝=情绪温度　棕=上证指数　竖线=年份 · 滚轮缩放",
+                        "情绪 vs 上证指数(2021–2026 全历史) · 蓝=情绪温度　棕=上证指数　年份/月份在 x 轴 · 滚轮缩放",
                         300, fdata, opt_js)
 
 
