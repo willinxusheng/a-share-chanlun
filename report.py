@@ -1946,58 +1946,6 @@ def _sent_trend(ma5s, ma20s):
     return "回暖 ↑" if ma5s > ma20s else ("降温 ↓" if ma5s < ma20s else "持平 →")
 
 
-def _sent_spark_svg(hist, w=430, h=100, buy_th=None, sell_th=None):
-    """情绪走势多线图: 情绪分(绿主) + MA5(蓝) + MA20(灰) + 买入/卖出阈值参考线(绿/红虚线)。
-    hist 行 = [date, close, score, ma5s, ma20s, bull_flag, elasticity]（calc_v2 产出契约）。
-    buy_th/sell_th 为 0-100 分位阈值, 与情绪线同坐标系, 可直读「情绪相对买卖线的位置」。"""
-    rows = [r for r in (hist or []) if isinstance(r, (list, tuple)) and len(r) >= 5]
-    if len(rows) < 2:
-        return ""
-    rows = rows[-120:]
-    n = len(rows)
-
-    def _pts(idx):
-        return [None if r[idx] is None else float(r[idx]) for r in rows]
-
-    sc, m5, m20 = _pts(2), _pts(3), _pts(4)
-    vals = [v for v in sc + m5 + m20 if v is not None]
-    if not vals:
-        return ""
-    lo, hi = min(vals), max(vals)
-    span = (hi - lo) or 1
-    pad = span * 0.06
-    lo, hi = lo - pad, hi + pad
-    sw, sh = w - 8, h - 16
-
-    def _y(v):
-        return h - 8 - sh * (v - lo) / (hi - lo)
-
-    def _path(pts, color, dash=None):
-        coords = [(4 + sw * i / (n - 1), _y(v))
-                  for i, v in enumerate(pts) if v is not None]
-        if len(coords) < 2:
-            return ""
-        d = _smooth(coords, tension=0.7)
-        return (f'<path d="{d}" fill="none" stroke="{color}" stroke-width="1.5"'
-                + (f' stroke-dasharray="{dash}"' if dash else '')
-                + ' stroke-linejoin="round" stroke-linecap="round"/>')
-
-    ticks = "".join(
-        f'<text x="{4 + sw * i / (n - 1):.0f}" y="{h - 2}" font-size="9" fill="#94a3b8" text-anchor="middle">{rows[i][0][5:]}</text>'
-        for i in (0, n // 2, n - 1))
-    # 买卖线参考线(0-100 分位同坐标系; 阈值超出视野时裁剪到边缘, 避免 SVG 溢出)
-    th_lines = ""
-    for _th, _lab, _c in ((buy_th, "买", GREEN), (sell_th, "卖", RED)):
-        if _th is None:
-            continue
-        _yy = max(4.0, min(h - 8.0, _y(float(_th))))
-        th_lines += (f'<line x1="4" y1="{_yy:.1f}" x2="{w - 4}" y2="{_yy:.1f}" '
-                     f'stroke="{_c}" stroke-width="1" stroke-dasharray="5 4" opacity="0.55"/>'
-                     f'<text x="6" y="{_yy - 3:.1f}" font-size="9" fill="{_c}" opacity="0.85">{_lab}{float(_th):.0f}</text>')
-    return (f'<svg viewBox="0 0 {w} {h}" width="100%" xmlns="http://www.w3.org/2000/svg">'
-            + th_lines + _path(sc, GREEN) + _path(m5, BLUE, "4 3") + _path(m20, GRAY)
-            + ticks + "</svg>")
-
 
 def _sent_x_struct(sc, zone, score):
     """情绪×结构交叉判定（情绪板块与分指数图解互联的核心）:
@@ -2035,6 +1983,178 @@ def _sent_x_struct(sc, zone, score):
     if bear:
         return ("中性·结构偏空", f"情绪中性 + 结构偏空({sc})——按结构谨慎", BLUE, 2)
     return ("中性观望", f"情绪与结构均无明确方向({sc})", "#94a3b8", 1)
+
+
+# ================= R177c ECharts 情绪图（对标 sentiment-dashboard 视觉语言: 仪表盘 + 走势 + 预测带） =================
+def _echart_block(cid, opt, toolbar, height):
+    """通用 ECharts 容器块: 工具栏 + 图表 div + 内联初始化脚本。
+    选项全部 json 可序列化(无 JS 函数), 故直接 json.dumps 注入, 避免 f-string 大括号转义;
+    图表统一 push 到 window.__charts 由全局 resizeAll 接管缩放。"""
+    js = ("(function(){var chart=echarts.init(document.getElementById('" + cid
+          + "')); (window.__charts=window.__charts||[]).push(chart); chart.setOption("
+          + json.dumps(opt, ensure_ascii=False) + ");})();")
+    return ('<div class="echart-toolbar">' + toolbar + '</div>'
+            + '<div id="' + cid + '" class="echart-main" style="width:100%;height:'
+            + str(height) + 'px;"></div>'
+            + '<script>' + js + '</script>')
+
+
+def _sent_gauge_echart(value, buy_th, sell_th, zlabel):
+    """当前情绪分仪表盘(0-100 分位): 绿(恐惧·机会)→黄(中性)→红(贪婪·危险), pointer 颜色随档位 auto。
+    value 用 final(已 clamp 0-100), 与顶部徽标一致。"""
+    bt = max(0.0, min(1.0, float(buy_th) / 100.0))
+    st = max(0.0, min(1.0, float(sell_th) / 100.0))
+    # 三档色阶: 恐惧绿 / 中性黄 / 贪婪红; buy_th/sell_th 把 0-100 切成机会区/中性区/危险区
+    opt = {
+        "series": [{
+            "type": "gauge", "min": 0, "max": 100, "radius": "94%", "center": ["50%", "56%"],
+            "startAngle": 210, "endAngle": -30,
+            "axisLine": {"lineStyle": {"width": 15,
+                "color": [[bt, "#18a058"], [st, "#eab308"], [1, "#e54545"]]}},
+            "pointer": {"width": 5, "length": "60%", "itemStyle": {"color": "auto"}},
+            "anchor": {"show": True, "size": 12, "itemStyle": {"color": "#475569"}},
+            "axisTick": {"distance": -15, "length": 4, "lineStyle": {"color": "#fff"}},
+            "splitLine": {"distance": -15, "length": 14, "lineStyle": {"color": "#fff", "width": 2}},
+            "axisLabel": {"distance": -10, "color": "#64748b", "fontSize": 10},
+            "detail": {"valueAnimation": True, "formatter": "{value}", "fontSize": 30,
+                       "fontWeight": "bolder", "offsetCenter": [0, "42%"], "color": "auto"},
+            "title": {"offsetCenter": [0, "74%"], "fontSize": 13, "color": "#475569"},
+            "data": [{"value": round(float(value), 1), "name": zlabel}]
+        }]
+    }
+    return _echart_block("echart-sent-gauge", opt,
+                         "情绪分仪表盘 · 绿=恐惧(机会)　黄=中性　红=贪婪(危险)", 230)
+
+
+def _sent_trend_echart(hist, buy_th, sell_th):
+    """情绪走势 ECharts 折线: 情绪分(绿) + MA5(蓝) + MA20(灰) + 买入/卖出阈值参考线(绿/红虚线) + dataZoom 滑块。
+    替代原 SVG sparkline, 支持滚轮缩放/拖拽平移, 与全局图表交互一致。hist 行=[date,close,score,ma5s,ma20s,...]。"""
+    rows = [r for r in (hist or []) if isinstance(r, (list, tuple)) and len(r) >= 5]
+    rows = rows[-120:]
+    if len(rows) < 2:
+        return ""
+    x = [r[0][5:] for r in rows]  # MM-DD(近期窗口年份自明, 避免标签拥挤)
+    sc = [None if r[2] is None else float(r[2]) for r in rows]
+    m5 = [None if r[3] is None else float(r[3]) for r in rows]
+    m20 = [None if r[4] is None else float(r[4]) for r in rows]
+    opt = {
+        "tooltip": {"trigger": "axis", "axisPointer": {"type": "cross"}},
+        "legend": {"data": ["情绪分", "MA5", "MA20"], "top": 2, "textStyle": {"fontSize": 11}},
+        "grid": {"left": 44, "right": 14, "top": 34, "bottom": 52},
+        "xAxis": {"type": "category", "data": x, "boundaryGap": False,
+                  "axisLabel": {"fontSize": 10, "hideOverlap": True}, "axisTick": {"show": False}},
+        "yAxis": {"type": "value", "scale": True, "axisLabel": {"fontSize": 11},
+                  "splitLine": {"lineStyle": {"color": "#eef2f7"}}},
+        "dataZoom": [
+            {"type": "inside", "xAxisIndex": 0},
+            {"type": "slider", "xAxisIndex": 0, "height": 16, "bottom": 22,
+             "handleStyle": {"color": "#2b6cb0"}, "borderColor": "#e2e8f0",
+             "fillerColor": "rgba(43,108,176,0.12)"}
+        ],
+        "series": [
+            {"name": "情绪分", "type": "line", "data": sc, "symbol": "none", "smooth": True,
+             "lineStyle": {"color": GREEN, "width": 2}, "z": 5,
+             "markLine": {"symbol": "none", "data": [
+                 {"yAxis": buy_th, "lineStyle": {"color": GREEN, "type": "dashed", "width": 1},
+                  "label": {"formatter": "买 " + str(int(buy_th)), "color": GREEN, "position": "insideEndTop"}},
+                 {"yAxis": sell_th, "lineStyle": {"color": RED, "type": "dashed", "width": 1},
+                  "label": {"formatter": "卖 " + str(int(sell_th)), "color": RED, "position": "insideEndTop"}}
+             ]}},
+            {"name": "MA5", "type": "line", "data": m5, "symbol": "none", "smooth": True,
+             "lineStyle": {"color": BLUE, "width": 1.4}},
+            {"name": "MA20", "type": "line", "data": m20, "symbol": "none", "smooth": True,
+             "lineStyle": {"color": GRAY, "width": 1.2}}
+        ]
+    }
+    return _echart_block("echart-sent-trend", opt,
+                         "情绪走势（近 120 交易日）· 绿/红虚线为买入线/卖出线 · 滚轮缩放 / 拖拽底部滑块平移", 300)
+
+
+def _sent_forecast_echart(forecast, hist, buy_th, sell_th):
+    """未来情绪预测 ECharts: 历史引线(近 40 日) + KNN 中位轨迹(红) + P25–P75 置信带(仅前 band_days 日画面积)
+    + 反弹峰值 markPoint(橙) + 机会/危险区 markArea(绿/红背景)。样本不足(forecast=None)时降级为提示条。"""
+    if not isinstance(forecast, dict):
+        return ('<div class="sent-note" style="font-size:12px;color:#94a3b8;padding:10px 0">'
+                '样本不足（历史 < 51 交易日），暂未生成情绪预测带。</div>')
+    fmed = forecast.get("median") or []
+    fp25 = forecast.get("p25") or []
+    fp75 = forecast.get("p75") or []
+    fdates = forecast.get("dates") or []
+    H = forecast.get("horizon") or len(fmed)
+    if not fmed or len(fmed) != H or not fdates or len(fdates) != H:
+        return ('<div class="sent-note" style="font-size:12px;color:#94a3b8;padding:10px 0">'
+                '情绪预测数据不完整，暂未渲染预测带。</div>')
+    band_days = int(forecast.get("band_days", 10))
+    peak_day = int(forecast.get("peak_day", 1))
+    peak_val = float(forecast.get("peak_val", 0))
+    LEAD = 40
+    rows = [r for r in (hist or []) if isinstance(r, (list, tuple)) and len(r) >= 3]
+    rows = rows[-LEAD:]
+    M = len(rows)
+    if M < 1:
+        return ""
+    x_hist = [r[0][5:] for r in rows]
+    y_hist = [None if r[2] is None else float(r[2]) for r in rows]
+    x_fc = [d[5:] for d in fdates]
+    xcats = x_hist + x_fc
+    score_series = y_hist + [None] * H
+    bridge = y_hist[-1]  # 桥接: 预测轨迹首点=今日值, 紧贴今日虚线展开(旭总要求"预测线紧贴今日")
+    median_series = [None] * (M - 1) + [bridge] + [float(v) for v in fmed]
+    p25_series = [None] * (M - 1) + [bridge] + [float(v) for v in fp25]
+    p75_series = [None] * (M - 1) + [bridge] + [float(v) for v in fp75]
+    # 置信带: 基准(下沿) + 堆叠高度(上沿-下沿); 仅前 band_days 日画面积, 其后置 None 不画
+    band_lo = list(p25_series)
+    band_hi = [None] * len(p25_series)
+    band_hi[M - 1] = 0.0
+    for j in range(band_days):
+        idx = M + j
+        if idx < len(band_hi):
+            lo, hi = p25_series[idx], p75_series[idx]
+            band_hi[idx] = (hi - lo) if (lo is not None and hi is not None) else None
+    for j in range(band_days, H):
+        band_lo[M + j] = None
+    peak_idx = M + peak_day - 1
+    peak_x = xcats[peak_idx] if 0 <= peak_idx < len(xcats) else ""
+    opt = {
+        "tooltip": {"trigger": "axis", "axisPointer": {"type": "cross"}},
+        "legend": {"data": ["历史情绪分", "预测中位", "P25–P75 置信带"], "top": 2, "textStyle": {"fontSize": 11}},
+        "grid": {"left": 44, "right": 14, "top": 34, "bottom": 52},
+        "xAxis": {"type": "category", "data": xcats, "boundaryGap": False,
+                  "axisLabel": {"fontSize": 10, "hideOverlap": True}, "axisTick": {"show": False}},
+        "yAxis": {"type": "value", "scale": False, "min": 0, "max": 100,
+                  "axisLabel": {"fontSize": 11}, "splitLine": {"lineStyle": {"color": "#eef2f7"}}},
+        "dataZoom": [
+            {"type": "inside", "xAxisIndex": 0, "start": max(0, (len(xcats) - 70) / len(xcats) * 100), "end": 100},
+            {"type": "slider", "xAxisIndex": 0, "height": 16, "bottom": 22,
+             "start": max(0, (len(xcats) - 70) / len(xcats) * 100), "end": 100,
+             "handleStyle": {"color": "#2b6cb0"}, "borderColor": "#e2e8f0",
+             "fillerColor": "rgba(43,108,176,0.12)"}
+        ],
+        "series": [
+            {"name": "历史情绪分", "type": "line", "data": score_series, "symbol": "none", "smooth": True,
+             "lineStyle": {"color": "#2b6cb0", "width": 1.8}, "z": 4,
+             "markArea": {"silent": True, "itemStyle": {"opacity": 0.07}, "data": [
+                 [{"yAxis": 0, "itemStyle": {"color": GREEN}}, {"yAxis": buy_th}],
+                 [{"yAxis": sell_th, "itemStyle": {"color": RED}}, {"yAxis": 100}]
+             ]}},
+            {"name": "P25–P75 置信带", "type": "line", "data": band_lo, "stack": "sb",
+             "symbol": "none", "lineStyle": {"opacity": 0}, "areaStyle": {"opacity": 0},
+             "tooltip": {"show": False}, "silent": True},
+            {"name": "P25–P75 置信带", "type": "line", "data": band_hi, "stack": "sb",
+             "symbol": "none", "lineStyle": {"opacity": 0}, "areaStyle": {"color": "rgba(229,69,69,0.10)"},
+             "tooltip": {"show": False}, "silent": True},
+            {"name": "预测中位", "type": "line", "data": median_series, "symbol": "none", "smooth": True,
+             "lineStyle": {"color": "#e54545", "width": 2}, "z": 6,
+             "markPoint": {"symbol": "pin", "symbolSize": 26, "data": [{
+                 "coord": [peak_x, round(peak_val, 1)],
+                 "value": "反弹峰值 T+%d %.1f" % (peak_day, peak_val),
+                 "itemStyle": {"color": "#d97706"},
+                 "label": {"show": True, "position": "top", "color": "#d97706",
+                           "fontSize": 11, "fontWeight": "bold"}}]}}
+        ]
+    }
+    return _echart_block("echart-sent-forecast", opt,
+                         "未来情绪预测（KNN 轨迹 · 中位 + P25–P75 置信带 · 橙点=反弹峰值）· 绿背景=机会区 红背景=危险区", 340)
 
 
 def sentiment_board_html(base, data, results, results_week, scores, last_date):
@@ -2184,8 +2304,7 @@ def sentiment_board_html(base, data, results, results_week, scores, last_date):
       <div class="sent-grid">
         <div class="sent-card">
           <div class="sent-card-t">当前情绪分（0-100 分位）</div>
-          <div class="sent-num" style="color:{zcolor}">{final:.1f}</div>
-          <div class="sent-zone" style="color:{zcolor}">{zlabel}</div>
+          {_sent_gauge_echart(final, buy_th, sell_th, zlabel)}
           <div class="sent-kv"><span>快线 MA5 / 慢线 MA20</span><b>{'—' if ma5s is None else ("%.1f" % ma5s)} / {'—' if ma20s is None else ("%.1f" % ma20s)} · {trend}</b></div>
           <div class="sent-kv"><span>距买入线（{buy_th:.0f}）</span><b style="color:{GREEN if dbuy > 0 else RED}">{dbuy:+.1f} 分</b></div>
           <div class="sent-kv"><span>距卖出线（{sell_th:.0f}）</span><b style="color:{RED if dsell < 0 else GREEN}">{dsell:+.1f} 分</b></div>
@@ -2198,8 +2317,11 @@ def sentiment_board_html(base, data, results, results_week, scores, last_date):
         </div>
         <div class="sent-card sent-card-wide">
           <div class="sent-card-t">情绪走势（近 120 交易日 · 绿/红虚线为买入线/卖出线）</div>
-          {_sent_spark_svg(sent.get("hist") or [], buy_th=buy_th, sell_th=sell_th)}
-          <div class="sent-legend"><span><i style="background:{GREEN}"></i>情绪分</span><span><i style="background:{BLUE}"></i>MA5</span><span><i style="background:{GRAY}"></i>MA20</span><span><i style="background:{GREEN};opacity:.55"></i>买线{buy_th:.0f}</span><span><i style="background:{RED};opacity:.55"></i>卖线{sell_th:.0f}</span></div>
+          {_sent_trend_echart(sent.get("hist") or [], buy_th=buy_th, sell_th=sell_th)}
+        </div>
+        <div class="sent-card sent-card-wide">
+          <div class="sent-card-t">未来情绪预测（KNN 轨迹 · 中位 + P25–P75 置信带 + 反弹峰值）</div>
+          {_sent_forecast_echart(sent.get("forecast"), sent.get("hist") or [], buy_th, sell_th)}
         </div>
         <div class="sent-card">
           <div class="sent-card-t">弹性与共振</div>

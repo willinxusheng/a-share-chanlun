@@ -11,6 +11,7 @@
 历史基准曲线六项: 量能水平.25 换手.20 动量.20 波动-.10(波动率飙升=恐惧折扣) 分层.15 量能变化.10
 """
 import json, math, re, os
+from datetime import date, timedelta
 
 BASE = os.environ.get("SENTIMENT_BASE", os.path.dirname(os.path.abspath(__file__)))
 
@@ -332,6 +333,89 @@ resonance = count_resonance(last, last["p"])
 adj_items = []
 adj_total = max(-8, min(8, sum(x["adj"] for x in adj_items)))
 
+# ---- R177c 自包含 KNN 情绪轨迹预测 ----
+# 移植自 sentiment-dashboard 技能的情绪预测方法论(本仓库副本, 不依赖另一工作区 build_v3):
+# 以最近 ctx 日 score 形状(相对首值归一化, 只看斜率/形状而非绝对水平)为查询向量,
+# 在历史中找 k 个最相似窗口, 拼接其后 horizon 日真实轨迹, 平移锚定到当前末值,
+# 取分位 median/p25/p75 作未来带; 反弹峰值取中位轨迹在未来段的最大点。
+# OFF-BY-ONE 关键: future 切片须从 i+1(明日)起, 不取 i(今日)——否则预测会"吃掉"今日点导致起点偏移。
+def _pct(arr, q):
+    """线性插值分位(0-1)。空数组返回 None。"""
+    if not arr:
+        return None
+    if len(arr) == 1:
+        return arr[0]
+    idx = (len(arr) - 1) * q
+    lo_i = int(idx)
+    hi_i = min(lo_i + 1, len(arr) - 1)
+    frac = idx - lo_i
+    return arr[lo_i] * (1 - frac) + arr[hi_i] * frac
+
+
+def _future_dates(start, n):
+    """从 start(YYYY-MM-DD) 起生成 n 个未来交易日(跳过周末)。"""
+    d = date.fromisoformat(start)
+    out = []
+    while len(out) < n:
+        d += timedelta(days=1)
+        if d.weekday() < 5:
+            out.append(d.isoformat())
+    return out
+
+
+def sentiment_forecast(valid, horizon=30, k=10, ctx=20, band_days=10):
+    """KNN 情绪轨迹预测。样本不足(历史 < ctx+horizon+1 或候选 < k)时返回 None, 由上层降级处理。"""
+    scores = [d["score"] for d in valid if d.get("score") is not None]
+    n = len(scores)
+    need = ctx + horizon + 1
+    if n < need or k <= 0:
+        return None
+    cur = scores[n - ctx:]                 # 查询窗口(最近 ctx 日)
+    cur_norm = [x - cur[0] for x in cur]   # 相对首值归一化: 消除长期水平漂移, 纯比形状/斜率
+    cand = []                              # (距离, 平移后的未来轨迹)
+    for i in range(ctx - 1, n - horizon - 1):   # i = 上下文末点; 需 i+1..i+horizon 完整
+        c = scores[i - ctx + 1: i + 1]
+        if any(v is None for v in c):
+            continue
+        c_norm = [x - c[0] for x in c]
+        dist = math.sqrt(sum((a - b) ** 2 for a, b in zip(cur_norm, c_norm)))
+        fut = scores[i + 1: i + 1 + horizon]    # OFF-BY-ONE: 从明日(i+1)起, 非今日(i)
+        if len(fut) < horizon or any(v is None for v in fut):
+            continue
+        cur_last = scores[-1]
+        c_end = c[-1]                            # 匹配窗口的"今日"等价点(上下文末值)
+        # 平移锚定: 把匹配窗口 T+1..T+horizon 的相对形状接到当前末值上——
+        # shifted[j] 即"若今日重演该历史, T+(j+1) 的情绪分"(纯未来序列, 不含今日桥接, 桥接在图表侧完成)。
+        shifted = [cur_last + (fut[j] - c_end) for j in range(horizon)]
+        cand.append((dist, shifted))
+    if len(cand) < k:
+        return None
+    cand.sort(key=lambda x: x[0])
+    top = [c[1] for c in cand[:k]]
+    median, p25, p75 = [], [], []
+    for j in range(horizon):
+        col = sorted(t[j] for t in top)
+        median.append(round(max(0.0, min(100.0, _pct(col, 0.5))), 1))
+        p25.append(round(max(0.0, _pct(col, 0.25)), 1))
+        p75.append(round(max(0.0, min(100.0, _pct(col, 0.75))), 1))
+    # 反弹峰值: 中位轨迹在未来段(1-based, 明日=1)的最大点——恐惧市况下衡量情绪修复的潜在高点
+    peak_day = int(max(range(horizon), key=lambda j: median[j])) + 1
+    peak_val = median[peak_day - 1]
+    return {"horizon": horizon, "ctx": ctx, "k": k, "band_days": band_days,
+            "asof": valid[-1]["date"],
+            "dates": _future_dates(valid[-1]["date"], horizon),
+            "median": median, "p25": p25, "p75": p75,
+            "peak_day": peak_day, "peak_val": peak_val}
+
+
+fc = sentiment_forecast(valid)
+if fc:
+    print("forecast: horizon=%d k=%d ctx=%d peak@T+%d=%.1f band_days=%d"
+          % (fc["horizon"], fc["k"], fc["ctx"], fc["peak_day"], fc["peak_val"], fc["band_days"]))
+else:
+    print("forecast: 样本不足, 跳过情绪预测带生成")
+
+
 result = {
     "asof": last["date"],
     "close": last["close"],
@@ -354,6 +438,9 @@ result = {
     "hist": [[d["date"], d["close"], d["score"], d["ma5s"], d["ma20s"],
               (1 if d["regime"] == "bull" else 0),
               d.get("elasticity")] for d in valid],
+    # R177c: KNN 情绪轨迹预测(未来 horizon 日 median/p25/p75 带 + 反弹峰值)。
+    # 样本不足时 calc_v2 返回 None, 此处写为 None, 由 report.py 情绪板块降级(不画预测带)。
+    "forecast": fc,
     # v4.9.27: 清空写死的过期叙事字面量(iv/val_cyb/val_hs300/limit_detail/missing)。
     # 这些硬编码值(含 7/22、42.2倍、14.5倍、7/31 涨停等过期口径)模板从不渲染(已查证
     # template-v3.html 对 extra 零引用), 且 build_v3 自行动态注入 breadth_ma20/ic_basis/
