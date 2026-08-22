@@ -2012,7 +2012,7 @@ def _sent_echart(cid, toolbar, height, fdata, opt_js):
     """情绪 ECharts 容器块: 数据 json.dumps 注入, option 由 JS 构建(支持 formatter 函数/年份标注)。
     图表统一 push 到 window.__charts 由全局 resizeAll 接管缩放。"""
     js = ("(function(){var D=" + json.dumps(fdata, ensure_ascii=False) + ";"
-          "var chart=echarts.init(document.getElementById('" + cid + "'));"
+          "var chart=echarts.init(document.getElementById('" + cid + "'), null, {group:'sentGroup'});"
           "(window.__charts=window.__charts||[]).push(chart);"
           + _SENT_DATE_FMT +
           "chart.setOption((" + opt_js + ")(D,chart));})();")
@@ -2196,16 +2196,26 @@ def _sent_main_chart(forecast, hist, buy_th, sell_th, acc=None):
 
 
 
-def _sent_index_chart(hist):
-    """情绪 vs 上证指数(R179): 双 Y 轴, 全量历史(与分指数图解同起点), 年份竖线标注 + dataZoom。"""
+def _sent_index_chart(hist, forecast=None):
+    """情绪 vs 上证指数(R179): 双 Y 轴, 全量历史(与分指数图解同起点), 年份竖线标注 + dataZoom。
+    R192: xcat 与主图统一为 历史+预测(预测段 sc/cl 补 None), 默认缩放 start/end 与主图一致, 两图时间轴对齐联动。"""
     rows = [r for r in (hist or []) if isinstance(r, (list, tuple)) and len(r) >= 3]
     if len(rows) < 2:
         return ""
-    x = [r[0] for r in rows]
-    sc = [None if r[2] is None else float(r[2]) for r in rows]
-    cl = [None if r[1] is None else float(r[1]) for r in rows]
-    _wb = _sent_warm_band(sc, x)
-    fdata = {"xcats": x, "sc": sc, "cl": cl, "yearLines": _year_lines(x),
+    x_hist = [r[0] for r in rows]
+    sc_hist = [None if r[2] is None else float(r[2]) for r in rows]
+    cl_hist = [None if r[1] is None else float(r[1]) for r in rows]
+    # R192: 与主图统一 xcat(历史+预测), 预测段补 None, 使两图时间轴长度/刻度完全一致
+    x_fc = (forecast or {}).get("dates") or []
+    H = len(x_fc)
+    if H > 0:
+        xcats = x_hist + list(x_fc)
+        sc = sc_hist + [None] * H
+        cl = cl_hist + [None] * H
+    else:
+        xcats, sc, cl = x_hist, sc_hist, cl_hist
+    _wb = _sent_warm_band(sc, xcats)
+    fdata = {"xcats": xcats, "sc": sc, "cl": cl, "yearLines": _year_lines(x_hist),
              "markAreaData": _sent_warm_markarea(_wb)}
     opt_js = (
         "function(D,chart){"
@@ -2220,8 +2230,8 @@ def _sent_index_chart(hist):
         "yAxis:[{type:'value',min:0,max:100,position:'left',"
         "axisLabel:{fontSize:11,color:'#2b6cb0'},splitLine:{lineStyle:{color:'#eef2f7'}},name:'温度'},"
         "{type:'value',position:'right',scale:true,axisLabel:{fontSize:11,color:'#b45309'},name:'上证'}],"
-        "dataZoom:[{type:'inside',xAxisIndex:0,start:82,end:100},"
-        "{type:'slider',xAxisIndex:0,height:18,bottom:14,start:82,end:100,showDetail:false,"
+        "dataZoom:[{type:'inside',xAxisIndex:0,start:62,end:100},"
+        "{type:'slider',xAxisIndex:0,height:18,bottom:14,start:62,end:100,showDetail:false,"
         "handleStyle:{color:'#2b6cb0'},borderColor:'#e2e8f0',fillerColor:'rgba(43,108,176,0.12)',"
         "dataBackground:{lineStyle:{color:'#cbd5e1'},areaStyle:{color:'rgba(203,213,225,0.25)'}},"
         "selectedDataBackground:{lineStyle:{color:'#2b6cb0'},areaStyle:{color:'rgba(43,108,176,0.25)'}}}],"
@@ -2232,10 +2242,10 @@ def _sent_index_chart(hist):
     )
     cap = ('<div class="sent-zone-cap">'
            '<span class="zc zc-w">▦ 灰带=数据预热期(样本不足, 非断线)</span>'
-           '<span class="zc">蓝=情绪温度　棕=上证指数　滚轮拖拽缩放（默认近 120 日）</span>'
+           '<span class="zc">蓝=情绪温度　棕=上证指数　滚轮拖拽缩放（与主图时间轴联动）</span>'
            '</div>')
     return _sent_echart("echart-sent-index",
-                        "情绪温度 vs 上证指数（近 120 日）",
+                        "情绪温度 vs 上证指数",
                         300, fdata, opt_js) + cap
 
 
@@ -2269,7 +2279,7 @@ def sentiment_board_html(base, data, results, results_week, scores, last_date):
         scores = [float(r[2]) for r in hist if isinstance(r, (list, tuple)) and len(r) >= 3 and r[2] is not None]
         header = _sent_thermometer_html(final, zone, zlabel, zcolor, buy_th, sell_th, final_pct, ma5s, ma20s, scores)
         main_chart = _sent_main_chart(forecast, hist, buy_th, sell_th, acc)
-        index_chart = _sent_index_chart(hist)
+        index_chart = _sent_index_chart(hist, forecast)
         acc_html = ""
         if isinstance(acc, dict):
             acc_html = ('<div class="sent-acc">预测可信度（walk-forward 样本外回测 {n} 锚点）：'
@@ -2291,6 +2301,7 @@ def sentiment_board_html(base, data, results, results_week, scores, last_date):
       <div class="sent-chart-card">{main_chart}</div>
       {acc_html}
       <div class="sent-chart-card">{index_chart}</div>
+      <script>if(window.echarts){{ try{{echarts.connect('sentGroup');}}catch(e){{}} }}</script>
       <p class="sent-footnote">代理情绪温度（monitor_only）：由上证量能/动量/波动/牛熊位置 + 宽基与跨市场广度合成，非全市场涨跌家数；量能维度受数据源 volume 单位差异影响，仅供研判参考，不参与任何概率/方向计算。history 为全部可用交易日逐日回算；forecast 由 KNN 历史轨迹派生（k=15/ctx=15 等权全局，经 walk-forward 回测反选），紫色虚线为未来预测中值（κ 重标定，样本外实测覆盖率≈名义 50% 的 p25–p75 区间）；预测为路径派生，非因子预测，仅供参考。</p>
     </section>"""
     except Exception as _e:
