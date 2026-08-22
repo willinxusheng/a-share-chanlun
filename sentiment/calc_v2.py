@@ -559,6 +559,20 @@ def backtest_sentiment_forecast(valid, horizon=30, k=10, ctx=20,
     cov = 0
     cov_tot = 0
     anchors = 0
+    # R200: 极端区 regime 内分段披露(透明化, 不改算法)
+    # zone: fear(<=BUY_TH) / greed(>=SELL_TH) / neutral(其余)
+    z_err = {"fear": [], "greed": [], "neutral": []}
+    z_dir_hit = {"fear": 0, "greed": 0, "neutral": 0}
+    z_dir_tot = {"fear": 0, "greed": 0, "neutral": 0}
+    z_cov = {"fear": 0, "greed": 0, "neutral": 0}
+    z_cov_tot = {"fear": 0, "greed": 0, "neutral": 0}
+    z_n = {"fear": 0, "greed": 0, "neutral": 0}
+    def _zone_of(s):
+        if s <= BUY_TH:
+            return "fear"
+        if s >= SELL_TH:
+            return "greed"
+        return "neutral"
     for t in range(ctx + horizon, n - horizon, step):
         cur = scores[t - ctx: t]
         cur_norm = [x - cur[0] for x in cur]
@@ -613,12 +627,40 @@ def backtest_sentiment_forecast(valid, horizon=30, k=10, ctx=20,
             if (med[-1] - today >= 0) == (actual[-1] - today >= 0):
                 dir_hit += 1
         anchors += 1
+        z = _zone_of(today)
+        z_n[z] += 1
+        for j in range(horizon):
+            a = actual[j]
+            m = med[j]
+            if a is None or m is None:
+                continue
+            z_err[z].append(abs(a - m))
+            z_cov_tot[z] += 1
+            kj = kap[j]
+            lo = max(0.0, m - kj * (m - (p25l[j] if p25l[j] is not None else m)))
+            hi = min(100.0, m + kj * ((p75l[j] if p75l[j] is not None else m) - m))
+            if lo <= a <= hi:
+                z_cov[z] += 1
+        if actual[-1] is not None and med[-1] is not None and today is not None:
+            z_dir_tot[z] += 1
+            if (med[-1] - today >= 0) == (actual[-1] - today >= 0):
+                z_dir_hit[z] += 1
     if not errs:
         return None
+    by_zone = {}
+    for zk in ("fear", "greed", "neutral"):
+        if z_n[zk] > 0:
+            by_zone[zk] = {
+                "n": z_n[zk],
+                "mae": round(sum(z_err[zk]) / len(z_err[zk]), 2),
+                "dir_acc": round(z_dir_hit[zk] / max(1, z_dir_tot[zk]) * 100, 1),
+                "cov": round(z_cov[zk] / max(1, z_cov_tot[zk]) * 100, 1),
+            }
     return {"mae": round(sum(errs) / len(errs), 2),
             "dir_acc": round(dir_hit / max(1, dir_tot) * 100, 1),
             "cov": round(cov / max(1, cov_tot) * 100, 1),
-            "n": anchors}
+            "n": anchors,
+            "by_zone": by_zone}
 
 
 def calibrate_sentiment_band_kappa(valid, horizon=30, k=15, ctx=15,

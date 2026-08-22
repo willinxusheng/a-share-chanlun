@@ -2302,12 +2302,24 @@ def sentiment_board_html(base, data, results, results_week, scores, last_date):
         index_chart = _sent_index_chart(hist, forecast)
         acc_html = ""
         if isinstance(acc, dict):
+            by_zone = acc.get("by_zone") or {}
+            zone_line = ""
+            if by_zone:
+                def _ztag(zk):
+                    z = by_zone.get(zk)
+                    if not z:
+                        return ""
+                    zname = {"fear": "恐惧区", "greed": "贪婪区", "neutral": "中性区"}[zk]
+                    return ('<span class="zc">%s(n=%d): 方向 <b>%.0f%%</b> · 覆盖 <b>%.0f%%</b></span>'
+                            % (zname, z.get("n", 0), z.get("dir_acc", 0), z.get("cov", 0)))
+                zone_line = ('<div class="sent-acc sent-acc-sub">分情绪区回测（透明化，提示极端区更难测）：'
+                             + _ztag("fear") + _ztag("neutral") + _ztag("greed") + '</div>')
             acc_html = ('<div class="sent-acc">预测可信度（walk-forward 样本外回测 {n} 锚点）：'
                         '预测带覆盖率 <b>{cov:.1f}%</b> · 方向命中 <b>{d:.1f}%</b> · 平均误差 <b>{m:.1f}</b> 分'
-                        '（0–100 标尺，30 日 horizon；阴影带经 κ={k:.2f} 重标定至名义 50% 覆盖）。</div>').format(
+                        '（0–100 标尺，30 日 horizon；阴影带经逐日 κ 重标定至名义 50% 覆盖，近紧远宽）。</div>'
+                        + zone_line).format(
                 n=acc.get("n", 0), cov=acc.get("cov", 0),
-                d=acc.get("dir_acc", 0), m=acc.get("mae", 0),
-                k=(acc.get("band_kappa") or 1.0))
+                d=acc.get("dir_acc", 0), m=acc.get("mae", 0))
         return f"""
     <section class="panel" id="sentiment-board" style="border-left:4px solid {zcolor}; --sent-accent:{zcolor};">
       <h2 class="sec" id="s2">二、市场情绪
@@ -2873,6 +2885,9 @@ def main():
   .sent-footnote {{ font-size: 11px; color: #94a3b8; line-height: 1.7; margin-top: 12px; padding: 10px 12px; background: var(--surface-2, #f8fafc); border-left: 3px solid #cbd5e1; border-radius: 0 8px 8px 0; }}
   .sent-acc {{ font-size: 12px; color: #475569; line-height: 1.6; margin: -4px 0 12px; padding: 8px 12px; background: #fffbeb; border: 1px solid #fde68a; border-left: 4px solid #f0c14b; border-radius: 0 8px 8px 0; }}
   .sent-acc b {{ color: #b45309; font-variant-numeric: tabular-nums; }}
+  .sent-acc-sub {{ margin-top: -8px; background: #f8fafc; border-color: #e2e8f0; border-left-color: #cbd5e1; font-size: 11.5px; }}
+  .sent-acc-sub .zc {{ color: #64748b; margin-right: 14px; white-space: nowrap; }}
+  .sent-acc-sub .zc b {{ color: #475569; }}
   .sent-zone-cap {{ display: flex; flex-wrap: wrap; gap: 14px; font-size: 11px; color: #64748b; margin-top: 6px; padding: 0 2px; line-height: 1.6; }}
   .sent-zone-cap .zc-g {{ color: #18a058; font-weight: 600; }}
   .sent-zone-cap .zc-r {{ color: #e54545; font-weight: 600; }}
