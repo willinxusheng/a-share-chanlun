@@ -1985,7 +1985,7 @@ def _sent_x_struct(sc, zone, score):
     return ("中性观望", f"情绪与结构均无明确方向({sc})", "#94a3b8", 1)
 
 
-# ================= R177c ECharts 情绪图（对标 sentiment-dashboard 视觉语言: 仪表盘 + 走势 + 预测带） =================
+# ================= R178 情绪板块（对齐 sentiment-dashboard 视觉语言: 温度计 + 维度表 + 走势预测 + 情绪vs指数） =================
 def _echart_block(cid, opt, toolbar, height):
     """通用 ECharts 容器块: 工具栏 + 图表 div + 内联初始化脚本。
     选项全部 json 可序列化(无 JS 函数), 故直接 json.dumps 注入, 避免 f-string 大括号转义;
@@ -1999,52 +1999,151 @@ def _echart_block(cid, opt, toolbar, height):
             + '<script>' + js + '</script>')
 
 
-def _sent_gauge_echart(value, buy_th, sell_th, zlabel):
-    """当前情绪分仪表盘(0-100 分位): 绿(恐惧·机会)→黄(中性)→红(贪婪·危险), pointer 颜色随档位 auto。
-    value 用 final(已 clamp 0-100), 与顶部徽标一致。"""
-    bt = max(0.0, min(1.0, float(buy_th) / 100.0))
-    st = max(0.0, min(1.0, float(sell_th) / 100.0))
-    # 三档色阶: 恐惧绿 / 中性黄 / 贪婪红; buy_th/sell_th 把 0-100 切成机会区/中性区/危险区
-    opt = {
-        "series": [{
-            "type": "gauge", "min": 0, "max": 100, "radius": "94%", "center": ["50%", "56%"],
-            "startAngle": 210, "endAngle": -30,
-            "axisLine": {"lineStyle": {"width": 15,
-                "color": [[bt, "#18a058"], [st, "#eab308"], [1, "#e54545"]]}},
-            "pointer": {"width": 5, "length": "60%", "itemStyle": {"color": "auto"}},
-            "anchor": {"show": True, "size": 12, "itemStyle": {"color": "#475569"}},
-            "axisTick": {"distance": -15, "length": 4, "lineStyle": {"color": "#fff"}},
-            "splitLine": {"distance": -15, "length": 14, "lineStyle": {"color": "#fff", "width": 2}},
-            "axisLabel": {"distance": -10, "color": "#64748b", "fontSize": 10},
-            "detail": {"valueAnimation": True, "formatter": "{value}", "fontSize": 30,
-                       "fontWeight": "bolder", "offsetCenter": [0, "42%"], "color": "auto"},
-            "title": {"offsetCenter": [0, "74%"], "fontSize": 13, "color": "#475569"},
-            "data": [{"value": round(float(value), 1), "name": zlabel}]
-        }]
-    }
-    return _echart_block("echart-sent-gauge", opt,
-                         "情绪分仪表盘 · 绿=恐惧(机会)　黄=中性　红=贪婪(危险)", 230)
+def _sent_thermometer_html(final, zone, zlabel, zcolor, buy_th, sell_th, final_pct, ma5s, ma20s):
+    """市场情绪温度计头图: 大分数 + 色阶进度条 + 档位标签 + 历史分位 + 趋势箭头。"""
+    bt = max(0.0, min(100.0, float(buy_th)))
+    st = max(0.0, min(100.0, float(sell_th)))
+    pos = max(0.0, min(100.0, float(final)))
+    # 趋势箭头
+    trend_arrow = "→"
+    trend_color = "#94a3b8"
+    if ma5s is not None and ma20s is not None:
+        if ma5s > ma20s:
+            trend_arrow, trend_color = "↗ 升温", RED
+        elif ma5s < ma20s:
+            trend_arrow, trend_color = "↘ 降温", GREEN
+    # 档位持续统计(模拟截图: 冰点/偏冷/中性/偏热/狂热)
+    # 用 buy_th/sell_th 切分: <buy=冰点/偏冷, buy-50=偏冷/中性, 50-sell=中性/偏热, >sell=狂热
+    ztext = {
+        "fear": "恐惧 · 机会区", "fearish": "中性偏恐", "greedish": "中性偏贪", "greed": "贪婪 · 危险区"
+    }.get(zone, zlabel)
+    pct_txt = ("历史分位 %g%%" % final_pct) if final_pct is not None else ""
+    return f"""
+    <div class="sent-head">
+      <div class="sent-head-row">
+        <div class="sent-title-wrap">
+          <span class="sent-main-title">市场情绪温度</span>
+          <span class="sent-tag" style="background:{zcolor}">{zlabel}</span>
+        </div>
+        <div class="sent-score-wrap">
+          <div class="sent-big-score" style="color:{zcolor}">{final:.1f}</div>
+          <div class="sent-score-meta">
+            <span class="sent-pct">{pct_txt}</span>
+            <span class="sent-trend" style="color:{trend_color}">{trend_arrow}</span>
+          </div>
+        </div>
+      </div>
+      <div class="sent-bar-wrap">
+        <div class="sent-bar-track">
+          <div class="sent-bar-fill" style="width:{pos:.1f}%;background:{zcolor}"></div>
+          <div class="sent-bar-tick" style="left:{bt:.1f}%"></div>
+          <div class="sent-bar-tick" style="left:{st:.1f}%"></div>
+        </div>
+        <div class="sent-bar-labels">
+          <span style="color:{GREEN}">机会<br><small>{buy_th:.0f}</small></span>
+          <span style="color:#64748b">中性<br><small>50</small></span>
+          <span style="color:{RED}">危险<br><small>{sell_th:.0f}</small></span>
+        </div>
+      </div>
+      <div class="sent-head-note">{ztext} · 绿=恐惧(机会) 红=贪婪(危险) · 数据截至今日收盘</div>
+    </div>"""
 
 
-def _sent_trend_echart(hist, buy_th, sell_th):
-    """情绪走势 ECharts 折线: 情绪分(绿) + MA5(蓝) + MA20(灰) + 买入/卖出阈值参考线(绿/红虚线) + dataZoom 滑块。
-    替代原 SVG sparkline, 支持滚轮缩放/拖拽平移, 与全局图表交互一致。hist 行=[date,close,score,ma5s,ma20s,...]。"""
-    rows = [r for r in (hist or []) if isinstance(r, (list, tuple)) and len(r) >= 5]
+def _sent_dimensions_html(dimensions):
+    """维度拆解表: 名称 | 子分 | 明细。"""
+    if not dimensions:
+        return ""
+    rows = ""
+    for d in dimensions:
+        sub = d.get("sub")
+        sub_txt = "—" if sub is None else ("%+.2f" % sub)
+        sub_color = RED if (sub or 0) > 0 else (GREEN if (sub or 0) < 0 else "#64748b")
+        pct = d.get("pct")
+        pct_txt = "—" if pct is None else ("%g" % pct)
+        rows += (f'<tr><td>{d.get("name", "—")}</td>'
+                 f'<td class="tac"><b style="color:{sub_color}">{sub_txt}</b></td>'
+                 f'<td class="tar"><span style="color:#64748b">{d.get("detail", "")}</span></td></tr>')
+    return (f'<div class="sent-dim-card">'
+            f'<div class="sent-dim-title">维度</div>'
+            f'<table class="sent-dim-tbl"><thead><tr><th>维度</th><th class="tac">子分</th><th class="tar">明细</th></tr></thead>'
+            f'<tbody>{rows}</tbody></table></div>')
+
+
+def _sent_main_chart(forecast, hist, buy_th, sell_th):
+    """情绪走势与未来预测合一主图: 历史情绪(蓝实线) + 预测情绪(橙虚线) + 今日竖线 + 机会/危险区背景 + dataZoom。
+    对齐参考图: 一条连续曲线, 今日为界, 左侧实线右侧虚线, 80以上红色风险区、20以下绿色机会区。"""
+    rows = [r for r in (hist or []) if isinstance(r, (list, tuple)) and len(r) >= 3]
     rows = rows[-120:]
     if len(rows) < 2:
         return ""
-    x = [r[0][5:] for r in rows]  # MM-DD(近期窗口年份自明, 避免标签拥挤)
-    sc = [None if r[2] is None else float(r[2]) for r in rows]
-    m5 = [None if r[3] is None else float(r[3]) for r in rows]
-    m20 = [None if r[4] is None else float(r[4]) for r in rows]
+    x_hist = [r[0][5:] for r in rows]
+    y_hist = [None if r[2] is None else float(r[2]) for r in rows]
+    today_x = x_hist[-1]
+    # 预测序列
+    fmed = (forecast or {}).get("median") or []
+    fdates = (forecast or {}).get("dates") or []
+    H = len(fmed)
+    x_fc = [d[5:] for d in fdates]
+    xcats = x_hist + x_fc
+    # 历史实线 + 预测虚线: 用同一 series, 在今日处桥接; 预测段前插 None 断点制造虚实区分
+    hist_series = y_hist + [None] * H
+    fc_series = [None] * (len(x_hist) - 1) + [y_hist[-1]] + [float(v) for v in fmed]
     opt = {
         "tooltip": {"trigger": "axis", "axisPointer": {"type": "cross"}},
-        "legend": {"data": ["情绪分", "MA5", "MA20"], "top": 2, "textStyle": {"fontSize": 11}},
-        "grid": {"left": 44, "right": 14, "top": 34, "bottom": 52},
+        "legend": {"data": ["历史情绪", "预测情绪"], "top": 2, "textStyle": {"fontSize": 11}},
+        "grid": {"left": 44, "right": 14, "top": 38, "bottom": 52},
+        "xAxis": {"type": "category", "data": xcats, "boundaryGap": False,
+                  "axisLabel": {"fontSize": 10, "hideOverlap": True}, "axisTick": {"show": False}},
+        "yAxis": {"type": "value", "min": 0, "max": 100, "axisLabel": {"fontSize": 11},
+                  "splitLine": {"lineStyle": {"color": "#eef2f7"}}},
+        "dataZoom": [
+            {"type": "inside", "xAxisIndex": 0, "start": max(0, (len(xcats) - 80) / len(xcats) * 100), "end": 100},
+            {"type": "slider", "xAxisIndex": 0, "height": 16, "bottom": 22,
+             "start": max(0, (len(xcats) - 80) / len(xcats) * 100), "end": 100,
+             "handleStyle": {"color": "#2b6cb0"}, "borderColor": "#e2e8f0",
+             "fillerColor": "rgba(43,108,176,0.12)"}
+        ],
+        "series": [
+            {"name": "历史情绪", "type": "line", "data": hist_series, "symbol": "none", "smooth": True,
+             "lineStyle": {"color": "#2b6cb0", "width": 2}, "z": 4,
+             "markArea": {"silent": True, "itemStyle": {"opacity": 0.08}, "data": [
+                 [{"yAxis": 0, "itemStyle": {"color": GREEN}, "label": {"formatter": "机会区·大盘易涨", "position": "insideBottom", "color": GREEN, "fontSize": 10}}, {"yAxis": buy_th}],
+                 [{"yAxis": sell_th, "itemStyle": {"color": RED}, "label": {"formatter": "风险区·大盘易跌", "position": "insideTop", "color": RED, "fontSize": 10}}, {"yAxis": 100}]
+             ]},
+             "markLine": {"symbol": "none", "data": [
+                 {"xAxis": today_x, "lineStyle": {"color": "#94a3b8", "type": "dashed", "width": 1},
+                  "label": {"formatter": "今日", "color": "#475569", "position": "insideEndTop"}}
+             ]}},
+            {"name": "预测情绪", "type": "line", "data": fc_series, "symbol": "none", "smooth": True,
+             "lineStyle": {"color": "#f59e0b", "width": 2, "type": "dashed"}, "z": 5}
+        ]
+    }
+    return _echart_block("echart-sent-main", opt,
+                         "情绪走势与未来预测 · 蓝实线=历史情绪　橙虚线=KNN预测情绪　灰虚线=今日分界", 340)
+
+
+def _sent_index_chart(hist):
+    """情绪 vs 上证指数: 双 Y 轴折线图, 近 120 交易日。"""
+    rows = [r for r in (hist or []) if isinstance(r, (list, tuple)) and len(r) >= 3]
+    rows = rows[-120:]
+    if len(rows) < 2:
+        return ""
+    x = [r[0][5:] for r in rows]
+    sc = [None if r[2] is None else float(r[2]) for r in rows]
+    cl = [None if r[1] is None else float(r[1]) for r in rows]
+    opt = {
+        "tooltip": {"trigger": "axis", "axisPointer": {"type": "cross"}},
+        "legend": {"data": ["情绪温度", "上证指数"], "top": 2, "textStyle": {"fontSize": 11}},
+        "grid": {"left": 44, "right": 56, "top": 38, "bottom": 52},
         "xAxis": {"type": "category", "data": x, "boundaryGap": False,
                   "axisLabel": {"fontSize": 10, "hideOverlap": True}, "axisTick": {"show": False}},
-        "yAxis": {"type": "value", "scale": True, "axisLabel": {"fontSize": 11},
-                  "splitLine": {"lineStyle": {"color": "#eef2f7"}}},
+        "yAxis": [
+            {"type": "value", "min": 0, "max": 100, "position": "left",
+             "axisLabel": {"fontSize": 11, "color": "#2b6cb0"},
+             "splitLine": {"lineStyle": {"color": "#eef2f7"}}, "name": "温度"},
+            {"type": "value", "position": "right", "scale": True,
+             "axisLabel": {"fontSize": 11, "color": "#b45309"}, "name": "上证"}
+        ],
         "dataZoom": [
             {"type": "inside", "xAxisIndex": 0},
             {"type": "slider", "xAxisIndex": 0, "height": 16, "bottom": 22,
@@ -2052,114 +2151,20 @@ def _sent_trend_echart(hist, buy_th, sell_th):
              "fillerColor": "rgba(43,108,176,0.12)"}
         ],
         "series": [
-            {"name": "情绪分", "type": "line", "data": sc, "symbol": "none", "smooth": True,
-             "lineStyle": {"color": GREEN, "width": 2}, "z": 5,
-             "markLine": {"symbol": "none", "data": [
-                 {"yAxis": buy_th, "lineStyle": {"color": GREEN, "type": "dashed", "width": 1},
-                  "label": {"formatter": "买 " + str(int(buy_th)), "color": GREEN, "position": "insideEndTop"}},
-                 {"yAxis": sell_th, "lineStyle": {"color": RED, "type": "dashed", "width": 1},
-                  "label": {"formatter": "卖 " + str(int(sell_th)), "color": RED, "position": "insideEndTop"}}
-             ]}},
-            {"name": "MA5", "type": "line", "data": m5, "symbol": "none", "smooth": True,
-             "lineStyle": {"color": BLUE, "width": 1.4}},
-            {"name": "MA20", "type": "line", "data": m20, "symbol": "none", "smooth": True,
-             "lineStyle": {"color": GRAY, "width": 1.2}}
+            {"name": "情绪温度", "type": "line", "data": sc, "symbol": "none", "smooth": True,
+             "lineStyle": {"color": "#2b6cb0", "width": 2}, "yAxisIndex": 0},
+            {"name": "上证指数", "type": "line", "data": cl, "symbol": "none", "smooth": True,
+             "lineStyle": {"color": "#b45309", "width": 1.6}, "yAxisIndex": 1}
         ]
     }
-    return _echart_block("echart-sent-trend", opt,
-                         "情绪走势（近 120 交易日）· 绿/红虚线为买入线/卖出线 · 滚轮缩放 / 拖拽底部滑块平移", 300)
-
-
-def _sent_forecast_echart(forecast, hist, buy_th, sell_th):
-    """未来情绪预测 ECharts: 历史引线(近 40 日) + KNN 中位轨迹(红) + P25–P75 置信带(仅前 band_days 日画面积)
-    + 反弹峰值 markPoint(橙) + 机会/危险区 markArea(绿/红背景)。样本不足(forecast=None)时降级为提示条。"""
-    if not isinstance(forecast, dict):
-        return ('<div class="sent-note" style="font-size:12px;color:#94a3b8;padding:10px 0">'
-                '样本不足（历史 < 51 交易日），暂未生成情绪预测带。</div>')
-    fmed = forecast.get("median") or []
-    fp25 = forecast.get("p25") or []
-    fp75 = forecast.get("p75") or []
-    fdates = forecast.get("dates") or []
-    H = forecast.get("horizon") or len(fmed)
-    if not fmed or len(fmed) != H or not fdates or len(fdates) != H:
-        return ('<div class="sent-note" style="font-size:12px;color:#94a3b8;padding:10px 0">'
-                '情绪预测数据不完整，暂未渲染预测带。</div>')
-    band_days = int(forecast.get("band_days", 10))
-    peak_day = int(forecast.get("peak_day", 1))
-    peak_val = float(forecast.get("peak_val", 0))
-    LEAD = 40
-    rows = [r for r in (hist or []) if isinstance(r, (list, tuple)) and len(r) >= 3]
-    rows = rows[-LEAD:]
-    M = len(rows)
-    if M < 1:
-        return ""
-    x_hist = [r[0][5:] for r in rows]
-    y_hist = [None if r[2] is None else float(r[2]) for r in rows]
-    x_fc = [d[5:] for d in fdates]
-    xcats = x_hist + x_fc
-    score_series = y_hist + [None] * H
-    bridge = y_hist[-1]  # 桥接: 预测轨迹首点=今日值, 紧贴今日虚线展开(旭总要求"预测线紧贴今日")
-    median_series = [None] * (M - 1) + [bridge] + [float(v) for v in fmed]
-    p25_series = [None] * (M - 1) + [bridge] + [float(v) for v in fp25]
-    p75_series = [None] * (M - 1) + [bridge] + [float(v) for v in fp75]
-    # 置信带: 基准(下沿) + 堆叠高度(上沿-下沿); 仅前 band_days 日画面积, 其后置 None 不画
-    band_lo = list(p25_series)
-    band_hi = [None] * len(p25_series)
-    band_hi[M - 1] = 0.0
-    for j in range(band_days):
-        idx = M + j
-        if idx < len(band_hi):
-            lo, hi = p25_series[idx], p75_series[idx]
-            band_hi[idx] = (hi - lo) if (lo is not None and hi is not None) else None
-    for j in range(band_days, H):
-        band_lo[M + j] = None
-    peak_idx = M + peak_day - 1
-    peak_x = xcats[peak_idx] if 0 <= peak_idx < len(xcats) else ""
-    opt = {
-        "tooltip": {"trigger": "axis", "axisPointer": {"type": "cross"}},
-        "legend": {"data": ["历史情绪分", "预测中位", "P25–P75 置信带"], "top": 2, "textStyle": {"fontSize": 11}},
-        "grid": {"left": 44, "right": 14, "top": 34, "bottom": 52},
-        "xAxis": {"type": "category", "data": xcats, "boundaryGap": False,
-                  "axisLabel": {"fontSize": 10, "hideOverlap": True}, "axisTick": {"show": False}},
-        "yAxis": {"type": "value", "scale": False, "min": 0, "max": 100,
-                  "axisLabel": {"fontSize": 11}, "splitLine": {"lineStyle": {"color": "#eef2f7"}}},
-        "dataZoom": [
-            {"type": "inside", "xAxisIndex": 0, "start": max(0, (len(xcats) - 70) / len(xcats) * 100), "end": 100},
-            {"type": "slider", "xAxisIndex": 0, "height": 16, "bottom": 22,
-             "start": max(0, (len(xcats) - 70) / len(xcats) * 100), "end": 100,
-             "handleStyle": {"color": "#2b6cb0"}, "borderColor": "#e2e8f0",
-             "fillerColor": "rgba(43,108,176,0.12)"}
-        ],
-        "series": [
-            {"name": "历史情绪分", "type": "line", "data": score_series, "symbol": "none", "smooth": True,
-             "lineStyle": {"color": "#2b6cb0", "width": 1.8}, "z": 4,
-             "markArea": {"silent": True, "itemStyle": {"opacity": 0.07}, "data": [
-                 [{"yAxis": 0, "itemStyle": {"color": GREEN}}, {"yAxis": buy_th}],
-                 [{"yAxis": sell_th, "itemStyle": {"color": RED}}, {"yAxis": 100}]
-             ]}},
-            {"name": "P25–P75 置信带", "type": "line", "data": band_lo, "stack": "sb",
-             "symbol": "none", "lineStyle": {"opacity": 0}, "areaStyle": {"opacity": 0},
-             "tooltip": {"show": False}, "silent": True},
-            {"name": "P25–P75 置信带", "type": "line", "data": band_hi, "stack": "sb",
-             "symbol": "none", "lineStyle": {"opacity": 0}, "areaStyle": {"color": "rgba(229,69,69,0.10)"},
-             "tooltip": {"show": False}, "silent": True},
-            {"name": "预测中位", "type": "line", "data": median_series, "symbol": "none", "smooth": True,
-             "lineStyle": {"color": "#e54545", "width": 2}, "z": 6,
-             "markPoint": {"symbol": "pin", "symbolSize": 26, "data": [{
-                 "coord": [peak_x, round(peak_val, 1)],
-                 "value": "反弹峰值 T+%d %.1f" % (peak_day, peak_val),
-                 "itemStyle": {"color": "#d97706"},
-                 "label": {"show": True, "position": "top", "color": "#d97706",
-                           "fontSize": 11, "fontWeight": "bold"}}]}}
-        ]
-    }
-    return _echart_block("echart-sent-forecast", opt,
-                         "未来情绪预测（KNN 轨迹 · 中位 + P25–P75 置信带 · 橙点=反弹峰值）· 绿背景=机会区 红背景=危险区", 340)
+    return _echart_block("echart-sent-index", opt,
+                         "情绪 vs 上证指数（近 120 交易日）· 蓝=情绪温度　棕=上证指数", 300)
 
 
 def sentiment_board_html(base, data, results, results_week, scores, last_date):
-    """市场情绪板块：仪表盘 + 六因子 + 走势 + 弹性/共振 + 情绪×结构互联矩阵 + 历史信号 + 背离记录。
-    情绪数据缺失时降级为提示条（不阻断主报告, 与 quality_cert 缺失同策略）。"""
+    """R178 市场情绪板块：温度计头图 + 维度拆解表 + 情绪走势与未来预测主图 + 情绪vs上证指数副图。
+    删除旧版的仪表盘/六因子卡/弹性共振/互联矩阵/历史信号/背离记录，仅保留截图所示核心结构。
+    情绪数据缺失时降级为提示条（不阻断主报告）。"""
     sent = load_sentiment_full()
     if not sent:
         return ('<section class="panel" id="sentiment-board">'
@@ -2173,181 +2178,38 @@ def sentiment_board_html(base, data, results, results_week, scores, last_date):
         buy_th = float(sent.get("buy_th", 20))
         sell_th = float(sent.get("sell_th", 85))
         asof = str(sent.get("asof", "—"))
-        close = float(sent.get("close", 0))
-        ma250 = float(sent.get("ma250", 0))
         ma5s = sent.get("ma5s")
         ma20s = sent.get("ma20s")
         ma5s = None if ma5s is None else float(ma5s)
         ma20s = None if ma20s is None else float(ma20s)
-        regime = str(sent.get("regime", "—"))
         zone, zlabel, zcolor = _sent_zone(score, buy_th, sell_th)
-        rg_color = RED if regime == "bull" else (GREEN if regime == "bear" else GRAY)
-        trend = _sent_trend(ma5s, ma20s)
-        dbuy = score - buy_th
-        dsell = sell_th - score
-        # —— 六因子分解 ——
-        parts = sent.get("parts") or {}
-        _FACTORS = (("amt", "量能水平", 0.25), ("to", "换手率", 0.20), ("mom", "动量", 0.20),
-                    ("vol", "波动率", -0.10), ("rat", "大小票分层", 0.15), ("chg", "量能变化", 0.10))
-        factor_bars = ""
-        for _k, _lab, _w in _FACTORS:
-            _v = parts.get(_k)
-            if not isinstance(_v, (int, float)):
-                _v = None
-            if _v is None:
-                factor_bars += (f'<div class="sent-frow"><span class="sent-fl">{_lab}</span>'
-                                f'<span class="sent-fv" style="color:#94a3b8">—</span></div>')
-                continue
-            _v = max(0.0, min(100.0, float(_v)))
-            _w_txt = "%+.0f%%" % (_w * 100)
-            factor_bars += (f'<div class="sent-frow"><span class="sent-fl">{_lab}</span>'
-                            f'<div class="sent-fbar"><i style="width:{_v:.0f}%"></i></div>'
-                            f'<span class="sent-fv">{_v:.0f}</span>'
-                            f'<span class="sent-fw">{_w_txt}</span></div>')
-        # —— 弹性与共振 ——
-        elas_pct = sent.get("elasticity_pct")
-        elas_pct = None if not isinstance(elas_pct, (int, float)) else float(elas_pct)
-        res = sent.get("resonance") or {}
-        fear_cnt = res.get("fear_count", 0)
-        greed_cnt = res.get("greed_count", 0)
-        # —— 情绪×结构互联矩阵（与各模块互联核心, 按信号强度排序）——
-        m_rows = []
-        for sym, d in data.items():
-            _cls = results[sym]["classify"]
-            _sc = _cls.get("scenario", "—")
-            _wsc = results_week[sym]["classify"].get("scenario", "—")
-            _health, _conf = scores[sym]
-            _sig, _txt, _col, _w = _sent_x_struct(_sc, zone, score)
-            m_rows.append((_w, sym, d["name"], _sig, _txt, _col, _sc, _wsc, _health, _conf))
-        m_rows.sort(key=lambda r: -r[0])  # 排序逻辑: 强信号(顶背离/底共振)在前, 顺势一致居中, 观望最后; 同级保持指数原序
-        m_html = ""
-        for _w, _sym, _name, _sig, _txt, _col, _sc, _wsc, _h, _c in m_rows:
-            m_html += (f'<tr data-sym="{_sym}" class="linkrow" data-jump>'
-                       f'<td><b>{_name}</b><span class="sym" style="margin-left:6px">{_sym}</span></td>'
-                       f'<td><span class="badge" style="background:{_col}">{_sig}</span></td>'
-                       f'<td style="font-size:12px;color:#475569">{_txt}</td>'
-                       f'<td class="tac">{_sc}</td><td class="tac">{_wsc}</td>'
-                       f'<td class="tac">{_h}</td><td class="tac">{_c}</td></tr>')
-        # —— 历史情绪信号（按日期倒序, 信号后 5/10/20 日实际表现）——
-        sigs = sorted([s for s in (sent.get("signals") or [])
-                       if isinstance(s, dict) and s.get("date")],
-                      key=lambda s: s["date"], reverse=True)
-        _rcls = lambda v: ("#e54545" if v > 0 else ("#18a058" if v < 0 else "#94a3b8"))
-        sig_html = ""
-        for s in sigs[:14]:
-            _t = s.get("type")
-            _sig_c = RED if _t == "sell" else GREEN
-            _sig_l = "卖出(贪婪)" if _t == "sell" else "买入(恐惧)"
-            _mk = lambda k: s.get(k)
-            sig_html += (f'<tr><td class="tac">{s.get("date")}</td>'
-                         f'<td class="tac"><span class="badge" style="background:{_sig_c}">{_sig_l}</span></td>'
-                         f'<td class="tac">{s.get("score")}</td>'
-                         f'<td class="tac">{s.get("regime", "—")}</td>'
-                         f'<td class="tac" style="color:{_rcls(_mk("r5") or 0)}">{"%+.1f%%" % (_mk("r5") or 0)}</td>'
-                         f'<td class="tac" style="color:{_rcls(_mk("r10") or 0)}">{"%+.1f%%" % (_mk("r10") or 0)}</td>'
-                         f'<td class="tac" style="color:{_rcls(_mk("r20") or 0)}">{"%+.1f%%" % (_mk("r20") or 0)}</td></tr>')
-        # 信号有效性统计（逆向验证: 买入信号后 20 日是否普遍为正, 卖出信号后是否为负）
-        _buys = [s.get("r20") for s in sigs if s.get("type") == "buy" and isinstance(s.get("r20"), (int, float))]
-        _sells = [s.get("r20") for s in sigs if s.get("type") == "sell" and isinstance(s.get("r20"), (int, float))]
-        _buy_avg = sum(_buys) / len(_buys) if _buys else None
-        _sell_avg = sum(_sells) / len(_sells) if _sells else None
-        _eff = ""
-        if _buy_avg is not None or _sell_avg is not None:
-            _b_txt = "%+.1f%%" % _buy_avg if _buy_avg is not None else "—"
-            _s_txt = "%+.1f%%" % _sell_avg if _sell_avg is not None else "—"
-            _b_c = _rcls(_buy_avg) if _buy_avg is not None else "#94a3b8"
-            _s_c = _rcls(_sell_avg) if _sell_avg is not None else "#94a3b8"
-            _eff = (f'<p class="sent-summary">信号有效性（历史 {len(sigs)} 次触发）: '
-                    f'买入信号后 20 日平均 <b style="color:{_b_c}">{_b_txt}</b>'
-                    f'（N={len(_buys)}） · 卖出信号后 20 日平均 <b style="color:{_s_c}">{_s_txt}</b>'
-                    f'（N={len(_sells)}）—— 情绪逆向指标在恐惧区买入、贪婪区卖出的历史统计基准。</p>')
-        # 分市况信号表现（regime_stats 由 calc_v2 产出: 牛/熊市况下买卖信号后20日平均, 直接消费不重算）
-        _rs = sent.get("regime_stats") or {}
-        _reg_txt = ""
-        _reg_parts = []
-        for _rg, _lab in (("bull", "牛市"), ("bear", "熊市")):
-            _rgd = _rs.get(_rg) or {}
-            _rb = _rgd.get("buy") or {}
-            _rss = _rgd.get("sell") or {}
-            if not (_rb.get("n") or _rss.get("n")):
-                continue
-            _bp = ("买 %+.2f%%（N=%d）" % (_rb["avg"], _rb["n"])) if _rb.get("n") else "买 —"
-            _sp = ("卖 %+.2f%%（N=%d）" % (_rss["avg"], _rss["n"])) if _rss.get("n") else "卖 —"
-            _reg_parts.append("%s：%s / %s" % (_lab, _bp, _sp))
-        if _reg_parts:
-            _reg_txt = ('<p class="sent-summary">分市况信号表现（信号后 20 日平均涨跌）: '
-                        + "　".join(_reg_parts) + '</p>')
-        # —— 顶底背离记录（按日期倒序）——
-        divs = sorted([d2 for d2 in (sent.get("divs") or [])
-                       if isinstance(d2, dict) and d2.get("date")],
-                      key=lambda d2: d2["date"], reverse=True)
-        div_html = ""
-        for d2 in divs[:14]:
-            _t = d2.get("type")
-            _c = RED if _t == "top" else GREEN
-            _l = "顶背离" if _t == "top" else "底背离"
-            div_html += (f'<tr><td class="tac">{d2.get("date")}</td>'
-                         f'<td class="tac"><span class="badge" style="background:{_c}">{_l}</span></td>'
-                         f'<td class="tac">{d2.get("close")}</td>'
-                         f'<td class="tac">{d2.get("score")}</td></tr>')
-        _rg_txt = ("年线之上 · 牛市" if regime == "bull" else ("年线之下 · 熊市" if regime == "bear" else "—"))
+        final_pct = sent.get("final_pct")
+        final_pct = None if not isinstance(final_pct, (int, float)) else float(final_pct)
+        hist = sent.get("hist") or []
+        forecast = sent.get("forecast")
+        dimensions = sent.get("dimensions") or []
+        header = _sent_thermometer_html(final, zone, zlabel, zcolor, buy_th, sell_th, final_pct, ma5s, ma20s)
+        dim_table = _sent_dimensions_html(dimensions)
+        main_chart = _sent_main_chart(forecast, hist, buy_th, sell_th)
+        index_chart = _sent_index_chart(hist)
         return f"""
     <section class="panel" id="sentiment-board" style="border-left:4px solid {zcolor}">
       <h2 class="sec" id="s2">二、市场情绪
         <span class="badge" style="background:{zcolor}">{zlabel} {final:.1f} 分</span>
-        <span class="badge" style="background:{rg_color}">regime {regime}</span>
         <span class="badge" style="background:#64748b">asof {asof}</span>
       </h2>
-      <p class="sent-asof" style="font-size:12px;color:#64748b;margin:2px 0 10px;line-height:1.7">
+      <p class="sent-asof" style="font-size:12px;color:#64748b;margin:2px 0 12px;line-height:1.7">
         情绪数据由仓库内置 <code>sentiment/calc_v2.py</code> 基于提交的指数日K计算（asof <b>{asof}</b>），
         更新节奏独立于行情数据（截至 {last_date}）；情绪仅作环境参考，不进入推演数学（R76 监控中）。</p>
-      <div class="sent-grid">
-        <div class="sent-card">
-          <div class="sent-card-t">当前情绪分（0-100 分位）</div>
-          {_sent_gauge_echart(final, buy_th, sell_th, zlabel)}
-          <div class="sent-kv"><span>快线 MA5 / 慢线 MA20</span><b>{'—' if ma5s is None else ("%.1f" % ma5s)} / {'—' if ma20s is None else ("%.1f" % ma20s)} · {trend}</b></div>
-          <div class="sent-kv"><span>距买入线（{buy_th:.0f}）</span><b style="color:{GREEN if dbuy > 0 else RED}">{dbuy:+.1f} 分</b></div>
-          <div class="sent-kv"><span>距卖出线（{sell_th:.0f}）</span><b style="color:{RED if dsell < 0 else GREEN}">{dsell:+.1f} 分</b></div>
-          <div class="sent-kv"><span>年线位置</span><b style="color:{rg_color}">{close:.0f} vs MA250 {ma250:.0f} · {_rg_txt}</b></div>
-        </div>
-        <div class="sent-card">
-          <div class="sent-card-t">六因子分位（滚动 252 日 · 括号内为权重）</div>
-          {factor_bars}
-          <p class="sent-note" style="font-size:11px;color:#94a3b8;margin-top:6px">波动率分位为负权重（波动飙升=恐惧折扣）；其余因子高分位=情绪偏热。</p>
-        </div>
-        <div class="sent-card sent-card-wide">
-          <div class="sent-card-t">情绪走势（近 120 交易日 · 绿/红虚线为买入线/卖出线）</div>
-          {_sent_trend_echart(sent.get("hist") or [], buy_th=buy_th, sell_th=sell_th)}
-        </div>
-        <div class="sent-card sent-card-wide">
-          <div class="sent-card-t">未来情绪预测（KNN 轨迹 · 中位 + P25–P75 置信带 + 反弹峰值）</div>
-          {_sent_forecast_echart(sent.get("forecast"), sent.get("hist") or [], buy_th, sell_th)}
-        </div>
-        <div class="sent-card">
-          <div class="sent-card-t">弹性与共振</div>
-          <div class="sent-num2" style="color:{BLUE}">{'—' if elas_pct is None else ("%.1f%%" % elas_pct)}</div>
-          <div class="sent-kv"><span>弹性系数</span><b>= (100-分) × 年线偏离%，衡量恐慌修复空间</b></div>
-          <div class="sent-kv"><span>恐惧共振</span><b>{fear_cnt} 项</b></div>
-          <div class="sent-kv"><span>贪婪共振</span><b>{greed_cnt} 项</b></div>
+      {header}
+      <div class="sent-layout">
+        <div class="sent-col-left">{dim_table}</div>
+        <div class="sent-col-right">
+          <div class="sent-chart-card">{main_chart}</div>
+          <div class="sent-chart-card">{index_chart}</div>
         </div>
       </div>
-      <h3 class="fc-title">情绪 × 结构互联矩阵
-        <span class="fc-sub">信号强度排序：顶背离/底共振 ＞ 顺势一致/偏恐偏贪提示 ＞ 观望；点击行跳转对应指数图解</span></h3>
-      <div class="tablescroll"><table class="tbl">
-        <thead><tr><th style="width:14%">指数</th><th style="width:15%">情绪×结构判定</th><th>说明</th><th class="tac" style="width:12%">日线</th><th class="tac" style="width:12%">周线</th><th class="tac" style="width:8%">健康</th><th class="tac" style="width:8%">置信</th></tr></thead>
-        <tbody>{m_html}</tbody></table></div>
-      <h3 class="fc-title">历史情绪信号
-        <span class="fc-sub">按日期倒序（最新在前）· 信号后 5/10/20 日实际涨跌（红涨绿跌）</span></h3>
-      <div class="tablescroll"><table class="tbl">
-        <thead><tr><th class="tac" style="width:12%">日期</th><th class="tac" style="width:14%">信号</th><th class="tac" style="width:10%">触发分</th><th class="tac" style="width:10%">市况</th><th class="tac" style="width:12%">后 5 日</th><th class="tac" style="width:12%">后 10 日</th><th class="tac" style="width:12%">后 20 日</th></tr></thead>
-        <tbody>{sig_html}</tbody></table></div>
-      {_eff}
-      {_reg_txt}
-      <h3 class="fc-title">顶底背离记录
-        <span class="fc-sub">按日期倒序（最新在前）· 60 日窗口顶/底背离</span></h3>
-      <div class="tablescroll"><table class="tbl">
-        <thead><tr><th class="tac" style="width:16%">日期</th><th class="tac" style="width:16%">类型</th><th class="tac" style="width:20%">指数收盘</th><th class="tac" style="width:16%">情绪分</th></tr></thead>
-        <tbody>{div_html}</tbody></table></div>
+      <p class="sent-footnote">代理情绪温度（monitor_only）：由上证量能/动量/波动/牛熊位置 + 宽基与跨市场广度合成，非全市场涨跌家数；量能维度受数据源 volume 单位差异影响，仅供研判参考，不参与任何概率/方向计算。history 为全部可用交易日逐日回算；forecast 由 KNN 历史轨迹派生，为路径派生预测而非因子预测。</p>
     </section>"""
     except Exception as _e:
         print("WARN 情绪板块渲染降级: %s" % _e)
@@ -2868,26 +2730,36 @@ def main():
   .xh-tip {{ position: absolute; pointer-events: none; background: rgba(15,23,42,.92); color: #fff; font-size: 13px; font-weight: 500; line-height: 1.55; padding: 8px 12px; border-radius: 6px; display: none; z-index: 20; white-space: nowrap; font-variant-numeric: tabular-nums; box-shadow: 0 2px 10px rgba(0,0,0,.3); }}
   .xh-tip b {{ color: #fbbf24; }}
   .tablescroll {{ width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }}
-  /* R177 市场情绪板块 */
-  .sent-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin: 4px 0 14px; }}
-  .sent-card {{ background: #f8fafc; border: 1px solid #e5e9f0; border-radius: 10px; padding: 12px 14px; }}
-  .sent-card-wide {{ grid-column: span 2; }}
-  .sent-card-t {{ font-size: 13px; font-weight: 700; color: #334155; margin-bottom: 8px; }}
-  .sent-num {{ font-size: 40px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }}
-  .sent-num2 {{ font-size: 30px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }}
-  .sent-zone {{ font-size: 15px; font-weight: 700; margin: 6px 0 8px; }}
-  .sent-kv {{ display: flex; justify-content: space-between; gap: 8px; font-size: 12px; color: #64748b; padding: 3px 0; line-height: 1.5; }}
-  .sent-kv b {{ color: #1f2937; font-variant-numeric: tabular-nums; text-align: right; }}
-  .sent-frow {{ display: flex; align-items: center; gap: 8px; margin: 4px 0; font-size: 12px; }}
-  .sent-fl {{ flex: 0 0 64px; color: #475569; }}
-  .sent-fbar {{ flex: 1; height: 7px; border-radius: 4px; background: #eef2f7; overflow: hidden; }}
-  .sent-fbar i {{ display: block; height: 100%; border-radius: 4px; background: linear-gradient(90deg,#2b6cb0,#60a5fa); }}
-  .sent-fv {{ flex: 0 0 30px; text-align: right; color: #1f2937; font-variant-numeric: tabular-nums; }}
-  .sent-fw {{ flex: 0 0 38px; text-align: right; color: #94a3b8; font-variant-numeric: tabular-nums; }}
-  .sent-legend {{ display: flex; gap: 14px; font-size: 11px; color: #64748b; margin-top: 4px; }}
-  .sent-legend span {{ display: inline-flex; align-items: center; gap: 4px; }}
-  .sent-legend i {{ display: inline-block; width: 16px; height: 3px; border-radius: 2px; }}
-  .sent-summary {{ font-size: 12px; color: #475569; background: #f8fafc; border: 1px solid #eef2f7; border-radius: 6px; padding: 8px 12px; margin: 8px 0 4px; line-height: 1.8; }}
+  /* R178 市场情绪板块（对齐 sentiment-dashboard 视觉语言） */
+  .sent-head {{ background: #f8fafc; border: 1px solid #e5e9f0; border-radius: 12px; padding: 16px 18px; margin-bottom: 14px; }}
+  .sent-head-row {{ display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }}
+  .sent-title-wrap {{ display: flex; align-items: center; gap: 10px; }}
+  .sent-main-title {{ font-size: 18px; font-weight: 800; color: #1e293b; }}
+  .sent-tag {{ font-size: 12px; color: #fff; padding: 3px 12px; border-radius: 999px; font-weight: 700; }}
+  .sent-score-wrap {{ display: flex; align-items: baseline; gap: 10px; }}
+  .sent-big-score {{ font-size: 42px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }}
+  .sent-score-meta {{ display: flex; flex-direction: column; align-items: flex-start; gap: 2px; font-size: 12px; color: #64748b; }}
+  .sent-pct {{ font-variant-numeric: tabular-nums; }}
+  .sent-trend {{ font-weight: 700; }}
+  .sent-bar-wrap {{ margin-top: 12px; }}
+  .sent-bar-track {{ position: relative; height: 10px; border-radius: 5px; background: linear-gradient(90deg, #22c55e 0%, #22c55e 25%, #f59e0b 50%, #ef4444 75%, #ef4444 100%); overflow: visible; }}
+  .sent-bar-fill {{ position: absolute; left: 0; top: -2px; height: 14px; border-radius: 7px; box-shadow: 0 0 0 3px rgba(255,255,255,.85), 0 2px 6px rgba(0,0,0,.2); min-width: 4px; max-width: 100%; transition: width .6s ease; }}
+  .sent-bar-tick {{ position: absolute; top: -3px; width: 2px; height: 16px; background: rgba(255,255,255,.9); border-radius: 1px; box-shadow: 0 1px 2px rgba(0,0,0,.25); }}
+  .sent-bar-labels {{ display: flex; justify-content: space-between; font-size: 11px; color: #64748b; margin-top: 6px; text-align: center; }}
+  .sent-bar-labels small {{ font-size: 10px; opacity: .8; }}
+  .sent-head-note {{ font-size: 12px; color: #64748b; margin-top: 10px; line-height: 1.5; }}
+  .sent-layout {{ display: grid; grid-template-columns: 300px 1fr; gap: 14px; align-items: start; }}
+  .sent-dim-card {{ background: #fff; border: 1px solid #e5e9f0; border-radius: 12px; overflow: hidden; }}
+  .sent-dim-title {{ font-size: 13px; font-weight: 700; color: #334155; padding: 12px 14px; background: #f8fafc; border-bottom: 1px solid #eef2f7; }}
+  .sent-dim-tbl {{ width: 100%; border-collapse: collapse; font-size: 13px; }}
+  .sent-dim-tbl th {{ text-align: left; font-weight: 600; color: #475569; background: #f1f5f9; padding: 9px 12px; border-bottom: 1px solid #eef2f7; }}
+  .sent-dim-tbl td {{ padding: 10px 12px; border-bottom: 1px solid #f1f5f9; color: #334155; }}
+  .sent-dim-tbl tbody tr:last-child td {{ border-bottom: none; }}
+  .sent-dim-tbl .tac {{ text-align: center; }}
+  .sent-dim-tbl .tar {{ text-align: right; }}
+  .sent-chart-card {{ background: #fff; border: 1px solid #e5e9f0; border-radius: 12px; padding: 10px 12px 12px; margin-bottom: 12px; }}
+  .sent-chart-card:last-child {{ margin-bottom: 0; }}
+  .sent-footnote {{ font-size: 11px; color: #94a3b8; line-height: 1.7; margin-top: 12px; padding: 10px 12px; background: #f8fafc; border-radius: 8px; }}
 
   @media (max-width: 720px) {{
     body {{ padding: 12px; }}
@@ -2905,6 +2777,12 @@ def main():
     nav.toc a {{ padding: 5px 8px; }}
     nav.toc a .num {{ width: 16px; height: 16px; font-size: 10px; margin-right: 4px; }}
     .hero {{ gap: 8px; }}
+    .sent-layout {{ grid-template-columns: 1fr; }}
+    .sent-head {{ padding: 12px 14px; }}
+    .sent-big-score {{ font-size: 34px; }}
+    .sent-head-row {{ gap: 10px; }}
+    .sent-dim-tbl {{ font-size: 12px; }}
+    .sent-dim-tbl th, .sent-dim-tbl td {{ padding: 8px 10px; }}
   }}
   /* ===== 模块互联互通 ===== */
   nav.sym-rail {{ position: sticky; top: 54px; z-index: 49; background: rgba(255,255,255,0.97); backdrop-filter: blur(8px); border: 1px solid #e2e8f0; border-radius: 12px; padding: 6px 10px; margin: 10px 0 18px; display: flex; flex-wrap: wrap; gap: 6px; box-shadow: 0 4px 14px rgba(15,23,42,0.05); }}
