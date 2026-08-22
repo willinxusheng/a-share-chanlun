@@ -2094,12 +2094,7 @@ def _sent_main_chart(forecast, hist, buy_th, sell_th, acc=None):
     band_lo = [None] * len(x_hist) + [float(v) for v in fp25]
     band_hi = [None] * len(x_hist) + [None if (i >= len(fp75) or fp75[i] is None or fp25[i] is None)
                                        else round(fp75[i] - fp25[i], 1) for i in range(H)]
-    acc_txt = ""
-    if isinstance(acc, dict):
-        _bk = (forecast or {}).get("band_kappa")
-        acc_txt = "　|　预测可信度: 带覆盖 %.1f%% · 方向命中 %.1f%% · 均误 %.1f 分%s" % (
-            acc.get("cov", 0), acc.get("dir_acc", 0), acc.get("mae", 0),
-            (" · κ=%.2f" % _bk) if _bk else "")
+    # 预测可信度信息已通过下方 .sent-acc 黄底行披露, 此处不再堆叠到标题(避免工具栏过长/窄屏换行拥挤)
     fdata = {
         "xcats": xcats, "yhist": hist_series, "yfc": fc_series,
         "band_lo": band_lo, "band_hi": band_hi,
@@ -2115,18 +2110,20 @@ def _sent_main_chart(forecast, hist, buy_th, sell_th, acc=None):
         "label:{formatter:'今日',position:'insideEndTop',color:'#475569',fontSize:10}});"
         "return {tooltip:{trigger:'axis',axisPointer:{type:'cross'}},"
         "legend:{data:['历史情绪','预测情绪','预测区间(50%置信带)'],top:2,textStyle:{fontSize:11}},"
-        "grid:{left:44,right:14,top:38,bottom:54},"
+        "grid:{left:46,right:16,top:42,bottom:62},"
         "xAxis:{type:'category',data:D.xcats,boundaryGap:false,"
         "axisLabel:{fontSize:10,hideOverlap:true,formatter:_sFmt},axisTick:{show:false}},"
         "yAxis:{type:'value',min:0,max:100,axisLabel:{fontSize:11},splitLine:{lineStyle:{color:'#eef2f7'}}},"
         "dataZoom:[{type:'inside',xAxisIndex:0,start:0,end:100},"
-        "{type:'slider',xAxisIndex:0,height:16,bottom:22,start:0,end:100,"
-        "handleStyle:{color:'#2b6cb0'},borderColor:'#e2e8f0',fillerColor:'rgba(43,108,176,0.12)'}],"
+        "{type:'slider',xAxisIndex:0,height:18,bottom:14,start:0,end:100,showDetail:false,"
+        "handleStyle:{color:'#2b6cb0'},borderColor:'#e2e8f0',fillerColor:'rgba(43,108,176,0.12)',"
+        "dataBackground:{lineStyle:{color:'#cbd5e1'},areaStyle:{color:'rgba(203,213,225,0.25)'}},"
+        "selectedDataBackground:{lineStyle:{color:'#2b6cb0'},areaStyle:{color:'rgba(43,108,176,0.25)'}}}],"
         "series:[{name:'历史情绪',type:'line',data:D.yhist,symbol:'none',smooth:true,"
         "lineStyle:{color:'#2b6cb0',width:2},z:4,"
         "markArea:{silent:true,itemStyle:{opacity:0.08},data:["
-        "[{yAxis:0,itemStyle:{color:'#18a058'},label:{formatter:'机会区·大盘易涨',position:'insideBottom',color:'#18a058',fontSize:10}},{yAxis:D.buy_th}],"
-        "[{yAxis:D.sell_th,itemStyle:{color:'#e54545'},label:{formatter:'风险区·大盘易跌',position:'insideTop',color:'#e54545',fontSize:10}},{yAxis:100}]]},"
+        "[{yAxis:0,itemStyle:{color:'#18a058'}},{yAxis:D.buy_th}],"
+        "[{yAxis:D.sell_th,itemStyle:{color:'#e54545'}},{yAxis:100}]]},"
         "markLine:{symbol:'none',data:yearML}},"
         "{name:'预测情绪',type:'line',data:D.yfc,symbol:'none',smooth:true,"
         "lineStyle:{color:'#f59e0b',width:2,type:'dashed'},z:5},"
@@ -2135,10 +2132,14 @@ def _sent_main_chart(forecast, hist, buy_th, sell_th, acc=None):
         "{name:'预测区间(50%置信带)',type:'line',data:D.band_hi,stack:'band',symbol:'none',"
         "lineStyle:{opacity:0},areaStyle:{color:'rgba(245,158,11,0.15)'},z:3,tooltip:{show:false}}]};}"
     )
+    zone_cap = ('<div class="sent-zone-cap">'
+                '<span class="zc zc-g">▾ 绿带=机会区(&lt;%.0f·大盘易涨)</span>'
+                '<span class="zc zc-r">▴ 红带=风险区(&gt;%.0f·大盘易跌)</span>'
+                '<span class="zc">竖线=年份/今日　·　阴影=50%%置信带　·　滚轮/拖拽缩放</span>'
+                '</div>') % (buy_th, sell_th)
     return _sent_echart("echart-sent-main",
-                        "情绪走势与未来预测(2021-2026) · 蓝=历史　橙虚线=KNN预测　阴影=预测区间(50%置信带)　竖线=年份/今日 · 滚轮缩放"
-                        + acc_txt,
-                        340, fdata, opt_js)
+                        "情绪走势与未来预测(2021–2026)　蓝=历史　橙虚线=KNN预测　阴影=50%置信带　竖线=年份/今日",
+                        340, fdata, opt_js) + zone_cap
 
 
 
@@ -2158,15 +2159,17 @@ def _sent_index_chart(hist):
         "label:{formatter:o.y+'年',position:'insideEndTop',color:'#64748b',fontSize:10}};});"
         "return {tooltip:{trigger:'axis',axisPointer:{type:'cross'}},"
         "legend:{data:['情绪温度','上证指数'],top:2,textStyle:{fontSize:11}},"
-        "grid:{left:44,right:56,top:38,bottom:54},"
+        "grid:{left:46,right:58,top:42,bottom:62},"
         "xAxis:{type:'category',data:D.xcats,boundaryGap:false,"
         "axisLabel:{fontSize:10,hideOverlap:true,formatter:_sFmt},axisTick:{show:false}},"
         "yAxis:[{type:'value',min:0,max:100,position:'left',"
         "axisLabel:{fontSize:11,color:'#2b6cb0'},splitLine:{lineStyle:{color:'#eef2f7'}},name:'温度'},"
         "{type:'value',position:'right',scale:true,axisLabel:{fontSize:11,color:'#b45309'},name:'上证'}],"
         "dataZoom:[{type:'inside',xAxisIndex:0,start:0,end:100},"
-        "{type:'slider',xAxisIndex:0,height:16,bottom:22,start:0,end:100,"
-        "handleStyle:{color:'#2b6cb0'},borderColor:'#e2e8f0',fillerColor:'rgba(43,108,176,0.12)'}],"
+        "{type:'slider',xAxisIndex:0,height:18,bottom:14,start:0,end:100,showDetail:false,"
+        "handleStyle:{color:'#2b6cb0'},borderColor:'#e2e8f0',fillerColor:'rgba(43,108,176,0.12)',"
+        "dataBackground:{lineStyle:{color:'#cbd5e1'},areaStyle:{color:'rgba(203,213,225,0.25)'}},"
+        "selectedDataBackground:{lineStyle:{color:'#2b6cb0'},areaStyle:{color:'rgba(43,108,176,0.25)'}}}],"
         "series:[{name:'情绪温度',type:'line',data:D.sc,symbol:'none',smooth:true,"
         "lineStyle:{color:'#2b6cb0',width:2},yAxisIndex:0,markLine:{symbol:'none',data:yearML}},"
         "{name:'上证指数',type:'line',data:D.cl,symbol:'none',smooth:true,"
@@ -2769,10 +2772,13 @@ def main():
   .sent-head-note {{ font-size: 12px; color: #64748b; margin-top: 10px; line-height: 1.5; }}
   .sent-chart-card {{ background: #fff; border: 1px solid #e5e9f0; border-radius: 14px; padding: 10px 12px 12px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(15,23,42,.04); }}
   .sent-chart-card:last-child {{ margin-bottom: 0; }}
-  .sent-chart-card .echart-toolbar {{ font-size: 12px; color: #475569; font-weight: 700; padding: 4px 2px 8px; line-height: 1.4; }}
+  .sent-chart-card .echart-toolbar {{ font-size: 12px; color: #475569; font-weight: 700; padding: 4px 2px 8px; line-height: 1.55; flex-wrap: wrap; word-break: break-word; }}
   .sent-footnote {{ font-size: 11px; color: #94a3b8; line-height: 1.7; margin-top: 12px; padding: 10px 12px; background: #f8fafc; border-radius: 8px; }}
   .sent-acc {{ font-size: 12px; color: #475569; line-height: 1.6; margin: -4px 0 12px; padding: 8px 12px; background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; }}
   .sent-acc b {{ color: #b45309; font-variant-numeric: tabular-nums; }}
+  .sent-zone-cap {{ display: flex; flex-wrap: wrap; gap: 14px; font-size: 11px; color: #64748b; margin-top: 6px; padding: 0 2px; line-height: 1.6; }}
+  .sent-zone-cap .zc-g {{ color: #18a058; font-weight: 600; }}
+  .sent-zone-cap .zc-r {{ color: #e54545; font-weight: 600; }}
 
   @media (max-width: 720px) {{
     body {{ padding: 12px; }}
