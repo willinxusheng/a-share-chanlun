@@ -1993,9 +1993,12 @@ _SENT_DATE_FMT = """
    根因: dataZoom 缩放后 ECharts 传给 axisLabel formatter 的 i 是可见窗口内相对索引,
    旧代码用 D.xcats[i] 取日期 → 标签系统性错位(如 2026-04 窗口内 i=0 取到 2021-01-04)。 */
 function _sGI(v){return D.xcats.indexOf(v);}
-function _sMonStart(g){var d=D.xcats[g];if(!d)return false;if(g<=0)return true;var pd=D.xcats[g-1];return !pd||(+d.slice(5,7))!==(+pd.slice(5,7));}
-function _sQuarterFirst(g){var d=D.xcats[g];if(!d)return false;var m=+d.slice(5,7);if(m!==1&&m!==4&&m!==7&&m!==10)return false;if(g<=0)return true;var pd=D.xcats[g-1];if(!pd)return true;return (+pd.slice(5,7))!==m;}
-function _sYearStart(g){var d=D.xcats[g];if(!d)return false;if(g<=0)return true;var pd=D.xcats[g-1];return !pd||(+pd.slice(0,4))<(+d.slice(0,4));}
+/* R197: 移除 g<=0 兜底。副图 D.xcats 是近180日切片, g=0 的前一点是切片末尾(2026-08),
+   若 g<=0 判为年/月首, 会在 2025-12-08 处误标"2025年", 并与几天后的真实"12月"标签重叠。
+   改为仅做真实相邻比较; 首点若不是真实月/季首, 自然留白, 避免和真实月首重叠。 */
+function _sMonStart(g){var d=D.xcats[g];if(!d)return false;if(g<=0)return false;var pd=D.xcats[g-1];return (+d.slice(5,7))!==(+pd.slice(5,7));}
+function _sQuarterFirst(g){var d=D.xcats[g];if(!d)return false;var m=+d.slice(5,7);if(m!==1&&m!==4&&m!==7&&m!==10)return false;if(g<=0)return false;var pd=D.xcats[g-1];if(!pd)return false;return (+pd.slice(5,7))!==m;}
+function _sYearStart(g){var d=D.xcats[g];if(!d)return false;if(g<=0)return false;var pd=D.xcats[g-1];return (+pd.slice(0,4))<(+d.slice(0,4));}
 /* R194: 可见窗口自适应密度 —— 修复缩放后标签错配/断续(根因: 旧版按全量类目数定密度,
    主图 dataZoom 默认窗口仅末90日+预测, 全量1426点走季首分支 → 可见窗内标签几乎空白)。
    _sVis 由 dataZoom 事件实时刷新: 可见<=30 逐日 / <=60 每周(i%5) / <=180 月首 / 更长季首; 年首标年份。 */
@@ -2011,7 +2014,10 @@ _sVisInit();
 function _sRefreshVis(){var zooms=(chart.getOption().dataZoom)||[];if(!zooms.length||!zooms[0])return;var z=zooms[0]||{};var total=D.xcats.length;var s=(z.start!=null?z.start:(z.startValue!=null?Math.max(0,D.xcats.indexOf(z.startValue)):0));var e=(z.end!=null?z.end:100);if(typeof s!=='number'||typeof e!=='number')return;_sVis=Math.max(1,Math.round(total*(e-s)/100));}
 chart.on('dataZoom',_sRefreshVis);
 function _sShowLabel(v,g){var n=_sVis||D.xcats.length;if(n<=30)return true;if(n<=60)return g%5===0;if(n<=180)return _sMonStart(g);return _sQuarterFirst(g);}
-function _sFmt(v,i){var g=D.xcats.indexOf(v);if(g<0)return v||'';if(!_sShowLabel(v,g))return '';var d=D.xcats[g];if(!d)return v||'';var n=_sVis||D.xcats.length;if(n<=30)return d.slice(5);if(n<=60)return d.slice(5);if(_sYearStart(g))return d.slice(0,4)+'年';return (+d.slice(5,7))+'月';}
+/* R197: 同一刻度只输出一个标签, 年首的月首合并为"YYYY年M月", 杜绝"2025年"与"12月"两个独立短标签相邻重叠。 */
+function _sFmt(v,i){var g=D.xcats.indexOf(v);if(g<0)return v||'';if(!_sShowLabel(v,g))return '';var d=D.xcats[g];if(!d)return v||'';var n=_sVis||D.xcats.length;if(n<=30)return d.slice(5);if(n<=60)return d.slice(5);if(n<=180){if(_sYearStart(g))return (+d.slice(0,4))+'年'+(+d.slice(5,7))+'月';if(_sMonStart(g))return (+d.slice(5,7))+'月';return '';}
+if(_sYearStart(g))return d.slice(0,4)+'年';if(_sQuarterFirst(g))return 'Q'+Math.floor(((+d.slice(5,7))-1)/3+1);
+return '';}
 """
 
 
@@ -2188,7 +2194,7 @@ def _sent_main_chart(forecast, hist, buy_th, sell_th, acc=None):
         "label:{formatter:'今日',position:'insideEndBottom',color:'#475569',fontSize:10}});"
         "return {tooltip:{trigger:'axis',axisPointer:{type:'cross'}},"
         "legend:{data:['历史情绪','预测情绪'],top:2,textStyle:{fontSize:11}},"
-        "grid:{left:46,right:16,top:42,bottom:62},"
+        "grid:{left:46,right:16,top:48,bottom:66},"
         "xAxis:{type:'category',data:D.xcats,boundaryGap:false,"
         "axisLabel:{fontSize:10,autoHide:false,position:'bottom',interval:0,formatter:function(v,i){return _sFmt(v,i);}},axisTick:{show:false}},"
         "yAxis:{type:'value',min:0,max:100,axisLabel:{fontSize:11},splitLine:{lineStyle:{color:'#eef2f7'}}},"
@@ -2243,7 +2249,7 @@ def _sent_index_chart(hist, forecast=None):
         "label:{show:false}};});"
         "return {tooltip:{trigger:'axis',axisPointer:{type:'cross'}},"
         "legend:{data:['情绪温度','上证指数'],top:2,textStyle:{fontSize:11}},"
-        "grid:{left:46,right:58,top:42,bottom:34},"
+        "grid:{left:46,right:58,top:50,bottom:42},"
         "xAxis:{type:'category',data:D.xcats,boundaryGap:false,"
         "axisLabel:{fontSize:10,autoHide:false,position:'bottom',interval:0,formatter:function(v,i){return _sFmt(v,i);}},axisTick:{show:false}},"
         "yAxis:[{type:'value',min:0,max:100,position:'left',"
