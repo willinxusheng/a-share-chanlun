@@ -371,14 +371,20 @@ def _weights(dists, scheme):
 
 def _wquant(vals, weights, q):
     """加权分位(0-1): 按 val 升序累计权重定位 q。weights 需与 vals 等长、非负。
-    用于距离加权 KNN——离当前形态越近的历史窗口权重越大, 预测更聚焦。"""
-    if not vals:
+    用于距离加权 KNN——离当前形态越近的历史窗口权重越大, 预测更聚焦。
+    R186 健壮性: vals 中含 None 时视为缺失并跳过(不崩溃), 防御未来数据缺口;
+    正常无 None 输入时行为与旧版逐点一致。"""
+    # 过滤 None(缺失值), 同步裁剪 weights, 保持 val 升序累计定位逻辑不变
+    paired = [(v, w) for v, w in zip(vals, weights) if v is not None]
+    if not paired:
         return None
-    if len(vals) == 1:
-        return vals[0]
-    order = sorted(range(len(vals)), key=lambda i: vals[i])
-    vs = [vals[i] for i in order]
-    ws = [weights[i] for i in order]
+    if len(paired) == 1:
+        return paired[0][0]
+    vs = [v for v, _ in paired]
+    ws = [w for _, w in paired]
+    order = sorted(range(len(vs)), key=lambda i: vs[i])
+    vs = [vs[i] for i in order]
+    ws = [ws[i] for i in order]
     tot = sum(ws)
     if tot <= 0:
         return vs[len(vs) // 2]
