@@ -2303,7 +2303,7 @@ def sentiment_board_html(base, data, results, results_week, scores, last_date):
                 d=acc.get("dir_acc", 0), m=acc.get("mae", 0),
                 k=(acc.get("band_kappa") or 1.0))
         return f"""
-    <section class="panel" id="sentiment-board" style="border-left:4px solid {zcolor}">
+    <section class="panel" id="sentiment-board" style="border-left:4px solid {zcolor}; --sent-accent:{zcolor};">
       <h2 class="sec" id="s2">二、市场情绪
         <span class="badge" style="background:{zcolor}">{zlabel} {final:.1f} 分</span>
         <span class="badge" style="background:#64748b">asof {asof}</span>
@@ -2837,18 +2837,22 @@ def main():
   .xh-tip b {{ color: #fbbf24; }}
   .tablescroll {{ width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }}
   /* R178 市场情绪板块（对齐 sentiment-dashboard 视觉语言） */
-  .sent-head {{ background: #fff; border: 1px solid #e5e9f0; border-radius: 10px; padding: 16px 18px; margin-bottom: 14px; box-shadow: 0 1px 3px rgba(15,23,42,.04); }}
+  /* 基础层：结构/布局/色彩，圆角与阴影统一引用 R153 令牌（--radius-* / --shadow-*），
+     由 R153 增强层统一覆盖质感，避免与看板主体（.panel/.card/.chartbox）风格割裂。 */
+  .sent-head {{ position: relative; overflow: hidden; background: var(--surface, #fff); border: 1px solid #e5e9f0; border-radius: var(--radius-lg, 18px); padding: 18px 20px; margin-bottom: 14px; box-shadow: var(--shadow-sm2, 0 2px 10px rgba(15,23,42,.05)); }}
+  /* 情绪主题顶饰：用当前 zone 色（内联 style 注入的 --sent-accent），无则回退主色渐变 */
+  .sent-head::before {{ content: ""; display: block; height: 4px; margin: -18px -20px 14px; background: linear-gradient(90deg, var(--sent-accent, #2b6cb0), #60a5fa); }}
   .sent-head-row {{ display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }}
   .sent-title-wrap {{ display: flex; align-items: center; gap: 10px; }}
-  .sent-main-title {{ font-size: 18px; font-weight: 800; color: #1e293b; letter-spacing: -.2px; }}
-  .sent-tag {{ font-size: 12px; color: #fff; padding: 4px 12px; border-radius: 999px; font-weight: 700; box-shadow: 0 1px 2px rgba(0,0,0,.08); }}
+  .sent-main-title {{ font-size: 18px; font-weight: 800; color: #1e293b; letter-spacing: .2px; }}
+  .sent-tag {{ font-size: 12px; color: #fff; padding: 4px 12px; border-radius: 999px; font-weight: 700; box-shadow: 0 1px 2px rgba(0,0,0,.08); font-variant-numeric: tabular-nums; }}
   .sent-score-wrap {{ display: flex; align-items: baseline; gap: 10px; }}
   .sent-big-score {{ font-size: 44px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; letter-spacing: -1px; }}
   .sent-score-meta {{ display: flex; flex-direction: column; align-items: flex-start; gap: 3px; font-size: 12px; color: #64748b; }}
   .sent-pct {{ font-variant-numeric: tabular-nums; background: #f1f5f9; padding: 1px 6px; border-radius: 4px; font-size: 11px; }}
   .sent-trend {{ font-weight: 700; font-variant-numeric: tabular-nums; }}
   .sent-bar-wrap {{ margin-top: 14px; }}
-  .sent-bar-track {{ position: relative; height: 10px; border-radius: 5px; background: linear-gradient(90deg, #22c55e 0%, #22c55e 28%, #f59e0b 50%, #ef4444 72%, #ef4444 100%); overflow: visible; }}
+  .sent-bar-track {{ position: relative; height: 10px; border-radius: 5px; background: linear-gradient(90deg, #22c55e 0%, #84cc16 24%, #f59e0b 50%, #f97316 72%, #ef4444 100%); overflow: visible; }}
   .sent-bar-fill {{ position: absolute; left: 0; top: -2px; height: 14px; border-radius: 7px; box-shadow: 0 0 0 3px rgba(255,255,255,.9), 0 2px 6px rgba(0,0,0,.18); min-width: 4px; max-width: 100%; transition: width .6s ease; }}
   .sent-bar-tick {{ position: absolute; top: -3px; width: 2px; height: 16px; background: rgba(255,255,255,.95); border-radius: 1px; box-shadow: 0 1px 2px rgba(0,0,0,.25); }}
   .sent-bar-labels {{ display: flex; justify-content: space-between; font-size: 11px; color: #64748b; margin-top: 6px; text-align: center; }}
@@ -2856,12 +2860,12 @@ def main():
   .sent-head-note {{ font-size: 12px; color: #64748b; margin-top: 8px; line-height: 1.5; }}
   .sent-zstat {{ display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 11px; font-variant-numeric: tabular-nums; margin-top: 10px; }}
   .sent-zstat .zs {{ font-weight: 600; white-space: nowrap; }}
-  .sent-interp {{ font-size: 12.5px; color: #334155; margin-top: 8px; line-height: 1.6; background: #f8fafc; border-radius: 8px; padding: 8px 10px; }}
-  .sent-chart-card {{ background: #fff; border: 1px solid #e5e9f0; border-radius: 10px; padding: 8px 12px 10px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(15,23,42,.04); }}
+  .sent-interp {{ font-size: 12.5px; color: #334155; margin-top: 8px; line-height: 1.6; background: var(--surface-2, #f8fafc); border-left: 3px solid var(--sent-accent, #94a3b8); border-radius: 0 8px 8px 0; padding: 8px 10px; }}
+  .sent-chart-card {{ background: var(--surface, #fff); border: 1px solid #e5e9f0; border-radius: var(--radius-md, 14px); padding: 10px 14px 12px; margin-bottom: 12px; box-shadow: var(--shadow-sm2, 0 2px 10px rgba(15,23,42,.05)); }}
   .sent-chart-card:last-child {{ margin-bottom: 0; }}
-  .sent-chart-card .echart-toolbar {{ font-size: 12px; color: #475569; font-weight: 700; padding: 4px 2px 8px; line-height: 1.55; flex-wrap: wrap; word-break: break-word; }}
-  .sent-footnote {{ font-size: 11px; color: #94a3b8; line-height: 1.7; margin-top: 12px; padding: 10px 12px; background: #f8fafc; border-radius: 8px; }}
-  .sent-acc {{ font-size: 12px; color: #475569; line-height: 1.6; margin: -4px 0 12px; padding: 8px 12px; background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; }}
+  .sent-chart-card .echart-toolbar {{ font-size: 13px; color: #475569; font-weight: 600; padding: 2px 2px 10px; line-height: 1.55; flex-wrap: wrap; word-break: break-word; border-bottom: 1px solid #f1f5f9; margin-bottom: 8px; }}
+  .sent-footnote {{ font-size: 11px; color: #94a3b8; line-height: 1.7; margin-top: 12px; padding: 10px 12px; background: var(--surface-2, #f8fafc); border-left: 3px solid #cbd5e1; border-radius: 0 8px 8px 0; }}
+  .sent-acc {{ font-size: 12px; color: #475569; line-height: 1.6; margin: -4px 0 12px; padding: 8px 12px; background: #fffbeb; border: 1px solid #fde68a; border-left: 4px solid #f0c14b; border-radius: 0 8px 8px 0; }}
   .sent-acc b {{ color: #b45309; font-variant-numeric: tabular-nums; }}
   .sent-zone-cap {{ display: flex; flex-wrap: wrap; gap: 14px; font-size: 11px; color: #64748b; margin-top: 6px; padding: 0 2px; line-height: 1.6; }}
   .sent-zone-cap .zc-g {{ color: #18a058; font-weight: 600; }}
@@ -3101,6 +3105,26 @@ def main():
   /* 预测质量自检卡 */
   .qc-card {{ box-shadow: var(--shadow-md); border-radius: var(--radius-md); }}
 
+  /* —— 市场情绪板块（R196：对齐看板主体现代视觉语言，消除与 .panel/.card 风格割裂） —— */
+  /* 头图：分层阴影 + 悬停微抬，呼应 .card/.kpi */
+  .sent-head {{ box-shadow: var(--shadow-md); transition: box-shadow .18s ease, transform .18s ease; }}
+  .sent-head:hover {{ box-shadow: 0 18px 44px rgba(43,108,176,.16); transform: translateY(-2px); }}
+  .sent-main-title {{ letter-spacing: .3px; }}
+  .sent-big-score {{ letter-spacing: -1.2px; }}
+  .sent-chart-card {{ box-shadow: var(--shadow-md); background: linear-gradient(180deg,#ffffff,#fbfdff); }}
+  .sent-chart-card:hover {{ box-shadow: var(--shadow); }}
+  /* 图表卡内 ECharts 容器：圆角 + 内描边，对齐 .chartbox */
+  .sent-chart-card .echart-main {{ border-radius: var(--radius-sm); background: linear-gradient(180deg,#ffffff,#fbfdff); }}
+  /* 提示/解读块：柔色胶囊 + 渐变底，对齐 .fc-note / .disclaimer 观感 */
+  .sent-interp {{ background: linear-gradient(180deg,#f8fafc,#f3f7fc); }}
+  .sent-footnote {{ background: linear-gradient(180deg,#f8fafc,#f3f7fc); border-left-color: #cbd5e1; }}
+  .sent-acc {{ background: linear-gradient(180deg,#fffbeb,#fff8e6); }}
+  /* 图表工具栏：圆角底色容器，对齐 .echart-toolbar 增强层（R153 已对通用 .echart-toolbar 处理，
+     此处情绪专用 toolbar 因外层容器不同需单独补圆角底色） */
+  .sent-chart-card .echart-toolbar {{ background: var(--surface-2); border-radius: var(--radius-sm); border-bottom: none; padding: 8px 10px; margin-bottom: 6px; }}
+  /* 等宽数字保护，对齐全站 tnum 排版 */
+  .sent-big-score, .sent-pct, .sent-trend, .sent-bar-labels, .sent-zstat {{ font-variant-numeric: tabular-nums; }}
+
   /* 通用柔和过渡 */
   .card, .kpi, .panel, nav.toc a, nav.sym-rail .chip {{ transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease; }}
 
@@ -3213,6 +3237,24 @@ def main():
 
     /* 通用柔和过渡 */
     .card, .kpi, nav.toc a, nav.sym-rail .chip {{ transition: all .15s ease; }}
+
+    /* —— 市场情绪板块：横屏紧凑化（R196，对齐看板主体横屏层，避免拥挤/溢出） —— */
+    .sent-head {{ padding: 11px 13px; margin-bottom: 9px; border-radius: 12px; }}
+    .sent-head::before {{ margin: -11px -13px 10px; height: 3px; }}
+    .sent-head-row {{ gap: 8px; }}
+    .sent-main-title {{ font-size: 14px; }}
+    .sent-big-score {{ font-size: 30px; letter-spacing: -.6px; }}
+    .sent-score-meta {{ font-size: 10.5px; }}
+    .sent-bar-wrap {{ margin-top: 9px; }}
+    .sent-bar-labels {{ font-size: 10px; }}
+    .sent-zstat {{ font-size: 10px; gap: 4px 10px; margin-top: 7px; }}
+    .sent-interp {{ font-size: 11px; padding: 6px 8px; margin-top: 6px; }}
+    .sent-chart-card {{ padding: 7px 9px 8px; margin-bottom: 9px; border-radius: 12px; }}
+    .sent-chart-card .echart-toolbar {{ font-size: 10.5px; padding: 4px 6px; margin-bottom: 5px; }}
+    .sent-chart-card .echart-main {{ height: calc(100dvh - 220px) !important; max-height: 240px; min-height: 140px; border-radius: 8px; }}
+    .sent-zone-cap {{ font-size: 10px; gap: 8px; margin-top: 4px; }}
+    .sent-acc {{ font-size: 10.5px; padding: 6px 8px; margin: -4px 0 8px; }}
+    .sent-footnote {{ font-size: 10px; padding: 7px 9px; margin-top: 9px; }}
   }}
 </style>
 </head>
