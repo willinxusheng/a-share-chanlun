@@ -1991,9 +1991,9 @@ def _sent_x_struct(sc, zone, score):
 _SENT_DATE_FMT = """
 function _sMonStart(i){var d=D.xcats[i];return d&&d.slice(8,10)==='01';}
 function _sQuarterFirst(i){var d=D.xcats[i];if(!d)return false;var m=+d.slice(5,7);if(m!==1&&m!==4&&m!==7&&m!==10)return false;if(i===0)return true;var pd=D.xcats[i-1];if(!pd)return true;return (+pd.slice(5,7))!==m;}
-function _sMonDay(i){var p=D.xcats[i].split('-');return new Date(+p[0],+p[1]-1,+p[2]).getDay()===1;}
-function _sShowLabel(i){var n=D.xcats.length;if(n<=30)return true;if(n<=60)return _sMonDay(i);if(n<=180)return _sMonStart(i);return _sQuarterFirst(i);}
-function _sFmt(v,i){var idx=D.xcats.indexOf(v);if(idx<0)idx=i;var d=(idx>=0&&D.xcats[idx])?D.xcats[idx]:v;if(!d||d.length<7)return v;if(!_sShowLabel(idx))return '';if(D.xcats.length<=10)return d;var m=+d.slice(5,7);if(_sQuarterFirst(idx))return m+'月';return '';}
+function _sYearStart(i){var d=D.xcats[i];if(!d)return false;var m=+d.slice(5,7);if(m!==1)return false;if(i===0)return true;var pd=D.xcats[i-1];if(!pd)return true;return (+pd.slice(0,4))<(+d.slice(0,4));}
+function _sShowLabel(i){var n=D.xcats.length;if(n<=30)return true;if(n<=90)return i%Math.max(1,Math.ceil(n/12))===0;if(n<=180)return _sMonStart(i);return _sQuarterFirst(i);}
+function _sFmt(v,i){if(i==null)i=D.xcats.indexOf(v);if(!_sShowLabel(i))return '';var d=D.xcats[i];if(!d)return v||'';var n=D.xcats.length;if(n<=30)return d.slice(5);if(n<=90){var m=+d.slice(5,7),day=+d.slice(8,10);return m+'月'+day+'日';}if(n<=180)return (+d.slice(5,7))+'月';if(_sYearStart(i))return d.slice(0,4)+'年';return (+d.slice(5,7))+'月';}
 """
 
 
@@ -2112,7 +2112,7 @@ def _sent_main_chart(forecast, hist, buy_th, sell_th, acc=None):
         "legend:{data:['历史情绪','预测情绪','预测区间(50%置信带)'],top:2,textStyle:{fontSize:11}},"
         "grid:{left:46,right:16,top:42,bottom:62},"
         "xAxis:{type:'category',data:D.xcats,boundaryGap:false,"
-        "axisLabel:{fontSize:10,hideOverlap:true,position:'bottom',formatter:_sFmt},axisTick:{show:false}},"
+        "axisLabel:{fontSize:10,hideOverlap:true,position:'bottom',interval:0,formatter:function(v,i){return _sFmt(v,i);}},axisTick:{show:false}},"
         "yAxis:{type:'value',min:0,max:100,axisLabel:{fontSize:11},splitLine:{lineStyle:{color:'#eef2f7'}}},"
         "dataZoom:[{type:'inside',xAxisIndex:0,start:0,end:100},"
         "{type:'slider',xAxisIndex:0,height:18,bottom:14,start:0,end:100,showDetail:false,"
@@ -2161,7 +2161,7 @@ def _sent_index_chart(hist):
         "legend:{data:['情绪温度','上证指数'],top:2,textStyle:{fontSize:11}},"
         "grid:{left:46,right:58,top:42,bottom:62},"
         "xAxis:{type:'category',data:D.xcats,boundaryGap:false,"
-        "axisLabel:{fontSize:10,hideOverlap:true,position:'bottom',formatter:_sFmt},axisTick:{show:false}},"
+        "axisLabel:{fontSize:10,hideOverlap:true,position:'bottom',interval:0,formatter:function(v,i){return _sFmt(v,i);}},axisTick:{show:false}},"
         "yAxis:[{type:'value',min:0,max:100,position:'left',"
         "axisLabel:{fontSize:11,color:'#2b6cb0'},splitLine:{lineStyle:{color:'#eef2f7'}},name:'温度'},"
         "{type:'value',position:'right',scale:true,axisLabel:{fontSize:11,color:'#b45309'},name:'上证'}],"
