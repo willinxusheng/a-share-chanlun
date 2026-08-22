@@ -2022,8 +2022,8 @@ def _sent_echart(cid, toolbar, height, fdata, opt_js):
             + '<script>' + js + '</script>')
 
 
-def _sent_thermometer_html(final, zone, zlabel, zcolor, buy_th, sell_th, final_pct, ma5s, ma20s):
-    """市场情绪温度计头图: 大分数 + 色阶进度条 + 档位标签 + 历史分位 + 趋势箭头。"""
+def _sent_thermometer_html(final, zone, zlabel, zcolor, buy_th, sell_th, final_pct, ma5s, ma20s, scores=None):
+    """市场情绪温度计头图: 大分数 + 色阶进度条 + 档位标签 + 历史分位 + 趋势箭头 + 档位持续统计 + 一句话解读。"""
     bt = max(0.0, min(100.0, float(buy_th)))
     st = max(0.0, min(100.0, float(sell_th)))
     pos = max(0.0, min(100.0, float(final)))
@@ -2035,8 +2035,36 @@ def _sent_thermometer_html(final, zone, zlabel, zcolor, buy_th, sell_th, final_p
             trend_arrow, trend_color = "↗ 升温", RED
         elif ma5s < ma20s:
             trend_arrow, trend_color = "↘ 降温", GREEN
-    # 档位持续统计(模拟截图: 冰点/偏冷/中性/偏热/狂热)
-    # 用 buy_th/sell_th 切分: <buy=冰点/偏冷, buy-50=偏冷/中性, 50-sell=中性/偏热, >sell=狂热
+    # 档位持续统计(冰点/偏冷/中性/偏热/狂热 全样本天数)
+    zstat = ""
+    if scores:
+        mid = (bt + st) / 2.0
+        bins = [0, 0, 0, 0, 0]  # 冰点,偏冷,中性,偏热,狂热
+        for s in scores:
+            if s < bt:
+                bins[0] += 1
+            elif s < 50:
+                bins[1] += 1
+            elif s < mid:
+                bins[2] += 1
+            elif s < st:
+                bins[3] += 1
+            else:
+                bins[4] += 1
+        zstat = ('<div class="sent-zstat">'
+                 '<span class="zs" style="color:#16a34a">冰点 %d日</span>'
+                 '<span class="zs" style="color:#65a30d">偏冷 %d日</span>'
+                 '<span class="zs" style="color:#64748b">中性 %d日</span>'
+                 '<span class="zs" style="color:#ea580c">偏热 %d日</span>'
+                 '<span class="zs" style="color:#dc2626">狂热 %d日</span>'
+                 '</div>') % tuple(bins)
+    # 一句话解读
+    if final_pct is not None:
+        bias = "偏低" if final_pct < 40 else ("偏高" if final_pct > 60 else "中性")
+        interp = ("当前情绪%s，处于历史%d%%分位（%s），多空%s；极端区信号更具参考价值。"
+                  % (zlabel, int(round(final_pct)), bias, "偏弱" if final < 50 else "偏强"))
+    else:
+        interp = "当前情绪%s，极端区信号更具参考价值。" % zlabel
     ztext = {
         "fear": "恐惧 · 机会区", "fearish": "中性偏恐", "greedish": "中性偏贪", "greed": "贪婪 · 危险区"
     }.get(zone, zlabel)
@@ -2068,6 +2096,8 @@ def _sent_thermometer_html(final, zone, zlabel, zcolor, buy_th, sell_th, final_p
           <span style="color:{RED}">危险<br><small>{sell_th:.0f}</small></span>
         </div>
       </div>
+      {zstat}
+      <div class="sent-interp">{interp}</div>
       <div class="sent-head-note">{ztext} · 绿=恐惧(机会) 红=贪婪(危险) · 数据截至今日收盘</div>
     </div>"""
 
@@ -2136,13 +2166,13 @@ def _sent_main_chart(forecast, hist, buy_th, sell_th, acc=None):
         "yearML.unshift({xAxis:D.today_x,lineStyle:{color:'#334155',type:'dashed',width:1.5},"
         "label:{formatter:'今日',position:'insideEndBottom',color:'#475569',fontSize:10}});"
         "return {tooltip:{trigger:'axis',axisPointer:{type:'cross'}},"
-        "legend:{data:['历史情绪','预测情绪','预测区间(50%置信带)'],top:2,textStyle:{fontSize:11}},"
+        "legend:{data:['历史情绪','预测情绪'],top:2,textStyle:{fontSize:11}},"
         "grid:{left:46,right:16,top:42,bottom:62},"
         "xAxis:{type:'category',data:D.xcats,boundaryGap:false,"
         "axisLabel:{fontSize:10,hideOverlap:true,position:'bottom',interval:0,formatter:function(v,i){return _sFmt(v,i);}},axisTick:{show:false}},"
         "yAxis:{type:'value',min:0,max:100,axisLabel:{fontSize:11},splitLine:{lineStyle:{color:'#eef2f7'}}},"
-        "dataZoom:[{type:'inside',xAxisIndex:0,start:0,end:100},"
-        "{type:'slider',xAxisIndex:0,height:18,bottom:14,start:0,end:100,showDetail:false,"
+        "dataZoom:[{type:'inside',xAxisIndex:0,start:62,end:100},"
+        "{type:'slider',xAxisIndex:0,height:18,bottom:14,start:62,end:100,showDetail:false,"
         "handleStyle:{color:'#2b6cb0'},borderColor:'#e2e8f0',fillerColor:'rgba(43,108,176,0.12)',"
         "dataBackground:{lineStyle:{color:'#cbd5e1'},areaStyle:{color:'rgba(203,213,225,0.25)'}},"
         "selectedDataBackground:{lineStyle:{color:'#2b6cb0'},areaStyle:{color:'rgba(43,108,176,0.25)'}}}],"
@@ -2151,20 +2181,17 @@ def _sent_main_chart(forecast, hist, buy_th, sell_th, acc=None):
         "markArea:{silent:true,data:D.markAreaData},"
         "markLine:{symbol:'none',data:yearML}},"
         "{name:'预测情绪',type:'line',data:D.yfc,symbol:'none',smooth:true,"
-        "lineStyle:{color:'#f59e0b',width:2,type:'dashed'},z:5},"
-        "{name:'预测区间(50%置信带)',type:'line',data:D.band_lo,stack:'band',symbol:'none',"
-        "lineStyle:{opacity:0},z:3,tooltip:{show:false}},"
-        "{name:'预测区间(50%置信带)',type:'line',data:D.band_hi,stack:'band',symbol:'none',"
-        "lineStyle:{opacity:0},areaStyle:{color:'rgba(245,158,11,0.15)'},z:3,tooltip:{show:false}}]};}"
+        "lineStyle:{color:'#2b6cb0',width:2,type:'dashed'},z:5},"
+        "]};}"
     )
     zone_cap = ('<div class="sent-zone-cap">'
-                '<span class="zc zc-g">▾ 绿带=机会区(&lt;%.0f·大盘易涨)</span>'
-                '<span class="zc zc-r">▴ 红带=风险区(&gt;%.0f·大盘易跌)</span>'
-                '<span class="zc zc-w">▦ 左侧灰带=数据预热期(样本不足, 非断线)</span>'
-                '<span class="zc">竖线=年份切换/今日参考　·　年份/月份在 x 轴下沿　·　阴影=50%%置信带　·　滚轮/拖拽缩放</span>'
+                '<span class="zc zc-g">▾ 绿带=机会区(&lt;%.0f)</span>'
+                '<span class="zc zc-r">▴ 红带=风险区(&gt;%.0f)</span>'
+                '<span class="zc zc-w">▦ 灰带=数据预热期(样本不足, 非断线)</span>'
+                '<span class="zc">蓝实线=历史情绪　蓝虚线=未来KNN预测　年份/月份在 x 轴　·　滚轮拖拽缩放</span>'
                 '</div>') % (buy_th, sell_th)
     return _sent_echart("echart-sent-main",
-                        "情绪走势与未来预测(2021–2026)　蓝=历史　橙虚线=KNN预测　阴影=50%置信带　竖线=今日参考",
+                        "情绪走势与未来预测（KNN 路径派生）",
                         340, fdata, opt_js) + zone_cap
 
 
@@ -2193,8 +2220,8 @@ def _sent_index_chart(hist):
         "yAxis:[{type:'value',min:0,max:100,position:'left',"
         "axisLabel:{fontSize:11,color:'#2b6cb0'},splitLine:{lineStyle:{color:'#eef2f7'}},name:'温度'},"
         "{type:'value',position:'right',scale:true,axisLabel:{fontSize:11,color:'#b45309'},name:'上证'}],"
-        "dataZoom:[{type:'inside',xAxisIndex:0,start:0,end:100},"
-        "{type:'slider',xAxisIndex:0,height:18,bottom:14,start:0,end:100,showDetail:false,"
+        "dataZoom:[{type:'inside',xAxisIndex:0,start:82,end:100},"
+        "{type:'slider',xAxisIndex:0,height:18,bottom:14,start:82,end:100,showDetail:false,"
         "handleStyle:{color:'#2b6cb0'},borderColor:'#e2e8f0',fillerColor:'rgba(43,108,176,0.12)',"
         "dataBackground:{lineStyle:{color:'#cbd5e1'},areaStyle:{color:'rgba(203,213,225,0.25)'}},"
         "selectedDataBackground:{lineStyle:{color:'#2b6cb0'},areaStyle:{color:'rgba(43,108,176,0.25)'}}}],"
@@ -2204,11 +2231,11 @@ def _sent_index_chart(hist):
         "lineStyle:{color:'#b45309',width:1.6},yAxisIndex:1}]};}"
     )
     cap = ('<div class="sent-zone-cap">'
-           '<span class="zc zc-w">▦ 左侧灰带=数据预热期(样本不足, 非断线)</span>'
-           '<span class="zc">蓝=情绪温度　棕=上证指数　年份/月份在 x 轴　·　滚轮缩放</span>'
+           '<span class="zc zc-w">▦ 灰带=数据预热期(样本不足, 非断线)</span>'
+           '<span class="zc">蓝=情绪温度　棕=上证指数　滚轮拖拽缩放（默认近 120 日）</span>'
            '</div>')
     return _sent_echart("echart-sent-index",
-                        "情绪 vs 上证指数(2021–2026 全历史) · 蓝=情绪温度　棕=上证指数　年份/月份在 x 轴 · 滚轮缩放",
+                        "情绪温度 vs 上证指数（近 120 日）",
                         300, fdata, opt_js) + cap
 
 
@@ -2239,7 +2266,8 @@ def sentiment_board_html(base, data, results, results_week, scores, last_date):
         hist = sent.get("hist") or []
         forecast = sent.get("forecast")
         acc = sent.get("forecast_acc")
-        header = _sent_thermometer_html(final, zone, zlabel, zcolor, buy_th, sell_th, final_pct, ma5s, ma20s)
+        scores = [float(r[2]) for r in hist if isinstance(r, (list, tuple)) and len(r) >= 3 and r[2] is not None]
+        header = _sent_thermometer_html(final, zone, zlabel, zcolor, buy_th, sell_th, final_pct, ma5s, ma20s, scores)
         main_chart = _sent_main_chart(forecast, hist, buy_th, sell_th, acc)
         index_chart = _sent_index_chart(hist)
         acc_html = ""
@@ -2263,7 +2291,7 @@ def sentiment_board_html(base, data, results, results_week, scores, last_date):
       <div class="sent-chart-card">{main_chart}</div>
       {acc_html}
       <div class="sent-chart-card">{index_chart}</div>
-      <p class="sent-footnote">代理情绪温度（monitor_only）：由上证量能/动量/波动/牛熊位置 + 宽基与跨市场广度合成，非全市场涨跌家数；量能维度受数据源 volume 单位差异影响，仅供研判参考，不参与任何概率/方向计算。history 为全部可用交易日逐日回算；forecast 由 KNN 历史轨迹派生（k=15/ctx=15 等权全局，经 walk-forward 回测反选），橙色阴影为 50% 校准置信带（κ 重标定，样本外实测覆盖率≈名义 50%）；预测为路径派生，非因子预测，仅供参考。</p>
+      <p class="sent-footnote">代理情绪温度（monitor_only）：由上证量能/动量/波动/牛熊位置 + 宽基与跨市场广度合成，非全市场涨跌家数；量能维度受数据源 volume 单位差异影响，仅供研判参考，不参与任何概率/方向计算。history 为全部可用交易日逐日回算；forecast 由 KNN 历史轨迹派生（k=15/ctx=15 等权全局，经 walk-forward 回测反选），紫色虚线为未来预测中值（κ 重标定，样本外实测覆盖率≈名义 50% 的 p25–p75 区间）；预测为路径派生，非因子预测，仅供参考。</p>
     </section>"""
     except Exception as _e:
         print("WARN 情绪板块渲染降级: %s" % _e)
@@ -2785,7 +2813,7 @@ def main():
   .xh-tip b {{ color: #fbbf24; }}
   .tablescroll {{ width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }}
   /* R178 市场情绪板块（对齐 sentiment-dashboard 视觉语言） */
-  .sent-head {{ background: #fff; border: 1px solid #e5e9f0; border-radius: 14px; padding: 18px 20px; margin-bottom: 14px; box-shadow: 0 1px 3px rgba(15,23,42,.04); }}
+  .sent-head {{ background: #fff; border: 1px solid #e5e9f0; border-radius: 10px; padding: 16px 18px; margin-bottom: 14px; box-shadow: 0 1px 3px rgba(15,23,42,.04); }}
   .sent-head-row {{ display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }}
   .sent-title-wrap {{ display: flex; align-items: center; gap: 10px; }}
   .sent-main-title {{ font-size: 18px; font-weight: 800; color: #1e293b; letter-spacing: -.2px; }}
@@ -2801,8 +2829,11 @@ def main():
   .sent-bar-tick {{ position: absolute; top: -3px; width: 2px; height: 16px; background: rgba(255,255,255,.95); border-radius: 1px; box-shadow: 0 1px 2px rgba(0,0,0,.25); }}
   .sent-bar-labels {{ display: flex; justify-content: space-between; font-size: 11px; color: #64748b; margin-top: 6px; text-align: center; }}
   .sent-bar-labels small {{ font-size: 10px; opacity: .8; }}
-  .sent-head-note {{ font-size: 12px; color: #64748b; margin-top: 10px; line-height: 1.5; }}
-  .sent-chart-card {{ background: #fff; border: 1px solid #e5e9f0; border-radius: 14px; padding: 10px 12px 12px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(15,23,42,.04); }}
+  .sent-head-note {{ font-size: 12px; color: #64748b; margin-top: 8px; line-height: 1.5; }}
+  .sent-zstat {{ display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 11px; font-variant-numeric: tabular-nums; margin-top: 10px; }}
+  .sent-zstat .zs {{ font-weight: 600; white-space: nowrap; }}
+  .sent-interp {{ font-size: 12.5px; color: #334155; margin-top: 8px; line-height: 1.6; background: #f8fafc; border-radius: 8px; padding: 8px 10px; }}
+  .sent-chart-card {{ background: #fff; border: 1px solid #e5e9f0; border-radius: 10px; padding: 8px 12px 10px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(15,23,42,.04); }}
   .sent-chart-card:last-child {{ margin-bottom: 0; }}
   .sent-chart-card .echart-toolbar {{ font-size: 12px; color: #475569; font-weight: 700; padding: 4px 2px 8px; line-height: 1.55; flex-wrap: wrap; word-break: break-word; }}
   .sent-footnote {{ font-size: 11px; color: #94a3b8; line-height: 1.7; margin-top: 12px; padding: 10px 12px; background: #f8fafc; border-radius: 8px; }}
