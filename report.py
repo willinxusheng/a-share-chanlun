@@ -1986,13 +1986,36 @@ def _sent_x_struct(sc, zone, score):
 
 
 # ================= R178 情绪板块（对齐 sentiment-dashboard 视觉语言: 温度计 + 维度表 + 走势预测 + 情绪vs指数） =================
-def _echart_block(cid, opt, toolbar, height):
-    """通用 ECharts 容器块: 工具栏 + 图表 div + 内联初始化脚本。
-    选项全部 json 可序列化(无 JS 函数), 故直接 json.dumps 注入, 避免 f-string 大括号转义;
+# R179: 情绪图共用的时间轴年份标注 + 自适应密度标签 formatter(沿用 forecast_echart 的反抽稀逻辑,
+# 杜绝缩放后日期错配; 按全量类目数切 日/周/月/季 密度, 年份由竖线标注补充)。
+_SENT_DATE_FMT = """
+function _sMonStart(i){var d=D.xcats[i];return d&&d.slice(8,10)==='01';}
+function _sQuarterStart(i){var d=D.xcats[i];if(!d||d.slice(8,10)!=='01')return false;var m=parseInt(d.slice(5,7),10);return m===1||m===4||m===7||m===10;}
+function _sMonDay(i){var p=D.xcats[i].split('-');return new Date(+p[0],+p[1]-1,+p[2]).getDay()===1;}
+function _sShowLabel(i){var n=D.xcats.length;if(n<=30)return true;if(n<=60)return _sMonDay(i);if(n<=180)return _sMonStart(i);return _sQuarterStart(i);}
+function _sFmt(v,i){var idx=D.xcats.indexOf(v);if(idx<0)idx=i;var d=(idx>=0&&D.xcats[idx])?D.xcats[idx]:v;if(!d||d.length<7)return v;if(!_sShowLabel(idx))return '';if(D.xcats.length<=10)return d;return d.slice(5);}
+"""
+
+
+def _year_lines(xcats):
+    """每个自然年首根交易日作为年份竖线锚点(与分指数图解年份对齐)。"""
+    out, last_y = [], None
+    for x in xcats:
+        y = x[:4]
+        if y != last_y:
+            out.append({"x": x, "y": y})
+            last_y = y
+    return out
+
+
+def _sent_echart(cid, toolbar, height, fdata, opt_js):
+    """情绪 ECharts 容器块: 数据 json.dumps 注入, option 由 JS 构建(支持 formatter 函数/年份标注)。
     图表统一 push 到 window.__charts 由全局 resizeAll 接管缩放。"""
-    js = ("(function(){var chart=echarts.init(document.getElementById('" + cid
-          + "')); (window.__charts=window.__charts||[]).push(chart); chart.setOption("
-          + json.dumps(opt, ensure_ascii=False) + ");})();")
+    js = ("(function(){var D=" + json.dumps(fdata, ensure_ascii=False) + ";"
+          "var chart=echarts.init(document.getElementById('" + cid + "'));"
+          "(window.__charts=window.__charts||[]).push(chart);"
+          + _SENT_DATE_FMT +
+          "chart.setOption((" + opt_js + ")(D,chart));})();")
     return ('<div class="echart-toolbar">' + toolbar + '</div>'
             + '<div id="' + cid + '" class="echart-main" style="width:100%;height:'
             + str(height) + 'px;"></div>'
@@ -2050,95 +2073,89 @@ def _sent_thermometer_html(final, zone, zlabel, zcolor, buy_th, sell_th, final_p
 
 
 def _sent_main_chart(forecast, hist, buy_th, sell_th):
-    """情绪走势与未来预测合一主图: 历史情绪(蓝实线) + 预测情绪(橙虚线) + 今日竖线 + 机会/危险区背景 + dataZoom。
-    对齐参考图: 一条连续曲线, 今日为界, 左侧实线右侧虚线, 80以上红色风险区、20以下绿色机会区。"""
+    """情绪走势与未来预测合一主图(R179): 全量历史(与分指数图解同起点 2021-01-04) + KNN 预测(橙虚线) +
+    今日竖线 + 机会/危险区背景 + 年份竖线标注 + dataZoom(默认显示全历史, 可缩放)。"""
     rows = [r for r in (hist or []) if isinstance(r, (list, tuple)) and len(r) >= 3]
-    rows = rows[-120:]
     if len(rows) < 2:
         return ""
-    x_hist = [r[0][5:] for r in rows]
+    x_hist = [r[0] for r in rows]
     y_hist = [None if r[2] is None else float(r[2]) for r in rows]
     today_x = x_hist[-1]
-    # 预测序列
     fmed = (forecast or {}).get("median") or []
     fdates = (forecast or {}).get("dates") or []
     H = len(fmed)
-    x_fc = [d[5:] for d in fdates]
+    x_fc = [d for d in fdates]
     xcats = x_hist + x_fc
-    # 历史实线 + 预测虚线: 用同一 series, 在今日处桥接; 预测段前插 None 断点制造虚实区分
     hist_series = y_hist + [None] * H
     fc_series = [None] * (len(x_hist) - 1) + [y_hist[-1]] + [float(v) for v in fmed]
-    opt = {
-        "tooltip": {"trigger": "axis", "axisPointer": {"type": "cross"}},
-        "legend": {"data": ["历史情绪", "预测情绪"], "top": 2, "textStyle": {"fontSize": 11}},
-        "grid": {"left": 44, "right": 14, "top": 38, "bottom": 52},
-        "xAxis": {"type": "category", "data": xcats, "boundaryGap": False,
-                  "axisLabel": {"fontSize": 10, "hideOverlap": True}, "axisTick": {"show": False}},
-        "yAxis": {"type": "value", "min": 0, "max": 100, "axisLabel": {"fontSize": 11},
-                  "splitLine": {"lineStyle": {"color": "#eef2f7"}}},
-        "dataZoom": [
-            {"type": "inside", "xAxisIndex": 0, "start": max(0, (len(xcats) - 80) / len(xcats) * 100), "end": 100},
-            {"type": "slider", "xAxisIndex": 0, "height": 16, "bottom": 22,
-             "start": max(0, (len(xcats) - 80) / len(xcats) * 100), "end": 100,
-             "handleStyle": {"color": "#2b6cb0"}, "borderColor": "#e2e8f0",
-             "fillerColor": "rgba(43,108,176,0.12)"}
-        ],
-        "series": [
-            {"name": "历史情绪", "type": "line", "data": hist_series, "symbol": "none", "smooth": True,
-             "lineStyle": {"color": "#2b6cb0", "width": 2}, "z": 4,
-             "markArea": {"silent": True, "itemStyle": {"opacity": 0.08}, "data": [
-                 [{"yAxis": 0, "itemStyle": {"color": GREEN}, "label": {"formatter": "机会区·大盘易涨", "position": "insideBottom", "color": GREEN, "fontSize": 10}}, {"yAxis": buy_th}],
-                 [{"yAxis": sell_th, "itemStyle": {"color": RED}, "label": {"formatter": "风险区·大盘易跌", "position": "insideTop", "color": RED, "fontSize": 10}}, {"yAxis": 100}]
-             ]},
-             "markLine": {"symbol": "none", "data": [
-                 {"xAxis": today_x, "lineStyle": {"color": "#94a3b8", "type": "dashed", "width": 1},
-                  "label": {"formatter": "今日", "color": "#475569", "position": "insideEndTop"}}
-             ]}},
-            {"name": "预测情绪", "type": "line", "data": fc_series, "symbol": "none", "smooth": True,
-             "lineStyle": {"color": "#f59e0b", "width": 2, "type": "dashed"}, "z": 5}
-        ]
+    fdata = {
+        "xcats": xcats, "yhist": hist_series, "yfc": fc_series,
+        "buy_th": buy_th, "sell_th": sell_th, "today_x": today_x,
+        "yearLines": _year_lines(xcats),
     }
-    return _echart_block("echart-sent-main", opt,
-                         "情绪走势与未来预测 · 蓝实线=历史情绪　橙虚线=KNN预测情绪　灰虚线=今日分界", 340)
+    opt_js = (
+        "function(D,chart){"
+        "var yearML=(D.yearLines||[]).map(function(o){return {xAxis:o.x,"
+        "lineStyle:{color:'#cbd5e1',type:'dashed',width:1},"
+        "label:{formatter:o.y+'年',position:'insideEndTop',color:'#64748b',fontSize:10}};});"
+        "yearML.unshift({xAxis:D.today_x,lineStyle:{color:'#334155',type:'dashed',width:1.5},"
+        "label:{formatter:'今日',position:'insideEndTop',color:'#475569',fontSize:10}});"
+        "return {tooltip:{trigger:'axis',axisPointer:{type:'cross'}},"
+        "legend:{data:['历史情绪','预测情绪'],top:2,textStyle:{fontSize:11}},"
+        "grid:{left:44,right:14,top:38,bottom:54},"
+        "xAxis:{type:'category',data:D.xcats,boundaryGap:false,"
+        "axisLabel:{fontSize:10,hideOverlap:true,formatter:_sFmt},axisTick:{show:false}},"
+        "yAxis:{type:'value',min:0,max:100,axisLabel:{fontSize:11},splitLine:{lineStyle:{color:'#eef2f7'}}},"
+        "dataZoom:[{type:'inside',xAxisIndex:0,start:0,end:100},"
+        "{type:'slider',xAxisIndex:0,height:16,bottom:22,start:0,end:100,"
+        "handleStyle:{color:'#2b6cb0'},borderColor:'#e2e8f0',fillerColor:'rgba(43,108,176,0.12)'}],"
+        "series:[{name:'历史情绪',type:'line',data:D.yhist,symbol:'none',smooth:true,"
+        "lineStyle:{color:'#2b6cb0',width:2},z:4,"
+        "markArea:{silent:true,itemStyle:{opacity:0.08},data:["
+        "[{yAxis:0,itemStyle:{color:'#18a058'},label:{formatter:'机会区·大盘易涨',position:'insideBottom',color:'#18a058',fontSize:10}},{yAxis:D.buy_th}],"
+        "[{yAxis:D.sell_th,itemStyle:{color:'#e54545'},label:{formatter:'风险区·大盘易跌',position:'insideTop',color:'#e54545',fontSize:10}},{yAxis:100}]]},"
+        "markLine:{symbol:'none',data:yearML}},"
+        "{name:'预测情绪',type:'line',data:D.yfc,symbol:'none',smooth:true,"
+        "lineStyle:{color:'#f59e0b',width:2,type:'dashed'},z:5}]};}"
+    )
+    return _sent_echart("echart-sent-main",
+                        "情绪走势与未来预测(2021–2026 全历史) · 蓝实线=历史情绪　橙虚线=KNN预测　竖线=年份/今日 · 滚轮缩放看全历史",
+                        340, fdata, opt_js)
 
 
 def _sent_index_chart(hist):
-    """情绪 vs 上证指数: 双 Y 轴折线图, 近 120 交易日。"""
+    """情绪 vs 上证指数(R179): 双 Y 轴, 全量历史(与分指数图解同起点), 年份竖线标注 + dataZoom。"""
     rows = [r for r in (hist or []) if isinstance(r, (list, tuple)) and len(r) >= 3]
-    rows = rows[-120:]
     if len(rows) < 2:
         return ""
-    x = [r[0][5:] for r in rows]
+    x = [r[0] for r in rows]
     sc = [None if r[2] is None else float(r[2]) for r in rows]
     cl = [None if r[1] is None else float(r[1]) for r in rows]
-    opt = {
-        "tooltip": {"trigger": "axis", "axisPointer": {"type": "cross"}},
-        "legend": {"data": ["情绪温度", "上证指数"], "top": 2, "textStyle": {"fontSize": 11}},
-        "grid": {"left": 44, "right": 56, "top": 38, "bottom": 52},
-        "xAxis": {"type": "category", "data": x, "boundaryGap": False,
-                  "axisLabel": {"fontSize": 10, "hideOverlap": True}, "axisTick": {"show": False}},
-        "yAxis": [
-            {"type": "value", "min": 0, "max": 100, "position": "left",
-             "axisLabel": {"fontSize": 11, "color": "#2b6cb0"},
-             "splitLine": {"lineStyle": {"color": "#eef2f7"}}, "name": "温度"},
-            {"type": "value", "position": "right", "scale": True,
-             "axisLabel": {"fontSize": 11, "color": "#b45309"}, "name": "上证"}
-        ],
-        "dataZoom": [
-            {"type": "inside", "xAxisIndex": 0},
-            {"type": "slider", "xAxisIndex": 0, "height": 16, "bottom": 22,
-             "handleStyle": {"color": "#2b6cb0"}, "borderColor": "#e2e8f0",
-             "fillerColor": "rgba(43,108,176,0.12)"}
-        ],
-        "series": [
-            {"name": "情绪温度", "type": "line", "data": sc, "symbol": "none", "smooth": True,
-             "lineStyle": {"color": "#2b6cb0", "width": 2}, "yAxisIndex": 0},
-            {"name": "上证指数", "type": "line", "data": cl, "symbol": "none", "smooth": True,
-             "lineStyle": {"color": "#b45309", "width": 1.6}, "yAxisIndex": 1}
-        ]
-    }
-    return _echart_block("echart-sent-index", opt,
-                         "情绪 vs 上证指数（近 120 交易日）· 蓝=情绪温度　棕=上证指数", 300)
+    fdata = {"xcats": x, "sc": sc, "cl": cl, "yearLines": _year_lines(x)}
+    opt_js = (
+        "function(D,chart){"
+        "var yearML=(D.yearLines||[]).map(function(o){return {xAxis:o.x,"
+        "lineStyle:{color:'#cbd5e1',type:'dashed',width:1},"
+        "label:{formatter:o.y+'年',position:'insideEndTop',color:'#64748b',fontSize:10}};});"
+        "return {tooltip:{trigger:'axis',axisPointer:{type:'cross'}},"
+        "legend:{data:['情绪温度','上证指数'],top:2,textStyle:{fontSize:11}},"
+        "grid:{left:44,right:56,top:38,bottom:54},"
+        "xAxis:{type:'category',data:D.xcats,boundaryGap:false,"
+        "axisLabel:{fontSize:10,hideOverlap:true,formatter:_sFmt},axisTick:{show:false}},"
+        "yAxis:[{type:'value',min:0,max:100,position:'left',"
+        "axisLabel:{fontSize:11,color:'#2b6cb0'},splitLine:{lineStyle:{color:'#eef2f7'}},name:'温度'},"
+        "{type:'value',position:'right',scale:true,axisLabel:{fontSize:11,color:'#b45309'},name:'上证'}],"
+        "dataZoom:[{type:'inside',xAxisIndex:0,start:0,end:100},"
+        "{type:'slider',xAxisIndex:0,height:16,bottom:22,start:0,end:100,"
+        "handleStyle:{color:'#2b6cb0'},borderColor:'#e2e8f0',fillerColor:'rgba(43,108,176,0.12)'}],"
+        "series:[{name:'情绪温度',type:'line',data:D.sc,symbol:'none',smooth:true,"
+        "lineStyle:{color:'#2b6cb0',width:2},yAxisIndex:0,markLine:{symbol:'none',data:yearML}},"
+        "{name:'上证指数',type:'line',data:D.cl,symbol:'none',smooth:true,"
+        "lineStyle:{color:'#b45309',width:1.6},yAxisIndex:1}]};}"
+    )
+    return _sent_echart("echart-sent-index",
+                        "情绪 vs 上证指数(2021–2026 全历史) · 蓝=情绪温度　棕=上证指数　竖线=年份 · 滚轮缩放",
+                        300, fdata, opt_js)
 
 
 def sentiment_board_html(base, data, results, results_week, scores, last_date):

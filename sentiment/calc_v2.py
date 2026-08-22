@@ -475,9 +475,11 @@ result = {
     "elasticity": cur_elasticity,
     "elasticity_pct": elas_pct,
     "resonance": resonance,
-    "hist": [[d["date"], d["close"], d["score"], d["ma5s"], d["ma20s"],
+    # R179: hist 改为基于全量 data(与 data.json 的 klines 同起点 2021-01-04), 早期 score/ma5s/ma20s 为 None 占位,
+    # 使情绪图 x 轴起点与分指数图解对齐、历史拉满 5 年; scoring/KNN 仍基于 valid(未改动, 含 120 样本 warmup 的滚动分位模型)。
+    "hist": [[d["date"], d["close"], d["score"], d.get("ma5s"), d.get("ma20s"),
               (1 if d["regime"] == "bull" else 0),
-              d.get("elasticity")] for d in valid],
+              d.get("elasticity")] for d in data],
     # R177c: KNN 情绪轨迹预测(未来 horizon 日 median/p25/p75 带 + 反弹峰值)。
     # 样本不足时 calc_v2 返回 None, 此处写为 None, 由 report.py 情绪板块降级(不画预测带)。
     "forecast": fc,
