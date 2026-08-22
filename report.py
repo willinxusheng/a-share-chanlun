@@ -2005,7 +2005,10 @@ var _sVis=null;
    副图无 zoomStart → 取全量长度。 */
 function _sVisInit(){var si=D.xcats.indexOf(D.zoomStart);_sVis=(si>=0)?(D.xcats.length-si):D.xcats.length;}
 _sVisInit();
-function _sRefreshVis(){var zooms=(chart.getOption().dataZoom)||[];if(!zooms.length){_sVis=D.xcats.length;return;}var z=zooms[0]||{};var total=D.xcats.length;var s=(z.start!=null?z.start:(z.startValue!=null?Math.max(0,D.xcats.indexOf(z.startValue)):0));var e=(z.end!=null?z.end:100);_sVis=Math.max(1,Math.round(total*(e-s)/100));}
+/* R194c: dataZoom 事件刷新可见窗口数。关键健壮性: 若 getOption().dataZoom 暂不可得
+   (SSR 首帧/交互瞬间), 必须保留 _sVis 当前值, 严禁回退全量 —— 否则默认窗口标签会从月档
+   退化成季档(只显2个季首), 表现为"标签稀疏/断续/错配"。_sVisInit 已给出正确基线。 */
+function _sRefreshVis(){var zooms=(chart.getOption().dataZoom)||[];if(!zooms.length||!zooms[0])return;var z=zooms[0]||{};var total=D.xcats.length;var s=(z.start!=null?z.start:(z.startValue!=null?Math.max(0,D.xcats.indexOf(z.startValue)):0));var e=(z.end!=null?z.end:100);if(typeof s!=='number'||typeof e!=='number')return;_sVis=Math.max(1,Math.round(total*(e-s)/100));}
 chart.on('dataZoom',_sRefreshVis);
 function _sShowLabel(v,g){var n=_sVis||D.xcats.length;if(n<=30)return true;if(n<=60)return g%5===0;if(n<=180)return _sMonStart(g);return _sQuarterFirst(g);}
 function _sFmt(v,i){var g=D.xcats.indexOf(v);if(g<0)return v||'';if(!_sShowLabel(v,g))return '';var d=D.xcats[g];if(!d)return v||'';var n=_sVis||D.xcats.length;if(n<=30)return d.slice(5);if(n<=60)return d.slice(5);if(_sYearStart(g))return d.slice(0,4)+'年';return (+d.slice(5,7))+'月';}
