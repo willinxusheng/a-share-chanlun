@@ -2072,6 +2072,27 @@ def _sent_thermometer_html(final, zone, zlabel, zcolor, buy_th, sell_th, final_p
     </div>"""
 
 
+def _sent_warm_band(yvals, xvals):
+    """返回预热期(首段连续 None 样本不足)的 x 区间 [x0, x1]; 无预热则 None。
+    仅覆盖前导连续 None(数据本身首段才缺样本), 不做内部断档——内部断档非统计预热, 不标灰。"""
+    first = next((i for i, y in enumerate(yvals) if y is not None), None)
+    if first is None or first == 0:
+        return None
+    return (xvals[0], xvals[first])
+
+
+def _sent_warm_markarea(wb, band_color="#94a3b8", band_op=0.22):
+    """构造 markArea 数据(灰带 + 文字标注)。wb=None 时返回空列表。"""
+    if not wb:
+        return []
+    return [[{"xAxis": wb[0],
+              "itemStyle": {"color": band_color, "opacity": band_op},
+              "label": {"show": True, "formatter": "数据预热期（样本不足）",
+                        "position": "insideLeft", "color": "#64748b",
+                        "fontSize": 10, "align": "left"}},
+             {"xAxis": wb[1]}]]
+
+
 def _sent_main_chart(forecast, hist, buy_th, sell_th, acc=None):
     """情绪走势与未来预测合一主图(R181): 全量历史 + KNN预测(橙虚线) + 50%校准置信带(κ重标定, 阴影) +
     今日竖线 + 机会/危险区 + 年份竖线 + dataZoom。acc=forecast_acc 用于标题可信度标注。"""
@@ -2088,6 +2109,11 @@ def _sent_main_chart(forecast, hist, buy_th, sell_th, acc=None):
     H = len(fmed)
     x_fc = [d for d in fdates]
     xcats = x_hist + x_fc
+    _wb = _sent_warm_band(y_hist, x_hist)
+    _ma = [
+        [{"yAxis": 0, "itemStyle": {"color": "#18a058", "opacity": 0.10}}, {"yAxis": buy_th}],
+        [{"yAxis": sell_th, "itemStyle": {"color": "#e54545", "opacity": 0.10}}, {"yAxis": 100}],
+    ] + _sent_warm_markarea(_wb)
     hist_series = y_hist + [None] * H
     fc_series = [None] * (len(x_hist) - 1) + [y_hist[-1]] + [float(v) for v in fmed]
     # 预测置信带: 仅未来段; band_lo=p25 下界, band_hi=p75-p25 堆叠增量(面积填充至 p75)
@@ -2100,6 +2126,7 @@ def _sent_main_chart(forecast, hist, buy_th, sell_th, acc=None):
         "band_lo": band_lo, "band_hi": band_hi,
         "buy_th": buy_th, "sell_th": sell_th, "today_x": today_x,
         "yearLines": _year_lines(xcats),
+        "markAreaData": _ma,
     }
     opt_js = (
         "function(D,chart){"
@@ -2121,9 +2148,7 @@ def _sent_main_chart(forecast, hist, buy_th, sell_th, acc=None):
         "selectedDataBackground:{lineStyle:{color:'#2b6cb0'},areaStyle:{color:'rgba(43,108,176,0.25)'}}}],"
         "series:[{name:'历史情绪',type:'line',data:D.yhist,symbol:'none',smooth:true,"
         "lineStyle:{color:'#2b6cb0',width:2},z:4,"
-        "markArea:{silent:true,itemStyle:{opacity:0.08},data:["
-        "[{yAxis:0,itemStyle:{color:'#18a058'}},{yAxis:D.buy_th}],"
-        "[{yAxis:D.sell_th,itemStyle:{color:'#e54545'}},{yAxis:100}]]},"
+        "markArea:{silent:true,data:D.markAreaData},"
         "markLine:{symbol:'none',data:yearML}},"
         "{name:'预测情绪',type:'line',data:D.yfc,symbol:'none',smooth:true,"
         "lineStyle:{color:'#f59e0b',width:2,type:'dashed'},z:5},"
@@ -2135,6 +2160,7 @@ def _sent_main_chart(forecast, hist, buy_th, sell_th, acc=None):
     zone_cap = ('<div class="sent-zone-cap">'
                 '<span class="zc zc-g">▾ 绿带=机会区(&lt;%.0f·大盘易涨)</span>'
                 '<span class="zc zc-r">▴ 红带=风险区(&gt;%.0f·大盘易跌)</span>'
+                '<span class="zc zc-w">▦ 左侧灰带=数据预热期(样本不足, 非断线)</span>'
                 '<span class="zc">竖线=年份/今日(下沿标注)　·　月份在 x 轴　·　阴影=50%%置信带　·　滚轮/拖拽缩放</span>'
                 '</div>') % (buy_th, sell_th)
     return _sent_echart("echart-sent-main",
@@ -2151,7 +2177,9 @@ def _sent_index_chart(hist):
     x = [r[0] for r in rows]
     sc = [None if r[2] is None else float(r[2]) for r in rows]
     cl = [None if r[1] is None else float(r[1]) for r in rows]
-    fdata = {"xcats": x, "sc": sc, "cl": cl, "yearLines": _year_lines(x)}
+    _wb = _sent_warm_band(sc, x)
+    fdata = {"xcats": x, "sc": sc, "cl": cl, "yearLines": _year_lines(x),
+             "markAreaData": _sent_warm_markarea(_wb)}
     opt_js = (
         "function(D,chart){"
         "var yearML=(D.yearLines||[]).map(function(o){return {xAxis:o.x,"
@@ -2171,13 +2199,17 @@ def _sent_index_chart(hist):
         "dataBackground:{lineStyle:{color:'#cbd5e1'},areaStyle:{color:'rgba(203,213,225,0.25)'}},"
         "selectedDataBackground:{lineStyle:{color:'#2b6cb0'},areaStyle:{color:'rgba(43,108,176,0.25)'}}}],"
         "series:[{name:'情绪温度',type:'line',data:D.sc,symbol:'none',smooth:true,"
-        "lineStyle:{color:'#2b6cb0',width:2},yAxisIndex:0,markLine:{symbol:'none',data:yearML}},"
+        "lineStyle:{color:'#2b6cb0',width:2},yAxisIndex:0,markArea:{silent:true,data:D.markAreaData},markLine:{symbol:'none',data:yearML}},"
         "{name:'上证指数',type:'line',data:D.cl,symbol:'none',smooth:true,"
         "lineStyle:{color:'#b45309',width:1.6},yAxisIndex:1}]};}"
     )
+    cap = ('<div class="sent-zone-cap">'
+           '<span class="zc zc-w">▦ 左侧灰带=数据预热期(样本不足, 非断线)</span>'
+           '<span class="zc">蓝=情绪温度　棕=上证指数　年份/月份在 x 轴　·　滚轮缩放</span>'
+           '</div>')
     return _sent_echart("echart-sent-index",
                         "情绪 vs 上证指数(2021–2026 全历史) · 蓝=情绪温度　棕=上证指数　年份/月份在 x 轴 · 滚轮缩放",
-                        300, fdata, opt_js)
+                        300, fdata, opt_js) + cap
 
 
 def sentiment_board_html(base, data, results, results_week, scores, last_date):
@@ -2779,6 +2811,7 @@ def main():
   .sent-zone-cap {{ display: flex; flex-wrap: wrap; gap: 14px; font-size: 11px; color: #64748b; margin-top: 6px; padding: 0 2px; line-height: 1.6; }}
   .sent-zone-cap .zc-g {{ color: #18a058; font-weight: 600; }}
   .sent-zone-cap .zc-r {{ color: #e54545; font-weight: 600; }}
+  .sent-zone-cap .zc-w {{ color: #64748b; font-weight: 600; }}
 
   @media (max-width: 720px) {{
     body {{ padding: 12px; }}
