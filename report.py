@@ -2124,7 +2124,7 @@ def _sent_warm_markarea(wb, band_color="#94a3b8", band_op=0.22):
 
 
 def _sent_main_chart(forecast, hist, buy_th, sell_th, acc=None):
-    """情绪走势与未来预测合一主图(R181): 全量历史 + KNN预测(橙虚线) + 50%校准置信带(κ重标定, 阴影) +
+    """情绪走势与未来预测合一主图(R181): 全量历史 + KNN预测(紫虚线) + 50%校准置信带(κ重标定, 阴影) +
     今日竖线 + 机会/危险区 + 年份竖线 + dataZoom。acc=forecast_acc 用于标题可信度标注。"""
     rows = [r for r in (hist or []) if isinstance(r, (list, tuple)) and len(r) >= 3]
     if len(rows) < 2:
@@ -2181,14 +2181,14 @@ def _sent_main_chart(forecast, hist, buy_th, sell_th, acc=None):
         "markArea:{silent:true,data:D.markAreaData},"
         "markLine:{symbol:'none',data:yearML}},"
         "{name:'预测情绪',type:'line',data:D.yfc,symbol:'none',smooth:true,"
-        "lineStyle:{color:'#2b6cb0',width:2,type:'dashed'},z:5},"
+        "lineStyle:{color:'#7c3aed',width:2,type:'dashed'},z:5},"
         "]};}"
     )
     zone_cap = ('<div class="sent-zone-cap">'
                 '<span class="zc zc-g">▾ 绿带=机会区(&lt;%.0f)</span>'
                 '<span class="zc zc-r">▴ 红带=风险区(&gt;%.0f)</span>'
                 '<span class="zc zc-w">▦ 灰带=数据预热期(样本不足, 非断线)</span>'
-                '<span class="zc">蓝实线=历史情绪　蓝虚线=未来KNN预测　年份/月份在 x 轴　·　滚轮拖拽缩放</span>'
+                '<span class="zc">蓝实线=历史情绪　紫虚线=未来KNN预测　年份/月份在 x 轴　·　滚轮拖拽缩放</span>'
                 '</div>') % (buy_th, sell_th)
     return _sent_echart("echart-sent-main",
                         "情绪走势与未来预测（KNN 路径派生）",
