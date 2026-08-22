@@ -98,12 +98,17 @@ for i, d in enumerate(data):
     d["ma250"] = ma(closes, i, 250)
     d["regime"] = ("bull" if d["close"] >= d["ma250"] else "bear") if d["ma250"] else None
 
-# ---- 滚动252日分位 ----
-WIN, MIN_N = 252, 120
+# ---- 滚动252日分位(早期自适应窗口, 减少左侧断档) ----
+# 历史设定: 固定252日窗口, 要求≥120个非None样本。结果2021-01-04起约139天score=None,
+# 情绪图最左侧出现明显断档。改为: 早期用全部可用历史(窗口=i+1), 最少样本数
+# max(30, win//2), 中后期平滑过渡到252/120, 既保留统计意义, 又让图从更早日期开始连续。
+WIN, MIN_N_FULL = 252, 120
 def roll_pct(series, i):
-    lo = max(0, i - WIN + 1)
+    win = min(WIN, i + 1)
+    lo = max(0, i - win + 1)
     vals = [x for x in series[lo: i + 1] if x is not None]
-    if len(vals) < MIN_N or series[i] is None:
+    min_n = max(30, win // 2) if win < WIN else MIN_N_FULL
+    if len(vals) < min_n or series[i] is None:
         return None
     return round(sum(1 for x in vals if x <= series[i]) / len(vals) * 100, 1)
 
@@ -551,7 +556,10 @@ def backtest_sentiment_forecast(valid, horizon=30, k=10, ctx=20,
 def calibrate_sentiment_band_kappa(valid, horizon=30, k=15, ctx=15,
                                    regime_weight=False, weight="equal",
                                    step=6, target=50.0,
-                                   grid=(1.0, 1.05, 1.1, 1.15, 1.2, 1.3, 1.4, 1.5, 1.6)):
+                                   grid=None):
+    if grid is None:
+        # R184: 0.02 步长加密, 让 κ 更精确命中名义 50%, 避免 0.05 步长造成 49.3% vs 51.3% 二选一。
+        grid = tuple(round(1.0 + i * 0.02, 2) for i in range(21))  # 1.00..1.40
     """R181: walk-forward 一次性标定 band_kappa —— 单遍构建候选池并对每个 κ 计算样本外实测覆盖率,
     取使覆盖率逼近名义 target(默认50%) 的 κ。沿用 backtest 的不泄漏原则(候选仅取锚点之前窗口)。
     返回 {'kappa','cov','grid'} 或样本不足时 None。"""
