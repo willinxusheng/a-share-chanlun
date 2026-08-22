@@ -557,12 +557,12 @@ def calibrate_sentiment_band_kappa(valid, horizon=30, k=15, ctx=15,
                                    regime_weight=False, weight="equal",
                                    step=6, target=50.0,
                                    grid=None):
-    if grid is None:
-        # R184: 0.02 步长加密, 让 κ 更精确命中名义 50%, 避免 0.05 步长造成 49.3% vs 51.3% 二选一。
-        grid = tuple(round(1.0 + i * 0.02, 2) for i in range(21))  # 1.00..1.40
     """R181: walk-forward 一次性标定 band_kappa —— 单遍构建候选池并对每个 κ 计算样本外实测覆盖率,
     取使覆盖率逼近名义 target(默认50%) 的 κ。沿用 backtest 的不泄漏原则(候选仅取锚点之前窗口)。
     返回 {'kappa','cov','grid'} 或样本不足时 None。"""
+    if grid is None:
+        # R184: 0.02 步长加密, 让 κ 更精确命中名义 50%, 避免 0.05 步长造成 49.3% vs 51.3% 二选一。
+        grid = tuple(round(1.0 + i * 0.02, 2) for i in range(21))  # 1.00..1.40
     scores = [d["score"] for d in valid if d.get("score") is not None]
     regimes = [d.get("regime") for d in valid if d.get("score") is not None]
     n = len(scores)

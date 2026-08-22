@@ -1990,10 +1990,10 @@ def _sent_x_struct(sc, zone, score):
 # 杜绝缩放后日期错配; 按全量类目数切 日/周/月/季 密度, 年份由 x 轴标签显示, 竖线仅作今日参考)。
 _SENT_DATE_FMT = """
 function _sMonStart(i){var d=D.xcats[i];return d&&d.slice(8,10)==='01';}
-function _sQuarterStart(i){var d=D.xcats[i];if(!d||d.slice(8,10)!=='01')return false;var m=parseInt(d.slice(5,7),10);return m===1||m===4||m===7||m===10;}
+function _sQuarterFirst(i){var d=D.xcats[i];if(!d)return false;var m=+d.slice(5,7);if(m!==1&&m!==4&&m!==7&&m!==10)return false;if(i===0)return true;var pd=D.xcats[i-1];if(!pd)return true;return (+pd.slice(5,7))!==m;}
 function _sMonDay(i){var p=D.xcats[i].split('-');return new Date(+p[0],+p[1]-1,+p[2]).getDay()===1;}
-function _sShowLabel(i){var n=D.xcats.length;if(n<=30)return true;if(n<=60)return _sMonDay(i);if(n<=180)return _sMonStart(i);return _sQuarterStart(i);}
-function _sFmt(v,i){var idx=D.xcats.indexOf(v);if(idx<0)idx=i;var d=(idx>=0&&D.xcats[idx])?D.xcats[idx]:v;if(!d||d.length<7)return v;if(!_sShowLabel(idx))return '';if(D.xcats.length<=10)return d;var y=d.slice(0,4),m=+d.slice(5,7),day=+d.slice(8,10);if(m===1&&day===1)return y+'年'+m+'月';if(_sQuarterStart(idx))return m+'月';return d.slice(5);}
+function _sShowLabel(i){var n=D.xcats.length;if(n<=30)return true;if(n<=60)return _sMonDay(i);if(n<=180)return _sMonStart(i);return _sQuarterFirst(i);}
+function _sFmt(v,i){var idx=D.xcats.indexOf(v);if(idx<0)idx=i;var d=(idx>=0&&D.xcats[idx])?D.xcats[idx]:v;if(!d||d.length<7)return v;if(!_sShowLabel(idx))return '';if(D.xcats.length<=10)return d;var m=+d.slice(5,7);if(_sQuarterFirst(idx))return m+'月';return '';}
 """
 
 
