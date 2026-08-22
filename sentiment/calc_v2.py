@@ -522,6 +522,14 @@ def sentiment_forecast(valid, horizon=30, k=10, ctx=20, band_days=10,
         p25.append(round(max(0.0, min(100.0, q25)), 1))
         p75.append(round(max(0.0, min(100.0, q75)), 1))
     median = [round(x, 1) for x in median]
+    # 钳制带序: 逐日四舍五入后 κ 展开量(尤其 MR 混合使 median 偏离 KNN 分位中心)可能致
+    # p25>median 或 p75<median(带倒置/负宽, ECharts 面积堆叠出现穿线 glitch)。
+    # 钳 p25<=median<=p75 保证带恒有效(带中心恒为 median, 半宽非负)。R200 审计发现。
+    for j in range(horizon):
+        if p25[j] > median[j]:
+            p25[j] = median[j]
+        if p75[j] < median[j]:
+            p75[j] = median[j]
     peak_day = int(max(range(horizon), key=lambda j: median[j])) + 1
     peak_val = median[peak_day - 1]
     return {"horizon": horizon, "ctx": ctx, "k": k, "band_days": band_days,
@@ -620,6 +628,8 @@ def backtest_sentiment_forecast(valid, horizon=30, k=10, ctx=20,
                 kj = kap[j]
                 lo = max(0.0, m - kj * (m - (p25l[j] if p25l[j] is not None else m)))
                 hi = min(100.0, m + kj * ((p75l[j] if p75l[j] is not None else m) - m))
+                # R200 审计: 钳带序, 防 MR 混合致 hi<m/lo>m 使带倒置、覆盖率被静默低估
+                lo, hi = min(lo, m), max(hi, m)
                 if lo <= a <= hi:
                     cov += 1
         if actual[-1] is not None and med[-1] is not None and today is not None:
@@ -639,6 +649,8 @@ def backtest_sentiment_forecast(valid, horizon=30, k=10, ctx=20,
             kj = kap[j]
             lo = max(0.0, m - kj * (m - (p25l[j] if p25l[j] is not None else m)))
             hi = min(100.0, m + kj * ((p75l[j] if p75l[j] is not None else m) - m))
+            # R200 审计: 钳带序, 防止带倒置致分情绪区覆盖率被静默低估
+            lo, hi = min(lo, m), max(hi, m)
             if lo <= a <= hi:
                 z_cov[z] += 1
         if actual[-1] is not None and med[-1] is not None and today is not None:
