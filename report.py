@@ -1989,11 +1989,26 @@ def _sent_x_struct(sc, zone, score):
 # R179/R183: 情绪图共用的时间轴年份/月份标注 + 自适应密度标签 formatter(沿用 forecast_echart 的反抽稀逻辑,
 # 杜绝缩放后日期错配; 按全量类目数切 日/周/月/季 密度, 年份由 x 轴标签显示, 竖线仅作今日参考)。
 _SENT_DATE_FMT = """
-function _sMonStart(i){var d=D.xcats[i];return d&&d.slice(8,10)==='01';}
-function _sQuarterFirst(i){var d=D.xcats[i];if(!d)return false;var m=+d.slice(5,7);if(m!==1&&m!==4&&m!==7&&m!==10)return false;if(i===0)return true;var pd=D.xcats[i-1];if(!pd)return true;return (+pd.slice(5,7))!==m;}
-function _sYearStart(i){var d=D.xcats[i];if(!d)return false;var m=+d.slice(5,7);if(m!==1)return false;if(i===0)return true;var pd=D.xcats[i-1];if(!pd)return true;return (+pd.slice(0,4))<(+d.slice(0,4));}
-function _sShowLabel(i){var n=D.xcats.length;if(n<=30)return true;if(n<=90)return i%Math.max(1,Math.ceil(n/12))===0;if(n<=180)return _sMonStart(i);return _sQuarterFirst(i);}
-function _sFmt(v,i){if(i==null)i=D.xcats.indexOf(v);if(!_sShowLabel(i))return '';var d=D.xcats[i];if(!d)return v||'';var n=D.xcats.length;if(n<=30)return d.slice(5);if(n<=90){var m=+d.slice(5,7),day=+d.slice(8,10);return m+'月'+day+'日';}if(n<=180)return (+d.slice(5,7))+'月';if(_sYearStart(i))return d.slice(0,4)+'年';return (+d.slice(5,7))+'月';}
+/* R194: 全部日期边界判断以 v(数据点日期字符串) 为锚, 用 indexOf 求全局索引。
+   根因: dataZoom 缩放后 ECharts 传给 axisLabel formatter 的 i 是可见窗口内相对索引,
+   旧代码用 D.xcats[i] 取日期 → 标签系统性错位(如 2026-04 窗口内 i=0 取到 2021-01-04)。 */
+function _sGI(v){return D.xcats.indexOf(v);}
+function _sMonStart(g){var d=D.xcats[g];if(!d)return false;if(g<=0)return true;var pd=D.xcats[g-1];return !pd||(+d.slice(5,7))!==(+pd.slice(5,7));}
+function _sQuarterFirst(g){var d=D.xcats[g];if(!d)return false;var m=+d.slice(5,7);if(m!==1&&m!==4&&m!==7&&m!==10)return false;if(g<=0)return true;var pd=D.xcats[g-1];if(!pd)return true;return (+pd.slice(5,7))!==m;}
+function _sYearStart(g){var d=D.xcats[g];if(!d)return false;if(g<=0)return true;var pd=D.xcats[g-1];return !pd||(+pd.slice(0,4))<(+d.slice(0,4));}
+/* R194: 可见窗口自适应密度 —— 修复缩放后标签错配/断续(根因: 旧版按全量类目数定密度,
+   主图 dataZoom 默认窗口仅末90日+预测, 全量1426点走季首分支 → 可见窗内标签几乎空白)。
+   _sVis 由 dataZoom 事件实时刷新: 可见<=30 逐日 / <=60 每周(i%5) / <=180 月首 / 更长季首; 年首标年份。 */
+var _sVis=null;
+/* R194b: 初始可见窗口直接用 D.zoomStart 手动算(setOption 前 formatter 已被调用,
+   _sRefreshVis 依赖 setOption 后的 dataZoom, 首帧会落到全量档 → 默认窗只显季首)。
+   副图无 zoomStart → 取全量长度。 */
+function _sVisInit(){var si=D.xcats.indexOf(D.zoomStart);_sVis=(si>=0)?(D.xcats.length-si):D.xcats.length;}
+_sVisInit();
+function _sRefreshVis(){var zooms=(chart.getOption().dataZoom)||[];if(!zooms.length){_sVis=D.xcats.length;return;}var z=zooms[0]||{};var total=D.xcats.length;var s=(z.start!=null?z.start:(z.startValue!=null?Math.max(0,D.xcats.indexOf(z.startValue)):0));var e=(z.end!=null?z.end:100);_sVis=Math.max(1,Math.round(total*(e-s)/100));}
+chart.on('dataZoom',_sRefreshVis);
+function _sShowLabel(v,g){var n=_sVis||D.xcats.length;if(n<=30)return true;if(n<=60)return g%5===0;if(n<=180)return _sMonStart(g);return _sQuarterFirst(g);}
+function _sFmt(v,i){var g=D.xcats.indexOf(v);if(g<0)return v||'';if(!_sShowLabel(v,g))return '';var d=D.xcats[g];if(!d)return v||'';var n=_sVis||D.xcats.length;if(n<=30)return d.slice(5);if(n<=60)return d.slice(5);if(_sYearStart(g))return d.slice(0,4)+'年';return (+d.slice(5,7))+'月';}
 """
 
 
@@ -2015,7 +2030,8 @@ def _sent_echart(cid, toolbar, height, fdata, opt_js):
           "var chart=echarts.init(document.getElementById('" + cid + "'));"
           "(window.__charts=window.__charts||[]).push(chart);"
           + _SENT_DATE_FMT +
-          "chart.setOption((" + opt_js + ")(D,chart));})();")
+          "chart.setOption((" + opt_js + ")(D,chart));"
+          "_sRefreshVis();})();")
     return ('<div class="echart-toolbar">' + toolbar + '</div>'
             + '<div id="' + cid + '" class="echart-main" style="width:100%;height:'
             + str(height) + 'px;"></div>'
@@ -2171,7 +2187,7 @@ def _sent_main_chart(forecast, hist, buy_th, sell_th, acc=None):
         "legend:{data:['历史情绪','预测情绪'],top:2,textStyle:{fontSize:11}},"
         "grid:{left:46,right:16,top:42,bottom:62},"
         "xAxis:{type:'category',data:D.xcats,boundaryGap:false,"
-        "axisLabel:{fontSize:10,hideOverlap:true,position:'bottom',interval:0,formatter:function(v,i){return _sFmt(v,i);}},axisTick:{show:false}},"
+        "axisLabel:{fontSize:10,autoHide:false,position:'bottom',interval:0,formatter:function(v,i){return _sFmt(v,i);}},axisTick:{show:false}},"
         "yAxis:{type:'value',min:0,max:100,axisLabel:{fontSize:11},splitLine:{lineStyle:{color:'#eef2f7'}}},"
         "dataZoom:[{type:'inside',xAxisIndex:0,startValue:D.zoomStart,end:100},"
         "{type:'slider',xAxisIndex:0,height:18,bottom:14,startValue:D.zoomStart,end:100,showDetail:false,"
@@ -2226,7 +2242,7 @@ def _sent_index_chart(hist, forecast=None):
         "legend:{data:['情绪温度','上证指数'],top:2,textStyle:{fontSize:11}},"
         "grid:{left:46,right:58,top:42,bottom:34},"
         "xAxis:{type:'category',data:D.xcats,boundaryGap:false,"
-        "axisLabel:{fontSize:10,hideOverlap:true,position:'bottom',formatter:function(v,i){return _sFmt(v,i);}},axisTick:{show:false}},"
+        "axisLabel:{fontSize:10,autoHide:false,position:'bottom',interval:0,formatter:function(v,i){return _sFmt(v,i);}},axisTick:{show:false}},"
         "yAxis:[{type:'value',min:0,max:100,position:'left',"
         "axisLabel:{fontSize:11,color:'#2b6cb0'},splitLine:{lineStyle:{color:'#eef2f7'}},name:'温度'},"
         "{type:'value',position:'right',scale:true,axisLabel:{fontSize:11,color:'#b45309'},name:'上证'}],"
