@@ -2073,7 +2073,7 @@ def _sent_thermometer_html(final, zone, zlabel, zcolor, buy_th, sell_th, final_p
 
 
 def _sent_main_chart(forecast, hist, buy_th, sell_th, acc=None):
-    """情绪走势与未来预测合一主图(R180): 全量历史 + KNN预测(橙虚线) + p25-p75置信带(阴影) +
+    """情绪走势与未来预测合一主图(R181): 全量历史 + KNN预测(橙虚线) + 50%校准置信带(κ重标定, 阴影) +
     今日竖线 + 机会/危险区 + 年份竖线 + dataZoom。acc=forecast_acc 用于标题可信度标注。"""
     rows = [r for r in (hist or []) if isinstance(r, (list, tuple)) and len(r) >= 3]
     if len(rows) < 2:
@@ -2096,8 +2096,10 @@ def _sent_main_chart(forecast, hist, buy_th, sell_th, acc=None):
                                        else round(fp75[i] - fp25[i], 1) for i in range(H)]
     acc_txt = ""
     if isinstance(acc, dict):
-        acc_txt = "　|　预测可信度: 带覆盖 %.1f%% · 方向命中 %.1f%% · 均误 %.1f 分" % (
-            acc.get("cov", 0), acc.get("dir_acc", 0), acc.get("mae", 0))
+        _bk = (forecast or {}).get("band_kappa")
+        acc_txt = "　|　预测可信度: 带覆盖 %.1f%% · 方向命中 %.1f%% · 均误 %.1f 分%s" % (
+            acc.get("cov", 0), acc.get("dir_acc", 0), acc.get("mae", 0),
+            (" · κ=%.2f" % _bk) if _bk else "")
     fdata = {
         "xcats": xcats, "yhist": hist_series, "yfc": fc_series,
         "band_lo": band_lo, "band_hi": band_hi,
@@ -2112,7 +2114,7 @@ def _sent_main_chart(forecast, hist, buy_th, sell_th, acc=None):
         "yearML.unshift({xAxis:D.today_x,lineStyle:{color:'#334155',type:'dashed',width:1.5},"
         "label:{formatter:'今日',position:'insideEndTop',color:'#475569',fontSize:10}});"
         "return {tooltip:{trigger:'axis',axisPointer:{type:'cross'}},"
-        "legend:{data:['历史情绪','预测情绪','预测区间(p25-p75)'],top:2,textStyle:{fontSize:11}},"
+        "legend:{data:['历史情绪','预测情绪','预测区间(50%置信带)'],top:2,textStyle:{fontSize:11}},"
         "grid:{left:44,right:14,top:38,bottom:54},"
         "xAxis:{type:'category',data:D.xcats,boundaryGap:false,"
         "axisLabel:{fontSize:10,hideOverlap:true,formatter:_sFmt},axisTick:{show:false}},"
@@ -2128,13 +2130,13 @@ def _sent_main_chart(forecast, hist, buy_th, sell_th, acc=None):
         "markLine:{symbol:'none',data:yearML}},"
         "{name:'预测情绪',type:'line',data:D.yfc,symbol:'none',smooth:true,"
         "lineStyle:{color:'#f59e0b',width:2,type:'dashed'},z:5},"
-        "{name:'预测区间(p25-p75)',type:'line',data:D.band_lo,stack:'band',symbol:'none',"
+        "{name:'预测区间(50%置信带)',type:'line',data:D.band_lo,stack:'band',symbol:'none',"
         "lineStyle:{opacity:0},z:3,tooltip:{show:false}},"
-        "{name:'预测区间(p25-p75)',type:'line',data:D.band_hi,stack:'band',symbol:'none',"
+        "{name:'预测区间(50%置信带)',type:'line',data:D.band_hi,stack:'band',symbol:'none',"
         "lineStyle:{opacity:0},areaStyle:{color:'rgba(245,158,11,0.15)'},z:3,tooltip:{show:false}}]};}"
     )
     return _sent_echart("echart-sent-main",
-                        "情绪走势与未来预测(2021-2026) · 蓝=历史　橙虚线=KNN预测　阴影=预测区间(p25-p75)　竖线=年份/今日 · 滚轮缩放"
+                        "情绪走势与未来预测(2021-2026) · 蓝=历史　橙虚线=KNN预测　阴影=预测区间(50%置信带)　竖线=年份/今日 · 滚轮缩放"
                         + acc_txt,
                         340, fdata, opt_js)
 
@@ -2209,9 +2211,10 @@ def sentiment_board_html(base, data, results, results_week, scores, last_date):
         if isinstance(acc, dict):
             acc_html = ('<div class="sent-acc">预测可信度（walk-forward 样本外回测 {n} 锚点）：'
                         '预测带覆盖率 <b>{cov:.1f}%</b> · 方向命中 <b>{d:.1f}%</b> · 平均误差 <b>{m:.1f}</b> 分'
-                        '（0–100 标尺，30 日 horizon）。</div>').format(
+                        '（0–100 标尺，30 日 horizon；阴影带经 κ={k:.2f} 重标定至名义 50% 覆盖）。</div>').format(
                 n=acc.get("n", 0), cov=acc.get("cov", 0),
-                d=acc.get("dir_acc", 0), m=acc.get("mae", 0))
+                d=acc.get("dir_acc", 0), m=acc.get("mae", 0),
+                k=(acc.get("band_kappa") or 1.0))
         return f"""
     <section class="panel" id="sentiment-board" style="border-left:4px solid {zcolor}">
       <h2 class="sec" id="s2">二、市场情绪
@@ -2225,7 +2228,7 @@ def sentiment_board_html(base, data, results, results_week, scores, last_date):
       <div class="sent-chart-card">{main_chart}</div>
       {acc_html}
       <div class="sent-chart-card">{index_chart}</div>
-      <p class="sent-footnote">代理情绪温度（monitor_only）：由上证量能/动量/波动/牛熊位置 + 宽基与跨市场广度合成，非全市场涨跌家数；量能维度受数据源 volume 单位差异影响，仅供研判参考，不参与任何概率/方向计算。history 为全部可用交易日逐日回算；forecast 由 KNN 历史轨迹派生（k=15/ctx=15 等权全局，经 walk-forward 回测反选），橙色阴影为预测中位 ± 分位区间（p25–p75），其覆盖率由历史样本外回测标定（约 45%，名义 50%，属合理校准区间）；预测为路径派生，非因子预测，仅供参考。</p>
+      <p class="sent-footnote">代理情绪温度（monitor_only）：由上证量能/动量/波动/牛熊位置 + 宽基与跨市场广度合成，非全市场涨跌家数；量能维度受数据源 volume 单位差异影响，仅供研判参考，不参与任何概率/方向计算。history 为全部可用交易日逐日回算；forecast 由 KNN 历史轨迹派生（k=15/ctx=15 等权全局，经 walk-forward 回测反选），橙色阴影为 50% 校准置信带（κ 重标定，样本外实测覆盖率≈名义 50%）；预测为路径派生，非因子预测，仅供参考。</p>
     </section>"""
     except Exception as _e:
         print("WARN 情绪板块渲染降级: %s" % _e)
