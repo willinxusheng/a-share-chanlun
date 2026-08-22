@@ -2104,14 +2104,15 @@ def _sent_main_chart(forecast, hist, buy_th, sell_th, acc=None):
     opt_js = (
         "function(D,chart){"
         "var yearML=(D.yearLines||[]).map(function(o){return {xAxis:o.x,"
-        "lineStyle:{color:'#cbd5e1',type:'dashed',width:1}};});"
+        "lineStyle:{color:'#cbd5e1',type:'dashed',width:1},"
+        "label:{formatter:o.y+'年',position:'insideEndBottom',color:'#64748b',fontSize:10}};});"
         "yearML.unshift({xAxis:D.today_x,lineStyle:{color:'#334155',type:'dashed',width:1.5},"
-        "label:{formatter:'今日',position:'insideEndTop',color:'#475569',fontSize:10}});"
+        "label:{formatter:'今日',position:'insideEndBottom',color:'#475569',fontSize:10}});"
         "return {tooltip:{trigger:'axis',axisPointer:{type:'cross'}},"
         "legend:{data:['历史情绪','预测情绪','预测区间(50%置信带)'],top:2,textStyle:{fontSize:11}},"
         "grid:{left:46,right:16,top:42,bottom:62},"
         "xAxis:{type:'category',data:D.xcats,boundaryGap:false,"
-        "axisLabel:{fontSize:10,hideOverlap:true,formatter:_sFmt},axisTick:{show:false}},"
+        "axisLabel:{fontSize:10,hideOverlap:true,position:'bottom',formatter:_sFmt},axisTick:{show:false}},"
         "yAxis:{type:'value',min:0,max:100,axisLabel:{fontSize:11},splitLine:{lineStyle:{color:'#eef2f7'}}},"
         "dataZoom:[{type:'inside',xAxisIndex:0,start:0,end:100},"
         "{type:'slider',xAxisIndex:0,height:18,bottom:14,start:0,end:100,showDetail:false,"
@@ -2134,7 +2135,7 @@ def _sent_main_chart(forecast, hist, buy_th, sell_th, acc=None):
     zone_cap = ('<div class="sent-zone-cap">'
                 '<span class="zc zc-g">▾ 绿带=机会区(&lt;%.0f·大盘易涨)</span>'
                 '<span class="zc zc-r">▴ 红带=风险区(&gt;%.0f·大盘易跌)</span>'
-                '<span class="zc">竖线=今日参考　·　年份/月份在 x 轴标注　·　阴影=50%%置信带　·　滚轮/拖拽缩放</span>'
+                '<span class="zc">竖线=年份/今日(下沿标注)　·　月份在 x 轴　·　阴影=50%%置信带　·　滚轮/拖拽缩放</span>'
                 '</div>') % (buy_th, sell_th)
     return _sent_echart("echart-sent-main",
                         "情绪走势与未来预测(2021–2026)　蓝=历史　橙虚线=KNN预测　阴影=50%置信带　竖线=今日参考",
@@ -2154,12 +2155,13 @@ def _sent_index_chart(hist):
     opt_js = (
         "function(D,chart){"
         "var yearML=(D.yearLines||[]).map(function(o){return {xAxis:o.x,"
-        "lineStyle:{color:'#cbd5e1',type:'dashed',width:1}};});"
+        "lineStyle:{color:'#cbd5e1',type:'dashed',width:1},"
+        "label:{formatter:o.y+'年',position:'insideEndBottom',color:'#64748b',fontSize:10}};});"
         "return {tooltip:{trigger:'axis',axisPointer:{type:'cross'}},"
         "legend:{data:['情绪温度','上证指数'],top:2,textStyle:{fontSize:11}},"
         "grid:{left:46,right:58,top:42,bottom:62},"
         "xAxis:{type:'category',data:D.xcats,boundaryGap:false,"
-        "axisLabel:{fontSize:10,hideOverlap:true,formatter:_sFmt},axisTick:{show:false}},"
+        "axisLabel:{fontSize:10,hideOverlap:true,position:'bottom',formatter:_sFmt},axisTick:{show:false}},"
         "yAxis:[{type:'value',min:0,max:100,position:'left',"
         "axisLabel:{fontSize:11,color:'#2b6cb0'},splitLine:{lineStyle:{color:'#eef2f7'}},name:'温度'},"
         "{type:'value',position:'right',scale:true,axisLabel:{fontSize:11,color:'#b45309'},name:'上证'}],"
