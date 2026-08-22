@@ -668,36 +668,8 @@ if forecast_acc:
     print("forecast_acc: MAE=%.2f dir=%.1f%% cov=%.1f%% n=%d kappa=%.2f"
           % (forecast_acc["mae"], forecast_acc["dir_acc"], forecast_acc["cov"], forecast_acc["n"], BAND_KAPPA))
 
-# ---- R178 维度拆解(对齐 sentiment-dashboard 视觉语言) ----
-# 子分 = 该维度对情绪指数的 signed 贡献, 归一化到 [-1,1] 区间; 5 维权重之和为 1。
-# 明细取原始指标: 趋势动量→20日涨跌; 牛熊位置→偏离MA250; 量能水平→5日/20日成交额比;
-# 波动恐慌→HV20分位; 广度确认→大小盘换手比(中证1000/上证50)。
-_pos_dev = ((last["close"] / last["ma250"] - 1) * 100) if last.get("ma250") else None
-_raw_w5 = {"mom": .20, "pos": .15, "amt": .25, "vol": -.10, "rat": .15}
-_w5sum = sum(abs(v) for v in _raw_w5.values())
-W5 = {k: v / _w5sum for k, v in _raw_w5.items()}
-
-def _sub_score(pct, w):
-    """把 0-100 分位转成 [-1,1] 的 signed 子分, 再乘权重。"""
-    if pct is None:
-        return None
-    return round((pct - 50) / 50 * w, 2)
-
-_p = last["p"]
-dimensions = [
-    {"name": "趋势动量", "key": "mom", "sub": _sub_score(_p.get("mom"), W5["mom"]),
-     "pct": _p.get("mom"), "detail": "上证20日 " + ("%.2f%%" % last["mom20"] if last.get("mom20") is not None else "—")},
-    {"name": "牛熊位置", "key": "pos", "sub": _sub_score(
-         max(0, min(100, 50 + (_pos_dev or 0) * 2.5)), W5["pos"]),
-     "pct": round(max(0, min(100, 50 + (_pos_dev or 0) * 2.5)), 1) if _pos_dev is not None else None,
-     "detail": "偏离MA250 " + ("%.2f%%" % _pos_dev if _pos_dev is not None else "—")},
-    {"name": "量能水平", "key": "amt", "sub": _sub_score(_p.get("amt"), W5["amt"]),
-     "pct": _p.get("amt"), "detail": "量比 " + ("%.3f" % (1 + (last["amt_chg"] or 0) / 100) if last.get("amt_chg") is not None else "—")},
-    {"name": "波动恐慌", "key": "vol", "sub": _sub_score(_p.get("vol"), W5["vol"]),
-     "pct": _p.get("vol"), "detail": "HV20分位 " + ("%.0f" % _p.get("vol") if _p.get("vol") is not None else "—")},
-    {"name": "广度确认", "key": "rat", "sub": _sub_score(_p.get("rat"), W5["rat"]),
-     "pct": _p.get("rat"), "detail": "大小盘分化 " + ("%.2f" % last["ratio"] if last.get("ratio") is not None else "—")},
-]
+# R188: 删除 R178 维度拆解(dimensions 字段未被 report.py 渲染, 纯冗余死数据;
+# 其依赖的 _pos_dev/_raw_w5/_w5sum/W5/_sub_score/_p 一并清理, 不留 unused 变量)。
 # 最终分位: final 在全部有效历史上的滚动分位
 def _final_pct(valid, final):
     finals = [max(0, min(100, d["score"])) for d in valid]
@@ -717,7 +689,6 @@ result = {
     "adj_items": adj_items, "adj_total": adj_total,
     "final": _final_val,
     "final_pct": final_pct,
-    "dimensions": dimensions,
     "parts": last["p"],
     "weights": W,
     "buy_th": BUY_TH, "sell_th": SELL_TH,

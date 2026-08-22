@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
-# R180 监控门禁: 校验情绪 KNN 预测的样本外回测精度(forecast_acc)是否仍处合理区间。
-# 仅监控、不阻断(exit 0): 覆盖率偏离名义 50% 过多或 MAE 退化时发 WARN, 供人工复核。
+# R180→R188 预测精度门禁: 校验情绪 KNN 预测的样本外回测精度(forecast_acc)是否仍处合理区间。
+# 现已升为 CI 阻断: 覆盖率偏离名义 50% 过多 / MAE 退化 / 方向命中率异常时返回 exit 1,
+# 由 deploy.yml 在 calc_v2 之后、report 之前调用, set -euo pipefail 捕获非0 即阻断 Pages 部署。
+# 仅"数据缺失(SKIP: 文件不存在/forecast_acc 缺失)"保持 exit 0 不阻断。
 # 反选依据见 sentiment/calc_v2.py 内 analysis(_grid.py): 最优 k=15/ctx=15/等权全局。
 import json
 import os
@@ -44,12 +46,12 @@ def main():
         warns.append("方向命中率 %.1f%% 异常" % dacc)
 
     if warns:
-        print("  ⚠ WARN:")
+        print("  ⛔ 预测精度退化, 阻断发布 (exit 1):")
         for w in warns:
             print("    - " + w)
-        print("  结论: 预测精度指标需人工复核(本门禁仅监控, 不阻断 CI)")
-    else:
-        print("  ✅ 预测精度指标处于合理区间(覆盖率贴近名义 50%, MAE 未退化)")
+        print("  结论: 覆盖率偏离名义 50% / MAE 退化 / 方向命中率异常, 已阻断 Pages 部署。")
+        return 1
+    print("  ✅ 预测精度指标处于合理区间(覆盖率贴近名义 50%, MAE 未退化)")
     return 0
 
 

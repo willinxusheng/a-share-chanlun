@@ -57,6 +57,10 @@ jobs:
           # (东财源, 含成交额/换手率, 数据截至当日), 先跑 calc_v2 使情绪板块 asof 与行情同步;
           # 失败不阻断(已提交兜底 sentiment_v2.json 仍生效, report 读旧值但板块不崩)。
           python sentiment/calc_v2.py || echo "WARN: 情绪指数再生失败, 使用已提交的兜底 sentiment_v2.json"
+          # R188: 情绪预测精度门禁升为 CI 阻断——若覆盖率偏离名义50%过多/MAE退化/方向命中率异常,
+          # 返回非0, set -euo pipefail 会在此中断, 后续 report.py 与 Pages 部署均不执行(阻止脏精度发布)。
+          # calc_v2 失败时上面已用兜底 sentiment_v2.json, 此处审计兜底 JSON 的 forecast_acc(健康则不阻断)。
+          python audit_sentiment_forecast_acc.py
           python report.py
           cp report.html index.html
 
