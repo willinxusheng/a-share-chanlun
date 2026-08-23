@@ -2297,21 +2297,54 @@ def _sent_index_chart(hist, forecast=None):
 
 
 def load_other_fib_nodes(base=None):
-    """R204 跨项目锚点对照：从同机另一斐波那契项目(A-share-Fibonacci)的 data.js
-    解析 subForecast.points 波浪节点（含 date/price/lo/hi/label/side）。
-    本工程 chanlun/ 与另一项目 A-share-Fibonacci/ 位于同级父目录；
+    """R204 跨项目锚点对照：读取另一斐波那契项目(A-share-Fibonacci)的波浪节点
+    （含 date/price/lo/hi/label/side）。
+
+    数据源优先级：
+      1) 本仓库内置快照 sentiment/other_fib_nodes.json —— 线上 CI 稳定可用，
+         该文件由 R204b 从另一项目 data.js 导出（另一项目为人工维护买/卖点，
+         非每日变动，内置快照合理）；
+      2) 同机另一项目 data.js（本机实时热更新兜底）。
+
     路径不可达或解析失败 -> 返回 None（调用方静默降级，不阻断报告）。
     仅读取、不参与任何预测数学（合规 R76）。"""
-    import re
-    candidates = []
+    import re, json as _json
+    candidates_json = []
+    candidates_src = []
     if base:
-        # base 为本工程 chanlun 目录，父目录的兄弟项目
+        # base 为本工程 chanlun 目录，内置快照在 sentiment/ 下
+        candidates_json.append(os.path.join(base, "sentiment", "other_fib_nodes.json"))
+        # 同机兄弟项目（本机实时兜底）
         _parent = os.path.dirname(base)
-        candidates.append(os.path.join(_parent, "A-share-Fibonacci", "data", "data.js"))
+        candidates_src.append(os.path.join(_parent, "A-share-Fibonacci", "data", "data.js"))
     # 绝对兜底路径（本机固定布局）
-    candidates.append("C:/Users/Administrator/WorkBuddy/2026-08-04-23-16-18/A-share-Fibonacci/data/data.js")
+    candidates_src.append("C:/Users/Administrator/WorkBuddy/2026-08-04-23-16-18/A-share-Fibonacci/data/data.js")
+    # 1) 优先内置 JSON 快照（线上 CI 可用）
+    for _p in candidates_json:
+        if _p and os.path.exists(_p):
+            try:
+                _meta = _json.load(open(_p, encoding="utf-8"))
+                _nodes = _meta.get("nodes") if isinstance(_meta, dict) else None
+                if _nodes:
+                    _out = []
+                    for p in _nodes:
+                        try:
+                            _out.append({
+                                "date": str(p.get("date")),
+                                "price": float(p.get("price")),
+                                "lo": float(p.get("lo")),
+                                "hi": float(p.get("hi")),
+                                "label": str(p.get("label")),
+                                "side": str(p.get("side")),
+                            })
+                        except (TypeError, ValueError):
+                            continue
+                    return _out if _out else None
+            except Exception:
+                pass
+    # 2) 兜底：同机 data.js 实时解析
     src = None
-    for _p in candidates:
+    for _p in candidates_src:
         if _p and os.path.exists(_p):
             try:
                 src = open(_p, encoding="utf-8").read()
