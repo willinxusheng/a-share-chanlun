@@ -2048,20 +2048,21 @@ def _sent_echart(cid, toolbar, height, fdata, opt_js):
 
 
 def _sent_thermometer_html(final, zone, zlabel, zcolor, buy_th, sell_th, final_pct, ma5s, ma20s, scores=None):
-    """市场情绪温度计头图: 大分数 + 色阶进度条 + 档位标签 + 历史分位 + 趋势箭头 + 档位持续统计 + 一句话解读。"""
+    """市场情绪温度计头图(R205深度美化): SVG半圆仪表盘(弧+指针+居中大分) + 分段档位刻度条 + 趋势徽标 + 档位分布迷你条 + 一句话解读。"""
     bt = max(0.0, min(100.0, float(buy_th)))
     st = max(0.0, min(100.0, float(sell_th)))
     pos = max(0.0, min(100.0, float(final)))
     # 趋势箭头
-    trend_arrow = "→"
+    trend_arrow = "→ 持平"
     trend_color = "#94a3b8"
     if ma5s is not None and ma20s is not None:
         if ma5s > ma20s:
             trend_arrow, trend_color = "↗ 升温", RED
         elif ma5s < ma20s:
             trend_arrow, trend_color = "↘ 降温", GREEN
-    # 档位持续统计(冰点/偏冷/中性/偏热/狂热 全样本天数)
+    # 档位持续统计(冰点/偏冷/中性/偏热/狂热 全样本天数) -> 迷你分布条
     zstat = ""
+    zstat_bar = ""
     if scores:
         mid = (bt + st) / 2.0
         bins = [0, 0, 0, 0, 0]  # 冰点,偏冷,中性,偏热,狂热
@@ -2076,13 +2077,14 @@ def _sent_thermometer_html(final, zone, zlabel, zcolor, buy_th, sell_th, final_p
                 bins[3] += 1
             else:
                 bins[4] += 1
+        tot = max(1, sum(bins))
+        _zc = ["#16a34a", "#65a30d", "#64748b", "#ea580c", "#dc2626"]
+        _zl = ["冰点", "偏冷", "中性", "偏热", "狂热"]
+        segs = "".join('<span class="zseg" style="flex:%d;background:%s"></span>' % (bins[i], _zc[i]) for i in range(5))
         zstat = ('<div class="sent-zstat">'
-                 '<span class="zs" style="color:#16a34a">冰点 %d日</span>'
-                 '<span class="zs" style="color:#65a30d">偏冷 %d日</span>'
-                 '<span class="zs" style="color:#64748b">中性 %d日</span>'
-                 '<span class="zs" style="color:#ea580c">偏热 %d日</span>'
-                 '<span class="zs" style="color:#dc2626">狂热 %d日</span>'
-                 '</div>') % tuple(bins)
+                 + "".join('<span class="zs" style="color:%s">%s %d日</span>' % (_zc[i], _zl[i], bins[i]) for i in range(5))
+                 + '</div>')
+        zstat_bar = ('<div class="sent-zstat-bar" title="全样本档位分布">' + segs + '</div>')
     # 一句话解读
     if final_pct is not None:
         bias = "偏低" if final_pct < 40 else ("偏高" if final_pct > 60 else "中性")
@@ -2094,19 +2096,36 @@ def _sent_thermometer_html(final, zone, zlabel, zcolor, buy_th, sell_th, final_p
         "fear": "恐惧 · 机会区", "fearish": "中性偏恐", "greedish": "中性偏贪", "greed": "贪婪 · 危险区"
     }.get(zone, zlabel)
     pct_txt = ("历史分位 %g%%" % final_pct) if final_pct is not None else ""
+    # SVG 半圆仪表盘: 180°弧(-90°→90°), 半径 52, 中心(60,60)
+    import math
+    _ang = math.pi * (pos / 100.0)  # 0..pi, 0=左(-90°), pi=右(90°)
+    _px = 60 + 50 * math.cos(math.pi - _ang)  # 映射到半圆
+    _py = 60 - 50 * math.sin(_ang)
+    _arc = ("M 10 60 A 50 50 0 0 1 110 60")
     return f"""
     <div class="sent-head">
       <div class="sent-head-row">
         <div class="sent-title-wrap">
           <span class="sent-main-title">市场情绪温度</span>
           <span class="sent-tag" style="background:{zcolor}">{zlabel}</span>
+          <span class="sent-trend-badge" style="background:{trend_color}">{trend_arrow}</span>
         </div>
-        <div class="sent-score-wrap">
-          <div class="sent-big-score" style="color:{zcolor}">{final:.1f}</div>
-          <div class="sent-score-meta">
-            <span class="sent-pct">{pct_txt}</span>
-            <span class="sent-trend" style="color:{trend_color}">{trend_arrow}</span>
-          </div>
+        <div class="sent-gauge">
+          <svg viewBox="0 0 120 72" class="sent-gauge-svg" aria-hidden="true">
+            <path d="{_arc}" fill="none" stroke="url(#sgGrad)" stroke-width="9" stroke-linecap="round"/>
+            <defs>
+              <linearGradient id="sgGrad" x1="0" y1="0" x2="1" y2="0">
+                <stop offset="0%" stop-color="#22c55e"/>
+                <stop offset="50%" stop-color="#f59e0b"/>
+                <stop offset="100%" stop-color="#ef4444"/>
+              </linearGradient>
+            </defs>
+            <line x1="60" y1="60" x2="{_px:.1f}" y2="{_py:.1f}" stroke="{zcolor}" stroke-width="2.5" stroke-linecap="round"/>
+            <circle cx="60" cy="60" r="4.5" fill="{zcolor}"/>
+            <circle cx="{_px:.1f}" cy="{_py:.1f}" r="4" fill="#fff" stroke="{zcolor}" stroke-width="2.5"/>
+            <text x="60" y="56" text-anchor="middle" class="sent-gauge-num" fill="{zcolor}">{final:.1f}</text>
+            <text x="60" y="68" text-anchor="middle" class="sent-gauge-sub">{pct_txt}</text>
+          </svg>
         </div>
       </div>
       <div class="sent-bar-wrap">
@@ -2114,14 +2133,17 @@ def _sent_thermometer_html(final, zone, zlabel, zcolor, buy_th, sell_th, final_p
           <div class="sent-bar-fill" style="width:{pos:.1f}%;background:{zcolor}"></div>
           <div class="sent-bar-tick" style="left:{bt:.1f}%"></div>
           <div class="sent-bar-tick" style="left:{st:.1f}%"></div>
+          <div class="sent-bar-tick-label" style="left:{bt:.1f}%;color:{GREEN}">机会 {buy_th:.0f}</div>
+          <div class="sent-bar-tick-label" style="left:{st:.1f}%;color:{RED}">危险 {sell_th:.0f}</div>
         </div>
         <div class="sent-bar-labels">
-          <span style="color:{GREEN}">机会<br><small>{buy_th:.0f}</small></span>
-          <span style="color:#64748b">中性<br><small>50</small></span>
-          <span style="color:{RED}">危险<br><small>{sell_th:.0f}</small></span>
+          <span style="color:{GREEN}">机会区</span>
+          <span style="color:#64748b">中性 50</span>
+          <span style="color:{RED}">危险区</span>
         </div>
       </div>
       {zstat}
+      {zstat_bar}
       <div class="sent-interp">{interp}</div>
       <div class="sent-head-note">{ztext} · 绿=恐惧(机会) 红=贪婪(危险) · 数据截至今日收盘</div>
     </div>"""
@@ -2223,7 +2245,7 @@ def _sent_main_chart(forecast, hist, buy_th, sell_th, acc=None):
                 '<span class="zc">蓝实线=历史情绪　紫虚线=未来KNN预测　紫色阴影=预测区间(p25–p75, κ 重标定)　年份/月份在 x 轴　·　滚轮拖拽缩放</span>'
                 '</div>') % (buy_th, sell_th)
     return _sent_echart("echart-sent-main",
-                        "情绪走势与未来预测（KNN 路径派生）",
+                        "📈 情绪走势与未来预测",
                         340, fdata, opt_js) + zone_cap
 
 
@@ -2270,7 +2292,7 @@ def _sent_index_chart(hist, forecast=None):
            '<span class="zc">蓝=情绪温度　棕=上证指数　纯历史近180日切片·独立展示（不与主图联动）</span>'
            '</div>')
     return _sent_echart("echart-sent-index",
-                        "情绪温度 vs 上证指数",
+                        "🔗 情绪温度 vs 上证指数",
                         300, fdata, opt_js) + cap
 
 
@@ -3031,22 +3053,42 @@ def main():
   .sent-score-meta {{ display: flex; flex-direction: column; align-items: flex-start; gap: 3px; font-size: 12px; color: #64748b; }}
   .sent-pct {{ font-variant-numeric: tabular-nums; background: #f1f5f9; padding: 1px 6px; border-radius: 4px; font-size: 11px; }}
   .sent-trend {{ font-weight: 700; font-variant-numeric: tabular-nums; }}
-  .sent-bar-wrap {{ margin-top: 14px; }}
+  /* R205 深度美化: 趋势徽标 + SVG 半圆仪表盘 + 刻度标签 + 档位分布条 */
+  .sent-trend-badge {{ font-size: 11px; color: #fff; padding: 2px 9px; border-radius: 999px; font-weight: 700; white-space: nowrap; box-shadow: 0 1px 2px rgba(0,0,0,.10); font-variant-numeric: tabular-nums; }}
+  .sent-gauge {{ flex: 0 0 132px; display: flex; align-items: center; justify-content: center; }}
+  .sent-gauge-svg {{ width: 132px; height: 78px; overflow: visible; }}
+  .sent-gauge-num {{ font-size: 19px; font-weight: 800; font-variant-numeric: tabular-nums; }}
+  .sent-gauge-sub {{ font-size: 8.5px; fill: #64748b; font-variant-numeric: tabular-nums; }}
+  .sent-bar-wrap {{ margin-top: 14px; padding: 0 2px; }}
   .sent-bar-track {{ position: relative; height: 10px; border-radius: 5px; background: linear-gradient(90deg, #22c55e 0%, #84cc16 24%, #f59e0b 50%, #f97316 72%, #ef4444 100%); overflow: visible; }}
   .sent-bar-fill {{ position: absolute; left: 0; top: -2px; height: 14px; border-radius: 7px; box-shadow: 0 0 0 3px rgba(255,255,255,.9), 0 2px 6px rgba(0,0,0,.18); min-width: 4px; max-width: 100%; transition: width .6s ease; }}
   .sent-bar-tick {{ position: absolute; top: -3px; width: 2px; height: 16px; background: rgba(255,255,255,.95); border-radius: 1px; box-shadow: 0 1px 2px rgba(0,0,0,.25); }}
-  .sent-bar-labels {{ display: flex; justify-content: space-between; font-size: 11px; color: #64748b; margin-top: 6px; text-align: center; }}
+  .sent-bar-tick-label {{ position: absolute; top: 16px; transform: translateX(-50%); font-size: 9.5px; font-weight: 600; white-space: nowrap; }}
+  .sent-bar-labels {{ display: flex; justify-content: space-between; font-size: 11px; color: #64748b; margin-top: 16px; text-align: center; }}
   .sent-bar-labels small {{ font-size: 10px; opacity: .8; }}
-  .sent-head-note {{ font-size: 12px; color: #64748b; margin-top: 8px; line-height: 1.5; }}
-  .sent-zstat {{ display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 11px; font-variant-numeric: tabular-nums; margin-top: 10px; }}
+  .sent-zstat {{ display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 11px; font-variant-numeric: tabular-nums; margin-top: 12px; }}
   .sent-zstat .zs {{ font-weight: 600; white-space: nowrap; }}
+  /* 档位分布迷你条(全样本 hist 分箱) */
+  .sent-zstat-bar {{ display: flex; height: 7px; border-radius: 4px; overflow: hidden; margin-top: 7px; background: #eef2f7; box-shadow: inset 0 0 0 1px rgba(15,23,42,.04); }}
+  .sent-zstat-bar .zseg {{ display: block; min-width: 2px; transition: flex .4s ease; }}
+  .sent-head-note {{ font-size: 12px; color: #64748b; margin-top: 8px; line-height: 1.5; }}
   .sent-interp {{ font-size: 12.5px; color: #334155; margin-top: 8px; line-height: 1.6; background: var(--surface-2, #f8fafc); border-left: 3px solid var(--sent-accent, #94a3b8); border-radius: 0 8px 8px 0; padding: 8px 10px; }}
-  .sent-chart-card {{ background: var(--surface, #fff); border: 1px solid #e5e9f0; border-radius: var(--radius-md, 14px); padding: 10px 14px 12px; margin-bottom: 12px; box-shadow: var(--shadow-sm2, 0 2px 10px rgba(15,23,42,.05)); }}
+  .sent-chart-card {{ background: var(--surface, #fff); border: 1px solid #e5e9f0; border-radius: var(--radius-md, 14px); padding: 10px 14px 12px; margin-bottom: 12px; box-shadow: var(--shadow-sm2, 0 2px 10px rgba(15,23,42,.05)); position: relative; overflow: hidden; }}
   .sent-chart-card:last-child {{ margin-bottom: 0; }}
+  /* R205 图表卡渐变顶饰条(对齐 .card/.qc-card 观感) */
+  .sent-chart-card::before {{ content: ""; display: block; height: 3px; margin: -10px -14px 10px; background: linear-gradient(90deg, var(--primary, #2b6cb0), var(--primary2, #60a5fa)); opacity: .85; }}
   .sent-chart-card .echart-toolbar {{ font-size: 13px; color: #475569; font-weight: 600; padding: 2px 2px 10px; line-height: 1.55; flex-wrap: wrap; word-break: break-word; border-bottom: 1px solid #f1f5f9; margin-bottom: 8px; }}
   .sent-footnote {{ font-size: 11px; color: #94a3b8; line-height: 1.7; margin-top: 12px; padding: 10px 12px; background: var(--surface-2, #f8fafc); border-left: 3px solid #cbd5e1; border-radius: 0 8px 8px 0; }}
-  .sent-acc {{ font-size: 12px; color: #475569; line-height: 1.6; margin: -4px 0 12px; padding: 8px 12px; background: #fffbeb; border: 1px solid #fde68a; border-left: 4px solid #f0c14b; border-radius: 0 8px 8px 0; }}
+  /* R205 提示/对照行美化: 圆角胶囊 + 悬停微抬 + 图标感(用 ::before 注入符号), 三态配色一致 */
+  .sent-acc {{ font-size: 12px; color: #475569; line-height: 1.65; margin: -4px 0 12px; padding: 10px 14px; background: #fffbeb; border: 1px solid #fde68a; border-left: 4px solid #f0c14b; border-radius: 10px; box-shadow: 0 1px 3px rgba(15,23,42,.04); transition: box-shadow .16s ease, transform .16s ease; }}
+  .sent-acc:hover {{ box-shadow: 0 4px 12px rgba(15,23,42,.08); transform: translateY(-1px); }}
   .sent-acc b {{ color: #b45309; font-variant-numeric: tabular-nums; }}
+  .sent-diverge {{ background: #fff7ed; border-color: #fdba74; border-left-color: #ea580c; }}
+  .sent-diverge:hover {{ box-shadow: 0 4px 12px rgba(234,88,12,.10); }}
+  .sent-diverge b {{ color: #c2410c; }}
+  .sent-anchor {{ background: #ecfeff; border-color: #a5f3fc; border-left-color: #0891b2; }}
+  .sent-anchor:hover {{ box-shadow: 0 4px 12px rgba(8,145,178,.10); }}
+  .sent-anchor b {{ color: #0e7490; }}
   .sent-acc-sub {{ margin-top: -8px; background: #f8fafc; border-color: #e2e8f0; border-left-color: #cbd5e1; font-size: 11.5px; }}
   .sent-acc-sub .zc {{ color: #64748b; margin-right: 14px; white-space: nowrap; }}
   .sent-acc-sub .zc b {{ color: #475569; }}
@@ -3292,12 +3334,16 @@ def main():
   /* 预测质量自检卡 */
   .qc-card {{ box-shadow: var(--shadow-md); border-radius: var(--radius-md); }}
 
-  /* —— 市场情绪板块（R196：对齐看板主体现代视觉语言，消除与 .panel/.card 风格割裂） —— */
+  /* —— 市场情绪板块（R196/R205：对齐看板主体现代视觉语言） —— */
   /* 头图：分层阴影 + 悬停微抬，呼应 .card/.kpi */
   .sent-head {{ box-shadow: var(--shadow-md); transition: box-shadow .18s ease, transform .18s ease; }}
   .sent-head:hover {{ box-shadow: 0 18px 44px rgba(43,108,176,.16); transform: translateY(-2px); }}
   .sent-main-title {{ letter-spacing: .3px; }}
   .sent-big-score {{ letter-spacing: -1.2px; }}
+  /* R205 仪表盘：悬停微旋指针 + 分数辉光 */
+  .sent-gauge {{ transition: transform .25s ease; }}
+  .sent-head:hover .sent-gauge-svg {{ transform: scale(1.02); }}
+  .sent-gauge-svg {{ transition: transform .25s ease; transform-origin: center bottom; }}
   .sent-chart-card {{ box-shadow: var(--shadow-md); background: linear-gradient(180deg,#ffffff,#fbfdff); }}
   .sent-chart-card:hover {{ box-shadow: var(--shadow); }}
   /* 图表卡内 ECharts 容器：圆角 + 内描边，对齐 .chartbox */
@@ -3306,6 +3352,8 @@ def main():
   .sent-interp {{ background: linear-gradient(180deg,#f8fafc,#f3f7fc); }}
   .sent-footnote {{ background: linear-gradient(180deg,#f8fafc,#f3f7fc); border-left-color: #cbd5e1; }}
   .sent-acc {{ background: linear-gradient(180deg,#fffbeb,#fff8e6); }}
+  .sent-diverge {{ background: linear-gradient(180deg,#fff7ed,#fff3e6); }}
+  .sent-anchor {{ background: linear-gradient(180deg,#ecfeff,#e6fbff); }}
   /* 图表工具栏：圆角底色容器，对齐 .echart-toolbar 增强层（R153 已对通用 .echart-toolbar 处理，
      此处情绪专用 toolbar 因外层容器不同需单独补圆角底色） */
   .sent-chart-card .echart-toolbar {{ background: var(--surface-2); border-radius: var(--radius-sm); border-bottom: none; padding: 8px 10px; margin-bottom: 6px; }}
@@ -3430,11 +3478,19 @@ def main():
     .sent-head::before {{ margin: -11px -13px 10px; height: 3px; }}
     .sent-head-row {{ gap: 8px; }}
     .sent-main-title {{ font-size: 14px; }}
+    /* R205 横屏: 仪表盘缩小防溢出 */
+    .sent-gauge {{ flex: 0 0 96px; }}
+    .sent-gauge-svg {{ width: 96px; height: 58px; }}
+    .sent-gauge-num {{ font-size: 15px; }}
+    .sent-gauge-sub {{ font-size: 7px; }}
+    .sent-trend-badge {{ font-size: 9.5px; padding: 1px 7px; }}
     .sent-big-score {{ font-size: 30px; letter-spacing: -.6px; }}
     .sent-score-meta {{ font-size: 10.5px; }}
     .sent-bar-wrap {{ margin-top: 9px; }}
-    .sent-bar-labels {{ font-size: 10px; }}
+    .sent-bar-tick-label {{ font-size: 8px; top: 14px; }}
+    .sent-bar-labels {{ font-size: 10px; margin-top: 14px; }}
     .sent-zstat {{ font-size: 10px; gap: 4px 10px; margin-top: 7px; }}
+    .sent-zstat-bar {{ height: 5px; margin-top: 5px; }}
     .sent-interp {{ font-size: 11px; padding: 6px 8px; margin-top: 6px; }}
     .sent-chart-card {{ padding: 7px 9px 8px; margin-bottom: 9px; border-radius: 12px; }}
     .sent-chart-card .echart-toolbar {{ font-size: 10.5px; padding: 4px 6px; margin-bottom: 5px; }}
