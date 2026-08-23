@@ -2525,22 +2525,24 @@ def sentiment_board_html(base, data, results, results_week, scores, last_date,
                             _dev = _mv - _n["price"]
                             _dev_s = "（偏离目标 %.0f）" % _dev if abs(_dev) >= 1 else ""
                             _band_s = "（带内）" if _in_band else "（接近·带外）"
-                            _parts.append("本工程 <b>%.0f</b>（%s）↔ 波浪%s目标 %.0f%s%s%s"
-                                          % (_mv, _dt, _n["label"], _n["price"],
+                            # 双日期显式标注: 本工程推演日(_dt) vs 波浪节点自身日期(_n["date"])
+                            # 两法时间轴独立, 以"点位吻合"为锚, 不暗示同一天
+                            _parts.append("本工程主价 <b>%.0f</b>（本工程 %s）≈ 波浪%s目标 <b>%.0f</b>（波浪 %s）%s%s%s"
+                                          % (_mv, _dt, _n["label"], _n["price"], _n["date"],
                                              _dev_s, _band_s,
                                              "（%s）" % _side_tag if _side_tag else ""))
                         _detail = "；".join(_parts)
                         # 诚实措辞: 区分带内/带外接近, 不统一宣称"均落入带内"
                         if _n_in == len(_keep):
-                            _band_note = "上述本工程主价均落入对应波浪节点置信带"
+                            _band_note = "上述本工程主价均落入对应波浪节点置信带（两法时间轴独立，以点位吻合为锚，非同一天）"
                         elif _n_in == 0:
-                            _band_note = "上述本工程主价均接近（带外）对应波浪节点目标价"
+                            _band_note = "上述本工程主价均接近（带外）对应波浪节点目标价（两法时间轴独立，以点位吻合为锚，非同一天）"
                         else:
-                            _band_note = "其中 %d/%d 个本工程主价落入对应波浪节点置信带，其余接近（带外）" % (_n_in, len(_keep))
+                            _band_note = "其中 %d/%d 个本工程主价落入对应波浪节点置信带，其余接近（带外）；两法时间轴独立，以点位吻合为锚，非同一天" % (_n_in, len(_keep))
                         anchor_html = (
                             '<div class="sent-acc sent-anchor">'
                             '🔗 <b>跨项目锚点对照</b>：本工程上证推演主价与另一斐波那契项目（艾略特波浪+斐波那契比率）节点目标对照——%s。'
-                            '两法维度不同（统计路径外推 vs 波浪子浪比率），%s，共识非互相验证、仅供交叉参照。</div>'
+                            '两法维度不同（统计路径外推 vs 波浪子浪比率）、时间轴各自独立，%s，共识非互相验证、仅供交叉参照。</div>'
                             % (_detail, _band_note))
 
         return f"""
