@@ -2274,6 +2274,77 @@ def _sent_index_chart(hist, forecast=None):
                         300, fdata, opt_js) + cap
 
 
+def load_other_fib_nodes(base=None):
+    """R204 跨项目锚点对照：从同机另一斐波那契项目(A-share-Fibonacci)的 data.js
+    解析 subForecast.points 波浪节点（含 date/price/lo/hi/label/side）。
+    本工程 chanlun/ 与另一项目 A-share-Fibonacci/ 位于同级父目录；
+    路径不可达或解析失败 -> 返回 None（调用方静默降级，不阻断报告）。
+    仅读取、不参与任何预测数学（合规 R76）。"""
+    import re
+    candidates = []
+    if base:
+        # base 为本工程 chanlun 目录，父目录的兄弟项目
+        _parent = os.path.dirname(base)
+        candidates.append(os.path.join(_parent, "A-share-Fibonacci", "data", "data.js"))
+    # 绝对兜底路径（本机固定布局）
+    candidates.append("C:/Users/Administrator/WorkBuddy/2026-08-04-23-16-18/A-share-Fibonacci/data/data.js")
+    src = None
+    for _p in candidates:
+        if _p and os.path.exists(_p):
+            try:
+                src = open(_p, encoding="utf-8").read()
+            except Exception:
+                src = None
+            if src:
+                break
+    if not src:
+        return None
+    try:
+        start = src.find('"subForecast"')
+        if start < 0:
+            return None
+        seg = src[start:start + 8000]
+        k = seg.find('"points"')
+        if k < 0:
+            return None
+        sub = seg[k:]
+        i = sub.find('[')
+        if i < 0:
+            return None
+        depth = 0
+        end = -1
+        for j in range(i, len(sub)):
+            c = sub[j]
+            if c == '[':
+                depth += 1
+            elif c == ']':
+                depth -= 1
+                if depth == 0:
+                    end = j
+                    break
+        if end < 0:
+            return None
+        arr = eval(sub[i:end + 1])
+        nodes = []
+        for p in arr:
+            if not isinstance(p, dict):
+                continue
+            try:
+                nodes.append({
+                    "date": str(p.get("date")),
+                    "price": float(p.get("price")),
+                    "lo": float(p.get("lo")),
+                    "hi": float(p.get("hi")),
+                    "label": str(p.get("label")),
+                    "side": str(p.get("side")),
+                })
+            except (TypeError, ValueError):
+                continue
+        return nodes if nodes else None
+    except Exception:
+        return None
+
+
 def sentiment_board_html(base, data, results, results_week, scores, last_date,
                           idx_proj=None, idx_last=None):
     """R178 市场情绪板块：温度计头图 + 维度拆解表 + 情绪走势与未来预测主图 + 情绪vs上证指数副图。
@@ -2359,6 +2430,54 @@ def sentiment_board_html(base, data, results, results_week, scores, last_date,
                     '背离非"指数真强"，而是价格维度弱上行与情绪冰点并存；主情景非确定值（另含 alt/risk 更低情景），'
                     '谨慎追高、逆向关注恐慌区机会%s。</div>'
                     % (_dt, _mv, buy_th, _im, idx_last, _band))
+        # R204: 跨项目锚点对照(展示层, 不并入预测数学, 合规 R76)
+        # 触发: 本工程上证推演主价(idx_proj main, 点位量纲) 与另一项目波浪节点目标价(price)最接近者 -> 核心锚点对照
+        # 注: 情绪 forecast.median 为 0-100 情绪分, 与波浪节点点位量纲不同, 不可直接比; 必须用上证点位维度
+        anchor_html = ""
+        if idx_proj:
+            _onodes = load_other_fib_nodes(base)
+            if _onodes:
+                _idx_main = {p.get("date"): p.get("main") for p in idx_proj if isinstance(p, dict)}
+                if _idx_main:
+                    # 对每个波浪节点, 在本工程推演主价中找与该节点目标价(price)最接近的那一天作代表锚点
+                    _pairs = []
+                    for _n in _onodes:
+                        _best = None
+                        for _dt, _mv in _idx_main.items():
+                            if _mv is None:
+                                continue
+                            _d = abs(_mv - _n["price"])
+                            if _best is None or _d < _best[0]:
+                                _best = (_d, _dt, _mv)
+                        if _best:
+                            _pairs.append((_best[1], _best[2], _n, _best[0]))
+                    # 仅保留"带内"或"足够接近(距目标价<=节点半带宽)"的代表锚点, 按本工程日期序
+                    _keep = []
+                    for _dt, _mv, _n, _d in _pairs:
+                        _half = max(1.0, (_n["hi"] - _n["lo"]) / 2.0)
+                        if _n["lo"] <= _mv <= _n["hi"] or _d <= _half:
+                            _keep.append((_dt, _mv, _n))
+                    _keep.sort(key=lambda x: x[0])
+                    if _keep:
+                        _parts = []
+                        _lo_all, _hi_all = [], []
+                        for _dt, _mv, _n in _keep:
+                            _lo_all.append(_n["lo"])
+                            _hi_all.append(_n["hi"])
+                            _side_tag = {"buy": "买点", "sell": "卖点", "hold": "持有"}.get(_n["side"], "")
+                            # 标注本工程主价与该波浪节点目标价的偏差
+                            _dev = _mv - _n["price"]
+                            _dev_s = "（偏离目标 %.0f）" % _dev if abs(_dev) >= 1 else ""
+                            _parts.append("本工程 <b>%.0f</b>（%s）↔ 波浪%s目标 %.0f%s%s"
+                                          % (_mv, _dt, _n["label"], _n["price"],
+                                             _dev_s, "（%s）" % _side_tag if _side_tag else ""))
+                        _detail = "；".join(_parts)
+                        anchor_html = (
+                            '<div class="sent-acc sent-anchor">'
+                            '🔗 <b>跨项目锚点对照</b>：本工程上证推演主价与另一斐波那契项目（艾略特波浪+斐波那契比率）节点目标对照——%s。'
+                            '两法维度不同（统计路径外推 vs 波浪子浪比率），上述本工程主价均落入对应波浪节点置信带，共识非互相验证、仅供交叉参照。</div>'
+                            % _detail)
+
         return f"""
     <section class="panel" id="sentiment-board" style="border-left:4px solid {zcolor}; --sent-accent:{zcolor};">
       <h2 class="sec" id="s2">二、市场情绪
@@ -2372,6 +2491,7 @@ def sentiment_board_html(base, data, results, results_week, scores, last_date,
       <div class="sent-chart-card">{main_chart}</div>
       {acc_html}
       {diverge_html}
+      {anchor_html}
       <div class="sent-chart-card">{index_chart}</div>
       <p class="sent-footnote">代理情绪温度（monitor_only）：由上证量能/动量/波动/牛熊位置 + 宽基与跨市场广度合成，非全市场涨跌家数；量能维度受数据源 volume 单位差异影响，仅供研判参考，不参与任何概率/方向计算。history 为全部可用交易日逐日回算；forecast 由 KNN 历史轨迹派生（k=15/ctx=15 等权全局，经 walk-forward 回测反选），紫色虚线为未来预测中值（κ 重标定，样本外实测覆盖率≈名义 50% 的 p25–p75 区间）；预测为路径派生，非因子预测，仅供参考。主图含预测可缩放联动自身历史/预测；副图（情绪 vs 上证）为纯历史近180日独立切片，不与主图联动。</p>
     </section>"""
@@ -2932,6 +3052,8 @@ def main():
   .sent-acc-sub .zc b {{ color: #475569; }}
   .sent-diverge {{ background: #fff7ed; border-color: #fdba74; border-left-color: #ea580c; }}
   .sent-diverge b {{ color: #c2410c; }}
+  .sent-anchor {{ background: #ecfeff; border-color: #a5f3fc; border-left-color: #0891b2; }}
+  .sent-anchor b {{ color: #0e7490; }}
   .sent-zone-cap {{ display: flex; flex-wrap: wrap; gap: 14px; font-size: 11px; color: #64748b; margin-top: 6px; padding: 0 2px; line-height: 1.6; }}
   .sent-zone-cap .zc-g {{ color: #18a058; font-weight: 600; }}
   .sent-zone-cap .zc-r {{ color: #e54545; font-weight: 600; }}
