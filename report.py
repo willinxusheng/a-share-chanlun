@@ -2193,9 +2193,10 @@ def _sent_main_chart(forecast, hist, buy_th, sell_th, acc=None):
         [{"yAxis": sell_th, "itemStyle": {"color": "#e54545", "opacity": 0.10}}, {"yAxis": 100}],
     ] + _sent_warm_markarea(_wb)
     hist_series = y_hist + [None] * H
-    fc_series = [None] * (len(x_hist) - 1) + [y_hist[-1]] + [float(v) for v in fmed]
+    fc_series = [None] * (len(x_hist) - 1) + [y_hist[-1]] + [None if fmed[i] is None else float(fmed[i]) for i in range(H)]
     # 预测置信带: 仅未来段; band_lo=p25 下界, band_hi=p75-p25 堆叠增量(面积填充至 p75)
-    band_lo = [None] * len(x_hist) + [float(v) for v in fp25]
+    # R205f: fmed/fp25 未来段可能含 None(某日 KNN 邻居轨迹全缺失), 与 band_hi 一致做 None 守卫, 避免 float(None) 崩
+    band_lo = [None] * len(x_hist) + [None if fp25[i] is None else float(fp25[i]) for i in range(H)]
     band_hi = [None] * len(x_hist) + [None if (i >= len(fp75) or fp75[i] is None or fp25[i] is None)
                                        else round(fp75[i] - fp25[i], 1) for i in range(H)]
     # 预测可信度信息已通过下方 .sent-acc 黄底行披露, 此处不再堆叠到标题(避免工具栏过长/窄屏换行拥挤)

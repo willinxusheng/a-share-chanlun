@@ -509,29 +509,42 @@ def sentiment_forecast(valid, horizon=30, k=10, ctx=20, band_days=10,
         kap = [band_kappa] * horizon
     p25, p75 = [], []
     for j in range(horizon):
+        m = median[j]
+        if m is None:
+            # 该日 KNN 邻居轨迹全缺失, 预测空缺(下游图表已容错 None, 不伪造数值)
+            p25.append(None)
+            p75.append(None)
+            continue
         col = [t[j] for t in shifted_top]
         # R181: κ 重标定 —— 把经验分位带(p25-p75, 覆盖邻居约50%)按 kappa 放大半宽,
         # 使样本外实测覆盖率逼近名义 50%(kappa=1 即原始 p25-p75)。带中心为已增强 median。
         # R199: 第 j 天用逐日 kap[j]。
         q25 = _wquant(col, w, 0.25)
         q75 = _wquant(col, w, 0.75)
-        m = median[j]
         kj = kap[j]
         q25 = max(0.0, m - kj * (m - (q25 if q25 is not None else m)))
         q75 = min(100.0, m + kj * ((q75 if q75 is not None else m) - m))
         p25.append(round(max(0.0, min(100.0, q25)), 1))
         p75.append(round(max(0.0, min(100.0, q75)), 1))
-    median = [round(x, 1) for x in median]
+    # R205f: median 可能含 None(上游 _wquant 全缺失返回 None), round 须容错 None, 避免 round(None) 崩
+    median = [None if x is None else round(x, 1) for x in median]
     # 钳制带序: 逐日四舍五入后 κ 展开量(尤其 MR 混合使 median 偏离 KNN 分位中心)可能致
     # p25>median 或 p75<median(带倒置/负宽, ECharts 面积堆叠出现穿线 glitch)。
     # 钳 p25<=median<=p75 保证带恒有效(带中心恒为 median, 半宽非负)。R200 审计发现。
     for j in range(horizon):
-        if p25[j] > median[j]:
+        if median[j] is None:
+            continue
+        if p25[j] is not None and p25[j] > median[j]:
             p25[j] = median[j]
-        if p75[j] < median[j]:
+        if p75[j] is not None and p75[j] < median[j]:
             p75[j] = median[j]
-    peak_day = int(max(range(horizon), key=lambda j: median[j])) + 1
-    peak_val = median[peak_day - 1]
+    # peak 基于非 None 的 median(max 比较须排除 None, 否则 None>float 崩)
+    _valid_med = [(j, v) for j, v in enumerate(median) if v is not None]
+    if _valid_med:
+        peak_day = int(max(_valid_med, key=lambda x: x[1])[0]) + 1
+        peak_val = median[peak_day - 1]
+    else:
+        peak_day, peak_val = 1, None
     return {"horizon": horizon, "ctx": ctx, "k": k, "band_days": band_days,
             "regime_weight": regime_weight, "weight": weight,
             "band_kappa": band_kappa, "band_kappas": kap,
