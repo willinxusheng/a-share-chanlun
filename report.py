@@ -2612,7 +2612,10 @@ def build_quality_cert_html(base):
     acc_status = c.get("accuracy_status", "healthy")
     _acc_color = {"healthy": "#0891b2", "review": "#d97706", "warn": "#dc2626"}.get(acc_status, "#0891b2")
     warn_cls = "" if bias_ok else " warn"
-    bias_cell = (f'<div class="qc-cell{warn_cls}"><div class="qc-v">{bias_val}%</div>'
+    # R208: 老证书可能缺 bias_worst 且 T8 无 bias_median -> bias_val=None,
+    # 原 {bias_val}% 会渲染 "None%" 不专业输出; 与 cell() 对齐, None 显示 "-"。
+    _bias_disp = ("%.2f%%" % bias_val) if isinstance(bias_val, (int, float)) else "-"
+    bias_cell = (f'<div class="qc-cell{warn_cls}"><div class="qc-v">{_bias_disp}</div>'
                  f'<div class="qc-l">中线偏置(中位)</div></div>')
     # R80/R81 分 regime 覆盖 + 方向块：覆盖低 ≠ 方向错——两者并排切片,
     # 暴露「全样本平均」掩盖的弱点(如熊市常见『方向看空可信 / 区间太窄破带』)。
