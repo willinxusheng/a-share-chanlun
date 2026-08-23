@@ -16,6 +16,7 @@ import os
 import re
 import sys
 import json
+import ast
 import urllib.request
 import ssl
 
@@ -62,7 +63,7 @@ def parse_nodes(src):
                 break
     if end < 0:
         raise ValueError("unbalanced points array")
-    arr = eval(sub[i:end + 1])
+    arr = ast.literal_eval(sub[i:end + 1])
     nodes = []
     for p in arr:
         if not isinstance(p, dict):

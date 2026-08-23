@@ -4,6 +4,7 @@
 import json
 import os
 import math
+import ast
 from datetime import datetime, timedelta
 from chanlun import analyze, backtest_signals, MIN_BI_PCT_WEEK, health_score, forecast_confidence, forward_vol, adaptive_horizon, classify, realized_vol_annualized, KNOWN_PIVOTS, _date_diff, MIN_BI_PCT_MONTH, backtest_robustness, backtest_paths, _path_targets, market_breadth, regime_factor, classify_regime, SC_BULL, SC_BEAR
 
@@ -2379,7 +2380,7 @@ def load_other_fib_nodes(base=None):
                     break
         if end < 0:
             return None
-        arr = eval(sub[i:end + 1])
+        arr = ast.literal_eval(sub[i:end + 1])
         nodes = []
         for p in arr:
             if not isinstance(p, dict):
