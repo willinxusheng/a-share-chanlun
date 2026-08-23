@@ -1,6 +1,7 @@
 {
   "source": "A-share-Fibonacci/data/data.js",
-  "note": "另一斐波那契项目(艾略特波浪+斐波那契比率)波浪节点静态快照,R204 锚点对照用; 该项目为人工维护买/卖点, 非每日变动, 此处内置快照",
+  "synced_from": "https://raw.githubusercontent.com/willinxusheng/A-share-Fibonacci/main/data/data.js",
+  "note": "另一斐波那契项目(艾略特波浪+斐波那契比率)波浪节点静态快照, R204 锚点对照用; 由 sentiment/sync_other_fib.py 每次部署前从公开仓库同步; 该项目为人工维护买/卖点, 非每日变动, 此处内置快照作为 CI 兜底",
   "nodes": [
     {
       "date": "2026-07-20",

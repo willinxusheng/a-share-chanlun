@@ -61,6 +61,10 @@ jobs:
           # 返回非0, set -euo pipefail 会在此中断, 后续 report.py 与 Pages 部署均不执行(阻止脏精度发布)。
           # calc_v2 失败时上面已用兜底 sentiment_v2.json, 此处审计兜底 JSON 的 forecast_acc(健康则不阻断)。
           python audit_sentiment_forecast_acc.py
+          # R204b-A: 每次部署前同步另一斐波那契项目(A-share-Fibonacci, 已 public)的波浪节点快照,
+          # 使跨项目锚点对照随其波浪节点更新而更新。拉取失败不阻断(沿用已提交的内置快照兜底)。
+          # 该仓库已设为 public, 无需 token 即可 curl 公开 raw 文件。
+          python sentiment/sync_other_fib.py || echo "WARN: 同步另一斐波那契项目波浪节点失败, 沿用内置快照 other_fib_nodes.json"
           python report.py
           cp report.html index.html
 
