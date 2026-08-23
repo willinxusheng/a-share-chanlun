@@ -1826,7 +1826,14 @@ def forecast_summary_table(data, results, results_week, results_month, forecast_
         wcls = results_week[sym]["classify"]
         mcls = results_month[sym]["classify"]
         m_color = SCENARIO_COLOR.get(mcls["scenario"], BLUE)
-        fi = forecast_info[sym]
+        # R206: forecast_info 可能因单指数渲染降级(主循环 try/except 分支不写该 sym)而缺键,
+        # 用 .get 容错 + 占位行, 与「单指数降级不中断整份报告」纪律对齐, 避免整表 KeyError 崩。
+        fi = forecast_info.get(sym)
+        if fi is None:
+            rows.append(f'<tr data-sym="{sym}" class="linkrow" data-jump>'
+                         f'<td><b>{d.get("name", sym)}</b></td>'
+                         f'<td colspan="9" style="color:#dc2626;text-align:center">该指数推演降级占位（数据异常，不影响其余指数）</td></tr>')
+            continue
         cls = r["classify"]
         sc_color = SCENARIO_COLOR.get(cls["scenario"], BLUE)
         if cls.get("last_bi_dir") == wcls.get("last_bi_dir"):
@@ -1840,15 +1847,15 @@ def forecast_summary_table(data, results, results_week, results_month, forecast_
         stab = _lv_disp
         stab_c = _lv_c
         rows.append(f"""<tr data-sym="{sym}" class="linkrow" data-jump>
-          <td><b>{d["name"]}</b></td>
+          <td><b>{d.get("name", sym)}</b></td>
           <td>{badge(cls["scenario"], sc_color)}</td>
           <td>{badge(mcls["scenario"], m_color)}</td>
           <td class="tac">{syn}</td>
-          <td class="tac"><b style="color:{RED}">{fi["p_main"]*100:.0f}%</b>{prob_bar(fi["p_main"], RED)}</td>
-          <td class="tac"><b style="color:#64748b">{fi["p_alt"]*100:.0f}%</b>{prob_bar(fi["p_alt"], "#64748b")}</td>
-          <td class="tac"><b style="color:{GREEN}">{fi["p_risk"]*100:.0f}%</b>{prob_bar(fi["p_risk"], GREEN)}</td>
-          <td class="tac"><b style="color:{BLUE}">{fi["p_hold"]*100:.0f}%</b>{prob_bar(fi["p_hold"], BLUE)}</td>
-          <td class="tac">{fi["zd"]:.0f}</td>
+          <td class="tac"><b style="color:{RED}">{(fi.get("p_main") or 0)*100:.0f}%</b>{prob_bar(fi.get("p_main") or 0, RED)}</td>
+          <td class="tac"><b style="color:#64748b">{(fi.get("p_alt") or 0)*100:.0f}%</b>{prob_bar(fi.get("p_alt") or 0, "#64748b")}</td>
+          <td class="tac"><b style="color:{GREEN}">{(fi.get("p_risk") or 0)*100:.0f}%</b>{prob_bar(fi.get("p_risk") or 0, GREEN)}</td>
+          <td class="tac"><b style="color:{BLUE}">{(fi.get("p_hold") or 0)*100:.0f}%</b>{prob_bar(fi.get("p_hold") or 0, BLUE)}</td>
+          <td class="tac">{fi.get("zd") or 0:.0f}</td>
           <td class="tac">{badge(stab, stab_c)}</td>
         </tr>""")
     return f"""<h3 class="fc-title">推演情景概率与结论稳定性<span class="fc-sub">主 / 次 / 风险已归一 · 结构存续为独立参照</span></h3>
