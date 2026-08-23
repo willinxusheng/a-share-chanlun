@@ -2539,11 +2539,15 @@ def sentiment_board_html(base, data, results, results_week, scores, last_date,
                             _band_note = "上述本工程主价均接近（带外）对应波浪节点目标价（两法时间轴独立，以点位吻合为锚，非同一天）"
                         else:
                             _band_note = "其中 %d/%d 个本工程主价落入对应波浪节点置信带，其余接近（带外）；两法时间轴独立，以点位吻合为锚，非同一天" % (_n_in, len(_keep))
+                        # 定量边界说明: 锚点仅在点位维度交叉参照, 时间轴不可比
+                        _boundary = ("锚点仅在点位维度交叉参照（两法目标价位落入同一置信带即视为价格共振）；"
+                                     "时间轴各自独立、不可比，请勿据日期差推断到达先后或方法对错。")
                         anchor_html = (
                             '<div class="sent-acc sent-anchor">'
                             '🔗 <b>跨项目锚点对照</b>：本工程上证推演主价与另一斐波那契项目（艾略特波浪+斐波那契比率）节点目标对照——%s。'
-                            '两法维度不同（统计路径外推 vs 波浪子浪比率）、时间轴各自独立，%s，共识非互相验证、仅供交叉参照。</div>'
-                            % (_detail, _band_note))
+                            '两法维度不同（统计路径外推 vs 波浪子浪比率）、时间轴各自独立，%s，共识非互相验证、仅供交叉参照。'
+                            '<br><span style="opacity:.82">ⓘ %s</span></div>'
+                            % (_detail, _band_note, _boundary))
 
         return f"""
     <section class="panel" id="sentiment-board" style="border-left:4px solid {zcolor}; --sent-accent:{zcolor};">
