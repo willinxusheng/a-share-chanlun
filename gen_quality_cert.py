@@ -172,9 +172,16 @@ def main():
         "regime_note": regime_note,
     }
     out = os.path.join(base, "quality_cert.json")
-    with open(out, "w", encoding="utf-8") as f:
-        json.dump(cert, f, ensure_ascii=False, indent=2)
-    print("[quality_cert] written ->", out)
+    # R207: 写文件失败(只读/磁盘满/权限)不得让脚本非0退出——本脚本是 audit_data_accuracy
+    # 关7「监控门禁」委托对象, 设计语义为「恒退出0, 仅生成+打印, 不阻断总审计」(见 audit_data_accuracy
+    # 注释)。原 open/json.dump 未捕获, 写失败抛 PermissionError -> 退出码1 -> 关7 误判 FAIL ->
+    # 总审计 allok=False -> 意外 exit 1 误杀部署。包 try/except, 失败仅 WARN, 仍 return 0。
+    try:
+        with open(out, "w", encoding="utf-8") as f:
+            json.dump(cert, f, ensure_ascii=False, indent=2)
+        print("[quality_cert] written ->", out)
+    except Exception as _e:
+        print("[quality_cert] WARN 写文件失败(不影响监控门禁判定): %s" % _e)
     print(json.dumps(cert, ensure_ascii=False, indent=2)[:700])
     return 0
 

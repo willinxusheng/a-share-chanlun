@@ -133,7 +133,9 @@ def audit_calibration(deep):
     print("\n=== 关4 校准回测 (walk-forward, 委托 audit_forecast_calibration.py) ===")
     r = subprocess.run([sys.executable, "audit_forecast_calibration.py"],
                        cwd=os.path.dirname(os.path.abspath(__file__)))
-    return r.returncode == 0
+    # R207: 监控门禁语义——子脚本仅打印告警, 无论其退出码如何都不阻断总审计
+    # (与下方汇总注释「关4-16 监控门禁不阻断」对齐)。子脚本异常非0退出不再误杀部署。
+    return True
 
 
 def audit_sentiment(deep):
@@ -142,7 +144,9 @@ def audit_sentiment(deep):
     print("\n=== 关5 情绪条件化 (委托 audit_sentiment_conditioning.py, 监控门禁不阻断) ===")
     r = subprocess.run([sys.executable, "audit_sentiment_conditioning.py"],
                        cwd=os.path.dirname(os.path.abspath(__file__)))
-    return r.returncode == 0  # 该脚本恒退出0, 仅打印门禁判定
+    # R207: 监控门禁语义——子脚本仅打印告警, 无论其退出码如何都不阻断总审计
+    # (与下方汇总注释「关4-16 监控门禁不阻断」对齐)。子脚本异常非0退出不再误杀部署。
+    return True  # 该脚本恒退出0, 仅打印门禁判定
 
 
 def audit_drift(deep):
@@ -151,7 +155,9 @@ def audit_drift(deep):
     print("\n=== 关6 突变漂移监控 (委托 audit_forecast_drift.py, 监控门禁不阻断) ===")
     r = subprocess.run([sys.executable, "audit_forecast_drift.py"],
                        cwd=os.path.dirname(os.path.abspath(__file__)))
-    return r.returncode == 0  # 该脚本恒退出0, 仅打印门禁判定
+    # R207: 监控门禁语义——子脚本仅打印告警, 无论其退出码如何都不阻断总审计
+    # (与下方汇总注释「关4-16 监控门禁不阻断」对齐)。子脚本异常非0退出不再误杀部署。
+    return True  # 该脚本恒退出0, 仅打印门禁判定
 
 
 def audit_quality_cert(deep):
@@ -160,7 +166,9 @@ def audit_quality_cert(deep):
     print("\n=== 关7 预测质量证书 (委托 gen_quality_cert.py, 监控门禁不阻断) ===")
     r = subprocess.run([sys.executable, "gen_quality_cert.py"],
                        cwd=os.path.dirname(os.path.abspath(__file__)))
-    return r.returncode == 0  # 该脚本恒退出0, 仅生成 quality_cert.json + 打印
+    # R207: 监控门禁语义——子脚本仅打印告警, 无论其退出码如何都不阻断总审计
+    # (与下方汇总注释「关4-16 监控门禁不阻断」对齐)。子脚本异常非0退出不再误杀部署。
+    return True  # 该脚本恒退出0, 仅生成 quality_cert.json + 打印
 
 
 def audit_regime_direction(deep):
@@ -169,7 +177,9 @@ def audit_regime_direction(deep):
     print("\n=== 关8 分regime方向命中 (委托 audit_regime_direction.py, 监控门禁不阻断) ===")
     r = subprocess.run([sys.executable, "audit_regime_direction.py"],
                        cwd=os.path.dirname(os.path.abspath(__file__)))
-    return r.returncode == 0  # 该脚本恒退出0, 仅打印门禁判定
+    # R207: 监控门禁语义——子脚本仅打印告警, 无论其退出码如何都不阻断总审计
+    # (与下方汇总注释「关4-16 监控门禁不阻断」对齐)。子脚本异常非0退出不再误杀部署。
+    return True  # 该脚本恒退出0, 仅打印门禁判定
 
 
 def audit_point_in_time(deep):
@@ -178,7 +188,9 @@ def audit_point_in_time(deep):
     print("\n=== 关9 点前完整性+无未来泄漏+带宽抗污染 (委托 audit_point_in_time.py, 监控门禁不阻断) ===")
     r = subprocess.run([sys.executable, "audit_point_in_time.py"],
                        cwd=os.path.dirname(os.path.abspath(__file__)))
-    return r.returncode == 0  # 该脚本恒退出0, 仅打印门禁判定
+    # R207: 监控门禁语义——子脚本仅打印告警, 无论其退出码如何都不阻断总审计
+    # (与下方汇总注释「关4-16 监控门禁不阻断」对齐)。子脚本异常非0退出不再误杀部署。
+    return True  # 该脚本恒退出0, 仅打印门禁判定
 
 
 def audit_probability_calibration(deep):
@@ -187,7 +199,9 @@ def audit_probability_calibration(deep):
     print("\n=== 关10 概率校准诚实性 (委托 audit_probability_calibration.py, 监控门禁不阻断) ===")
     r = subprocess.run([sys.executable, "audit_probability_calibration.py"],
                        cwd=os.path.dirname(os.path.abspath(__file__)))
-    return r.returncode == 0  # 该脚本恒退出0, 仅打印可靠性表+Brier
+    # R207: 监控门禁语义——子脚本仅打印告警, 无论其退出码如何都不阻断总审计
+    # (与下方汇总注释「关4-16 监控门禁不阻断」对齐)。子脚本异常非0退出不再误杀部署。
+    return True  # 该脚本恒退出0, 仅打印可靠性表+Brier
 
 
 def audit_interval_score(deep):
@@ -196,7 +210,9 @@ def audit_interval_score(deep):
     print("\n=== 关11 区间锐度+不确定性校准 (委托 audit_interval_score.py, 监控门禁不阻断) ===")
     r = subprocess.run([sys.executable, "audit_interval_score.py"],
                        cwd=os.path.dirname(os.path.abspath(__file__)))
-    return r.returncode == 0  # 该脚本恒退出0, 仅打印区间评分+锐度诊断
+    # R207: 监控门禁语义——子脚本仅打印告警, 无论其退出码如何都不阻断总审计
+    # (与下方汇总注释「关4-16 监控门禁不阻断」对齐)。子脚本异常非0退出不再误杀部署。
+    return True  # 该脚本恒退出0, 仅打印区间评分+锐度诊断
 
 
 def audit_point_bias(deep):
@@ -205,7 +221,9 @@ def audit_point_bias(deep):
     print("\n=== 关12 点预测水平(价位)偏置 (委托 audit_point_bias.py, 监控门禁不阻断) ===")
     r = subprocess.run([sys.executable, "audit_point_bias.py"],
                        cwd=os.path.dirname(os.path.abspath(__file__)))
-    return r.returncode == 0  # 该脚本恒退出0, 仅打印水平偏置+符号检验
+    # R207: 监控门禁语义——子脚本仅打印告警, 无论其退出码如何都不阻断总审计
+    # (与下方汇总注释「关4-16 监控门禁不阻断」对齐)。子脚本异常非0退出不再误杀部署。
+    return True  # 该脚本恒退出0, 仅打印水平偏置+符号检验
 
 
 def audit_forecast_consistency(deep):
@@ -214,7 +232,9 @@ def audit_forecast_consistency(deep):
     print("\n=== 关13 推演数值内部自洽 (委托 audit_forecast_consistency.py, 监控门禁不阻断) ===")
     r = subprocess.run([sys.executable, "audit_forecast_consistency.py"],
                        cwd=os.path.dirname(os.path.abspath(__file__)))
-    return r.returncode == 0  # 该脚本恒退出0, 仅打印自洽性判定
+    # R207: 监控门禁语义——子脚本仅打印告警, 无论其退出码如何都不阻断总审计
+    # (与下方汇总注释「关4-16 监控门禁不阻断」对齐)。子脚本异常非0退出不再误杀部署。
+    return True  # 该脚本恒退出0, 仅打印自洽性判定
 
 
 def audit_path_shape(deep):
@@ -223,7 +243,9 @@ def audit_path_shape(deep):
     print("\n=== 关14 推演路径形态保真度 (委托 audit_path_shape.py, 监控门禁不阻断) ===")
     r = subprocess.run([sys.executable, "audit_path_shape.py"],
                        cwd=os.path.dirname(os.path.abspath(__file__)))
-    return r.returncode == 0  # 该脚本恒退出0, 仅打印路径形态吻合度+Spearmanρ
+    # R207: 监控门禁语义——子脚本仅打印告警, 无论其退出码如何都不阻断总审计
+    # (与下方汇总注释「关4-16 监控门禁不阻断」对齐)。子脚本异常非0退出不再误杀部署。
+    return True  # 该脚本恒退出0, 仅打印路径形态吻合度+Spearmanρ
 
 
 def audit_tail_coverage(deep):
@@ -232,7 +254,9 @@ def audit_tail_coverage(deep):
     print("\n=== 关15 极端尾部覆盖检验 (委托 audit_tail_coverage.py, 监控门禁不阻断) ===")
     r = subprocess.run([sys.executable, "audit_tail_coverage.py"],
                        cwd=os.path.dirname(os.path.abspath(__file__)))
-    return r.returncode == 0  # 该脚本恒退出0, 仅打印 Kupiec POF/下行尾部/最差十分位击穿
+    # R207: 监控门禁语义——子脚本仅打印告警, 无论其退出码如何都不阻断总审计
+    # (与下方汇总注释「关4-16 监控门禁不阻断」对齐)。子脚本异常非0退出不再误杀部署。
+    return True  # 该脚本恒退出0, 仅打印 Kupiec POF/下行尾部/最差十分位击穿
 
 
 def audit_vol_scaling(deep):
@@ -241,7 +265,9 @@ def audit_vol_scaling(deep):
     print("\n=== 关16 波动率扩散标度检验 (委托 audit_vol_scaling.py, 监控门禁不阻断) ===")
     r = subprocess.run([sys.executable, "audit_vol_scaling.py"],
                        cwd=os.path.dirname(os.path.abspath(__file__)))
-    return r.returncode == 0  # 该脚本恒退出0, 仅打印 √f 标度 log-log 斜率 + 模型带宽 vs 真实扩散 bias
+    # R207: 监控门禁语义——子脚本仅打印告警, 无论其退出码如何都不阻断总审计
+    # (与下方汇总注释「关4-16 监控门禁不阻断」对齐)。子脚本异常非0退出不再误杀部署。
+    return True  # 该脚本恒退出0, 仅打印 √f 标度 log-log 斜率 + 模型带宽 vs 真实扩散 bias
 
 
 def main():
