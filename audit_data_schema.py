@@ -120,8 +120,8 @@ def run():
         kl = d.get("klines")
         for sk in ("week_klines", "month_klines"):
             s2 = d.get(sk)
-            if isinstance(kl, list) and kl and isinstance(s2, list) and s2:
-                if s2[-1].get("date", "") > kl[-1].get("date", ""):
+        if isinstance(kl, list) and kl and isinstance(s2, list) and s2 and isinstance(s2[-1], dict):
+            if s2[-1].get("date", "") > kl[-1].get("date", ""):
                     problems.append("%s: %s 末日期 %s 晚于日线末 %s" % (
                         sym, sk, s2[-1].get("date"), kl[-1].get("date")))
 
