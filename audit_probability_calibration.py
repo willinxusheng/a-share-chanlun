@@ -44,8 +44,9 @@ BINS = [(0.30, 0.40), (0.40, 0.50), (0.50, 0.60), (0.60, 0.73)]
 MISCAL_WARN = 0.15
 
 
-def run():
-    """滚动样本外: 抓取每个锚点 forecast_svg 产出的 p_main 与后来主路径方向是否真对。"""
+def run(quick=None):
+    """滚动样本外: 抓取每个锚点 forecast_svg 产出的 p_main 与后来主路径方向是否真对。
+    quick: 仅处理前 N 个锚点(用于本地快速自验, 与 CI 全量同代码路径); None=全量(默认)。"""
     data = json.load(open(os.path.join(BASE, "data.json"), encoding="utf-8"))
     symbols = list(data.keys())
     kls = {sym: sorted(data[sym]["klines"], key=lambda k: k["date"]) for sym in symbols}
@@ -66,6 +67,7 @@ def run():
         except Exception:
             bt_paths_all[sym] = None
     i = MIN_HISTORY
+    anchor_cnt = 0
     while i < n_base - 35:
         date_i = base[i]["date"]
         for sym in symbols:
@@ -103,6 +105,9 @@ def run():
                 correct = 1 if ms * (real - last_a) > 0 else 0
                 rec[sym][H].append((p_main, correct))
         i += ANCHOR_STEP
+        anchor_cnt += 1
+        if quick is not None and anchor_cnt >= quick:
+            break
     return rec
 
 
@@ -176,5 +181,10 @@ def report(rec):
 
 
 if __name__ == "__main__":
-    rec = run()
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--quick", type=int, default=None,
+                    help="仅处理前 N 个锚点(本地快速自验, 与 CI 全量同代码路径); 缺省=全量")
+    args = ap.parse_args()
+    rec = run(quick=args.quick)
     sys.exit(report(rec))
