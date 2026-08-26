@@ -715,8 +715,8 @@ def calibrate_sentiment_band_kappa(valid, horizon=30, k=15, ctx=15,
                 if a is None or m is None:
                     continue
                 tot += 1
-                lo = max(0.0, m - kappa * (m - p25l[j]))
-                hi = min(100.0, m + kappa * (p75l[j] - m))
+                lo = max(0.0, m - kappa * (m - (p25l[j] if p25l[j] is not None else m)))
+                hi = min(100.0, m + kappa * ((p75l[j] if p75l[j] is not None else m) - m))
                 if lo <= a <= hi:
                     cov += 1
         cov_pct = cov / max(1, tot) * 100
