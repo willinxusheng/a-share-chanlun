@@ -1132,10 +1132,6 @@ def forecast_echart(sym, fc_data):
             if _sp25[_j] is not None and _sp75[_j] is not None:
                 sent_lo[_si] = round(float(_sp25[_j]), 1)
                 sent_hi[_si] = round(float(_sp75[_j]) - float(_sp25[_j]), 1)
-        _svals = [(i, float(_sm[i])) for i in range(len(_sm)) if _sm[i] is not None]
-        if _svals:
-            _mi = min(_svals, key=lambda t: t[1])[0]
-            sent_min = {"date": _sd[_mi], "val": round(float(_sm[_mi]), 1)}
     n_hist = len(hist)
     # R215: 对未来段中非交易日/forecast未覆盖日期做前向+后向填充，避免情绪曲线断档。
     # 根因: xcats 未来段含非交易日(如 2026-09-20 周日)或 forecast 未覆盖日, 情绪 forecast dates 只含交易日,
@@ -1154,6 +1150,14 @@ def forecast_echart(sym, fc_data):
             elif first is not None:
                 arr[i] = first
     _fill_sent(sent_med); _fill_sent(sent_lo); _fill_sent(sent_hi)
+    # R216: 修复"情绪见底"标注点坐标不匹配——旧逻辑从情绪 forecast 自身日期 _sd[_mi] 取最低点,
+    # 该日期未必在推演图 xcats 中(情绪模型投影窗口与缠论投影窗口可能不同), 导致 markPoint coord
+    # 与 category 轴不匹配而画不出来(与 R215 断档同类边界坑)。改为从已对齐(并经 R215 填充)的
+    # sent_med 取最低点, date 直接取自 xcats, 保证坐标一定落在轴上、pin 必渲染。
+    _fut = [(i, sent_med[i]) for i in range(n_hist, len(sent_med)) if sent_med[i] is not None]
+    if _fut:
+        _mi2 = min(_fut, key=lambda t: t[1])[0]
+        sent_min = {"date": xcats[_mi2], "val": round(float(sent_med[_mi2]), 1)}
     n_proj = len(proj)
     hist_s = [h[1] for h in hist] + [None] * n_proj
     # R123/R125: 历史线末点(idx=n_hist-1=今日=2026-08-18)与未来路径衔接——旭总要求"预测的几条线都要
