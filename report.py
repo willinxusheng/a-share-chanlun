@@ -586,7 +586,7 @@ def _interp(path, f):
     return path[-1][1]
 
 
-def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_paths=None, breadth_score=None):
+def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_paths=None, breadth_score=None, sent_fc=None):
     bt = bt or {}            # 防御：未传回测时退化为空，避免 None.get 崩溃
     bt_paths = bt_paths or {}
     closes = [k["close"] for k in klines]
@@ -1087,7 +1087,10 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
                "sigma": round(sigma, 4), "horizon": horizon, "lo": round(lo, 4), "span": round(span, 4),
                "med_term": round(_medf(1.0), 2), "q50": round(_q50, 4), "q_sd": round((_sp_up + _sp_dn) / 2, 4),
                "hist_dates": [_hd[i] for i in range(len(tail))],
-               "gap_refs": [{"type": g["type"], "top": round(g["top"], 2), "bottom": round(g["bottom"], 2), "date": g["date"]} for g in _gap_refs]}
+               "gap_refs": [{"type": g["type"], "top": round(g["top"], 2), "bottom": round(g["bottom"], 2), "date": g["date"]} for g in _gap_refs],
+               # R210: 真联动——透传市场情绪预测序列(fear/greed 指数, 0-100), 由 forecast_echart 叠加第二条 Y 轴。
+               # 缺失/非 dict 时置 None, 下游优雅降级(仅不画情绪线, 不影响价格推演)。
+               "sent_fc": sent_fc if isinstance(sent_fc, dict) else None}
     return forecast_echart(sym, fc_data), note, (p_main, p_alt, p_risk), legend_html, fc_data
 
 
@@ -1102,6 +1105,31 @@ def forecast_echart(sym, fc_data):
     x_proj = [p["date"] for p in proj]
     xcats = x_hist + x_proj
     x_full = xcats
+    # R210: 市场情绪预测(恐惧贪婪指数 0-100)与价格推演图真联动——按日期对齐到 xcats:
+    # 历史段(无情绪历史序列)填 None, 未来段填对应中位/p25/p75。最低点用于标注"情绪已先行见底"。
+    sent_med = [None] * len(xcats)
+    sent_lo = [None] * len(xcats)
+    sent_hi = [None] * len(xcats)
+    sent_min = None
+    _sf = fc_data.get("sent_fc")
+    if _sf and _sf.get("dates") and _sf.get("median"):
+        _sd = _sf["dates"]; _sm = _sf["median"]
+        _sp25 = _sf.get("p25") or [None] * len(_sd)
+        _sp75 = _sf.get("p75") or [None] * len(_sd)
+        _sidx = {_sd[i]: i for i in range(len(_sd))}
+        for _si, _sx in enumerate(xcats):
+            _j = _sidx.get(_sx)
+            if _j is None:
+                continue
+            if _sm[_j] is not None:
+                sent_med[_si] = round(float(_sm[_j]), 1)
+            if _sp25[_j] is not None and _sp75[_j] is not None:
+                sent_lo[_si] = round(float(_sp25[_j]), 1)
+                sent_hi[_si] = round(float(_sp75[_j]) - float(_sp25[_j]), 1)
+        _svals = [(i, float(_sm[i])) for i in range(len(_sm)) if _sm[i] is not None]
+        if _svals:
+            _mi = min(_svals, key=lambda t: t[1])[0]
+            sent_min = {"date": _sd[_mi], "val": round(float(_sm[_mi]), 1)}
     n_hist = len(hist)
     n_proj = len(proj)
     hist_s = [h[1] for h in hist] + [None] * n_proj
@@ -1225,6 +1253,8 @@ def forecast_echart(sym, fc_data):
         "hlines": hlines, "vline": vline, "endPoints": end_points,
         "med": med_s, "f95l": f95l, "f95h": f95h, "f75l": f75l, "f75h": f75h,
         "p_main": p_main, "p_alt": p_alt, "p_risk": p_risk, "proj_raw": proj,
+        # R210: 真联动情绪数据——按 xcats 日期对齐的中位/分位序列 + 最低点(供 JS 叠加第二条 Y 轴)
+        "sentMed": sent_med, "sentLo": sent_lo, "sentHi": sent_hi, "sentMin": sent_min,
     }
     cid = f"echart-forecast-{sym}"
     return f'''<div class="echart-toolbar">🔍 滚轮/拖拽缩放 · 拖动底部滑块平移 · 悬停看推演路径/置信锥/趋势</div>
@@ -1289,6 +1319,7 @@ def forecast_echart(sym, fc_data):
         }}
         var pi = i - D.n_hist;
         var p = D.proj[pi];
+        var sm = (D.sentMed && i >= 0 && i < D.sentMed.length) ? D.sentMed[i] : null;
         if(!p) return '<b>'+x+'</b>';
         var red='#e54545', gray='#94a3b8', grn='#18a058', cyan='#0891b2';
         var f95l=p.f95l, f95h=p.f95h, f75l=p.f75l, f75h=p.f75h;
@@ -1300,14 +1331,18 @@ def forecast_echart(sym, fc_data):
           + '<span style="color:'+grn+'">风险路径 '+p.risk.toFixed(2)+'</span> '+Math.round(D.p_risk*100)+'%<br>'
           + '<span style="color:'+cyan+'">趋势外推 '+p.trend.toFixed(2)+'</span><br>'
           + '<span style="color:#64748b">经验分位 P05~P95 '+s95+'</span><br>'
-          + '<span style="color:#64748b">P25~P75 '+s75+'</span>';
+          + '<span style="color:#64748b">P25~P75 '+s75+'</span>'
+          + (sm != null ? '<br><span style="color:#7c3aed">市场情绪 '+sm.toFixed(1)+'</span>' : '');
       }}
     }},
-    legend: {{ data: ['历史','统计中位路径','结构演绎路径','次路径','风险路径','趋势外推','MA20','MA60','MA120','MA250','置信锥 P05–P95','置信锥 P25–P75'], top: 2, itemGap: 8, textStyle: {{ fontSize: 11 }} }},
-    grid: {{ left: 96, right: 64, top: 64, bottom: 80 }},
+    legend: {{ data: ['历史','统计中位路径','结构演绎路径','次路径','风险路径','趋势外推','MA20','MA60','MA120','MA250','置信锥 P05–P95','置信锥 P25–P75','市场情绪中位','情绪P25~P75'], top: 2, itemGap: 8, textStyle: {{ fontSize: 11 }} }},
+    grid: {{ left: 96, right: 88, top: 64, bottom: 80 }},
     xAxis: {{ type: 'category', data: D.xcats, boundaryGap: false, axisTick: {{ show: false }}, axisLabel: {{ fontSize: 11, margin: 6, interval: 0, autoHide: false, hideOverlap: false, showMinLabel: false, showMaxLabel: false,
         formatter: __makeFcFormatter() }} }},
-    yAxis: {{ scale: false, min: D.ymin_core, max: D.ymax_core, splitNumber: 6, axisLine: {{ lineStyle: {{ color: '#cbd5e1' }} }}, splitLine: {{ lineStyle: {{ color: '#eef2f7' }} }}, axisLabel: {{ fontSize: 12, hideOverlap: true }} }},
+    yAxis: [
+      {{ scale: false, min: D.ymin_core, max: D.ymax_core, splitNumber: 6, axisLine: {{ lineStyle: {{ color: '#cbd5e1' }} }}, splitLine: {{ lineStyle: {{ color: '#eef2f7' }} }}, axisLabel: {{ fontSize: 12, hideOverlap: true }} }},
+      {{ name: '情绪(0-100)', min: 0, max: 100, position: 'right', axisLine: {{ show: true, lineStyle: {{ color: '#7c3aed' }} }}, splitLine: {{ show: false }}, axisLabel: {{ fontSize: 11, color: '#7c3aed', formatter: '{{value}}' }}, nameTextStyle: {{ color: '#7c3aed', fontSize: 11 }} }}
+    ],
     // 推演图默认展示历史最后 120 个交易日 + 全部推演窗口；避免首次打开落在多年前历史数据上。
     dataZoom: [
       {{ type: 'inside', xAxisIndex: 0, start: Math.max(0, (D.n_hist - 120) / D.xcats.length * 100), end: 100 }},
@@ -1328,6 +1363,13 @@ def forecast_echart(sym, fc_data):
       {{ name: '置信锥 P05–P95', type: 'line', data: D.f95h, stack: 'b95', symbol: 'none', lineStyle: {{ opacity: 0 }}, areaStyle: {{ color: 'rgba(229,69,69,0.06)' }}, tooltip: {{ show: false }}, silent: true }},
       {{ name: '置信锥 P25–P75', type: 'line', data: D.f75l, stack: 'b75', symbol: 'none', lineStyle: {{ opacity: 0 }}, areaStyle: {{ opacity: 0 }}, tooltip: {{ show: false }}, silent: true }},
       {{ name: '置信锥 P25–P75', type: 'line', data: D.f75h, stack: 'b75', symbol: 'none', lineStyle: {{ opacity: 0 }}, areaStyle: {{ color: 'rgba(229,69,69,0.12)' }}, tooltip: {{ show: false }}, silent: true }},
+      // R210: 真联动——市场情绪(恐惧贪婪指数)叠加第二条 Y 轴(0-100), 与价格推演同图对照"情绪领先价格见底"
+      {{ name: '情绪P25', type: 'line', yAxisIndex: 1, data: D.sentLo, stack: 'sP', symbol: 'none', lineStyle: {{ opacity: 0 }}, areaStyle: {{ opacity: 0 }}, tooltip: {{ show: false }}, silent: true }},
+      {{ name: '情绪P25~P75', type: 'line', yAxisIndex: 1, data: D.sentHi, stack: 'sP', symbol: 'none', lineStyle: {{ opacity: 0 }}, areaStyle: {{ color: 'rgba(124,58,237,0.10)' }}, tooltip: {{ show: false }}, silent: true }},
+      {{ name: '市场情绪中位', type: 'line', yAxisIndex: 1, data: D.sentMed, symbol: 'circle', symbolSize: 3.5, smooth: true, connectNulls: false,
+        lineStyle: {{ color: '#7c3aed', width: 2.2 }}, z: 11,
+        markPoint: {{ data: D.sentMin ? [{{ coord: [D.sentMin.date, D.sentMin.val], value: '情绪见底', itemStyle: {{ color: '#7c3aed' }}, symbol: 'pin', symbolSize: 32,
+          label: {{ show: true, position: 'top', color: '#7c3aed', fontSize: 11, fontWeight: 'bold' }} }}] : [] }} }},
       {{ name: '参考', type: 'line', data: [], silent: true,
         markLine: {{ symbol: 'none', data: D.hlines.concat(D.vline), labelLayout: {{ moveOverlap: 'shiftY' }} }},
         markPoint: {{ data: D.endPoints }} }}
@@ -2843,7 +2885,13 @@ def main():
             cls = r["classify"]
             sc_color = SCENARIO_COLOR.get(cls["scenario"], BLUE)
             w_color = SCENARIO_COLOR.get(wcls["scenario"], BLUE)
-            fs_svg, fs_note, fs_probs, fs_legend, fc_data = forecast_svg(d["klines"], r, wcls, conf, sigma, sym, horizon, backtests[sym], paths_bt[sym], breadth_score=bd["composite"]["score"])
+            # R210: 真联动——提取市场情绪预测序列(恐惧贪婪指数)透传给走势推演图, 叠加第二条 Y 轴
+            sent_fc = None
+            if isinstance(sent_full, dict) and isinstance(sent_full.get("forecast"), dict):
+                _sf = sent_full["forecast"]
+                if _sf.get("dates") and _sf.get("median"):
+                    sent_fc = _sf
+            fs_svg, fs_note, fs_probs, fs_legend, fc_data = forecast_svg(d["klines"], r, wcls, conf, sigma, sym, horizon, backtests[sym], paths_bt[sym], breadth_score=bd["composite"]["score"], sent_fc=sent_fc)
             div_txt = ('⚠️ 周线向下笔运行中，以上路径的兑现以周线底分型确认为前提；若周线续创新低，风险路径概率上升。'
                        if cls.get("last_bi_dir") != wcls.get("last_bi_dir")
                        else "日周级别共振，主路径置信度较高。")
