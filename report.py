@@ -1313,8 +1313,8 @@ def forecast_echart(sym, fc_data):
   }}
   var option = {{
     animation: false,
-    axisPointer: {{ link: [{{ xAxisIndex: 'all' }}], label: {{ show: true, backgroundColor: 'rgba(124,58,237,0.85)', color: '#fff', borderColor: 'transparent', padding: [2,6], borderRadius: 3, fontSize: 11 }} }},
-    tooltip: {{ trigger: 'axis', axisPointer: {{ type: 'cross', label: {{ show: true, backgroundColor: 'rgba(124,58,237,0.85)', color: '#fff', borderColor: 'transparent', padding: [2,6], borderRadius: 3, fontSize: 11 }} }},
+    axisPointer: {{ link: [{{ xAxisIndex: 'all' }}], label: {{ show: true, backgroundColor: 'rgba(43,108,176,0.85)', color: '#fff', borderColor: 'transparent', padding: [2,6], borderRadius: 3, fontSize: 11 }} }},
+    tooltip: {{ trigger: 'axis', axisPointer: {{ type: 'cross', label: {{ show: true, backgroundColor: 'rgba(43,108,176,0.85)', color: '#fff', borderColor: 'transparent', padding: [2,6], borderRadius: 3, fontSize: 11 }} }},
       formatter: function(params){{
         if(!params || !params[0]) return '';
         var i = params[0].dataIndex;
@@ -1344,11 +1344,11 @@ def forecast_echart(sym, fc_data):
     }},
     legend: {{ data: ['历史','统计中位路径','结构演绎路径','次路径','风险路径','趋势外推','MA20','MA60','MA120','MA250','置信锥 P05–P95','置信锥 P25–P75','市场情绪中位','情绪P25~P75'], top: 2, itemGap: 8, textStyle: {{ fontSize: 11 }} }},
     grid: {{ left: 96, right: 88, top: 64, bottom: 80 }},
-    xAxis: {{ type: 'category', data: D.xcats, boundaryGap: false, axisTick: {{ show: false }}, axisPointer: {{ label: {{ show: true, backgroundColor: 'rgba(124,58,237,0.85)', color: '#fff', borderColor: 'transparent', padding: [2,6], borderRadius: 3, fontSize: 11 }} }}, axisLabel: {{ fontSize: 11, margin: 6, interval: 0, autoHide: false, hideOverlap: false, showMinLabel: false, showMaxLabel: false,
+    xAxis: {{ type: 'category', data: D.xcats, boundaryGap: false, axisTick: {{ show: false }}, axisPointer: {{ label: {{ show: true, backgroundColor: 'rgba(43,108,176,0.85)', color: '#fff', borderColor: 'transparent', padding: [2,6], borderRadius: 3, fontSize: 11 }} }}, axisLabel: {{ fontSize: 11, margin: 6, interval: 0, autoHide: false, hideOverlap: false, showMinLabel: false, showMaxLabel: false,
         formatter: __makeFcFormatter() }} }},
     yAxis: [
-      {{ scale: false, min: D.ymin_core, max: D.ymax_core, splitNumber: 6, axisLine: {{ lineStyle: {{ color: '#cbd5e1' }} }}, splitLine: {{ lineStyle: {{ color: '#eef2f7' }} }}, axisLabel: {{ fontSize: 12, hideOverlap: true }}, axisPointer: {{ label: {{ show: true, backgroundColor: 'rgba(124,58,237,0.85)', color: '#fff', borderColor: 'transparent', padding: [2,6], borderRadius: 3, fontSize: 11 }} }} }},
-      {{ name: '情绪(0-100)', min: 0, max: 100, position: 'right', axisLine: {{ show: true, lineStyle: {{ color: '#7c3aed' }} }}, splitLine: {{ show: false }}, axisLabel: {{ fontSize: 11, color: '#7c3aed', formatter: '{{value}}' }}, axisPointer: {{ label: {{ show: true, backgroundColor: 'rgba(124,58,237,0.85)', color: '#fff', borderColor: 'transparent', padding: [2,6], borderRadius: 3, fontSize: 11 }} }}, nameTextStyle: {{ color: '#7c3aed', fontSize: 11 }} }}
+      {{ scale: false, min: D.ymin_core, max: D.ymax_core, splitNumber: 6, axisLine: {{ lineStyle: {{ color: '#cbd5e1' }} }}, splitLine: {{ lineStyle: {{ color: '#eef2f7' }} }}, axisLabel: {{ fontSize: 12, hideOverlap: true }}, axisPointer: {{ label: {{ show: true, backgroundColor: 'rgba(43,108,176,0.85)', color: '#fff', borderColor: 'transparent', padding: [2,6], borderRadius: 3, fontSize: 11 }} }} }},
+      {{ name: '情绪(0-100)', min: 0, max: 100, position: 'right', axisLine: {{ show: true, lineStyle: {{ color: '#7c3aed' }} }}, splitLine: {{ show: false }}, axisLabel: {{ fontSize: 11, color: '#7c3aed', formatter: '{{value}}' }}, axisPointer: {{ label: {{ show: true, backgroundColor: 'rgba(43,108,176,0.85)', color: '#fff', borderColor: 'transparent', padding: [2,6], borderRadius: 3, fontSize: 11 }} }}, nameTextStyle: {{ color: '#7c3aed', fontSize: 11 }} }}
     ],
     // 推演图默认展示历史最后 120 个交易日 + 全部推演窗口；避免首次打开落在多年前历史数据上。
     dataZoom: [
@@ -2272,13 +2272,13 @@ def _sent_main_chart(forecast, hist, buy_th, sell_th, acc=None):
         "label:{show:false}};});"
         "yearML.unshift({xAxis:D.today_x,lineStyle:{color:'#334155',type:'dashed',width:1.5},"
         "label:{formatter:'今日',position:'insideEndBottom',color:'#475569',fontSize:10}});"
-        "return {tooltip:{trigger:'axis',axisPointer:{type:'cross',label:{show:true,backgroundColor:'rgba(124,58,237,0.85)',color:'#fff',borderColor:'transparent',padding:[2,6],borderRadius:3,fontSize:11}}},"
+        "return {tooltip:{trigger:'axis',axisPointer:{type:'cross',label:{show:true,backgroundColor:'rgba(43,108,176,0.85)',color:'#fff',borderColor:'transparent',padding:[2,6],borderRadius:3,fontSize:11}}},"
         "legend:{data:['历史情绪','预测情绪'],top:2,textStyle:{fontSize:11}},"
         "grid:{left:46,right:16,top:48,bottom:66},"
         "xAxis:{type:'category',data:D.xcats,boundaryGap:false,"
-        "axisPointer:{label:{show:true,backgroundColor:'rgba(124,58,237,0.85)',color:'#fff',borderColor:'transparent',padding:[2,6],borderRadius:3,fontSize:11}},"
+        "axisPointer:{label:{show:true,backgroundColor:'rgba(43,108,176,0.85)',color:'#fff',borderColor:'transparent',padding:[2,6],borderRadius:3,fontSize:11}},"
         "axisLabel:{fontSize:10,autoHide:false,position:'bottom',interval:0,formatter:function(v,i){return _sFmt(v,i);}},axisTick:{show:false}},"
-        "yAxis:{type:'value',min:0,max:100,axisPointer:{label:{show:true,backgroundColor:'rgba(124,58,237,0.85)',color:'#fff',borderColor:'transparent',padding:[2,6],borderRadius:3,fontSize:11}},axisLabel:{fontSize:11},splitLine:{lineStyle:{color:'#eef2f7'}}},"
+        "yAxis:{type:'value',min:0,max:100,axisPointer:{label:{show:true,backgroundColor:'rgba(43,108,176,0.85)',color:'#fff',borderColor:'transparent',padding:[2,6],borderRadius:3,fontSize:11}},axisLabel:{fontSize:11},splitLine:{lineStyle:{color:'#eef2f7'}}},"
         "dataZoom:[{type:'inside',xAxisIndex:0,startValue:D.zoomStart,end:100},"
         "{type:'slider',xAxisIndex:0,height:18,bottom:14,startValue:D.zoomStart,end:100,showDetail:false,"
         "handleStyle:{color:'#2b6cb0'},borderColor:'#e2e8f0',fillerColor:'rgba(43,108,176,0.12)',"
@@ -2342,7 +2342,7 @@ def _sent_index_chart(hist, forecast=None):
         "yAxis:[{type:'value',min:0,max:100,position:'left',"
         "axisPointer:{label:{show:true,backgroundColor:'rgba(43,108,176,0.85)',color:'#fff',borderColor:'transparent',padding:[2,6],borderRadius:3,fontSize:11}},"
         "axisLabel:{fontSize:11,color:'#2b6cb0'},splitLine:{lineStyle:{color:'#eef2f7'}},name:'温度'},"
-        "{type:'value',position:'right',scale:true,axisPointer:{label:{show:true,backgroundColor:'rgba(180,83,9,0.85)',color:'#fff',borderColor:'transparent',padding:[2,6],borderRadius:3,fontSize:11}},axisLabel:{fontSize:11,color:'#b45309'},name:'上证'}],"
+        "{type:'value',position:'right',scale:true,axisPointer:{label:{show:true,backgroundColor:'rgba(43,108,176,0.85)',color:'#fff',borderColor:'transparent',padding:[2,6],borderRadius:3,fontSize:11}},axisLabel:{fontSize:11,color:'#b45309'},name:'上证'}],"
         "series:[{name:'情绪温度',type:'line',data:D.sc,symbol:'none',smooth:true,"
         "lineStyle:{color:'#2b6cb0',width:2},yAxisIndex:0,markArea:{silent:true,data:D.markAreaData},markLine:{symbol:'none',data:yearML}},"
         "{name:'上证指数',type:'line',data:D.cl,symbol:'none',smooth:true,"
