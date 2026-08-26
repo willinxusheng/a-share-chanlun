@@ -484,7 +484,7 @@ def echart_main(klines, r, sym, captured=None):
     animation: false,
     tooltip: {{
       trigger: 'axis',
-      axisPointer: {{ type: 'cross', label: {{ show: false }} }},
+      axisPointer: {{ type: 'cross', label: {{ show: true, backgroundColor: 'rgba(43,108,176,0.85)', color: '#fff', borderColor: 'transparent', padding: [2,6], borderRadius: 3, fontSize: 11 }} }},
       formatter: function(params){{
         var k = params[0];
         if(!k) return '';
@@ -1312,7 +1312,7 @@ def forecast_echart(sym, fc_data):
   }}
   var option = {{
     animation: false,
-    tooltip: {{ trigger: 'axis', axisPointer: {{ type: 'cross', label: {{ show: false }} }},
+    tooltip: {{ trigger: 'axis', axisPointer: {{ type: 'cross', label: {{ show: true, backgroundColor: 'rgba(124,58,237,0.85)', color: '#fff', borderColor: 'transparent', padding: [2,6], borderRadius: 3, fontSize: 11 }} }},
       formatter: function(params){{
         if(!params || !params[0]) return '';
         var i = params[0].dataIndex;
@@ -2270,7 +2270,7 @@ def _sent_main_chart(forecast, hist, buy_th, sell_th, acc=None):
         "label:{show:false}};});"
         "yearML.unshift({xAxis:D.today_x,lineStyle:{color:'#334155',type:'dashed',width:1.5},"
         "label:{formatter:'今日',position:'insideEndBottom',color:'#475569',fontSize:10}});"
-        "return {tooltip:{trigger:'axis',axisPointer:{type:'cross'}},"
+        "return {tooltip:{trigger:'axis',axisPointer:{type:'cross',label:{show:true,backgroundColor:'rgba(124,58,237,0.85)',color:'#fff',borderColor:'transparent',padding:[2,6],borderRadius:3,fontSize:11}}},"
         "legend:{data:['历史情绪','预测情绪'],top:2,textStyle:{fontSize:11}},"
         "grid:{left:46,right:16,top:48,bottom:66},"
         "xAxis:{type:'category',data:D.xcats,boundaryGap:false,"
@@ -2330,7 +2330,7 @@ def _sent_index_chart(hist, forecast=None):
         "var yearML=(D.yearLines||[]).map(function(o){return {xAxis:o.x,"
         "lineStyle:{color:'#cbd5e1',type:'dashed',width:1},"
         "label:{show:false}};});"
-        "return {tooltip:{trigger:'axis',axisPointer:{type:'cross'}},"
+        "return {tooltip:{trigger:'axis',axisPointer:{type:'cross',label:{show:true,backgroundColor:'rgba(43,108,176,0.85)',color:'#fff',borderColor:'transparent',padding:[2,6],borderRadius:3,fontSize:11}}},"
         "legend:{data:['情绪温度','上证指数'],top:2,textStyle:{fontSize:11}},"
         "grid:{left:46,right:58,top:50,bottom:42},"
         "xAxis:{type:'category',data:D.xcats,boundaryGap:false,"
