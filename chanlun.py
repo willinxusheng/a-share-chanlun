@@ -1464,11 +1464,12 @@ def analyze(klines, min_bi_pct=MIN_BI_PCT, with_stability=True):
                              "seg_bc_top": False, "interval_nesting": "", "month_context": "",
                              "trend_type": "", "month_dir": 0, "week_dir": 0,
                              "week_scenario": "数据不足", "month_scenario": "数据不足",
-                             "resonance": ""},
-                "bis": [], "merged": [], "zss": [], "beichi": [], "stability": None,
-                "bias": None, "adx": None, "mdd": None, "vol_trend": None,
-                "ma_alignment": None, "capture_rate": 0.0,
-                "agreement": {"rate": 0.0, "ok": 0, "tot": 0}}
+                             "resonance": "", "ma_alignment": None},
+                "bis": [], "merged": [], "zhongshu": [], "dif": [], "dea": [], "hist": [],
+                "beichi": [], "signals": [], "segments": [], "seg_beichi": [],
+                "agreement": {"ok": 0, "total": 0, "rate": 0.0},
+                "captured": [], "capture_rate": 0.0, "stability": None,
+                "gaps": [], "bias": None, "adx": None, "mdd": None, "vol_trend": None}
     merged = merge_inclusion(klines)  # R173(BUG1 修复回归): 早退块误删此行, 致 happy path NameError
     bis = build_bi(merged, min_bi_pct)
     zss = build_zhongshu(bis)
