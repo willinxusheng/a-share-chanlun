@@ -41,20 +41,9 @@ REGIMES = ("bull", "bear", "range")
 # 检验A 用的 horizon 集合(交易日), 覆盖短/中/长, 均>=2
 HORIZONS = [2, 3, 4, 5, 8, 10, 12, 15, 20, 25, 30, 40, 50, 60]
 
-
-def classify_regime(trunc, win=60, bull=0.10, bear=-0.10):
-    """按锚点前 win 交易日累计对数收益分三档(无前视), 与关8/关15 同口径。"""
-    if len(trunc) < win + 2:
-        return "range"
-    pre = trunc[-(win + 1):-1]
-    cum = 0.0
-    for j in range(1, len(pre)):
-        cum += math.log(pre[j]["close"] / pre[j - 1]["close"])
-    if cum > bull:
-        return "bull"
-    if cum < bear:
-        return "bear"
-    return "range"
+# 单一来源(R108): regime 分档逻辑统一从 chanlun 导入, 禁止本地副本——
+# 否则未来改 chanlun.classify_regime 时, 本门禁切片口径会静默分裂(关16 与关8/关15 失配)。
+from chanlun import classify_regime
 
 
 def daily_log_returns(kl):
