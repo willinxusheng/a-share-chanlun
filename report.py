@@ -1137,6 +1137,23 @@ def forecast_echart(sym, fc_data):
             _mi = min(_svals, key=lambda t: t[1])[0]
             sent_min = {"date": _sd[_mi], "val": round(float(_sm[_mi]), 1)}
     n_hist = len(hist)
+    # R215: 对未来段中非交易日/forecast未覆盖日期做前向+后向填充，避免情绪曲线断档。
+    # 根因: xcats 未来段含非交易日(如 2026-09-20 周日)或 forecast 未覆盖日, 情绪 forecast dates 只含交易日,
+    # 对齐后 sentMed/sentLo/sentHi 这些位置为 None; ECharts connectNulls:false 导致断线。
+    def _fill_sent(arr):
+        last = None
+        for i in range(n_hist, len(arr)):
+            if arr[i] is not None:
+                last = arr[i]
+            elif last is not None:
+                arr[i] = last
+        first = None
+        for i in range(len(arr) - 1, n_hist - 1, -1):
+            if arr[i] is not None:
+                first = arr[i]
+            elif first is not None:
+                arr[i] = first
+    _fill_sent(sent_med); _fill_sent(sent_lo); _fill_sent(sent_hi)
     n_proj = len(proj)
     hist_s = [h[1] for h in hist] + [None] * n_proj
     # R123/R125: 历史线末点(idx=n_hist-1=今日=2026-08-18)与未来路径衔接——旭总要求"预测的几条线都要
