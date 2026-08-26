@@ -118,7 +118,9 @@ def fetch_em(secid):
             u = host + (EM_KLINE_PATH % secid)
             data = json.loads(_get(u))["data"]
             if not data or not data.get("klines"):
-                return []
+                # R211: 空响应视为该 host 失败, 尝试其余 host(避免主镜像偶发空响应即整体失败);
+                # 不再 return [], 既跳过备用 host 又破坏 (rows,dirty) 元组契约(调用方解包会 ValueError)。
+                continue
             out = []
             dirty = 0
             for row in data["klines"]:
@@ -137,7 +139,7 @@ def fetch_em(secid):
             last_err = e
     if last_err:
         raise last_err
-    return []
+    return [], 0
 
 
 def update_sentiment_txts():

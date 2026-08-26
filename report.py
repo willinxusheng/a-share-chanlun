@@ -1114,6 +1114,11 @@ def forecast_echart(sym, fc_data):
     _sf = fc_data.get("sent_fc")
     if _sf and _sf.get("dates") and _sf.get("median"):
         _sd = _sf["dates"]; _sm = _sf["median"]
+        # R211: 防御 dates/median 长度不一致(数据源异常) -> 截断/补齐对齐, 避免 _sm[_j] 越界 IndexError
+        if len(_sm) > len(_sd):
+            _sm = _sm[:len(_sd)]
+        elif len(_sm) < len(_sd):
+            _sm = list(_sm) + [None] * (len(_sd) - len(_sm))
         _sp25 = _sf.get("p25") or [None] * len(_sd)
         _sp75 = _sf.get("p75") or [None] * len(_sd)
         _sidx = {_sd[i]: i for i in range(len(_sd))}
@@ -1332,7 +1337,7 @@ def forecast_echart(sym, fc_data):
           + '<span style="color:'+cyan+'">趋势外推 '+p.trend.toFixed(2)+'</span><br>'
           + '<span style="color:#64748b">经验分位 P05~P95 '+s95+'</span><br>'
           + '<span style="color:#64748b">P25~P75 '+s75+'</span>'
-          + (sm != null ? '<br><span style="color:#7c3aed">市场情绪 '+sm.toFixed(1)+'</span>' : '');
+          + (sm != null ? '<br><span style="color:#7c3aed">市场情绪 '+sm.toFixed(1)+' · 通常领先价格见底</span>' : '');
       }}
     }},
     legend: {{ data: ['历史','统计中位路径','结构演绎路径','次路径','风险路径','趋势外推','MA20','MA60','MA120','MA250','置信锥 P05–P95','置信锥 P25–P75','市场情绪中位','情绪P25~P75'], top: 2, itemGap: 8, textStyle: {{ fontSize: 11 }} }},
