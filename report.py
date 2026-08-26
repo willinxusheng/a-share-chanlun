@@ -269,7 +269,7 @@ def echart_main(klines, r, sym, captured=None):
             _marker += "·盘"
         if s.get("vol_confirm"):
             _marker += "·量"
-        lbl = s["kind"][:3] + _marker
+        lbl = f"{dates[xi][5:]} {s['kind'][:3]}{_marker}"
         sig_points.append({
             "coord": [dates[xi], price],
             "value": lbl,
@@ -297,7 +297,7 @@ def echart_main(klines, r, sym, captured=None):
         _last_x_bc[d] = xi
         bc_points.append({
             "coord": [dates[xi], round(b["end_price"], 2)],
-            "value": "顶背驰" if d == 1 else "底背驰",
+            "value": f"{dates[xi][5:]} 顶背驰" if d == 1 else f"{dates[xi][5:]} 底背驰",
             "itemStyle": {"color": RED if d == 1 else GREEN},
             "symbol": "pin",
             "symbolSize": 11,
@@ -344,7 +344,7 @@ def echart_main(klines, r, sym, captured=None):
             _pcol = GOLD if _is_cap else "#94a3b8"
             cap_points.append({
                 "coord": [dates[_bi], round(klines[_bi]["close"], 2)],
-                "value": "✓" if _is_cap else "◇",
+                "value": f"{dates[_bi][5:]} ✓" if _is_cap else f"{dates[_bi][5:]} ◇",
                 "itemStyle": {"color": _pcol},
                 "symbol": "diamond",
                 "symbolSize": 8,
