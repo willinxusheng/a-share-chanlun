@@ -93,20 +93,29 @@ _SENT_FILES = {
     "sh000016": "sh50.txt",
     "sh000852": "zz1000.txt",
 }
-EM_URL = ("http://push2his.eastmoney.com/api/qt/stock/kline/get?secid=%s&fields1=f1,f2,f3,f4,f5,f6&"
-          "fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61&klt=101&fqt=1&beg=20210101&end=20500101")
-# R177b: 东财接口必须走 http 明文——https(CONNECT 隧道)在部分网络/代理环境会被
-# 截断 chunked 响应(实测沙箱内 https 全失败、http 双 host 全通); 双 host 互为镜像兜底。
-EM_HOSTS = ["push2his.eastmoney.com", "92.push2his.eastmoney.com"]
+# R177b+: 东财接口双协议 + 双 host 轮询。
+# 境内(沙箱/国内CI): http 明文镜像稳定(沙箱实测 https 被代理截断 chunked 响应, 故 http 优先);
+# 境外 CI(ubuntu-latest): 东财 http 境内镜像不可达(仅境内 CDN 节点), 需 https 端点直连兜底
+#   —— ubuntu 可出网至境内 web 服务(腾讯/新浪 https 在 CI 已验证可达), 故 https 端点可恢复抓取,
+#   根治 R177b 改 http 后境外 CI 情绪 txt 永久降级(asof 停在 08-21)的回归。
+# 顺序: 境内 http 主镜像 → 境内 http 备用镜像 → 境外 https 直连兜底。
+EM_KLINE_PATH = ("api/qt/stock/kline/get?secid=%s&fields1=f1,f2,f3,f4,f5,f6&"
+                 "fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61&klt=101&fqt=1&beg=20210101&end=20500101")
+EM_HOSTS = [
+    "http://push2his.eastmoney.com/",
+    "http://92.push2his.eastmoney.com/",
+    "https://push2his.eastmoney.com/",
+]
 
 
 def fetch_em(secid):
     """东方财富前复权日线: 返回正序 [(date, open, close, high, low, volume, amount, turnover)]。
-    https 隧道在部分网络被截断, 故用 http 明文 + 双 host 逐次尝试; 全部失败由调用方降级。"""
+    双协议(http/https) + 双 host 逐次尝试, 同时适配境内(沙箱)与境外(CI)网络;
+    全部失败由调用方降级保留旧 txt。"""
     last_err = None
     for host in EM_HOSTS:
         try:
-            u = (EM_URL % secid).replace("push2his.eastmoney.com", host)
+            u = host + (EM_KLINE_PATH % secid)
             data = json.loads(_get(u))["data"]
             if not data or not data.get("klines"):
                 return []
