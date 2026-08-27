@@ -2307,6 +2307,7 @@ def _sent_main_chart(forecast, hist, buy_th, sell_th, acc=None):
         "xcats": xcats, "yhist": hist_series, "yfc": fc_series,
         "band_lo": band_lo, "band_hi": band_hi,
         "buy_th": buy_th, "sell_th": sell_th, "today_x": today_x,
+        "today_y": y_hist[-1],
         "yearLines": _year_lines(x_hist),
         "markAreaData": _ma,
         # R193: 默认缩放起点用绝对日期(历史末90日), 替代百分比 start:62, 数据长度变化不再漂移
@@ -2341,14 +2342,19 @@ def _sent_main_chart(forecast, hist, buy_th, sell_th, acc=None):
         "{name:'预测区间',type:'line',data:D.band_hi,stack:'bsent',symbol:'none',"
         "lineStyle:{opacity:0},areaStyle:{color:'rgba(124,58,237,0.12)'},tooltip:{show:false},silent:true,z:3},"
         "{name:'预测情绪',type:'line',data:D.yfc,symbol:'none',smooth:true,"
-        "lineStyle:{color:'#7c3aed',width:2,type:'dashed'},z:5},"
+        "lineStyle:{color:'#7c3aed',width:2,type:'dashed'},z:5,"
+        # R226: 今日锚点圆点 + 数值标注, 显式把历史实线↔预测虚线的交接点压出来, 消除"断开"错觉
+        "markPoint:{silent:true,symbol:'circle',symbolSize:9,"
+        "itemStyle:{color:'#334155',borderColor:'#fff',borderWidth:2},"
+        "label:{show:true,formatter:function(p){return '今日 '+D.today_y.toFixed(1);},position:'top',color:'#334155',fontSize:10,fontWeight:'bold'},"
+        "data:[{coord:[D.today_x,D.today_y]}]}},"
         "]};}"
     )
     zone_cap = ('<div class="sent-zone-cap">'
                 '<span class="zc zc-g">▾ 绿带=机会区(&lt;%.0f)</span>'
                 '<span class="zc zc-r">▴ 红带=风险区(&gt;%.0f)</span>'
                 '<span class="zc zc-w">▦ 灰带=数据预热期(样本不足, 非断线)</span>'
-                '<span class="zc">蓝实线=历史情绪　紫虚线=未来KNN预测　紫色阴影=预测区间(p25–p75, κ 重标定)　年份/月份在 x 轴　·　滚轮拖拽缩放</span>'
+                '<span class="zc">蓝实线=历史情绪　紫虚线=未来KNN预测　紫色阴影=预测区间(p25–p75, κ 重标定)　● 今日锚点=历史↔预测交接点　年份/月份在 x 轴　·　滚轮拖拽缩放</span>'
                 '</div>') % (buy_th, sell_th)
     return _sent_echart("echart-sent-main",
                         "📈 情绪走势与未来预测",
