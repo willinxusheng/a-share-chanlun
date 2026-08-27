@@ -1071,6 +1071,16 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
         note += (f"\n⚠ <b>路径偏离提示</b>：结构主路径(目标情景)终点较「统计中位(无偏期望)」{_d} "
                  f"{abs(_dev)*100:.1f}%，反映当前缠论结构判断相对纯历史统计更{'乐观' if _dev > 0 else '悲观'}；"
                  f"实际落点更可能靠近统计中位(期望)，主路径应视为「方向性目标」而非「概率中点」，结论宜保守看待。")
+    # ---- R224: p_main 样本外校准诚实标注（仅展示层, 不动 p_main 数值/带/p_hold, 关13 安全）----
+    # 依据 audit_probability_calibration (walk-forward, 5指数, 锚点每15交易日) + prob_cal_holdout 留出法验证:
+    #   T+8 实际方向命中≈43%(Brier≈0.25 近随机); T+30 低 p_main 箱实际后市多涨>60%(逆向α)。
+    # 可靠性 regime/时间依赖不稳定(留出法否决静态重映射), 此处仅做方向性诚实标注, 绝不硬编码精确校准百分比。
+    _p_cv = []
+    _p_cv.append("主路径概率 p_main 由历史命中率校准，样本外方向准确性有限：walk-forward 回测显示 T+8 短周期方向命中仅≈43%（近随机），较长周期亦非高置信；p_main 宜作概率参考而非方向定论")
+    if p_main < 0.40:
+        _p_cv.append("当前 p_main 处于低位（模型偏空），历史回测显示该区间实际后市多涨（逆向信号），可结合「别人恐惧我贪婪」的逆向思维看待，而非顺势看空")
+    if _p_cv:
+        note += "\n" + "；".join("⚠ " + _s for _s in _p_cv) + "。"
     # ---- 悬浮交互数据：历史区真实收盘价 + 投影区密集采样（供 JS initForecast）----
     hist = [[_hd[i], round(tail[i], 2)] for i in range(len(tail))]
     proj = []
