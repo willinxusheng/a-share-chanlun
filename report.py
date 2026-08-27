@@ -3098,6 +3098,7 @@ def main():
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
+<script>window.__BUILD_TIME__="{gen_time}";</script>
 <title>A股缠论结构分析报告 · 2021 至今</title>
 <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
 <style>
@@ -3799,11 +3800,54 @@ function navH(){{ var t=document.querySelector('nav.toc'), r=document.getElement
   window.addEventListener('load', function(){{ setTimeout(resizeAll, 120); }});
 }})();
 </script>
+__POLL_JS__
 </body>
 </html>"""
 
+    # R229: 前端版本检测——轮询 version.json, 发现新版本(生成时间不同)弹红色横幅提示刷新,
+    # 根治 GitHub Pages CDN 边缘 max-age=600 导致的"服务端已更新但用户浏览器/CDN 仍吐旧版"感知偏差。
+    _POLL_JS = '''
+    <script>
+    (function(){
+      var bt = window.__BUILD_TIME__;
+      if(!bt) return;
+      function show(){
+        var b=document.getElementById('ver-banner');
+        if(!b){
+          b=document.createElement('div');b.id='ver-banner';
+          b.style.cssText='position:fixed;top:0;left:0;right:0;z-index:9999;background:#dc2626;color:#fff;text-align:center;padding:9px;font-size:14px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.2)';
+          b.onclick=function(){location.reload(true);};
+          (document.body||document.documentElement).appendChild(b);
+        }
+        b.textContent='检测到新版本（'+window.__LATEST__+'），点击此处刷新';
+      }
+      function check(){
+        fetch('./version.json?t='+Date.now()).then(function(r){return r.json();}).then(function(v){
+          if(v && v.time && v.time!==bt){
+            window.__LATEST__=v.time;
+            show();
+          }
+        }).catch(function(){});
+      }
+      setTimeout(check, 8000);
+      setInterval(check, 120000);
+    })();
+    </script>
+    '''
+
     # R173: 原子写——先写 .tmp 再 os.replace, 避免任一指数计算异常导致本次不写文件、
     # 磁盘残留上一次成功的陈旧 report.html 被误当最新。
+    # R229: 注入版本检测 JS + 生成 version.json 供前端轮询对比新版本
+    html = html.replace("__POLL_JS__", _POLL_JS)
+    import subprocess as _sp
+    _sha = "local"
+    try:
+        _sha = _sp.check_output(["git", "rev-parse", "--short", "HEAD"], cwd=_base, stderr=_sp.DEVNULL).decode().strip()
+    except Exception:
+        _sha = "local"
+    with open(os.path.join(_base, "version.json"), "w", encoding="utf-8") as _vf:
+        json.dump({"time": gen_time, "sha": _sha}, _vf, ensure_ascii=False)
+
     _out = os.path.join(_base, "report.html")
     _tmp = _out + ".tmp"
     with open(_tmp, "w", encoding="utf-8") as f:
