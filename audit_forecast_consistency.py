@@ -45,7 +45,12 @@ def load():
     return kls
 
 
-_KAPPA = {"bull": 1.5, "range": 1.4, "bear": 2.3}  # 与 report.py forecast_svg 内覆盖修正系数一致(R168+R171 标定: 牛1.5/震荡1.4/熊2.3)
+_KAPPA = {"bull": 1.50, "range": 1.40, "bear": 2.30}  # 远端(f=1)κ, 与 report.py forecast_svg 内 _KAPPA 一致(R223: 仅牛近端加宽修T+8漏覆盖, 其余维持R171 牛1.5/震1.4/熊2.3 不动)
+_KAPPA_NEAR = {"bull": 1.60, "range": 1.40, "bear": 2.30}  # 近端(f=0)κ, 与 report.py forecast_svg 内 _KAPPA_NEAR 一致(仅牛斜坡 1.5→1.60)
+def _kappa_at(f, rg):
+    _lo = _KAPPA_NEAR.get(rg, 1.40)
+    _hi = _KAPPA.get(rg, 1.40)
+    return _lo + (_hi - _lo) * f
 
 
 def recompute_p_hold(closes, zd, horizon, regime="range"):
@@ -66,7 +71,7 @@ def recompute_p_hold(closes, zd, horizon, regime="range"):
         return _rets[f0] * (c0 - k) + _rets[c0] * (k - f0)
     _q50 = _q(0.5); _q05 = _q(0.05); _q95 = _q(0.95)
     _mean = sum(_rets) / len(_rets)
-    _kappa = _KAPPA.get(regime, 1.4)
+    _kappa = _KAPPA.get(regime, 1.30)
     _sp_up = max((_q95 - _q50) * _kappa, 1e-9)
     _sp_dn = max((_q50 - _q05) * _kappa, 1e-9)
     last = closes[-1]
