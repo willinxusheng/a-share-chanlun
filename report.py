@@ -5,7 +5,7 @@ import json
 import os
 import math
 import ast
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from chanlun import analyze, backtest_signals, MIN_BI_PCT_WEEK, health_score, forecast_confidence, forward_vol, adaptive_horizon, classify, realized_vol_annualized, KNOWN_PIVOTS, _date_diff, MIN_BI_PCT_MONTH, backtest_robustness, backtest_paths, _path_targets, market_breadth, regime_factor, classify_regime, SC_BULL, SC_BEAR
 
 W, H_PRICE, H_VOL, H_MACD = 1060, 360, 64, 110
@@ -2899,7 +2899,7 @@ def main():
                       f'已折算为「全市场对齐度」±8 反馈进各指数推演置信度。</p>'
                       f'</div>')
 
-    gen_time = datetime.now().strftime("%Y-%m-%d %H:%M")
+    gen_time = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M") + " (UTC+8)"
 
     # 日周背离检测（用于结论）
     divergent = [d["name"] for sym, d in data.items()
