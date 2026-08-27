@@ -61,7 +61,17 @@ jobs:
           # R177b: 情绪指数必须在 report.py 之前重算——fetch_data 已刷新 4 个情绪 txt
           # (东财源, 含成交额/换手率, 数据截至当日), 先跑 calc_v2 使情绪板块 asof 与行情同步;
           # 失败不阻断(已提交兜底 sentiment_v2.json 仍生效, report 读旧值但板块不崩)。
-          python sentiment/calc_v2.py || echo "WARN: 情绪指数再生失败, 使用已提交的兜底 sentiment_v2.json"
+          # R230: 情绪源(东财)在云端 CI 被限流会静默回退到已提交旧快照并部署, 导致线上情绪数据永久滞后。
+          # 修复: (1) update_sentiment_txts 已写 sentinel sentiment/.em_fresh(1=东财可达/0=全失败);
+          #       (2) 全失败时跳过 calc_v2, 直接部署已提交的本地刷新快照(带醒目 WARN);
+          #       (3) 跑 calc_v2 后做回归护栏: 若产物 asof 早于已提交快照(东财部分失败导致), 还原为已提交。
+          if [ -f sentiment/.em_fresh ] && [ "$(cat sentiment/.em_fresh)" = "0" ]; then
+            echo "WARN: 东财情绪源在云端 CI 全部抓取失败(.em_fresh=0), 跳过 calc_v2, 直接部署已提交的本地刷新快照 sentiment_v2.json"
+          else
+            python sentiment/calc_v2.py || echo "WARN: 情绪指数再生失败, 使用已提交的兜底 sentiment_v2.json"
+            # R230 回归护栏: calc_v2 产物 asof 早于已提交快照则还原(防东财部分失败致情绪数据回归)
+            python sentiment/guard_sentiment_fresh.py
+          fi
           # R188: 情绪预测精度门禁升为 CI 阻断——若覆盖率偏离名义50%过多/MAE退化/方向命中率异常,
           # 返回非0, set -euo pipefail 会在此中断, 后续 report.py 与 Pages 部署均不执行(阻止脏精度发布)。
           # calc_v2 失败时上面已用兜底 sentiment_v2.json, 此处审计兜底 JSON 的 forecast_acc(健康则不阻断)。

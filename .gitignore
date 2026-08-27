@@ -3,6 +3,7 @@ data.json
 report.html
 version.json
 quality_cert.json
+sentiment/.em_fresh
 
 # ===== Python 缓存 =====
 __pycache__/

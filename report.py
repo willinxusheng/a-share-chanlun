@@ -2532,6 +2532,20 @@ def sentiment_board_html(base, data, results, results_week, scores, last_date,
         buy_th = float(sent.get("buy_th", 20))
         sell_th = float(sent.get("sell_th", 85))
         asof = str(sent.get("asof", "—"))
+        # R230: 情绪数据滞后诚实标注——对比主行情末日(last_date)与情绪 asof,
+        # 滞后≥1日即红标提示(根因: 东财情绪源在云端 CI 被限流, calc_v2 静默回退到已提交旧快照)。
+        _lag = None
+        try:
+            _lag = (datetime.strptime(last_date, "%Y-%m-%d").date()
+                    - datetime.strptime(asof, "%Y-%m-%d").date()).days
+        except Exception:
+            _lag = None
+        _stale_badge = ('<span class="badge" style="background:#dc2626;color:#fff">'
+                        '⚠️ 情绪数据滞后 %d 日（东财行情源在云端 CI 被限流，沿用 %s 成功快照）</span>'
+                        % (_lag, asof)) if (_lag is not None and _lag >= 1) else ""
+        _lag_note = ('；<b style="color:#dc2626">当前情绪数据滞后 %d 日</b>——东财在云端 CI 被限流，'
+                     '需在本机运行 <code>python fetch_data.py &amp;&amp; python sentiment/calc_v2.py</code> '
+                     '后推送刷新' % _lag) if (_lag is not None and _lag >= 1) else ""
         ma5s = sent.get("ma5s")
         ma20s = sent.get("ma20s")
         ma5s = None if ma5s is None else float(ma5s)
@@ -2667,11 +2681,11 @@ def sentiment_board_html(base, data, results, results_week, scores, last_date,
     <section class="panel" id="sentiment-board" style="border-left:4px solid {zcolor}; --sent-accent:{zcolor};">
       <h2 class="sec" id="s2">二、市场情绪
         <span class="badge" style="background:{zcolor}">{zlabel} {final:.1f} 分</span>
-        <span class="badge" style="background:#64748b">asof {asof}</span>
+        <span class="badge" style="background:#64748b">asof {asof}</span>{_stale_badge}
       </h2>
       <p class="sent-asof" style="font-size:12px;color:#64748b;margin:2px 0 12px;line-height:1.7">
         情绪数据由仓库内置 <code>sentiment/calc_v2.py</code> 基于提交的指数日K计算（asof <b>{asof}</b>），
-        更新节奏独立于行情数据（截至 {last_date}）；情绪仅作环境参考，不进入推演数学（R76 监控中）。</p>
+        更新节奏独立于行情数据（截至 {last_date}）{_lag_note}；情绪仅作环境参考，不进入推演数学（R76 监控中）。</p>
       {header}
       <div class="sent-chart-card">{main_chart}</div>
       {acc_html}

@@ -142,8 +142,26 @@ def fetch_em(secid):
     return [], 0
 
 
+def _txt_last_date(fname):
+    """读已存在情绪 txt 的末根日期(用于新鲜度比对, 防止 stale/限流的东财返回旧值覆盖本机已刷新数据)。"""
+    try:
+        with open(fname, encoding="utf-8") as f:
+            rows = [ln for ln in f if ln.strip().startswith("|")
+                    and not ln.strip().startswith("| date")
+                    and not ln.strip().startswith("| ---")]
+        if rows:
+            cols = [c.strip() for c in rows[-1].strip().strip("|").split("|")]
+            return cols[0] if cols else None
+    except Exception:
+        pass
+    return None
+
+
 def update_sentiment_txts():
     """把 4 指数日线刷新为 calc_v2 消费的 txt(8列 | 分隔, 含成交额/换手率)。
+    R230 修复: 仅当抓到更新数据(末根日期>已存在 txt)才覆盖, 防止 stale/限流的东财返回旧值
+    把本机已刷新的数据覆盖掉; 全部失败时写 sentinel sentiment/.em_fresh=0, 供 deploy.yml 跳过
+    calc_v2(直接部署已提交的本地刷新快照), 杜绝"东财在 CI 被限流→静默回退旧快照→线上永久滞后"。
     失败降级: 任一指数异常仅跳过该文件(保留旧值); 全部失败打印 WARN —— 情绪新鲜度
     是增强项, 绝不允许拖垮主行情管线(fetch_data 的主职责是 data.json)。"""
     _dir = os.path.join(_BASE, "sentiment")
@@ -159,6 +177,12 @@ def update_sentiment_txts():
                 print("WARN 情绪数据源 %s 拉取异常(仅%d行), 跳过更新保留旧txt" % (sym, len(rows)))
                 continue
             fname = os.path.join(_dir, _SENT_FILES[sym])
+            new_last = rows[-1][0]
+            old_last = _txt_last_date(fname)
+            if old_last and new_last <= old_last:
+                print("情绪txt %s 已是最新(末根 %s), 跳过覆盖" % (sym, old_last))
+                ok += 1
+                continue
             # 临时文件原子写, 避免中断留下半截 txt 被 calc_v2 解析出脏数据
             _tmp = fname + ".tmp"
             with open(_tmp, "w", encoding="utf-8") as f:
@@ -170,10 +194,16 @@ def update_sentiment_txts():
             os.replace(_tmp, fname)
             ok += 1
             print("情绪txt更新 %s -> %s (%d行, 末根 %s%s)" % (
-                sym, _SENT_FILES[sym], len(rows), rows[-1][0],
+                sym, _SENT_FILES[sym], len(rows), new_last,
                 (" 脏%d" % dirty) if dirty else ""))
         except Exception as e:
             print("WARN 情绪txt %s 更新失败(保留旧值): %s" % (sym, e))
+    # sentinel: 1=至少一只要更新/已最新(东财可达); 0=全部失败(东财在 CI 被限流)
+    try:
+        with open(os.path.join(_dir, ".em_fresh"), "w", encoding="utf-8") as f:
+            f.write("1" if ok > 0 else "0")
+    except Exception:
+        pass
     if ok == 0:
         print("WARN 全部情绪txt更新失败, 情绪数据保持旧快照(不影响主报告)")
     return ok
