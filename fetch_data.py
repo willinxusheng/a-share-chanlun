@@ -142,6 +142,36 @@ def fetch_em(secid):
     return [], 0
 
 
+# R232: 腾讯 gtimg 日线回退(海外/CI 可达)。东财在 CI/沙箱被限流, 而腾讯 gtimg 对 A 股指数
+# 返回完整日K(约1300根), 是 fib 项目在 GitHub 海外 runner 能自动刷新的同款可达源。
+# 腾讯仅给 6 列 OHLCV, 无成交额/换手率; 对指数 成交额≈成交量×指数点位(市值加权
+# Σvol_c·price_c≈(Σvol_c)·均价, 常数项在滚动分位/比值中抵消), 故派生 amount/to 代理,
+# 使 calc_v2 滚动分位/分层比值保持形状一致(scale-invariant), 模型权重/阈值/13门禁零改动。
+TX_SENT_URL = "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=%s,day,,,1300,qfq"
+
+
+def fetch_tx_sentiment(tx_code):
+    """腾讯 gtimg 前复权日线回退: 返回正序 [(date, open, close, high, low, volume, amount_proxy, to_proxy)]。
+    东财不可达时由 update_sentiment_txts 调用; amount_proxy=volume×typical_price, to_proxy=amount_proxy。"""
+    u = TX_SENT_URL % tx_code
+    data = json.loads(_get(u))["data"]
+    node = (data or {}).get(tx_code) or {}
+    kl = node.get("day") or node.get("qfqday") or []
+    out, dirty = [], 0
+    for row in kl:
+        if len(row) < 6:
+            dirty += 1
+            continue
+        try:
+            d, o, c, h, l, v = row[0], float(row[1]), float(row[2]), float(row[3]), float(row[4]), float(row[5])
+            tp = (h + l + c) / 3.0
+            amt = v * tp
+            out.append((d, o, c, h, l, v, amt, amt))
+        except (ValueError, IndexError, ZeroDivisionError):
+            dirty += 1
+    return out, dirty
+
+
 def _txt_last_date(fname):
     """读已存在情绪 txt 的末根日期(用于新鲜度比对, 防止 stale/限流的东财返回旧值覆盖本机已刷新数据)。"""
     try:
@@ -162,7 +192,12 @@ def update_sentiment_txts():
     R230 修复: 仅当抓到更新数据(末根日期>已存在 txt)才覆盖, 防止 stale/限流的东财返回旧值
     把本机已刷新的数据覆盖掉; 全部失败时写 sentinel sentiment/.em_fresh=0, 供 deploy.yml 跳过
     calc_v2(直接部署已提交的本地刷新快照), 杜绝"东财在 CI 被限流→静默回退旧快照→线上永久滞后"。
-    失败降级: 任一指数异常仅跳过该文件(保留旧值); 全部失败打印 WARN —— 情绪新鲜度
+    R232 修复: 东财在 CI/沙箱被限流导致情绪面板永久滞后(曾卡 08-26)。新增腾讯 gtimg 回退
+    (海外/CI 可达, 6 列 OHLCV), 对指数派生 成交额≈成交量×指数点位、换手率=成交额派生代理
+    (市值加权 Σvol_c·price_c≈(Σvol_c)·均价∝amount, 常数项在滚动分位/比值中抵消, 模型零改动),
+    使情绪面板在 CI 自动刷新到最新交易日, 不再依赖本机手动跑。写 sentinel sentiment/.sent_mode
+    供 report 诚实标注数据模式(em=东财全量 / tencent_proxy=腾讯派生代理)。
+    失败降级: 任一指数东财+腾讯均异常才跳过(保留旧值); 全部失败 .em_fresh=0 —— 情绪新鲜度
     是增强项, 绝不允许拖垮主行情管线(fetch_data 的主职责是 data.json)。"""
     _dir = os.path.join(_BASE, "sentiment")
     try:
@@ -170,17 +205,28 @@ def update_sentiment_txts():
     except Exception:
         pass
     ok = 0
+    modes = set()
     for sym, secid in SENTIMENT_SYMBOLS.items():
         try:
-            rows, dirty = fetch_em(secid)
-            if len(rows) < 100:
-                print("WARN 情绪数据源 %s 拉取异常(仅%d行), 跳过更新保留旧txt" % (sym, len(rows)))
-                continue
+            mode = "em"
+            try:
+                rows, dirty = fetch_em(secid)
+                if len(rows) < 100:
+                    raise ValueError("东财返回仅%d行" % len(rows))
+            except Exception as e_em:
+                # R232: 东财不可达 -> 腾讯 gtimg 回退(派生成交额/换手率代理), 情绪面板自动刷新
+                rows, dirty = fetch_tx_sentiment(sym)
+                mode = "tencent_proxy"
+                if len(rows) < 100:
+                    print("WARN 情绪 %s 东财与腾讯均失败, 保留旧txt" % sym)
+                    continue
+                print("INFO 情绪 %s 东财不可达 -> 腾讯 gtimg 回退(派生成交额/换手率代理)" % sym)
+            modes.add(mode)
             fname = os.path.join(_dir, _SENT_FILES[sym])
             new_last = rows[-1][0]
             old_last = _txt_last_date(fname)
             if old_last and new_last <= old_last:
-                print("情绪txt %s 已是最新(末根 %s), 跳过覆盖" % (sym, old_last))
+                print("情绪txt %s 已是最新(末根 %s, %s), 跳过覆盖" % (sym, old_last, mode))
                 ok += 1
                 continue
             # 临时文件原子写, 避免中断留下半截 txt 被 calc_v2 解析出脏数据
@@ -193,12 +239,18 @@ def update_sentiment_txts():
                             % (d, o, c, h, l, v, a, t))
             os.replace(_tmp, fname)
             ok += 1
-            print("情绪txt更新 %s -> %s (%d行, 末根 %s%s)" % (
-                sym, _SENT_FILES[sym], len(rows), new_last,
+            print("情绪txt更新 %s -> %s (%s, %d行, 末根 %s%s)" % (
+                sym, _SENT_FILES[sym], mode, len(rows), new_last,
                 (" 脏%d" % dirty) if dirty else ""))
         except Exception as e:
             print("WARN 情绪txt %s 更新失败(保留旧值): %s" % (sym, e))
-    # sentinel: 1=至少一只要更新/已最新(东财可达); 0=全部失败(东财在 CI 被限流)
+    # 模式标记(供 report 诚实标注): 任一指数走腾讯代理则整体标 tencent_proxy
+    try:
+        with open(os.path.join(_dir, ".sent_mode"), "w", encoding="utf-8") as f:
+            f.write("tencent_proxy" if "tencent_proxy" in modes else "em")
+    except Exception:
+        pass
+    # sentinel: 1=至少一只要更新/已最新(东财或腾讯可达); 0=全部失败(东财在 CI 被限流)
     try:
         with open(os.path.join(_dir, ".em_fresh"), "w", encoding="utf-8") as f:
             f.write("1" if ok > 0 else "0")

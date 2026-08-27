@@ -4,6 +4,7 @@ report.html
 version.json
 quality_cert.json
 sentiment/.em_fresh
+sentiment/.sent_mode
 
 # ===== Python 缓存 =====
 __pycache__/

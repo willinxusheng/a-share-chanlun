@@ -2546,6 +2546,19 @@ def sentiment_board_html(base, data, results, results_week, scores, last_date,
         _lag_note = ('；<b style="color:#dc2626">当前情绪数据滞后 %d 日</b>——东财在云端 CI 被限流，'
                      '需在本机运行 <code>python fetch_data.py &amp;&amp; python sentiment/calc_v2.py</code> '
                      '后推送刷新' % _lag) if (_lag is not None and _lag >= 1) else ""
+        # R232: 数据模式诚实标注。CI/沙箱东财被限流时走腾讯 gtimg 回退, 成交额/换手率为
+        # OHLCV 派生代理(指数 成交额≈成交量×指数点位, 滚动分位/比值 scale-invariant, 模型零改动)。
+        _mode_badge = ""
+        _mode_note = ""
+        try:
+            _mode = open(os.path.join(base, "sentiment", ".sent_mode"), encoding="utf-8").read().strip()
+            if _mode == "tencent_proxy":
+                _mode_badge = ('<span class="badge" style="background:#0891b2;color:#fff">'
+                               '数据源: 腾讯回退(成交额/换手率为 OHLCV 派生代理)</span>')
+                _mode_note = ('；<b style="color:#0891b2">当前情绪走腾讯 gtimg 回退</b>——东财在云端 CI 被限流，'
+                              '成交额/换手率由成交量×指数点位派生(模型权重/阈值不变, 精度门禁已验证), 仅供研判参考')
+        except Exception:
+            pass
         ma5s = sent.get("ma5s")
         ma20s = sent.get("ma20s")
         ma5s = None if ma5s is None else float(ma5s)
@@ -2681,11 +2694,11 @@ def sentiment_board_html(base, data, results, results_week, scores, last_date,
     <section class="panel" id="sentiment-board" style="border-left:4px solid {zcolor}; --sent-accent:{zcolor};">
       <h2 class="sec" id="s2">二、市场情绪
         <span class="badge" style="background:{zcolor}">{zlabel} {final:.1f} 分</span>
-        <span class="badge" style="background:#64748b">asof {asof}</span>{_stale_badge}
+        <span class="badge" style="background:#64748b">asof {asof}</span>{_stale_badge}{_mode_badge}
       </h2>
       <p class="sent-asof" style="font-size:12px;color:#64748b;margin:2px 0 12px;line-height:1.7">
         情绪数据由仓库内置 <code>sentiment/calc_v2.py</code> 基于提交的指数日K计算（asof <b>{asof}</b>），
-        更新节奏独立于行情数据（截至 {last_date}）{_lag_note}；情绪仅作环境参考，不进入推演数学（R76 监控中）。</p>
+        更新节奏独立于行情数据（截至 {last_date}）{_lag_note}{_mode_note}；情绪仅作环境参考，不进入推演数学（R76 监控中）。</p>
       {header}
       <div class="sent-chart-card">{main_chart}</div>
       {acc_html}
