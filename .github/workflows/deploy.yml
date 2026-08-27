@@ -46,11 +46,16 @@ jobs:
             echo "fetch attempt $i failed, retry in 30s"; sleep 30
           done
           if [ "$ok" -ne 1 ]; then
-            # Bug 修复：连续 3 次抓取失败必须中止发布，否则空/坏 data.json
-            # 会被 report.py 渲染成损坏站点静默上线（fetch_data.py 现已拒写空数据，
-            # 此处再兜底，确保任务整体失败而非发布脏数据）
-            echo "ERROR: 行情抓取连续 3 次失败, 中止发布避免部署脏数据"
-            exit 1
+            # R228: 行情源(东财)在 CI 偶发失败不应阻断发布——否则连只改展示层的提交
+            # (如 R227 改"生成时间"标注)都会被卡住不上线。改用仓库已提交的 data.json
+            # (上次成功抓取产物, 非脏数据) 兜底继续部署, 仅行情降级至上一成功交易日;
+            # 仅当仓库根本无 data.json(首次/损坏)才真正中止, 保留脏数据防护。
+            if [ -s data.json ]; then
+              echo "WARN: 行情抓取连续 3 次失败, 用已提交的 data.json 兜底继续部署(行情降级至上一成功交易日)"
+            else
+              echo "ERROR: 行情抓取失败且无可用 data.json, 中止发布"
+              exit 1
+            fi
           fi
           python gen_quality_cert.py
           # R177b: 情绪指数必须在 report.py 之前重算——fetch_data 已刷新 4 个情绪 txt
