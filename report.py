@@ -1079,6 +1079,7 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
     _p_cv.append("主路径概率 p_main 由历史命中率校准，样本外方向准确性有限：walk-forward 回测显示 T+8 短周期方向命中仅≈43%（近随机），较长周期亦非高置信；p_main 宜作概率参考而非方向定论")
     if p_main < 0.40:
         _p_cv.append("当前 p_main 处于低位（模型偏空），历史回测显示该区间实际后市多涨（逆向信号），可结合「别人恐惧我贪婪」的逆向思维看待，而非顺势看空")
+    _p_cv.append("置信带覆盖率诚实提示：walk-forward 回测显示，部分高波动指数（如创业板）T+30 置信带覆盖率约 86%，略低于 90% 名义目标——区间端点仅供参考，不构成精确点位预测")
     if _p_cv:
         note += "\n" + "；".join("⚠ " + _s for _s in _p_cv) + "。"
     # ---- 悬浮交互数据：历史区真实收盘价 + 投影区密集采样（供 JS initForecast）----
