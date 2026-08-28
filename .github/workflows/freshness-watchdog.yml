@@ -26,6 +26,9 @@ name: 数据新鲜度看门狗
     - cron: '0 13 * * 1-5'
     - cron: '0 15 * * 1-5'
   workflow_dispatch:      # 手动触发（Actions 页面 → 本工作流 → Run workflow）
+  # R239 临时: 为即时验证"看门狗到底能不能真的跑起来"而临时开启 push 触发。
+  # 旭总反复表达不放心, 与其口头保证不如当场跑一次拿证据。验证通过后立即移除。
+  push:
 
 permissions:
   contents: read

@@ -76,6 +76,23 @@ def fetch_deployed_date(url=None, bust_cache=True, retries=5, retry_sleep=10):
     raise last
 
 
+def parse_sentiment_asof(html):
+    """R239: 从报告 HTML 解析情绪板块的 asof 日期。
+
+    为什么必须单独盯它（上轮巡检的覆盖盲区）：
+    deploy.yml 有一条路径是「情绪 4 指数全部抓取失败(.em_fresh=0)
+    -> 跳过 calc_v2 -> 直接部署已提交的 sentiment_v2.json 快照」。
+    那种情况下行情照常更新(数据区间前进)，但**情绪会静默冻结在旧日期**；
+    而只比数据区间的巡检会误判为"一切正常"。情绪正是旭总最初反复反馈的对象，
+    故必须与行情分开校验。
+    """
+    if not html:
+        return None
+    # 报告里形如: "asof 2026-08-28" / "asof <b>2026-08-28</b>"
+    m = re.search(r"asof[^0-9]{0,40}(\d{4}-\d{2}-\d{2})", html)
+    return m.group(1) if m else None
+
+
 def fetch_source_date():
     """取源端最新交易日（腾讯 gtimg 上证日线末根日期）。"""
     raw = _http_get(SOURCE_URL)
@@ -130,12 +147,25 @@ def main(argv=None):
         return 1
     print("线上数据截止日: %s" % dep_date)
 
-    # 3) 比对
-    if dep_date >= src_date:
-        print("✅ 数据已最新（线上 %s >= 源端 %s），无需处理" % (dep_date, src_date))
+    # 3) 情绪 asof 单独校验（R239：补上"行情更新、情绪却静默冻结"的覆盖盲区）
+    sent_date = parse_sentiment_asof(_html)
+    if sent_date:
+        print("线上情绪 asof: %s" % sent_date)
+    else:
+        print("WARN 未解析到情绪 asof（报告结构可能变更），本轮仅校验行情数据")
+
+    # 4) 比对：行情与情绪都必须 >= 源端最新交易日
+    stale = []
+    if dep_date < src_date:
+        stale.append("行情数据 线上 %s < 源端 %s" % (dep_date, src_date))
+    if sent_date and sent_date < src_date:
+        stale.append("情绪数据 线上 %s < 源端 %s" % (sent_date, src_date))
+
+    if not stale:
+        print("✅ 行情与情绪均已最新（均 >= 源端 %s），无需处理" % src_date)
         return 0
 
-    print("❌ 数据落后：线上 %s < 源端 %s" % (dep_date, src_date))
+    print("❌ 数据落后：" + "；".join(stale))
     if auto_fix:
         ok, msg = trigger_redeploy()
         print("自动补救: %s" % ("成功" if ok else "未生效") + " -> " + msg)
