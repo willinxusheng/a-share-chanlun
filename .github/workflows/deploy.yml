@@ -64,6 +64,21 @@ jobs:
         with:
           python-version: '3.13'
 
+      - name: 恢复上次成功的行情数据（让"抓取失败兜底"真正可用）
+        # R238 修掉一个潜伏的"假兜底"：data.json 被 .gitignore 且从不入库，
+        # 所以下面 R228 那条「抓取失败 -> 用仓库已提交的 data.json 兜底继续部署」
+        # **永远不可能生效**（仓库里根本没有该文件）→ 抓取一旦连续失败就直接 exit 1
+        # 中止发布，连情绪板块也跟着不更新。
+        # 改用 Actions 缓存跨运行保留上次成功的 data.json（约 1MB）：
+        # 既不破坏"data 不入库"的纪律，又让兜底名副其实。
+        # 键含 run_id：每次成功运行都能写入一份新缓存；restore-keys 前缀匹配取最近一份。
+        uses: actions/cache@v4
+        with:
+          path: data.json
+          key: chanlun-data-${{ github.run_id }}
+          restore-keys: |
+            chanlun-data-
+
       - name: 抓取行情 + 生成报告（带重试）
         run: |
           set -euo pipefail
@@ -78,7 +93,8 @@ jobs:
             # (上次成功抓取产物, 非脏数据) 兜底继续部署, 仅行情降级至上一成功交易日;
             # 仅当仓库根本无 data.json(首次/损坏)才真正中止, 保留脏数据防护。
             if [ -s data.json ]; then
-              echo "WARN: 行情抓取连续 3 次失败, 用已提交的 data.json 兜底继续部署(行情降级至上一成功交易日)"
+              # R238: 措辞更正 —— data.json 并不入库, 这里用的是上一步缓存恢复的上次成功抓取产物
+              echo "WARN: 行情抓取连续 3 次失败, 用缓存恢复的上次成功 data.json 兜底继续部署(行情降级至上一成功交易日, 情绪等其余部分仍照常更新)"
             else
               echo "ERROR: 行情抓取失败且无可用 data.json, 中止发布"
               exit 1
