@@ -1,0 +1,63 @@
+name: 数据新鲜度看门狗
+
+# R237：把"云端数据没更新"从【靠旭总肉眼发现 → 来反馈 → 我再修】
+# 改成【自动巡检 → 自动补救 → 自动告警】。这是终结"同一问题反复折腾"的最后一块拼图。
+#
+# 它做什么：
+#   1. 取源端最新交易日（腾讯 gtimg 上证日线末根，海外 CI 实测可达，见 R232）
+#   2. 取线上已部署报告的「数据区间」截止日（带时间戳参数绕开 Pages CDN 边缘缓存，见 R229）
+#   3. 线上 < 源端  ->  说明当天数据没更新成功：
+#        a) 自动触发 deploy.yml 重新部署一次（自救）
+#        b) 以失败结束本 workflow -> GitHub 发邮件/在 Actions 显示红叉告警
+#   4. 线上 >= 源端 -> 正常结束（退出 0）
+#
+# 为何不会误报：不依赖节假日日历。节假日源端不前进、线上也不前进，两者始终相等；
+# 只有"源端已有新交易日、线上却停在旧日期"才判落后 —— 这正是我们真正要抓的情况。
+#
+# 补救/告警不保证一定成功（GitHub 自身可能故障），但它把"沉默失败"变成了"响亮失败"：
+# 出问题你会被主动通知，而不是自己发现后再来追问一轮。
+
+"on":
+  schedule:
+    # 北京 21:00 与 23:30 各一次（UTC 13:00 / 15:30）。
+    # 设两个是互为冗余：GitHub schedule 是 best-effort，会延迟甚至漏跑（见 R234/R235）。
+    # 两个点都落在所有部署窗口（北京 16:00/16:30/17:00/20:00）之后，
+    # 确保巡检时当天的部署尝试已全部结束，不会把"还没跑"误判成"跑失败了"。
+    - cron: '0 13 * * 1-5'
+    - cron: '0 15 * * 1-5'
+  workflow_dispatch:      # 手动触发（Actions 页面 → 本工作流 → Run workflow）
+
+permissions:
+  contents: read
+  actions: write          # 落后时用于触发 deploy.yml 自救
+
+concurrency:
+  group: freshness-watchdog
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出源码
+        uses: actions/checkout@v7
+
+      - name: 配置 Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+
+      - name: 巡检线上数据新鲜度
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -uo pipefail
+          # 退出码: 0=已最新; 1=落后(脚本内已尝试自动触发重新部署)
+          # 不用 set -e —— 需要捕获退出码后再决定是否以失败结束本 job
+          python check_freshness.py
+          rc=$?
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::线上数据落后于源端最新交易日。已尝试自动触发重新部署，请查看 deploy 工作流结果；若仍落后请人工介入。"
+            exit 1
+          fi
+          echo "✅ 线上数据已是最新，无需处理"
