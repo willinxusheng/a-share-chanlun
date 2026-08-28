@@ -26,6 +26,8 @@ name: 数据新鲜度看门狗
     - cron: '0 13 * * 1-5'
     - cron: '0 15 * * 1-5'
   workflow_dispatch:      # 手动触发（Actions 页面 → 本工作流 → Run workflow）
+  # R240 临时: 再次开启 push 触发, 用于实测"自救触发权限"这最后一个未知数。验证后移除。
+  push:
   # R239 现场验证已完成并移除临时 push 触发:
   # 2026-08-28 20:10(北京) 借临时 push 触发实跑一次, 8 秒完成, conclusion=success,
   # 证明看门狗能真正执行并正确判定"行情与情绪均已最新"(落后则会 exit 1 告警)。
@@ -65,3 +67,18 @@ jobs:
             exit 1
           fi
           echo "✅ 线上数据已是最新，无需处理"
+
+      - name: "[临时R240] 实测自救触发权限"
+        # 目的: 旭总连续三次表示不放心。此前每个环节都已实战验证,
+        # 唯独"数据落后时 gh workflow run deploy.yml 自救"因数据一直新鲜而从未真正触发过,
+        # 且 GitHub 对 GITHUB_TOKEN 的级联有限制 —— 不能只靠理论推断, 必须实测。
+        # 本步骤实测并把明确结果打进日志, 验证通过后移除。
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "=== 实测 GITHUB_TOKEN 能否触发 deploy.yml ==="
+          if gh workflow run deploy.yml --ref main; then
+            echo "RESULT_SELFHEAL=OK —— GITHUB_TOKEN 可成功触发 deploy.yml, 自救链路可用"
+          else
+            echo "RESULT_SELFHEAL=FAIL —— GITHUB_TOKEN 无法触发 deploy.yml, 自救需改方案"
+          fi
