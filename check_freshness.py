@@ -45,21 +45,34 @@ def _http_get(url, timeout=30):
     return urllib.request.urlopen(req, timeout=timeout).read().decode("utf-8", "replace")
 
 
-def fetch_deployed_date(url=None, bust_cache=True):
+def fetch_deployed_date(url=None, bust_cache=True, retries=3, retry_sleep=5):
     """抓取线上报告，解析「数据区间：A ~ B」中的 B（已部署数据截止日）。
 
     加时间戳参数绕开 GitHub Pages CDN 边缘缓存，否则可能读到旧副本造成误报
     （同类问题见 R229：服务端已更新但边缘节点吐旧版）。
+    网络偶发抖动会重试 retries 次，仍失败则抛异常 —— 由调用方判定为"巡检失效"并告警，
+    绝不静默当"正常"（R237b：巡检自身失效必须响亮失败，否则等于装了假监控）。
     """
     url = url or SITE_URL
     if bust_cache:
         url += ("&" if "?" in url else "?") + "_=%d" % int(time.time())
-    html = _http_get(url)
-    # 形如：数据区间：2021-01-04 ~ 2026-08-28
-    m = re.search(r"数据区间[^0-9]{0,10}[\d-]{8,10}\s*[~～]\s*([\d]{4}-[\d]{2}-[\d]{2})", html)
-    if m:
-        return m.group(1), html
-    return None, html
+    last = None
+    for i in range(1, retries + 1):
+        try:
+            html = _http_get(url)
+            # 形如：数据区间：2021-01-04 ~ 2026-08-28
+            m = re.search(
+                r"数据区间[^0-9]{0,10}[\d-]{8,10}\s*[~～]\s*([\d]{4}-[\d]{2}-[\d]{2})", html)
+            if m:
+                return m.group(1), html
+            last = RuntimeError("页面已抓取(%d 字节)但未匹配到「数据区间 ~ 日期」，"
+                                "可能报告结构已变更" % len(html))
+        except Exception as e:
+            last = e
+        if i < retries:
+            print("   第 %d 次抓取/解析失败，%d 秒后重试: %r" % (i, retry_sleep, last))
+            time.sleep(retry_sleep)
+    raise last
 
 
 def fetch_source_date():
@@ -96,23 +109,24 @@ def main(argv=None):
     print("巡检地址: %s" % SITE_URL)
 
     # 1) 源端最新交易日（判定基准）
+    # R237b: 巡检自身失效(拿不到基准/读不到页面/解析不出日期)一律退出 1 告警。
+    # 若此时静默返回 0, 等于"监控坏了还报平安" —— 正是要消灭的沉默失败。
     try:
         src_date = fetch_source_date()
     except Exception as e:
-        print("ERROR 无法获取源端最新交易日: %r" % (e,))
-        # 拿不到基准时不误判失败，退出 0 避免噪音告警
-        return 0
+        print("ERROR 巡检失效：无法获取源端最新交易日: %r" % (e,))
+        return 1
     print("源端最新交易日: %s" % src_date)
 
-    # 2) 线上已部署数据截止日
+    # 2) 线上已部署数据截止日（失败会在函数内重试后抛出）
     try:
         dep_date, _html = fetch_deployed_date()
     except Exception as e:
-        print("ERROR 无法读取线上报告: %r" % (e,))
-        return 0
+        print("ERROR 巡检失效：无法读取/解析线上报告: %r" % (e,))
+        return 1
     if not dep_date:
-        print("ERROR 线上报告未解析到「数据区间」，无法判定（可能是页面结构变更）")
-        return 0
+        print("ERROR 巡检失效：线上报告未解析到「数据区间」（可能报告结构已变更）")
+        return 1
     print("线上数据截止日: %s" % dep_date)
 
     # 3) 比对
