@@ -45,7 +45,7 @@ def _http_get(url, timeout=30):
     return urllib.request.urlopen(req, timeout=timeout).read().decode("utf-8", "replace")
 
 
-def fetch_deployed_date(url=None, bust_cache=True, retries=3, retry_sleep=5):
+def fetch_deployed_date(url=None, bust_cache=True, retries=5, retry_sleep=10):
     """抓取线上报告，解析「数据区间：A ~ B」中的 B（已部署数据截止日）。
 
     加时间戳参数绕开 GitHub Pages CDN 边缘缓存，否则可能读到旧副本造成误报
@@ -59,7 +59,8 @@ def fetch_deployed_date(url=None, bust_cache=True, retries=3, retry_sleep=5):
     last = None
     for i in range(1, retries + 1):
         try:
-            html = _http_get(url)
+            # 线上报告约 2MB, 30s 在慢链路上会超时并被误判成"数据落后" -> 放宽到 60s
+            html = _http_get(url, timeout=60)
             # 形如：数据区间：2021-01-04 ~ 2026-08-28
             m = re.search(
                 r"数据区间[^0-9]{0,10}[\d-]{8,10}\s*[~～]\s*([\d]{4}-[\d]{2}-[\d]{2})", html)
