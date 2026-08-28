@@ -97,12 +97,30 @@ jobs:
           else
             python sentiment/calc_v2.py || echo "WARN: 情绪指数再生失败, 使用已提交的兜底 sentiment_v2.json"
             # R230 回归护栏: calc_v2 产物 asof 早于已提交快照则还原(防东财部分失败致情绪数据回归)
-            python sentiment/guard_sentiment_fresh.py
+            # R238: 护栏只是兜底辅助, 自身异常不该冻结整个发布 -> 降级为告警
+            python sentiment/guard_sentiment_fresh.py || echo "WARN: 情绪回归护栏执行异常, 已忽略(不影响发布)"
           fi
-          # R188: 情绪预测精度门禁升为 CI 阻断——若覆盖率偏离名义50%过多/MAE退化/方向命中率异常,
-          # 返回非0, set -euo pipefail 会在此中断, 后续 report.py 与 Pages 部署均不执行(阻止脏精度发布)。
-          # calc_v2 失败时上面已用兜底 sentiment_v2.json, 此处审计兜底 JSON 的 forecast_acc(健康则不阻断)。
-          python audit_sentiment_forecast_acc.py
+          # R188→R238: 情绪预测精度门禁(分级)。
+          #   R188 把它升为 CI 阻断(覆盖率偏离名义50%过多 / MAE退化 / 方向命中率异常 -> exit 1),
+          #   对"模型或代码变更后拦截脏精度发布"这个目的而言是对的, 予以保留。
+          #   但它同时成了每日数据刷新的**单点故障**: 每日刷新根本不改模型,
+          #   却可能因市场状态漂移让回测覆盖率越界, 从而冻结整个看板(连主缠论报告都不更新),
+          #   与"每个交易日数据必须当天上线"的核心诉求直接冲突。
+          # 故按触发类型分级:
+          #   - 定时刷新(schedule), 或本次未改动任何 .py(纯数据/时间戳触发) -> 只告警, 不阻断
+          #   - push 且改动了 .py(代码/模型变更)                            -> 严格阻断(保持 R188 强度)
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            GATE_MODE=warn
+          else
+            CHANGED_PY=$(git diff --name-only HEAD~1 HEAD 2>/dev/null | grep -E '\.py$' || true)
+            if [ -z "$CHANGED_PY" ]; then GATE_MODE=warn; else GATE_MODE=block; fi
+          fi
+          echo "预测精度门禁模式: ${GATE_MODE} (事件=${{ github.event_name }})"
+          if [ "${GATE_MODE}" = "block" ]; then
+            python audit_sentiment_forecast_acc.py
+          else
+            python audit_sentiment_forecast_acc.py || echo "::warning::情绪预测精度指标超出合理区间 —— 本次为数据刷新(未改动代码), 按 R238 降级为告警不阻断, 保证当日数据照常上线; 若持续偏离请检查模型"
+          fi
           # R204b-A: 每次部署前同步另一斐波那契项目(A-share-Fibonacci, 已 public)的波浪节点快照,
           # 使跨项目锚点对照随其波浪节点更新而更新。拉取失败不阻断(沿用已提交的内置快照兜底)。
           # 该仓库已设为 public, 无需 token 即可 curl 公开 raw 文件。
