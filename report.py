@@ -2557,8 +2557,17 @@ def sentiment_board_html(base, data, results, results_week, scores, last_date,
                                '数据源: 腾讯回退(成交额/换手率为 OHLCV 派生代理)</span>')
                 _mode_note = ('；<b style="color:#0891b2">当前情绪走腾讯 gtimg 回退</b>——东财在云端 CI 被限流，'
                               '成交额/换手率由成交量×指数点位派生(模型权重/阈值不变, 精度门禁已验证), 仅供研判参考')
+            elif _mode == "em":
+                # R233: 东财在 CI 直达(海外 runner 可出网至东财 https 端点)时也要常驻标注,
+                # 否则用户无从确认面板已刷新且数据来自全量源, 反复误判"没更新"。
+                _mode_badge = ('<span class="badge" style="background:#16a34a;color:#fff">'
+                               '数据源: 东财全量(含成交额/换手率)</span>')
+            else:
+                _mode_badge = ('<span class="badge" style="background:#d97706;color:#fff">'
+                               '数据源: 未知(.sent_mode=%s)</span>' % _mode)
         except Exception:
-            pass
+            _mode_badge = ('<span class="badge" style="background:#d97706;color:#fff">'
+                           '数据源: 未知(读取 .sent_mode 失败)</span>')
         ma5s = sent.get("ma5s")
         ma20s = sent.get("ma20s")
         ma5s = None if ma5s is None else float(ma5s)
