@@ -187,6 +187,49 @@ def _txt_last_date(fname):
     return None
 
 
+def _bj_now():
+    """R236: 北京时间(UTC+8)当前时刻 -> (日期字符串, 小时)。
+
+    所有"当日 bar 是否已收盘"的判定都必须用北京时间：
+    GitHub runner 本地时区是 UTC，直接用 datetime.now().hour 会误判
+    （同类问题见 R167 修复）。"""
+    n = datetime.now(timezone(timedelta(hours=8)))
+    return n.date().isoformat(), n.hour
+
+
+def _trim_unclosed_bar(rows, bj_now=None):
+    """R236: 丢弃"未收盘的当日 bar"。
+
+    源端(东财/腾讯)盘中返回的是"进行中"的当日 K 线 —— 成交量/成交额/换手率/振幅
+    都只有半天，若直接入库会让 calc_v2 算出的情绪分数失真（量能维度被系统性低估）。
+    与 fetch_data.main() 对主行情的处理(R164/R167: 北京 <15:00 丢弃末根)口径保持一致。
+    bj_now 可注入以便单测（生产不传）。"""
+    if not rows:
+        return rows
+    today, hour = bj_now or _bj_now()
+    if rows[-1][0] == today and hour < 15:
+        return rows[:-1]
+    return rows
+
+
+def _should_skip_txt(old_last, new_last, bj_now=None):
+    """R236: 是否跳过覆盖情绪 txt。
+
+    原逻辑 `new_last <= old_last 即跳过` 有致命副作用：
+    若盘中把半截的当日 bar 写了进去，收盘后源端返回的完整 bar 末根日期与旧值相同，
+    会被判定为"已最新"而跳过覆盖 —— 半截数据永久卡在 txt 里，直到下一交易日才被顶掉。
+    故补充：收盘后(新末根==今天 且 北京>=15:00)强制重写，用完整 bar 顶掉盘中半截数据。
+    bj_now 可注入以便单测。"""
+    if not old_last:
+        return False
+    today, hour = bj_now or _bj_now()
+    if new_last > old_last:
+        return False
+    if new_last == old_last and new_last == today and hour >= 15:
+        return False      # 收盘后同日 -> 强制重写, 顶掉可能的半截 bar
+    return True
+
+
 def update_sentiment_txts():
     """把 4 指数日线刷新为 calc_v2 消费的 txt(8列 | 分隔, 含成交额/换手率)。
     R230 修复: 仅当抓到更新数据(末根日期>已存在 txt)才覆盖, 防止 stale/限流的东财返回旧值
@@ -221,11 +264,13 @@ def update_sentiment_txts():
                     print("WARN 情绪 %s 东财与腾讯均失败, 保留旧txt" % sym)
                     continue
                 print("INFO 情绪 %s 东财不可达 -> 腾讯 gtimg 回退(派生成交额/换手率代理)" % sym)
+            # R236: 盘中丢弃未收盘的当日 bar(与 main() 口径一致), 防半截数据入库
+            rows = _trim_unclosed_bar(rows)
             modes.add(mode)
             fname = os.path.join(_dir, _SENT_FILES[sym])
             new_last = rows[-1][0]
             old_last = _txt_last_date(fname)
-            if old_last and new_last <= old_last:
+            if _should_skip_txt(old_last, new_last):
                 print("情绪txt %s 已是最新(末根 %s, %s), 跳过覆盖" % (sym, old_last, mode))
                 ok += 1
                 continue
