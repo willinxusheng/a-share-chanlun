@@ -29,3 +29,11 @@ _c*.svg
 report_today_*.html
 report_r*.html
 *.bak
+
+# ===== 历轮迭代遗留的 dev 脚手架/中间产物（R242: 防止 git add . 误吞入仓）=====
+# 这些是回测/实验/校准脚本与其产物, 每次 git add . 都可能被扫进提交污染仓库
+# (曾见 18 个未跟踪文件堆在仓库根目录)。已核实不命中任何已跟踪文件。
+backtest_*
+exp_*
+prob_cal*
+report_regen*
