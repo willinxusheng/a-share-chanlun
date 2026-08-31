@@ -123,9 +123,12 @@ jobs:
           #   却可能因市场状态漂移让回测覆盖率越界, 从而冻结整个看板(连主缠论报告都不更新),
           #   与"每个交易日数据必须当天上线"的核心诉求直接冲突。
           # 故按触发类型分级:
-          #   - 定时刷新(schedule), 或本次未改动任何 .py(纯数据/时间戳触发) -> 只告警, 不阻断
-          #   - push 且改动了 .py(代码/模型变更)                            -> 严格阻断(保持 R188 强度)
-          if [ "${{ github.event_name }}" = "schedule" ]; then
+          #   - 定时刷新(schedule)、外部定时(workflow_dispatch)、或本次未改动任何 .py -> 只告警, 不阻断
+          #   - push 且改动了 .py(代码/模型变更)                                      -> 严格阻断(保持 R188 强度)
+          # R243: workflow_dispatch 必须并入 warn —— cron-job.org 外部定时正是用 dispatch 触发,
+          #   它部署的是 main 上已存在的代码(不带来新代码), 若还去查"最近提交是否改过 .py",
+          #   只要 main 最近一次提交碰过代码, 外部定时就会随机被门禁误阻断, 一劳永逸方案即告失败。
+          if [ "${{ github.event_name }}" = "schedule" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             GATE_MODE=warn
           else
             CHANGED_PY=$(git diff --name-only HEAD~1 HEAD 2>/dev/null | grep -E '\.py$' || true)
