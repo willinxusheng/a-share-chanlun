@@ -16,8 +16,19 @@ SYMBOLS = {
 }
 
 _END = (datetime.now() + timedelta(days=400)).strftime("%Y-%m-%d")
-TX_URL = ("https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=%s,%s,2021-01-01,"
-          + _END + ",1600,qfq")
+# R246: 腾讯 fqkline CDN 缓存绕过 —— 实测(2026-09-01)发现:
+#   "指定起始日期"形式的精确 URL(param=sh000001,day,2021-01-01,<今天+400天>,1600,qfq)
+#   会被腾讯 CDN 缓存: 盘中首次请求时源端当日数据未更新, 缓存了旧收盘(08-31),
+#   盘后 CI 用同一 URL 再请求仍命中缓存拿不到当日数据(09-01);
+#   而同源 count 形式(param=sh000001,day,,,1300,qfq)不受影响。
+#   验证: 同一 URL 微调 count(1601/1599)即绕过缓存返回最新。
+# 修复: count 参数随运行时间动态化(1700+分钟秒偏移, 区间1700~1999), 每次运行 URL 唯一, 强制 CDN 回源取最新;
+#       count 仅作返回条数上限, 日线实际 1373 根, 1700 已足够且经实测合法(count 超约 2000 接口报错,
+#       1700~1999 为验证过的安全区间, 且均能绕过 1600 精确 URL 的陈旧缓存)。
+def _tx_url(symbol, period):
+    _b = (datetime.now().minute * 60 + datetime.now().second) % 300
+    return ("https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=%s,%s,2021-01-01,"
+            + _END + ",%d,qfq") % (symbol, period, 1700 + _b)
 SINA_URL = "https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData?symbol=%s&scale=240&ma=no&datalen=5"
 UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 _BASE = os.path.dirname(os.path.abspath(__file__))
@@ -39,7 +50,7 @@ def _get(url):
 
 
 def fetch_tx(symbol, period):
-    data = json.loads(_get(TX_URL % (symbol, period)))["data"][symbol]
+    data = json.loads(_get(_tx_url(symbol, period)))["data"][symbol]
     klines = data.get("qfqday") or data.get("qfqweek") or data.get("qfqmonth") or data.get("day") or data.get("week") or data.get("month") or []
     out = []
     dirty = 0
