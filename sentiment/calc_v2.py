@@ -397,14 +397,48 @@ def _wquant(vals, weights, q):
     return vs[-1]
 
 
+# R245: A股交易日历 —— 预测带日期必须跳过节假日, 否则国庆/春节等长假期间
+# 的 x 轴会标注"有预测值"的休市日期, 且 30 个预测点被横向拉伸错位(实测量产)。
+# 两层规则:
+#   1) 通用固定法定日(任何年份兜底): 元旦 1/1、劳动节 5/1-5/3、国庆 10/1-10/7。
+#      (A股周末本就休市, 由 weekday 过滤; 补班上班的周六/周日 A股不开市, 无需处理)
+#   2) 年度表 _CN_HOLIDAYS(农历节日依赖年度官方安排, 预测带仅覆盖未来 30 天,
+#      表覆盖当年即可; 次年 1 月起需在年末按国务院通知补充一次)。
+# 2026 年官方安排(国务院办公厅 2025-11-04 发布): 春节 2/15-2/23、清明 4/4-4/6、
+# 劳动 5/1-5/5、端午 6/19-6/21、中秋 9/25-9/27、国庆 10/1-10/7; 表中仅列工作日休市日。
+_CN_HOLIDAYS = {
+    "2026": {"01-01", "01-02",
+             "02-16", "02-17", "02-18", "02-19", "02-20", "02-23",
+             "04-06",
+             "05-01", "05-04", "05-05",
+             "06-19",
+             "09-25",
+             "10-01", "10-02", "10-05", "10-06", "10-07"},
+}
+
+
+def _is_holiday(d):
+    if d.weekday() >= 5:
+        return True
+    if d.month == 1 and d.day == 1:
+        return True
+    if d.month == 5 and 1 <= d.day <= 3:
+        return True
+    if d.month == 10 and 1 <= d.day <= 7:
+        return True
+    tbl = _CN_HOLIDAYS.get(str(d.year))
+    return bool(tbl) and d.strftime("%m-%d") in tbl
+
+
 def _future_dates(start, n):
-    """从 start(YYYY-MM-DD) 起生成 n 个未来交易日(跳过周末)。"""
+    """从 start(YYYY-MM-DD) 起生成 n 个未来 A股交易日(跳过周末 + 节假日, 见 R245)。"""
     d = date.fromisoformat(start)
     out = []
     while len(out) < n:
         d += timedelta(days=1)
-        if d.weekday() < 5:
-            out.append(d.isoformat())
+        if _is_holiday(d):
+            continue
+        out.append(d.isoformat())
     return out
 
 
@@ -599,6 +633,11 @@ def backtest_sentiment_forecast(valid, horizon=30, k=10, ctx=20,
         cur_norm = [x - cur[0] for x in cur]
         cur_regime = regimes[t] if t < len(regimes) else None
         today = scores[t - 1]
+        # R245: 度量口径统一 —— 展示层情绪分为 clamp(score,0,100), 预测带亦钳制在 [0,100];
+        # 回测 actual/today 若用未钳制原始分(极端恐惧 -7.7 / 狂热 107.3), 与预测带尺度不对称,
+        # MAE 被系统性夸大、cov 被低估。此处仅统一"度量"口径, 预测生成(shifted/blend)仍用
+        # 原始 today 保持算法内部一致。
+        today_show = max(0.0, min(100.0, today))
         pool = []
         for (i, cn, rg, c_end) in cand_pool:
             if i + horizon >= t:
@@ -626,7 +665,7 @@ def backtest_sentiment_forecast(valid, horizon=30, k=10, ctx=20,
         med = _apply_blend(raw_med, today, _slow_mean_of(valid), ctx, horizon, blend)
         p25l = [_wquant([p[1][j] for p in top], w, 0.25) for j in range(horizon)]
         p75l = [_wquant([p[1][j] for p in top], w, 0.75) for j in range(horizon)]
-        actual = scores[t: t + horizon]
+        actual = [max(0.0, min(100.0, a)) for a in scores[t: t + horizon]]
         # R199: κ 支持逐日(list)或全局(scalar)
         if isinstance(band_kappa, (list, tuple)):
             kap = [band_kappa[j] if j < len(band_kappa) else band_kappa[-1] for j in range(horizon)]
@@ -645,9 +684,9 @@ def backtest_sentiment_forecast(valid, horizon=30, k=10, ctx=20,
                 lo, hi = min(lo, m), max(hi, m)
                 if lo <= a <= hi:
                     cov += 1
-        if actual[-1] is not None and med[-1] is not None and today is not None:
+        if actual[-1] is not None and med[-1] is not None and today_show is not None:
             dir_tot += 1
-            if (med[-1] - today >= 0) == (actual[-1] - today >= 0):
+            if (med[-1] - today_show >= 0) == (actual[-1] - today_show >= 0):
                 dir_hit += 1
         anchors += 1
         z = _zone_of(today)
@@ -666,9 +705,9 @@ def backtest_sentiment_forecast(valid, horizon=30, k=10, ctx=20,
             lo, hi = min(lo, m), max(hi, m)
             if lo <= a <= hi:
                 z_cov[z] += 1
-        if actual[-1] is not None and med[-1] is not None and today is not None:
+        if actual[-1] is not None and med[-1] is not None and today_show is not None:
             z_dir_tot[z] += 1
-            if (med[-1] - today >= 0) == (actual[-1] - today >= 0):
+            if (med[-1] - today_show >= 0) == (actual[-1] - today_show >= 0):
                 z_dir_hit[z] += 1
     if not errs:
         return None
@@ -810,7 +849,7 @@ def _build_band_anchors(valid, horizon=30, k=15, ctx=15, regime_weight=False,
         med = _apply_blend(raw_med, today, _slow_mean_of(valid), ctx, horizon, blend)
         p25l = [_wquant([p[1][j] for p in top], w, 0.25) for j in range(horizon)]
         p75l = [_wquant([p[1][j] for p in top], w, 0.75) for j in range(horizon)]
-        actual = scores[t: t + horizon]
+        actual = [max(0.0, min(100.0, a)) for a in scores[t: t + horizon]]
         anchors_data.append((med, p25l, p75l, actual))
     return anchors_data if anchors_data else None
 
