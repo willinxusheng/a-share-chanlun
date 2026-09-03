@@ -15,20 +15,25 @@ SYMBOLS = {
     "sh000905": "中证500",
 }
 
-_END = (datetime.now() + timedelta(days=400)).strftime("%Y-%m-%d")
-# R246: 腾讯 fqkline CDN 缓存绕过 —— 实测(2026-09-01)发现:
-#   "指定起始日期"形式的精确 URL(param=sh000001,day,2021-01-01,<今天+400天>,1600,qfq)
-#   会被腾讯 CDN 缓存: 盘中首次请求时源端当日数据未更新, 缓存了旧收盘(08-31),
-#   盘后 CI 用同一 URL 再请求仍命中缓存拿不到当日数据(09-01);
-#   而同源 count 形式(param=sh000001,day,,,1300,qfq)不受影响。
-#   验证: 同一 URL 微调 count(1601/1599)即绕过缓存返回最新。
-# 修复: count 参数随运行时间动态化(1700+分钟秒偏移, 区间1700~1999), 每次运行 URL 唯一, 强制 CDN 回源取最新;
-#       count 仅作返回条数上限, 日线实际 1373 根, 1700 已足够且经实测合法(count 超约 2000 接口报错,
-#       1700~1999 为验证过的安全区间, 且均能绕过 1600 精确 URL 的陈旧缓存)。
+# R248(2026-09-03): 腾讯 fqkline 数据滞后根因更正 —— R246 的"count 动态化"没修到根子。
+#   实测(2026-09-03, 对照 A-share-Fibonacci/datafeed.py 同时刻请求):
+#     · "带起始日期"式 URL(param=sh000001,day,2021-01-01,<今天+400天>,1700,qfq)
+#       —— 无论 count 怎么微调(1700~1999)都命中 CDN 陈旧缓存(09-02 晚 16:00~21:30 十次
+#       cron-job 全扑空、看门狗探针同被缓存蒙蔽判"已最新"), 直到次日早晨缓存刷新才追平;
+#     · 纯 count 式 URL(param=sh000001,day,,,10,qfq) —— 实时, 收盘后 1 小时即有当日数据
+#       (斐波那契项目同款 URL 09-02 16:03 即成功刷新到当日收盘)。
+#   结论: 腾讯 CDN 的缓存键含"日期范围"段, 只改 count 无法绕过; 根治=去掉日期段改纯 count。
+# 修复: _tx_url 去掉 2021-01-01 起始与动态结束日期, 对齐斐波那契项目的纯 count 形态;
+#       count 保留 R246 的动态化(1700~1999, 实测合法上限约 2000), 覆盖 2021 起 1300+ 根绰绰有余;
+#       起始日期由 fetch_tx 内按 MIN_DATE=2021-01-01 裁剪保证(与看板"2021 至今"契约一致)。
 def _tx_url(symbol, period):
     _b = (datetime.now().minute * 60 + datetime.now().second) % 300
-    return ("https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=%s,%s,2021-01-01,"
-            + _END + ",%d,qfq") % (symbol, period, 1700 + _b)
+    return ("https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=%s,%s,,,%d,qfq") % (
+        symbol, period, 1700 + _b)
+
+# 看板数据契约起点(标题"2021 至今")。纯 count 接口会返回更早历史(如日线 2019-04 起),
+# 统一裁剪到该日期之后, 保证各线首根与历史版本一致(2021-01-04 首交易日)。
+MIN_DATE = "2021-01-01"
 SINA_URL = "https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData?symbol=%s&scale=240&ma=no&datalen=5"
 UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 _BASE = os.path.dirname(os.path.abspath(__file__))
@@ -56,6 +61,10 @@ def fetch_tx(symbol, period):
     dirty = 0
     for row in klines:
         try:
+            # R248: 纯 count 接口会带回 2021-01-01 之前的历史 bar(日线可早至 2019),
+            # 按契约裁剪, 保证各线首根与"2021 至今"看板一致(不计数为脏 bar)。
+            if row[0] < MIN_DATE:
+                continue
             # [日期, 开, 收, 高, 低, 量]
             out.append({
                 "date": row[0],
