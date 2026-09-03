@@ -442,9 +442,16 @@ def _future_dates(start, n):
     return out
 
 
-def _slow_mean_of(valid):
-    """全量有效 score 的慢线均值: 全量均值与末 60 日均值各半, 作为均值回归目标锚。"""
-    scores = [d["score"] for d in valid if d.get("score") is not None]
+def _slow_mean_of(valid, upto=None):
+    """有效 score 的慢线均值: 全量均值与末 60 日均值各半, 作为均值回归目标锚。
+    upto(可选索引上界): 传入时仅用 valid[:upto](截至锚点当日, 不含未来)——
+    供 walk-forward 回测与 band κ 标定使用。R249 修复: 此前回测/标定直接传全量 valid,
+    其末 60 日均值取自样本末尾(2026 熊市 score≈23~34), 把 2021~2024 各历史锚点的回归锚
+    整体拖低(43.8 vs 截断口径 54.7), 产生系统性负偏(实测 bias 在 T+26~30 达 -5.2,
+    且随 horizon 放大) —— 等价于用未来信息压低预测, 属前视泄漏, 回测口径与生产不一致。
+    缺省 None = 全量(生产 forecast 锚点即今日, 无未来可泄漏, 与截断口径一致)。"""
+    seg = valid if upto is None else valid[:upto]
+    scores = [d["score"] for d in seg if d.get("score") is not None]
     if not scores:
         return 50.0
     full = sum(scores) / len(scores)
@@ -662,7 +669,9 @@ def backtest_sentiment_forecast(valid, horizon=30, k=10, ctx=20,
             for idx, p in enumerate(top):
                 w[idx] *= math.exp(-((n - 1) - p[3]) / float(recency_halflife))
         raw_med = [_wquant([p[1][j] for p in top], w, 0.5) for j in range(horizon)]
-        med = _apply_blend(raw_med, today, _slow_mean_of(valid), ctx, horizon, blend)
+        # R249: 回归锚用截至锚点(t)的截断慢线均值, 不用全量(末 60 日均值含锚点后未来样本,
+        # 属前视泄漏, 产生系统性负偏; 详见 _slow_mean_of 注释)。生产 forecast 无此问题。
+        med = _apply_blend(raw_med, today, _slow_mean_of(valid, t), ctx, horizon, blend)
         p25l = [_wquant([p[1][j] for p in top], w, 0.25) for j in range(horizon)]
         p75l = [_wquant([p[1][j] for p in top], w, 0.75) for j in range(horizon)]
         actual = [max(0.0, min(100.0, a)) for a in scores[t: t + horizon]]
@@ -846,7 +855,9 @@ def _build_band_anchors(valid, horizon=30, k=15, ctx=15, regime_weight=False,
         top = use[:k]
         w = _weights([p[0] for p in top], weight)
         raw_med = [_wquant([p[1][j] for p in top], w, 0.5) for j in range(horizon)]
-        med = _apply_blend(raw_med, today, _slow_mean_of(valid), ctx, horizon, blend)
+        # R249: 回归锚用截至锚点(t)的截断慢线均值, 不用全量(末 60 日均值含锚点后未来样本,
+        # 属前视泄漏, 产生系统性负偏; 详见 _slow_mean_of 注释)。生产 forecast 无此问题。
+        med = _apply_blend(raw_med, today, _slow_mean_of(valid, t), ctx, horizon, blend)
         p25l = [_wquant([p[1][j] for p in top], w, 0.25) for j in range(horizon)]
         p75l = [_wquant([p[1][j] for p in top], w, 0.75) for j in range(horizon)]
         actual = [max(0.0, min(100.0, a)) for a in scores[t: t + horizon]]
