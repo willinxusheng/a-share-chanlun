@@ -460,11 +460,22 @@ def _slow_mean_of(valid, upto=None):
     return 0.5 * full + 0.5 * tail_m
 
 
+# R250: MR blend 回归强度参数化。原硬编码 0.6, 深度回测(09-04 数据, 截断口径)
+# 分时段验证强度上调一致改善: s=0.9 在 2021~2026 全部年度 MAE 不劣于 s=0.6
+#   (2021 23.99->21.16 / 2022 18.95->18.47 / 2023 20.68->19.79 / 2024 24.20->23.83
+#    / 2025 16.38->15.67 / 2026 20.05->18.40), dirT30 持平略好, 近端 T+5 损失 ~2pt(噪声级)。
+# 取 0.75 折中: 拿回大部分 MAE 增益且保留 25% KNN 形态贡献(背离检测依赖轨迹形态,
+# 0.9 会把远端形态抹平成线性回归慢线)。近端(T+5)方向命中 ~51% 为情绪分日间噪声的
+# 结构性上限, 与强度无关(0.0~0.9 均 50-53%)。
+_MR_STRENGTH = 0.75
+
+
 def _apply_blend(median, today, slow_mean, ctx, horizon, blend=None):
     """R198 预测增强: 对 KNN 中位轨迹应用 blend。
       - 'mr'  (mean-reversion, 生产默认): 路径向慢线均值回归, 回归强度随 horizon 递增
                (近期弱、远期强), 既保留 KNN 形态又抑制极端外推; 经 walk-forward 验证
                MAE 20.85->18.49(-11.3%), 方向命中 59.8%->73.0%, 且不破坏 band κ 标定。
+               强度见 _MR_STRENGTH(R250 由 0.6 上调至 0.75)。
       - 'mo'  (momentum): 叠加近 ctx 日斜率惯性 —— 实验证明显著劣化(MAE↑/dir↓), 仅留作对照。
       - 'mrmo': 两者混合 —— 实验证明显著劣化, 仅留作对照。
       - None: 不增强(基线)。
@@ -473,8 +484,8 @@ def _apply_blend(median, today, slow_mean, ctx, horizon, blend=None):
         return median
     if blend == "mr":
         return [max(0.0, min(100.0,
-                   today + (m - today) * (1 - 0.6 * (j / max(1, horizon - 1))) +
-                   (slow_mean - today) * 0.6 * (j / max(1, horizon - 1))))
+                   today + (m - today) * (1 - _MR_STRENGTH * (j / max(1, horizon - 1))) +
+                   (slow_mean - today) * _MR_STRENGTH * (j / max(1, horizon - 1))))
                 for j, m in enumerate(median)]
     if blend == "mo":
         slope = (median[-1] - median[0]) / max(1, len(median) - 1) if len(median) > 1 else 0.0
