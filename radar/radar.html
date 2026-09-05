@@ -75,6 +75,11 @@ h1 .dot{color:#ffd43b}
 .dstrip .rsi-cell{margin:0}
 /* 涨跌单元格内 相对大盘 次级文案 */
 .vsub{font-size:10px;font-weight:400;text-align:right;margin-top:1px;line-height:1.2;white-space:nowrap;opacity:.95}
+/* 板块异动小徽章 / 成分股信号新鲜度 */
+.mvmini{font-size:10px;color:var(--muted);line-height:1.4;white-space:nowrap}
+.fsub{font-size:9.5px;color:var(--muted);margin-top:1px;white-space:nowrap;line-height:1.25;opacity:.85}
+.fsub.urg{font-weight:700;opacity:1}
+.ld-name{max-width:88px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block;vertical-align:bottom}
 /* 行业详情(K线/成分股) */
 #indDetail{margin-top:14px}
 .chart-note{font-size:11px;color:var(--muted);padding:6px 16px 8px;line-height:1.7}
@@ -154,6 +159,7 @@ a{color:var(--primary);text-decoration:none}
           <a id="tabSig" onclick="sortInds('sig')">📊 信号优先</a>
           <a id="tabCap" onclick="sortInds('cap')">💰 市值优先</a>
           <a id="tabChg" onclick="sortInds('chg')">⚡ 涨跌极端</a>
+          <a id="tabRel" onclick="sortInds('rel')">🎯 跑赢沪优先</a>
           <a id="tabRsi" class="on" onclick="sortInds('rsi')">📈 RSI 超买优先</a>
         </span>
         <span class="hint">申万一级 31 行业 + ETF 板块 · 默认收折叠起，点击展开</span>
@@ -177,7 +183,7 @@ a{color:var(--primary);text-decoration:none}
 <script>
 /* ============================================================
    全市场缠论雷达 v3 · 行业为根 + 个股K线内嵌切换
-   数据: radar/radar.json (scan_radar.py P3b-r1) · 前端 R252: 上证基准/温度透视/详情指标带/回撤列
+   数据: radar/radar.json (scan_radar.py P3b-r1) · 前端 R253: 基准/温度透视/指标带/回撤列/MA60/相对强弱/异动徽章
    K线: 行业=radar.json 内嵌合成; 个股=腾讯 fqkline (CORS 已开)
    ============================================================ */
 var UP="#e54545", DN="#18a058", ACC="#2b6cb0";
@@ -216,7 +222,7 @@ function kickIndex(){
       var v=idxParse(j);
       if(!v){tryNext(list.slice(1));return;}
       IDX=v;renderBar();renderInds();
-      var dw=$("dstripWrap");if(dw&&curInd&&INDS[curInd])dw.innerHTML=detailStrip(INDS[curInd]);
+      var dw=$("dstripWrap");if(dw&&curInd&&INDS[curInd])dw.innerHTML=detailStrip(INDS[curInd],curInd);
     }).catch(function(){tryNext(list.slice(1));});
   };
   tryNext(urls);
@@ -250,7 +256,7 @@ function renderBar(){
 /* ===== 行业列表排序 ===== */
 function sortInds(mode){
   curSortMode=mode;
-  ["tabSig","tabCap","tabChg","tabRsi"].forEach(function(id){$(id).classList.remove("on")});
+  ["tabSig","tabCap","tabChg","tabRel","tabRsi"].forEach(function(id){$(id).classList.remove("on")});
   $("tab"+mode.charAt(0).toUpperCase()+mode.slice(1)).classList.add("on");
   renderInds();
 }
@@ -260,6 +266,7 @@ function indScore(mode,k){
   if(mode==="sig")return (x.n_sig_top||0)*10+(x.n_sig_bot||0)*5+((x.st&&x.st.agree)||0);
   if(mode==="cap")return x.cap||0;
   if(mode==="chg")return Math.abs(x.chg1d||0);
+  if(mode==="rel")return IDX?(x.chg1d-(IDX.chg||0)):(x.chg1d||0);   // 相对强弱: 跑赢上证最多者在前
   if(mode==="rsi")return x.rsi14!=null?x.rsi14:-1;   // 超买超卖值从大到小(降序): RSI 高(超买)在前
   return 0;
 }
@@ -312,10 +319,27 @@ function ctrBlock(x){
     '<div style="font-size:10px;color:var(--muted);margin-top:2px;text-align:right">'+
     (pp==null?"60日-":"60日"+pp+"%分位")+' · 振'+ampTxt+' · 门禁'+qrtTxt+'</div>';
 }
+/* ===== 板块异动统计(大涨≥5%/大跌≤-5%, 领涨/领跌; 缓存) ===== */
+var MOV={};
+function indMovers(k){
+  if(MOV[k])return MOV[k];
+  var isETF=(INDS[k]||{}).is_etf===1;
+  var m={up:0,down:0,top:null,bot:null};
+  Object.keys(UNI).forEach(function(sym){
+    var u=UNI[sym];if(u.gate)return;
+    if(!(isETF?(u.type==="ETF"):(u.ind===k)))return;
+    var c=(u.st||{}).chg1d;if(c==null)return;
+    if(c>=0.05){m.up++;if(!m.top||c>m.top.chg)m.top={name:u.name,chg:c};}
+    else if(c<=-0.05){m.down++;if(!m.bot||c<m.bot.chg)m.bot={name:u.name,chg:c};}
+  });
+  MOV[k]=m;return m;
+}
+function ldName(s){s=s||"";return s.length>6?s.slice(0,6)+"…":s}
 /* ===== 行业详情头部专业指标带(点开行业即见完整面板) ===== */
-function detailStrip(ind){
+function detailStrip(ind,k){
   var rv=ind.rsi14,pp=rsiPctileOf(ind);
   var capTxt=(ind.cap==null)?"-":(ind.cap>=10000?(ind.cap/10000).toFixed(2)+"万亿":ind.cap.toFixed(0)+"亿");
+  var stx=ind.st||{};
   var h='<span class="rsi-cell '+(rv==null?"mid":(rv>=70?"hot":(rv<=30?"cold":"mid")))+'">RSI '+(rv!=null?rv.toFixed(0):"-")+'</span>';
   h+='<span style="display:inline-flex;align-items:center">'+rsiBarHtml(rv)+'</span>';
   h+='<span>60日'+(pp==null?"分位 -":pp+"% 分位")+'</span>';
@@ -324,7 +348,16 @@ function detailStrip(ind){
   h+='<span>顶背驰 <b class="up">'+(ind.n_sig_top||0)+'</b> / 底背驰 <b class="down">'+(ind.n_sig_bot||0)+'</b></span>';
   h+='<span>'+(ind.is_etf?"总规模 ":"总市值 ")+capTxt+'</span>';
   h+='<span>指数 '+pct(ind.chg1d,2)+'</span>';
+  h+='<span>缠论 笔 <b>'+(stx.bi_n||0)+'</b> · 中枢 <b>'+(stx.zs_n||0)+'</b> · 背驰 <b>'+(stx.bc_n||0)+'</b></span>';
+  if(stx.first)h+='<span style="color:#94a3b8">区间 '+esc(stx.first)+'~'+esc(stx.last||"")+'</span>';
   if(IDX){var rel=(ind.chg1d-IDX.chg)*100;h+='<span class="'+(rel>=0?"up":"down")+'">'+(rel>=0?"▲ 跑赢":"▼ 跑输")+'上证 '+Math.abs(rel).toFixed(1)+'pp</span>';}
+  var mv=k?indMovers(k):null;
+  if(mv&&(mv.top||mv.bot)){
+    h+='<span style="margin-left:auto;display:flex;gap:10px;flex-wrap:wrap">';
+    if(mv.top)h+='<span class="up" title="板块内今日涨幅最大">领涨 <b class="ld-name">'+esc(ldName(mv.top.name))+'</b> '+pct(mv.top.chg,1)+'</span>';
+    if(mv.bot)h+='<span class="down" title="板块内今日跌幅最大">领跌 <b class="ld-name">'+esc(ldName(mv.bot.name))+'</b> '+pct(mv.bot.chg,1)+'</span>';
+    h+='</span>';
+  }
   return '<div class="dstrip">'+h+'</div>';
 }
 /* ===== 一级: 行业列表(平铺+专业信息, 折叠) ===== */
@@ -349,9 +382,11 @@ function renderInds(){
     if((x.n_sig_top||0)>=2)strongCls=" strong-top";
     else if((x.n_sig_bot||0)>=2)strongCls=" strong-bot";
     if(!indExpanded&&i>=IND_SHOW&&!hl)return;   // 折叠: 高亮行业恒显示
+    var mv=indMovers(k);   // 板块异动(涨跌≥5%家数) — 仅在显示行计算, MOV 缓存
+    var mvLine=(mv.up||mv.down)?'<span class="mvmini">'+(mv.up?'<span class="up">▲'+mv.up+'</span>':'')+(mv.up&&mv.down?' ': '')+(mv.down?'<span class="down">▼'+mv.down+'</span>':'')+' ≥5%</span>':'';
     html+='<div class="ind-row'+hl+strongCls+'" onclick="pickInd(\''+esc(k)+'\')">'+
       '<div class="nm">'+esc(k)+etfTag+(sg?' <span class="badge2 '+(x.n_sig_top?'r':'g')+'">'+(x.n_sig_top?'顶'+x.n_sig_top:'底'+x.n_sig_bot)+'</span>':'')+'</div>'+
-      '<div class="meta" style="text-align:right">'+capTxt+'<br><span style="color:var(--muted)">'+(x.is_etf?(x.n_member||0)+"/"+(x.n_total||0)+"只":(x.n_member||0)+"只")+'</span></div>'+
+      '<div class="meta" style="text-align:right">'+capTxt+'<br><span style="color:var(--muted)">'+(x.is_etf?(x.n_member||0)+"/"+(x.n_total||0)+"只":(x.n_member||0)+"只")+'</span>'+(mvLine?'<br>'+mvLine:'')+'</div>'+
       '<div><span class="regime '+rCls+'">'+esc(x.regime||"-")+'</span></div>'+
       '<div class="spark">'+sparkSVG(x.spark,160,34)+'</div>'+
       '<div class="chg '+(x.chg1d>0?"up":(x.chg1d<0?"down":""))+'">'+pct(x.chg1d,1)+
@@ -397,7 +432,7 @@ function pickInd(k){
         '<a id="tStk" class="ind-tab '+(curTab==="stk"?"on":"")+'" onclick="switchTab(\'stk\')" style="font-size:12px;padding:5px 12px;border-radius:6px;cursor:pointer;color:'+(curTab==="stk"?"#1f2937":"#64748b")+';background:'+(curTab==="stk"?"#fff":"transparent")+';font-weight:'+(curTab==="stk"?"700":"400")+'">📈 个股 K 线'+(curStk?(" · "+esc((UNI[curStk]||{}).name||curStk)):"")+'</a>'+
       '</div>'+
     '</div>'+
-    '<div id="dstripWrap">'+detailStrip(ind)+'</div>'+
+    '<div id="dstripWrap">'+detailStrip(ind,k)+'</div>'+
     '<div class="chart-note"><span class="legend-tag"><i style="background:#e54545"></i>涨</span><span class="legend-tag"><i style="background:#18a058"></i>跌</span><span class="legend-tag"><i style="background:#7f77dd"></i>笔</span><span class="legend-tag"><i style="background:rgba(127,119,221,.25)"></i>中枢</span><span class="legend-tag"><i style="background:#c92a2a"></i>顶背驰(红▼)</span><span class="legend-tag"><i style="background:#087f5b"></i>底背驰(绿▲)</span></div>'+
     '<div id="mainChart"><div class="loading sk">K线渲染中…</div></div>'+
     '</div>';
@@ -479,16 +514,22 @@ function renderIndStkList(k){
     var avg=cv?sum/cv:null;
     var head='<div style="display:flex;align-items:center;flex-wrap:wrap;gap:4px 8px;padding:8px 16px;background:#f8fafc;border-top:1px solid #eef2f7;font-size:12px;color:var(--muted)">'+(opt.ic||"")+' '+title+' <b style="color:var(--ink)">'+cnt+'</b>'+(opt.note?'<span>· '+opt.note+'</span>':'')+(avg!=null?'<span style="margin-left:auto;font-weight:700" class="'+(avg>0?"up":"down")+'">组均 '+pct(avg,1)+'</span>':'')+'</div>';
     var body=rows.slice(0,opt.max||30).map(function(x){
-      var u=x.u,s=x.st;var chg=s.chg1d;var sigTxt=x.sg?((x.sg.dir==="top"?"顶背驰":"底背驰")+" "+(x.sg.bc_date||"")):(s.scenario||"");
+      var u=x.u,s=x.st;var chg=s.chg1d;
       var hl=curStk===x.sym?"background:#eaf2fb;border-left:3px solid "+ACC:"";
-      var tag='';
-      if(x.sg)tag='<span class="badge2 '+(x.sg.dir==="top"?"r":"g")+'">'+(x.sg.dir==="top"?"顶":"底")+'信号</span>';
+      var tag='',fsub='';
+      if(x.sg){
+        var dirTxt=x.sg.dir==="top"?"顶":"底";
+        tag='<span class="badge2 '+(x.sg.dir==="top"?"r":"g")+'">'+dirTxt+'信号</span>';
+        var fd=(x.sg.bc_date||"").slice(5);
+        fsub='<div class="fsub '+(x.sg.dir==="top"?"up":"down")+(x.sg.fresh!=null&&x.sg.fresh<=3?" urg":"")+'">'+(fd?fd+' · ':'')+(x.sg.fresh!=null?x.sg.fresh+'天前':'')+'</div>';
+      }
       else if(s.scenario&&s.scenario.indexOf("见")>=0)tag='<span class="badge2 '+(s.scenario.indexOf("见底")>=0?"g":"r")+'">'+esc(s.scenario)+'</span>';
       else if(s.scenario)tag='<span class="badge2 z">'+esc(s.scenario)+'</span>';
       else tag='<span class="badge2 o">震荡</span>';
-      return '<div class="stk-grid" style="'+hl+'" onclick="pickStkInInd(\''+x.sym+'\')">'+
+      var tip=esc((u.name||"")+" | "+(x.sg?(x.sg.dir==="top"?"顶背驰":"底背驰")+" "+x.sg.bc_date+" "+x.sg.bc_type+" 强度"+(x.sg.strong||0)+"/2"+(x.sg.vol?" 量缩确认":"")+" 距今"+(x.sg.fresh!=null?x.sg.fresh+"个交易日": "?") :(s.scenario||"震荡"))+(s.trend?" | 趋势"+s.trend:"")+(s.agree!=null?" | 自洽"+(s.agree*100).toFixed(0)+"%":""));
+      return '<div class="stk-grid" style="'+hl+'" title="'+tip+'" onclick="pickStkInInd(\''+x.sym+'\')">'+
         '<div><div class="nm">'+esc(u.name)+'</div><div class="cd">'+esc(x.sym)+'</div></div>'+
-        '<div class="val">'+tag+'</div>'+
+        '<div class="val">'+tag+fsub+'</div>'+
         '<div class="val">'+esc(s.trend||"-")+'</div>'+
         '<div class="val">'+(s.zs_last?("["+s.zs_last.zd+"~"+s.zs_last.zg+"]"):"-")+'</div>'+
         '<div class="val">'+(s.bi_n||0)+'</div>'+
@@ -627,7 +668,7 @@ function indKlineOption(kl){
     tooltip:{trigger:"axis",axisPointer:{type:"cross"},backgroundColor:"rgba(15,23,42,.9)",textStyle:{fontSize:11},borderWidth:0,
       formatter:function(ps){var p=ps[0];if(!p||!p.axisValue)return"";var i=ps[0].dataIndex;var k=kl[i];if(!k)return p.axisValue;
         var up=k.close>=k.open;return "<b>"+k.date+"</b><br/>开 "+k.open+"　收 "+k.close+(up?" ▲":" ▼")+"<br/>高 "+k.high+"　低 "+k.low+(rsiRaw[i]!=null?"<br/>RSI14 <b>"+(+rsiRaw[i].toFixed(1))+"</b>":"");}},
-    legend:{data:["K线","MA5","MA10","MA20","RSI14"],top:6,textStyle:{fontSize:11},itemWidth:14,itemHeight:8},
+    legend:{data:["K线","MA5","MA10","MA20","MA60","RSI14"],top:6,textStyle:{fontSize:11},itemWidth:14,itemHeight:8},
     axisPointer:{link:[{xAxisIndex:"all"}]},
     grid:[{left:58,right:16,top:30,height:"52%"},{left:58,right:16,top:"66%",height:"11%"},{left:58,right:16,top:"80%",height:"12%"}],
     xAxis:[{type:"category",data:dates,boundaryGap:true,axisLine:{lineStyle:{color:"#d7dee8"}},axisLabel:{fontSize:10,color:"#8a94a3"},axisTick:{show:false}},
@@ -640,7 +681,7 @@ function indKlineOption(kl){
     series:[
       {name:"K线",type:"candlestick",data:kdata,itemStyle:{color:UP,color0:DN,borderColor:UP,borderColor0:DN},barWidth:"65%"},
       {name:"量",type:"bar",xAxisIndex:1,yAxisIndex:1,data:vols,barWidth:"65%"},
-      ma(5,"#f59f00"),ma(10,"#3b82f6"),ma(20,"#a855f7"),
+      ma(5,"#f59f00"),ma(10,"#3b82f6"),ma(20,"#a855f7"),ma(60,"#b45309"),
       {name:"RSI14",type:"line",xAxisIndex:2,yAxisIndex:2,data:rsiData,smooth:false,symbol:"none",lineStyle:{width:1,color:"#7c5cd6"},
        markLine:{symbol:"none",silent:true,label:{show:false},
          lineStyle:{type:"dashed",width:.8},
