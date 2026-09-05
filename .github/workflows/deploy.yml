@@ -43,10 +43,12 @@ name: Deploy A股缠论看板
 
 # 部署 Pages 需要 pages/id-token 写权限；
 # contents: write 用于提交每日构建时间戳，保持仓库活跃，防止 GitHub 停用定时任务。
+# actions: write 用于末尾 dispatch radar-scan.yml(全市场雷达与本站同节奏更新, P1b)。
 permissions:
   contents: write
   pages: write
   id-token: write
+  actions: write
 
 concurrency:
   group: pages
@@ -199,3 +201,19 @@ jobs:
 
       - name: 部署到 GitHub Pages
         uses: actions/deploy-pages@v5
+
+      - name: 触发全市场雷达扫描（与本站每半小时刷新同节奏）
+        # P1b: cron-job.org 16:00 起每半小时 dispatch 本站 → 每次跑完顺带 dispatch radar-scan。
+        # radar-scan 内部有"当日已扫则跳过"守卫: 当日首扫(约40min)成功后, 后续各时点秒退;
+        # 若首扫失败/漏跑, 下一时点自动补扫 —— 跟随 12 次节奏总有成功兜底。
+        # radar-scan push radar.json → 再次触发本站 deploy → 首页信号条刷新为当日数据。
+        # 失败不阻断本站发布(continue-on-error), 30 分钟后下一 cron-job 时点会再次尝试。
+        continue-on-error: true
+        run: |
+          echo "dispatch radar-scan (ref=${{ github.ref_name }})"
+          curl -sS -o /tmp/dispatch_resp -w "http=%{http_code}\n" -X POST \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/radar-scan.yml/dispatches" \
+            -d '{"ref":"'"${{ github.ref_name }}"'"}'
+          cat /tmp/dispatch_resp 2>/dev/null | head -c 300; echo

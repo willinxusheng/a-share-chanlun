@@ -475,7 +475,8 @@ def main():
         src_cnt[_src] = src_cnt.get(_src, 0) + 1
     meta = {
         "title": "A股全市场缠论雷达",
-        "asof": asof, "build_time": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "asof": asof, "build_time": datetime.datetime.now(
+            datetime.timezone(datetime.timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S"),
         "version": "P1-r1",
         "n_universe": len(uni), "n_fetch": len(got), "n_fail": len(fails),
         "n_ok": len(sts), "n_gate": sum(gate_cnt.values()) - gate_cnt.get("", 0),

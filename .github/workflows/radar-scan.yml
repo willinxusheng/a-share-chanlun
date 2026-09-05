@@ -12,9 +12,13 @@ name: 全市场雷达每日扫描 (P1)
 permissions:
   contents: write
 
+# P1b: 由 deploy 每半小时 dispatch 触发(与主看板同节奏) —— 必须串行不可 cancel!
+# 若 cancel-in-progress:true, 16:30 的 dispatch 会把 16:00 起已跑 25 分钟的全量扫描
+# 直接掐断(全量约 40 分钟), 下一个 run 守卫仍见"昨日数据"又全量重扫 -> 永远扫不完。
+# 默认(无 cancel-in-progress)= 新 run 排队等待旧 run 完成, 全量期间堆积的 run 依次
+# 执行守卫后秒退(skip), 保证"当日仅一次真扫"。
 concurrency:
   group: radar-scan
-  cancel-in-progress: true
 
 jobs:
   scan:
@@ -22,6 +26,32 @@ jobs:
     steps:
       - name: 检出源码
         uses: actions/checkout@v7
+
+      - name: 当日已扫描守卫(同链路多时点触发只真扫一次)
+        run: |
+          set -euo pipefail
+          TODAY=$(TZ=Asia/Shanghai date +%F)
+          DOW=$(TZ=Asia/Shanghai date +%u)     # 1=周一..7=周日
+          HH=$(TZ=Asia/Shanghai date +%H)
+          if [ "$DOW" -ge 6 ]; then
+            echo "周末($DOW)休市, 数据不变, 跳过扫描"
+            exit 0
+          fi
+          if [ "$HH" -lt 15 ] || [ "$HH" -ge 23 ]; then
+            echo "当前北京 $HH 时不在盘后窗口(15~22时), 跳过(避免白天代码push误触发全量)"
+            exit 0
+          fi
+          if [ -f radar/radar.json ]; then
+            BD=$(python3 -c "import json;print(json.load(open('radar/radar.json'))['meta'].get('build_time','')[:10])")
+            echo "radar build_date=$BD  北京今天=$TODAY"
+            if [ "$BD" = "$TODAY" ]; then
+              echo "今日(北京 $TODAY)已完成扫描并入库, 本次 dispatch 跳过(数据已当日)"
+              exit 0
+            fi
+            echo "radar 数据为 $BD(非今日), 执行全量扫描以补当日数据"
+          else
+            echo "radar/radar.json 不存在, 执行全量扫描"
+          fi
 
       - name: 配置 Python
         uses: actions/setup-python@v7
