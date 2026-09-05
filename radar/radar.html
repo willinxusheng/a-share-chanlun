@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>A股全市场缠论雷达</title>
+<style>
+:root{
+  --bg:#f5f7fa; --card:#fff; --line:#e5e9f0; --tx:#1f2733; --tx2:#5b6675; --tx3:#8a94a3;
+  --up:#e03131; --dn:#0ca678; --accent:#2f6fed; --gold:#f59f00;
+  --tag:#eef2f8; --radius:12px;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+body{background:var(--bg);color:var(--tx);font:14px/1.55 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;padding-bottom:60px}
+.wrap{max-width:960px;margin:0 auto;padding:0 12px}
+header.top{position:sticky;top:0;z-index:20;background:linear-gradient(135deg,#16233c,#1d3a63);color:#fff;padding:14px 12px 12px;box-shadow:0 2px 10px rgba(0,0,0,.12)}
+header.top .wrap{padding:0}
+h1{font-size:19px;font-weight:700;letter-spacing:.5px}
+h1 .dot{color:#ffd43b}
+.sub{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:6px;color:#c8d3e2;font-size:12px}
+.sub b{color:#fff}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0 2px}
+.chip{flex:1 1 auto;min-width:96px;background:rgba(255,255,255,.12);border-radius:10px;padding:7px 10px;text-align:center}
+.chip .n{font-size:19px;font-weight:700;color:#fff}
+.chip .l{font-size:11px;color:#aab8cc}
+.chip.hot{background:rgba(255,211,59,.16);border:1px solid rgba(255,211,59,.4)}
+.chip.hot .n{color:#ffd43b}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);margin:12px 0;overflow:hidden}
+.sec-t{display:flex;align-items:center;gap:8px;padding:12px 14px 0;font-size:15px;font-weight:700}
+.sec-t .badge{background:var(--accent);color:#fff;font-size:11px;border-radius:20px;padding:1px 9px;font-weight:600}
+.sec-t .hint{margin-left:auto;font-size:11px;color:var(--tx3);font-weight:400}
+.empty{padding:26px 14px;text-align:center;color:var(--tx3);font-size:13px}
+/* ---------- 信号卡片 ---------- */
+.sig{display:block;width:100%;border:0;border-bottom:1px solid var(--line);background:var(--card);text-align:left;cursor:pointer;padding:12px 14px}
+.sig:last-child{border-bottom:0}
+.sig:hover{background:#fafcff}
+.sig-top{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.nm{font-size:15px;font-weight:700}
+.nm .code{font-size:11px;color:var(--tx3);font-weight:400;margin-left:4px}
+.pill{font-size:11px;border-radius:6px;padding:1px 7px;font-weight:600}
+.pill.bot{background:#fde8e8;color:var(--up);border:1px solid #f5c2c2}
+.pill.top{background:#e6f7f1;color:var(--dn);border:1px solid #bfe9da}
+.pill.new{background:var(--gold);color:#fff;border:0;animation:blink 1.6s infinite}
+.pill.strong{background:#7048e8;color:#fff;border:0}
+.pill.vol{background:#fff3bf;color:#a06100;border:0}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.45}}
+.price{margin-left:auto;font-size:13px}
+.price .c{font-weight:700}
+.up{color:var(--up)} .dn{color:var(--dn)}
+.sig-meta{display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:6px;color:var(--tx2);font-size:12px}
+canvas.spk{display:block;margin-top:8px;width:100%;height:56px}
+.detail{display:none;background:#fbfcfe;border-top:1px dashed var(--line);padding:10px 14px 12px;font-size:12.5px;color:var(--tx2)}
+.detail.open{display:block}
+.dl{display:grid;grid-template-columns:auto 1fr;gap:3px 12px}
+.dl b{color:var(--tx)}
+.levels{margin-top:8px;background:#fff;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:12px}
+.levels .row{display:flex;justify-content:space-between;padding:2px 0}
+/* ---------- 筛选/表格 ---------- */
+.toolbar{display:flex;flex-wrap:wrap;gap:8px;padding:10px 14px;border-bottom:1px solid var(--line);align-items:center}
+.toolbar input[type=search]{flex:1 1 160px;min-width:130px;border:1px solid var(--line);border-radius:8px;padding:7px 10px;font-size:13px;background:#fff;outline:none}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.seg button{border:0;background:#fff;padding:7px 12px;font-size:12px;color:var(--tx2);cursor:pointer}
+.seg button.on{background:var(--accent);color:#fff;font-weight:600}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th{position:sticky;top:0;background:#f1f4f9;color:var(--tx2);font-weight:600;padding:8px 8px;text-align:right;white-space:nowrap}
+td{padding:7px 8px;text-align:right;border-top:1px solid #f0f2f6;white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+tr.row{cursor:pointer}
+tr.row:hover td{background:#f7faff}
+tr.sigrow td{background:#fffdf5}
+.gate-tag{font-size:10.5px;color:#b06e00;background:#fff4e0;border-radius:5px;padding:0 6px}
+.pager{display:flex;align-items:center;justify-content:center;gap:10px;padding:10px;color:var(--tx2);font-size:12px}
+.pager button{border:1px solid var(--line);background:#fff;border-radius:7px;padding:4px 12px;cursor:pointer;font-size:12px}
+.pager button:disabled{opacity:.4;cursor:default}
+.row-detail{display:none;background:#fbfcfe;padding:8px 14px 10px;font-size:12px;color:var(--tx2);border-top:1px solid var(--line)}
+.row-detail.open{display:block}
+footer{color:var(--tx3);font-size:11px;text-align:center;padding:18px 12px}
+a{color:var(--accent);text-decoration:none}
+.lnk{color:#fff}
+@media(max-width:640px){ th:nth-child(5),td:nth-child(5),th:nth-child(6),td:nth-child(6){display:none} }
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <h1>A股全市场缠论雷达<span class="dot">●</span></h1>
+    <div class="sub" id="subbar">加载中…</div>
+    <div class="chips" id="chips"></div>
+  </div>
+</header>
+<div class="wrap">
+  <!-- 今日信号 -->
+  <div class="card">
+    <div class="sec-t">🎯 今日信号 <span class="badge" id="sigCnt">0</span>
+      <span class="hint">近端背驰见底/见顶 · 按强信号优先排序</span></div>
+    <div id="sigList"></div>
+  </div>
+
+  <!-- 全市场雷达 -->
+  <div class="card">
+    <div class="sec-t">🗺️ 全市场雷达 <span class="hint" id="listHint"></span></div>
+    <div class="toolbar">
+      <input type="search" id="q" placeholder="搜索 代码/名称…">
+      <span class="seg" id="typeSeg">
+        <button data-v="all" class="on">全部</button>
+        <button data-v="股">股票</button>
+        <button data-v="ETF">ETF</button>
+        <button data-v="北交">北交所</button>
+      </span>
+      <span class="seg" id="gateSeg">
+        <button data-v="all" class="on">全部</button>
+        <button data-v="ok">结构可用</button>
+        <button data-v="gate">门禁剔除</button>
+      </span>
+    </div>
+    <div style="overflow:auto;max-height:66vh">
+      <table>
+        <thead><tr>
+          <th>名称/代码</th><th>类型</th><th>最新价</th><th>涨跌</th>
+          <th>走势分类</th><th>门禁</th><th>笔/中枢</th>
+        </tr></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+    <div class="pager" id="pager"></div>
+  </div>
+</div>
+<footer id="foot"></footer>
+
+<script>
+"use strict";
+const UP="#e03131", DN="#0ca678", TX3="#8a94a3";
+let D=null, fType="all", fGate="all", fQ="", page=0, PAGE=100, sorted=[];
+
+const $=s=>document.querySelector(s);
+const esc=s=>String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const dirName=d=>d==="bottom"?"底背驰·见底机会":"顶背驰·见顶风险";
+
+function load(){
+  fetch("./radar.json",{cache:"no-store"}).then(r=>{if(!r.ok)throw 0;return r.json()})
+    .then(d=>{D=d;render();})
+    .catch(()=>{
+      $("#sigList").innerHTML='<div class="empty">雷达数据加载失败<br>请确认 <b>radar/radar.json</b> 已随最新部署发布</div>';
+      $("#subbar").textContent="数据不可用";
+    });
+}
+
+function render(){
+  const m=D.meta;
+  $("#subbar").innerHTML=`数据截至 <b>${m.asof}</b> · 更新于 ${m.build_time} · 版本 ${m.version}`;
+  const chips=[
+    ["标的池",m.n_universe,0],["有效分析",m.n_ok,0],["门禁剔除",m.n_gate,0],
+    ["今日信号",m.n_signal,1],["ST/退市排除",m.excl_st,0]];
+  $("#chips").innerHTML=chips.map(c=>`<div class="chip${c[2]?" hot":""}"><div class="n">${c[1]}</div><div class="l">${c[0]}</div></div>`).join("");
+  $("#sigCnt").textContent=m.n_signal;
+  $("#foot").textContent=m.note||"";
+  renderSigs();
+  renderTable();
+}
+
+/* ---------------- 信号区 ---------------- */
+function renderSigs(){
+  const list=D.signals||[];
+  $("#sigList").innerHTML = list.length? "" : '<div class="empty">今日暂无近端背驰信号<br><span style="font-size:11px">背驰见底/见顶且最近背驰在近 10 个交易日内才计信号</span></div>';
+  list.forEach((s,i)=>{
+    const freshTxt=s.fresh<=1?"今日":s.fresh<=3?"近3日":`${s.fresh}天前`;
+    const chg=s.st? s.st.chg1d:0, col=chg>0?UP:chg<0?DN:TX3, arrow=chg>0?"▲":chg<0?"▼":"";
+    const card=document.createElement("div");
+    card.className="sig";
+    card.innerHTML=`
+      <div class="sig-top">
+        <span class="nm">${esc(s.name)}<span class="code">${s.sym}</span></span>
+        <span class="pill ${s.dir}">${dirName(s.dir)}</span>
+        ${s.fresh<=2?'<span class="pill new">NEW</span>':""}
+        ${s.strong>=2?'<span class="pill strong">强信号</span>':""}
+        ${s.vol?'<span class="pill vol">量能确认</span>':""}
+        <span class="pill" style="background:#eef2f8;color:#5b6675">${freshTxt}</span>
+        <span class="price">${esc(s.st?s.st.close:"")} <span class="c" style="color:${col}">${arrow}${(chg*100).toFixed(2)}%</span></span>
+      </div>
+      <canvas class="spk" data-i="${i}"></canvas>
+      <div class="sig-meta">${s.st?`${esc(s.st.scenario)} · ${esc(s.st.trend||"")} · 笔${s.st.bi_n}/中枢${s.st.zs_n} · 近60日均额${s.st.avg_amt60}万`:""}</div>
+      <div class="detail">${detailHTML(s)}</div>`;
+    card.addEventListener("click",()=>{card.querySelector(".detail").classList.toggle("open")});
+    $("#sigList").appendChild(card);
+  });
+  // 等 DOM 就位后画 sparkline
+  requestAnimationFrame(()=>{list.forEach((s,i)=>{const cv=document.querySelector(`canvas.spk[data-i="${i}"]`);if(cv)drawSpark(cv,s.spark,s.dir);});});
+}
+
+function detailHTML(s){
+  const z=s.levels||{}, st=s.st||{};
+  const zt=st.zs_last;
+  const lines=[
+    ["信号场景",`${esc(st.scenario||"")}${s.strong>=2?"（强信号：趋势/段级背驰）":""}`],
+    ["走势类型",esc(st.trend||"-")],
+    ["信号背驰日",esc(s.bc_date||"-")],
+    ["面积比",s.area>0?s.area.toFixed(2):"-"],
+    ["最近中枢",zt?`ZD ${zt.zd} ~ ZG ${zt.zg}（${esc(zt.date_end||"")}）`:"暂无"],
+    ["结构自洽率",st.agree!=null?`${(st.agree*100).toFixed(0)}%（样本${st.agree_n}）`:"-"],
+    ["近60日均额",st.avg_amt60!=null?`${st.avg_amt60.toFixed(0)}万`:"-"],
+    ["近60日振幅中位",st.med_amp!=null?`${st.med_amp.toFixed(2)}%`:"-"],
+  ];
+  const keyTxt = s.dir==="bottom"
+    ? `背驰低点 ${s.st&&s.st.bottom_bc?s.st.bottom_bc.end_price:"-"}<br><span style="color:var(--tx3)">反弹观察位；跌破则信号失效。压力参考中枢区 ZD ${zt?zt.zd:"-"} 起</span>`
+    : `背驰高点 ${s.st&&s.st.top_bc?s.st.top_bc.end_price:"-"}<br><span style="color:var(--tx3)">反抽不收复则风险延续。支撑参考中枢区 ZG ${zt?zt.zg:"-"} 起</span>`;
+  return `
+    <div class="dl">${lines.map(([k,v])=>`<b>${k}</b><span>${v}</span>`).join("")}</div>
+    <div class="levels"><div class="row" style="font-weight:700;color:${s.dir==="bottom"?"var(--up)":"var(--dn)"}">${s.dir==="bottom"?"🟢 参考（买入视角）":"🔴 风险（卖出视角）"}</div>
+      <div class="row"><span>${keyTxt}</span></div>
+    </div>
+    <div style="margin-top:8px;color:var(--tx3)">缠论结构概率性分类，非投资建议；个股实操请结合日/周线区间套与基本面。</div>`;
+}
+
+/* ---------------- 迷你K线 ---------------- */
+function drawSpark(cv,spk,dir){
+  if(!spk||!spk.data||!spk.data.length)return;
+  const dpr=window.devicePixelRatio||1, W=cv.clientWidth||320, H=56;
+  cv.width=W*dpr; cv.height=H*dpr; cv.style.height=H+"px";
+  const g=cv.getContext("2d"); g.scale(dpr,dpr); g.clearRect(0,0,W,H);
+  const dd=spk.data, n=dd.length, lo=Math.min(...dd.map(k=>k[2])), hi=Math.max(...dd.map(k=>k[1]));
+  const pad=4, span=(hi-lo)||1, x=i=>pad+i*(W-2*pad)/(n-1), y=p=>H-pad-2-(p-lo)*(H-2*pad-4)/span;
+  const bw=Math.max(1.2,(W-2*pad)/n*0.62);
+  for(let i=0;i<n;i++){
+    const[o,h,l,c]=dd[i];
+    g.strokeStyle=l<=c?UP:DN; g.lineWidth=1; g.beginPath();
+    g.moveTo(x(i),y(h)); g.lineTo(x(i),y(l)); g.stroke();
+    g.fillStyle=l<=c?UP:DN; g.fillRect(x(i)-bw/2,y(Math.max(o,c)),bw,Math.max(1,y(Math.min(o,c))-y(Math.max(o,c))));
+  }
+  const col=dir==="bottom"?UP:DN;
+  g.fillStyle=col;g.beginPath();g.arc(x(n-1),y(dd[n-1][3]),2.4,0,7);g.fill();
+}
+
+/* ---------------- 全市场表 ---------------- */
+function renderTable(){
+  const u=D.universe, syms=Object.keys(u);
+  const q=fQ.trim().toLowerCase();
+  sorted=syms.filter(s=>{
+    const r=u[s];
+    if(fType!=="all" && r.type!==fType)return false;
+    const hasGate=!!r.gate;
+    if(fGate==="ok"&&hasGate)return false;
+    if(fGate==="gate"&&!hasGate)return false;
+    if(q && !(s.includes(q)||(r.name||"").toLowerCase().includes(q)))return false;
+    return true;
+  });
+  const sigSet=new Set((D.signals||[]).map(x=>x.sym));
+  sorted.sort((a,b)=>{
+    const ga=u[a].gate?1:0, gb=u[b].gate?1:0;
+    if(ga!==gb)return ga-gb;
+    const sa=sigSet.has(a)?1:0, sb=sigSet.has(b)?1:0;
+    if(sa!==sb)return sb-sa;
+    return (u[b].st?u[b].st.chg1d:0)-(u[a].st?u[a].st.chg1d:0);
+  });
+  $("#listHint").textContent=`${sorted.length} 只匹配 · 信号票置顶`;
+  const total=Math.ceil(sorted.length/PAGE), pg=Math.min(page,total-1); page=Math.max(0,pg);
+  renderPage();
+  renderPager(total,page);
+}
+
+function renderPage(){
+  const u=D.universe, start=page*PAGE, rows=sorted.slice(start,start+PAGE);
+  const sigSet=new Set((D.signals||[]).map(x=>x.sym));
+  $("#tbody").innerHTML=rows.map(s=>{
+    const r=u[s], st=r.st||{}, chg=st.chg1d, col=chg>0?"up":chg<0?"dn":"", arr=chg>0?"▲":chg<0?"▼":"";
+    const sig=sigSet.has(s);
+    return `<tr class="row${sig?" sigrow":""}" data-s="${s}">
+      <td>${esc(r.name)}<span style="color:#8a94a3;font-size:11px"> ${s}</span>${sig?'<span class="pill new" style="margin-left:5px">信号</span>':""}</td>
+      <td>${esc(r.type)}</td>
+      <td>${st.close??"-"}</td>
+      <td class="${col}">${arr}${chg!=null?(chg*100).toFixed(2):"-"}%</td>
+      <td>${esc(st.scenario||"-")}</td>
+      <td>${r.gate?`<span class="gate-tag">${esc(r.gate)}</span>`:""}</td>
+      <td>${st.bi_n??"-"}/${st.zs_n??"-"}</td>
+    </tr><tr class="row-detail" id="rd-${s}"><td colspan="7">${rowDetailHTML(s,r,st)}</td></tr>`;
+  }).join("");
+  document.querySelectorAll("tr.row").forEach(tr=>{
+    tr.addEventListener("click",()=>{
+      const s=tr.dataset.s, rd=document.getElementById("rd-"+s);
+      document.querySelectorAll(".row-detail.open").forEach(x=>{if(x!==rd)x.classList.remove("open")});
+      if(rd)rd.classList.toggle("open");
+    });
+  });
+}
+
+function rowDetailHTML(s,r,st){
+  const zt=st.zs_last, b=st.bottom_bc, t=st.top_bc;
+  return `<div class="dl">
+    <b>状态</b><span>${esc(st.scenario||"-")} · ${esc(st.trend||"-")} · 末笔方向${st.last_bi_dir===1?"↑":st.last_bi_dir===-1?"↓":"-"}</span>
+    <b>K线范围</b><span>${esc(st.first||"-")} ~ ${esc(st.last||"-")}（${st.n_bars??"-"}根,上市约${st.span_days??"-"}天）</span>
+    <b>结构</b><span>笔${st.bi_n??"-"} / 中枢${st.zs_n??"-"} / 背驰${st.bc_n??"-"} / 信号${st.sig_n??"-"} · 自洽${st.agree!=null?(st.agree*100).toFixed(0)+"%":""}</span>
+    <b>最近中枢</b><span>${zt?`ZD ${zt.zd} ~ ZG ${zt.zg}（${esc(zt.date_end||"")}）`:"暂无"}</span>
+    <b>流动性</b><span>近60日均额 ${st.avg_amt60??"-"}万 · 振幅中位 ${st.med_amp??"-"}% · 一字板${st.one_word??"-"}天</span>
+    <b>近端背驰</b><span>底:${b?`${esc(b.bc_type||"")} ${b.bi_date_end}(${b.fresh_days}天前,面积比${b.area_ratio})`:"无"}<br>顶:${t?`${esc(t.bc_type||"")} ${t.bi_date_end}(${t.fresh_days}天前,面积比${t.area_ratio})`:"无"}</span>
+    <b>距高点回撤</b><span>${st.dd!=null?(st.dd*100).toFixed(1)+"%":""}</span>
+  </div>`;
+}
+
+function renderPager(total,pg){
+  const p=$("#pager");
+  p.innerHTML=`<button id="pPrev" ${pg<=0?"disabled":""}>◀ 上一页</button>
+    <span>${total?pg+1:0} / ${total}</span>
+    <button id="pNext" ${pg>=total-1?"disabled":""}>下一页 ▶</button>`;
+  const pv=document.getElementById("pPrev"), nx=document.getElementById("pNext");
+  if(pv)pv.onclick=()=>{page--;renderPage();renderPager(total,page);window.scrollTo({top:0,behavior:"smooth"})};
+  if(nx)nx.onclick=()=>{page++;renderPage();renderPager(total,page);window.scrollTo({top:0,behavior:"smooth"})};
+}
+
+/* 事件 */
+document.querySelectorAll("#typeSeg button").forEach(b=>b.onclick=()=>{
+  document.querySelectorAll("#typeSeg button").forEach(x=>x.classList.remove("on"));
+  b.classList.add("on"); fType=b.dataset.v; page=0; renderTable();
+});
+document.querySelectorAll("#gateSeg button").forEach(b=>b.onclick=()=>{
+  document.querySelectorAll("#gateSeg button").forEach(x=>x.classList.remove("on"));
+  b.classList.add("on"); fGate=b.dataset.v; page=0; renderTable();
+});
+let qT=null;
+$("#q").addEventListener("input",e=>{clearTimeout(qT);qT=setTimeout(()=>{fQ=e.target.value;page=0;renderTable()},200)});
+load();
+</script>
+</body>
+</html>

@@ -1,0 +1,58 @@
+name: 全市场雷达每日扫描 (P1)
+
+"on":
+  workflow_dispatch:        # 手动触发（首次全量 / 补扫）
+  schedule:
+    # 交易日 北京 18:35 (UTC 10:35)：当日收盘 K 线此时已由源端完整发布(收盘后1~2小时)，
+    # 全量扫描约 20~60 分钟, 完成后 push 触发 deploy.yml 发布(radar.html/radar.json + 首页信号条)。
+    # 周末(A股休市)不跑——休市日数据不变, 无需重扫; 调休补班日不开市由下方交易日判断兜底。
+    - cron: '35 10 * * 1-5'
+
+# contents: write 用于提交 radar/radar.json
+permissions:
+  contents: write
+
+concurrency:
+  group: radar-scan
+  cancel-in-progress: true
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出源码
+        uses: actions/checkout@v7
+
+      - name: 配置 Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+
+      - name: 全市场缠论扫描(腾讯qfq主源/新浪兜底, 自动限速与WAF退避)
+        run: python3 radar/scan_radar.py
+
+      - name: 产物自检(不达标即失败, 保留上一版 radar.json)
+        run: |
+          python3 - <<'PY'
+          import json, datetime
+          d = json.load(open("radar/radar.json", encoding="utf-8"))
+          m = d["meta"]
+          assert m["n_ok"] > 4000, "有效分析过少: %s" % m["n_ok"]
+          assert m["n_signal"] >= 0
+          print("自检通过: 有效%d 信号%d asof=%s" % (m["n_ok"], m["n_signal"], m["asof"]))
+          PY
+
+      - name: 提交雷达数据(触发 deploy 发布)
+        run: |
+          set -euo pipefail
+          if git diff --quiet radar/radar.json; then
+            echo "radar.json 无变化(休市/扫描结果同昨), 跳过提交"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git pull --rebase --autostash origin "${GITHUB_REF_NAME}" || true
+          git add radar/radar.json
+          git commit -m "chore: 全市场缠论雷达数据刷新 asof=$(python3 -c 'import json;print(json.load(open("radar/radar.json"))["meta"]["asof"])')"
+          git push
+          echo "已提交并推送雷达数据"

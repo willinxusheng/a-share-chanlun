@@ -145,7 +145,8 @@ jobs:
           # 该仓库已设为 public, 无需 token 即可 curl 公开 raw 文件。
           python sentiment/sync_other_fib.py || echo "WARN: 同步另一斐波那契项目波浪节点失败, 沿用内置快照 other_fib_nodes.json"
           python report.py
-          cp report.html index.html
+          # P1: 生成 index.html 前注入「全市场雷达信号条」(读 radar/radar.json, 缺失/异常自动降级纯cp)
+          python radar/inject_banner.py report.html
 
       - name: 标签重叠诊断（非阻塞护栏，仅告警 + 上传 artifact）
         # 实证守卫：R100 日期轴修复(hideOverlap:false + formatter 控显)后，各图表文字
