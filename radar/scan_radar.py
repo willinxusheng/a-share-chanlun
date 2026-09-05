@@ -135,11 +135,12 @@ def _sym_of(code, mkt, name=""):
 
 
 def _typename(code, name):
-    if code.startswith(("60", "68", "69", "00", "30", "92", "83", "87", "88", "89", "43")):
+    """按代码段分交易所: 沪深A股 / 北交所(92新段+83/87/88/89/43/82/4老段) / 场内基金(兜底)"""
+    if code.startswith(("60", "68", "69", "00", "30")):      # 沪深A股(沪主板/科创/深主板/创业)
         return "股"
-    if code.startswith("4"):
+    if code.startswith(("92", "83", "87", "88", "89", "43", "82", "4")):   # 北交所
         return "北交"
-    return "ETF"
+    return "ETF"                                             # 15/16/18/51/56/58/50/90/11/12/20 场内基金
 
 
 def fetch_universe():
@@ -460,8 +461,10 @@ def main():
     signals.sort(key=lambda x: (-x[1]["strong"], x[1]["fresh"], -x[1]["area"] if x[1]["area"] > 0 else 0))
 
     # --- meta ---
-    all_last = sorted({s["last"] for s in sts.values() if s.get("last")})
-    asof = all_last[len(all_last) // 2] if all_last else ""
+    # asof = 全市场最新交易日: 取 last 众数(set去重后取中位会落到日期值域正中, 曾误得2014)
+    from collections import Counter as _Counter
+    _lc = _Counter(s["last"] for s in sts.values() if s.get("last"))
+    asof = _lc.most_common(1)[0][0] if _lc else ""
     scen_cnt, gate_cnt = {}, {}
     for s in sts.values():
         scen_cnt[s["scenario"]] = scen_cnt.get(s["scenario"], 0) + 1
