@@ -452,6 +452,73 @@ def synth_industry_kline(members, got):
     return out if len(out) >= 120 else None
 
 
+# ================= 4c. 行业专业指标(P3 雷达平铺用) =================
+def _rsi14(kline, n=14):
+    """Wilder 平滑 RSI(14)。输入 [o,h,l,c,...] 日线数组; 不足 n+1 返回 None。"""
+    closes = [k["close"] for k in kline if k.get("close")]
+    if len(closes) < n + 1:
+        return None
+    gains, losses = [], []
+    for i in range(1, len(closes)):
+        d = closes[i] - closes[i - 1]
+        gains.append(max(d, 0)); losses.append(max(-d, 0))
+    # 初始均值(前 n 期简单平均)
+    avg_g = sum(gains[:n]) / n
+    avg_l = sum(losses[:n]) / n
+    # Wilder: avg = (prev_avg*(n-1) + cur) / n
+    for i in range(n, len(gains)):
+        avg_g = (avg_g * (n - 1) + gains[i]) / n
+        avg_l = (avg_l * (n - 1) + losses[i]) / n
+    if avg_l <= 0:
+        return 100.0
+    rs = avg_g / avg_l
+    return round(100 - 100 / (1 + rs), 1)
+
+
+def _amp20(kline, win=20):
+    """近 win 日振幅 = (区间内 max(high) - min(low)) / 期初 open * 100。"""
+    seg = kline[-win:] if len(kline) >= win else kline
+    if len(seg) < 5:
+        return None
+    hi = max(k["high"] for k in seg)
+    lo = min(k["low"] for k in seg)
+    o0 = seg[0]["open"]
+    if o0 <= 0:
+        return None
+    return round((hi - lo) / o0 * 100, 2)
+
+
+def _regime_of(ist, n_top, n_bot):
+    """行业走势背驰状态: 基于最后一笔方向 + 顶/底背驰计数。
+    顶背驰占优 → '顶背驰区'; 底背驰占优 → '底背驰区';
+    末笔向下 + 顶背驰少 → '下跌趋势'; 末笔向上 + 底背驰少 → '上涨趋势';
+    其余 → '震荡中'。"""
+    bis = ist.get("bis") or []
+    last_dir = bis[-1].get("dir", "") if bis else ""
+    if n_top >= 2 and n_bot == 0 and last_dir == "down":
+        return "顶背驰区"
+    if n_bot >= 2 and n_top == 0 and last_dir == "up":
+        return "底背驰区"
+    if n_top >= 2 and n_top > n_bot * 2:
+        return "顶背驰区"
+    if n_bot >= 2 and n_bot > n_top * 2:
+        return "底背驰区"
+    if last_dir == "down":
+        return "下跌趋势"
+    if last_dir == "up":
+        return "上涨趋势"
+    return "震荡中"
+
+
+def _qual_rate(ind_name, ind_total, ind_qual):
+    """门禁合格率 = 行业过门禁 / 行业总成分(扫描后); 无成分时 None。"""
+    t = ind_total.get(ind_name, 0)
+    q = ind_qual.get(ind_name, 0)
+    if t <= 0:
+        return None
+    return round(q / t * 100, 1)
+
+
 # ================= 4. 主流程 =================
 def main():
     global SRC_ONLY
@@ -521,12 +588,17 @@ def main():
         print("  分析完成 %d 票, 均耗时 %.2fs/票, 失败 %d" % (len(sts), per, len(errs)))
 
     # --- 门禁 + 信号 + 行业聚合(同时攒成分) ---
-    signals, universe, ind_members = [], {}, {}
+    signals, universe, ind_members, ind_total, ind_qual = [], {}, {}, {}, {}
     for sym, st in sts.items():
         gate, gdesc = gate_of(st)
         sig = None
         if not gate:
             sig = signal_of(sym, uni[sym]["name"], uni[sym]["type"], st)
+        uind = uni[sym].get("ind", "-") if sym in uni else "-"
+        if uind not in ("", "-"):
+            ind_total[uind] = ind_total.get(uind, 0) + 1
+        if not gate and uind not in ("", "-") and uni[sym]["type"] in ("股", "北交"):
+            ind_qual[uind] = ind_qual.get(uind, 0) + 1
         uind = uni[sym].get("ind", "-") if sym in uni else "-"
         row = {"name": uni[sym]["name"], "type": uni[sym]["type"],
                "code": uni[sym]["code"], "src": st.pop("src", ""),
@@ -575,6 +647,10 @@ def main():
             "n_sig_top": n_top, "n_sig_bot": n_bot,
             "cap": round(total_cap / 1e8, 0),      # 亿元
             "chg1d": chg1d,
+            "rsi14": _rsi14(iks),
+            "amp20": _amp20(iks),
+            "qual_rate": _qual_rate(ind, ind_total, ind_qual),
+            "regime": _regime_of(ist, n_top, n_bot),
             "st": ist, "mark": imark,
             "kline": iks[-IND_KLINE_N:],           # 最近 N 根(画行业K线)
             "spark": _spark_of(iks[-SPARK_N:])["data"],
@@ -602,7 +678,7 @@ def main():
         "title": "A股全市场缠论雷达",
         "asof": asof, "build_time": datetime.datetime.now(
             datetime.timezone(datetime.timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S"),
-        "version": "P2-r1",
+        "version": "P3-r1",
         "n_universe": len(uni), "n_fetch": len(got), "n_fail": len(fails),
         "n_ok": len(sts), "n_gate": sum(gate_cnt.values()) - gate_cnt.get("", 0),
         "n_signal": len(signals), "n_ind": len(industries),
