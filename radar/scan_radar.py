@@ -30,8 +30,10 @@ from concurrent.futures import ThreadPoolExecutor
 
 _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # 仓库根
 sys.path.insert(0, _BASE)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))       # radar/ 内模块
 import fetch_data as fd   # noqa: E402   # 复用腾讯 qfq 抓取(纯count R248) 与 UA
 import chanlun as cl      # noqa: E402   # 生产级缠论库
+import industry_map as im # noqa: E402   # f100细分 -> 申万一级 映射(零遗漏实测)
 
 UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/120.0 Safari/537.36")
@@ -45,6 +47,7 @@ AGREE_RATE_MIN = 0.6
 FRESH_MAX_DAYS = 10            # 最近背驰距今天数 <= -> 才算"近端信号"
 SINA_LEN = 800                 # 新浪兜底K线根数(约3.2年, 与腾讯qfq窗口同量级)
 SPARK_N = 150                  # 信号票内嵌迷你K线根数(前端实操卡用)
+IND_KLINE_N = 320              # 行业K线入库根数(画行业走势; 合成全量更长仅用于行业缠论)
 CONCURRENCY = 4
 TX_INTERVAL = 0.35             # 腾讯全局限速 ~2.9 rps (P0实证突发连发会501)
 SINA_INTERVAL = 0.18           # 新浪限速 ~5.5 rps (新浪无501挑战, 温和节流, 实测稳定)
@@ -89,12 +92,13 @@ def _get(url, timeout=20, referer=""):
 
 # ================= 1. 全市场标的池(东财 clist, 名称门禁) =================
 def _em_clist(fs, host):
-    """拉取一个板块的全部标的: 返回 [(code, mkt, name)]。mkt: 1=沪 0=深/北交(用代码段细分)。
+    """拉取一个板块的全部标的: 返回 [(code, mkt, name, sub, mcap)]。
+    sub=f100细分行业名(ETF为'-'), mcap=f20总市值(元)。mkt: 1=沪 0=深/北交。
     实测 push2delay 将 pz 钳制到 100/页, 故用接口 total 字段控制翻页终止。"""
     out, page, total, empty_run = [], 1, None, 0
     while True:
         u = ("%s/api/qt/clist/get?pn=%d&pz=100&po=1&np=1&fltt=2&invt=2&fid=f12"
-             "&fs=%s&fields=f12,f13,f14" % (host, page, fs))
+             "&fs=%s&fields=f12,f13,f14,f100,f20" % (host, page, fs))
         try:
             d = json.loads(_get(u, timeout=20, referer="https://quote.eastmoney.com/")
                            .decode("utf-8", "ignore")).get("data") or {}
@@ -112,7 +116,12 @@ def _em_clist(fs, host):
             for x in diff:
                 code, mkt, name = str(x.get("f12", "")), int(x.get("f13", -1)), str(x.get("f14", ""))
                 if len(code) == 6 and mkt in (0, 1):
-                    out.append((code, mkt, name))
+                    sub = str(x.get("f100") or "-").strip()
+                    try:
+                        mcap = float(x.get("f20") or 0)
+                    except (TypeError, ValueError):
+                        mcap = 0.0
+                    out.append((code, mkt, name, sub, mcap))
         if total and len(out) >= total:
             break
         if page > 250:                                # 防死循环
@@ -144,7 +153,8 @@ def _typename(code, name):
 
 
 def fetch_universe():
-    """东财全市场标的池(多镜像轮询)。返回 {sym: {code,name,type}}, 及排除计数。"""
+    """东财全市场标的池(多镜像轮询)。返回 {sym: {code,name,type,ind,mcap}}, 及排除计数。
+    ind = 申万一级行业(industry_map 映射, ETF/未收录='-')"""
     uni, excl = {}, {"st": 0, "dup": 0}
     for host in EM_HOSTS:
         ok = True
@@ -157,7 +167,7 @@ def fetch_universe():
             rows.extend(r)
         if not ok:
             continue
-        for code, mkt, name in rows:
+        for code, mkt, name, sub, mcap in rows:
             # 退市/ST 名称门禁: 完全剔除(不展示不分析)
             nm = name.upper()
             if "ST" in nm or "退" in name or name.startswith("*"):
@@ -167,7 +177,10 @@ def fetch_universe():
             if sym in uni:
                 excl["dup"] += 1
                 continue
-            uni[sym] = {"code": code, "name": name, "type": _typename(code, name)}
+            typ = _typename(code, name)
+            ind = im.sub_to_sw1(sub) if typ != "ETF" and sub != "-" else "-"
+            uni[sym] = {"code": code, "name": name, "type": typ,
+                        "ind": ind, "mcap": mcap}
         return uni, excl, host
     return uni, excl, ""
 
@@ -273,17 +286,18 @@ def _bc_tail(bc, bis, btype, n_last=10):
 
 
 def analyze_one(sym, ks):
-    """chanlun.analyze -> 精简摘要(雷达schema)"""
+    """chanlun.analyze -> 精简摘要(雷达schema) + 轻量绘图标注 mark。
+    返回 (st, err, mark)。mark 仅供前端详情页叠画, 门禁剔除票也尽量给(可点看结构)。"""
     try:
         r = cl.analyze(ks, with_stability=False)
     except Exception as e:   # noqa: BLE001
-        return None, "analyze_err:%s" % str(e)[:80]
+        return None, "analyze_err:%s" % str(e)[:80], {}
     try:
         merged, bis, zss = r["merged"], r["bis"], r["zhongshu"]
         bc, signals = r["beichi"], r["signals"]
         cls, agree = r["classify"], r["agreement"]
     except (KeyError, TypeError) as e:
-        return None, "schema_err:%s" % e
+        return None, "schema_err:%s" % e, {}
     closes = [k["close"] for k in ks]
     highs = [k["high"] for k in ks]
     lows = [k["low"] for k in ks]
@@ -315,7 +329,18 @@ def analyze_one(sym, ks):
         "bottom_bc": bottom, "top_bc": top,
         "seg_bot": bool(cls.get("seg_bc_bottom")), "seg_top": bool(cls.get("seg_bc_top")),
     }
-    return st, None
+    # 轻量绘图标注(详情页叠画用): 近中枢矩形 + 近背驰点 + 近笔折线(限通过票)
+    mark = {"zs": [], "bc": [], "line": []}
+    for z in zss[-3:]:
+        mark["zs"].append([round(z["zg"], 2), round(z["zd"], 2), z["date_start"], z["date_end"]])
+    for b in bc[-6:]:
+        i = b["bi_index"]
+        if 0 <= i < len(bis):
+            mark["bc"].append([b["type"], bis[i]["date_end"], round(bis[i]["end_price"], 2)])
+    for b in bis[-10:]:
+        mark["line"].append([b["date_start"], round(b["start_price"], 2),
+                             b["date_end"], round(b["end_price"], 2), b["dir"]])
+    return st, None, mark
 
 
 def gate_of(st):
@@ -349,6 +374,7 @@ def signal_of(sym, name, typ, st):
                 "sig": "背驰见底", "strong": strong,
                 "vol": b["vol_confirm"], "fresh": b["fresh_days"],
                 "area": b["area_ratio"], "bc_date": b["bi_date_end"],
+                "bc_type": b.get("bc_type", ""),
                 "scenario": scen}
     if scen == "背驰见顶风险":
         b = st["top_bc"]
@@ -359,6 +385,7 @@ def signal_of(sym, name, typ, st):
                 "sig": "背驰见顶", "strong": strong,
                 "vol": b["vol_confirm"], "fresh": b["fresh_days"],
                 "area": b["area_ratio"], "bc_date": b["bi_date_end"],
+                "bc_type": b.get("bc_type", ""),
                 "scenario": scen}
     return None
 
@@ -369,6 +396,60 @@ def _spark_of(ks):
     return {"d0": ks2[0]["date"], "d1": ks2[-1]["date"],
             "data": [[round(k["open"], 3), round(k["high"], 3),
                       round(k["low"], 3), round(k["close"], 3)] for k in ks2]}
+
+
+# ================= 4b. 行业K线合成(总市值加权) =================
+def synth_industry_kline(members, got):
+    """行业成分股(市值加权收益率链式)合成行业日K [o,h,l,c,v,date]。
+    members: [(sym, mcap)]; got: {sym: (ks, src)}。市值缺失票剔除。
+    权重 w_i = 最新总市值占比; 当日停牌(缺K线/昨收)剔除并重归一。"""
+    rows = []
+    for sym, mcap in members:
+        if mcap <= 0 or sym not in got:
+            continue
+        ks = got[sym][0]
+        if len(ks) < 60:
+            continue
+        rows.append((mcap, ks))
+    if len(rows) < 3:                       # 成分太少 -> 无行业K线
+        return None
+    # 建日期->各股 map: date -> [(mcap, k), ...]
+    days = {}
+    for mcap, ks in rows:
+        prev_c = None
+        for k in ks:
+            c = k["close"]
+            if prev_c and prev_c > 0 and c > 0 and k["open"] > 0 and k["high"] > 0 and k["low"] > 0:
+                days.setdefault(k["date"], []).append(
+                    (mcap, k["open"] / prev_c - 1, k["high"] / prev_c - 1,
+                     k["low"] / prev_c - 1, c / prev_c - 1, k.get("volume", 0) * c))
+            prev_c = c
+    dates = sorted(days)
+    if len(dates) < 120:
+        return None
+    out = []
+    px = 1000.0
+    for d in dates:
+        bucket = days[d]
+        wsum = sum(m for m, *_ in bucket)
+        if wsum <= 0:
+            continue
+        ro = sum(m * o for m, o, *_ in bucket) / wsum
+        rh = sum(m * h for m, _o, h, *_ in bucket) / wsum
+        rl = sum(m * l for m, _o, _h, l, *_ in bucket) / wsum
+        rc = sum(m * c for m, _o, _h, _l, c, _v in bucket) / wsum
+        vol = sum(v for m, _o, _h, _l, _c, v in bucket)      # 行业成交额(元)合计
+        if len(bucket) < 3:                 # 当日在场成分太少, 跳过
+            continue
+        o = px * (1 + ro)
+        hi = px * (1 + rh)
+        lo = px * (1 + rl)
+        cl = px * (1 + rc)
+        out.append({"date": d, "open": round(o, 2), "high": round(max(hi, o, cl), 2),
+                    "low": round(min(lo, o, cl), 2), "close": round(cl, 2),
+                    "volume": round(vol / 1e8, 2)})          # 亿元
+        px = cl
+    return out if len(out) >= 120 else None
 
 
 # ================= 4. 主流程 =================
@@ -424,32 +505,42 @@ def main():
     print("  拉取完成: 有效 %d / %d, 失败 %d, %.0fs" % (len(got), len(syms), len(fails), time.time() - t_f))
 
     # --- 分析 ---
-    sts, errs = {}, {}
+    sts, marks, errs = {}, {}, {}
     t_a = time.time()
     for i, (sym, (ks, src)) in enumerate(got.items()):
-        st, err = analyze_one(sym, ks)
+        st, err, mark = analyze_one(sym, ks)
         if st:
             st["src"] = src
             sts[sym] = st
+            if mark:
+                marks[sym] = mark
         else:
             errs[sym] = err
     if sts:
         per = (time.time() - t_a) / len(sts)
         print("  分析完成 %d 票, 均耗时 %.2fs/票, 失败 %d" % (len(sts), per, len(errs)))
 
-    # --- 门禁 + 信号 ---
-    signals, universe = [], {}
+    # --- 门禁 + 信号 + 行业聚合(同时攒成分) ---
+    signals, universe, ind_members = [], {}, {}
     for sym, st in sts.items():
         gate, gdesc = gate_of(st)
         sig = None
         if not gate:
             sig = signal_of(sym, uni[sym]["name"], uni[sym]["type"], st)
+        uind = uni[sym].get("ind", "-") if sym in uni else "-"
         row = {"name": uni[sym]["name"], "type": uni[sym]["type"],
-               "code": uni[sym]["code"], "src": st.pop("src", ""), "gate": gate, "gd": gdesc}
+               "code": uni[sym]["code"], "src": st.pop("src", ""),
+               "gate": gate, "gd": gdesc, "ind": uind,
+               "mcap": uni[sym].get("mcap", 0)}
         row["st"] = st
+        if sym in marks:
+            row["mark"] = marks[sym]
         universe[sym] = row
         if sig:
+            sig["ind"] = uind
             signals.append((sym, sig))
+        if uind not in ("-", "") and uni[sym]["type"] in ("股", "北交") and gate == "":
+            ind_members.setdefault(uind, []).append((sym, uni[sym]["mcap"]))
     # 信号票补 spark 快照(从 got 拿原始K线)与关键位
     for sym, sig in signals:
         ks, _src = got[sym]
@@ -457,8 +548,38 @@ def main():
         sig["st"] = sts[sym]
         zs = sts[sym].get("zs_last")
         sig["levels"] = {"zd": zs["zd"], "zg": zs["zg"]} if zs else {}
+        if sym in marks:
+            sig["mark"] = marks[sym]
 
     signals.sort(key=lambda x: (-x[1]["strong"], x[1]["fresh"], -x[1]["area"] if x[1]["area"] > 0 else 0))
+
+    # --- 行业K线合成 + 行业自身缠论 + 行业聚合 ---
+    industries = {}
+    t_ind = time.time()
+    for ind, members in sorted(ind_members.items()):
+        iks = synth_industry_kline(members, got)
+        if not iks:
+            continue
+        ist, ierr, imark = analyze_one("ind_" + ind, iks)
+        if not ist:
+            continue
+        ist["src"] = "synth"
+        ind_sig = [x for x in signals if x[1].get("ind") == ind]
+        n_top = sum(1 for _s, sg in ind_sig if sg["dir"] == "top")
+        n_bot = sum(1 for _s, sg in ind_sig if sg["dir"] == "bottom")
+        # 行业当日加权涨跌(合成K线末两根)
+        chg1d = round(iks[-1]["close"] / iks[-2]["close"] - 1, 4) if len(iks) >= 2 else 0
+        total_cap = sum(m for _s, m in members if m)
+        industries[ind] = {
+            "n_member": len(members),
+            "n_sig_top": n_top, "n_sig_bot": n_bot,
+            "cap": round(total_cap / 1e8, 0),      # 亿元
+            "chg1d": chg1d,
+            "st": ist, "mark": imark,
+            "kline": iks[-IND_KLINE_N:],           # 最近 N 根(画行业K线)
+            "spark": _spark_of(iks[-SPARK_N:])["data"],
+        }
+    print("  行业合成/分析 %d 个, %.0fs" % (len(industries), time.time() - t_ind))
 
     # --- meta ---
     # asof = 全市场最新交易日: 取 last 众数(set去重后取中位会落到日期值域正中, 曾误得2014)
@@ -473,22 +594,29 @@ def main():
     src_cnt = {}
     for _s, (_ks, _src) in got.items():
         src_cnt[_src] = src_cnt.get(_src, 0) + 1
+    ind_cnt = {}
+    for r in universe.values():
+        i = r["ind"]
+        ind_cnt[i] = ind_cnt.get(i, 0) + 1
     meta = {
         "title": "A股全市场缠论雷达",
         "asof": asof, "build_time": datetime.datetime.now(
             datetime.timezone(datetime.timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S"),
-        "version": "P1-r1",
+        "version": "P2-r1",
         "n_universe": len(uni), "n_fetch": len(got), "n_fail": len(fails),
         "n_ok": len(sts), "n_gate": sum(gate_cnt.values()) - gate_cnt.get("", 0),
-        "n_signal": len(signals),
+        "n_signal": len(signals), "n_ind": len(industries),
         "scen_cnt": scen_cnt, "gate_cnt": gate_cnt, "src_cnt": src_cnt,
+        "ind_cnt": ind_cnt,
         "excl_st": excl.get("st", 0),
         "note": ("信号=近端背驰场景(背驰见底/见顶) 距背驰日<=%d天; 门禁剔除项仅展示不进信号; "
-                 "K线源 腾讯qfq优先/新浪兜底" % FRESH_MAX_DAYS),
+                 "K线源 腾讯qfq优先/新浪兜底; 行业=申万一级31个, K线=成分股总市值加权合成" % FRESH_MAX_DAYS),
     }
     out = {"meta": meta,
            "signals": [{"sym": s, **sig} for s, sig in signals],
-           "universe": {s: {k: v for k, v in row.items() if k in ("name", "type", "code", "gate", "gd", "st")}
+           "industries": industries,
+           "universe": {s: {k: v for k, v in row.items()
+                            if k in ("name", "type", "code", "gate", "gd", "ind", "mcap", "st", "mark")}
                         for s, row in universe.items()}}
     json.dump(out, open(OUT, "w"), ensure_ascii=False, separators=(",", ":"))
     print("\n======== 雷达产物 %s ========" % OUT)

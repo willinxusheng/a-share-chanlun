@@ -1,70 +1,76 @@
 # -*- coding: utf-8 -*-
-"""首页(主报告 index.html)顶部注入「全市场雷达信号条」 (radar/inject_banner.py)
+"""首页(主报告 index.html)注入「全市场雷达入口按钮」 (radar/inject_banner.py)
 ========================================================
-在 report.py 生成的 report.html 顶部注入一条常驻信号横幅:
-  今日信号 N 个(截至 asof) -> 点击进入全市场雷达页 radar/radar.html
-读取 radar/radar.json(由 radar/scan_radar.py 每日产出, CI radar-scan.yml 提交)。
-radar.json 缺失/异常时退化为「仅 cp 不注入」, 绝不阻断主报告发布。
+P2 改造(2026-09-05): 用户要求删除旧版常驻全宽信号横幅,
+改为在主报告标题栏(header)右上角注入一个跳转按钮:
+  📡 缠论雷达 ->   (点击进入全市场雷达页 radar/radar.html)
+
+不再读取 radar/radar.json(按钮为纯静态入口, 雷达数据缺失不阻断主报告发布)。
+旧版 build_banner 整条删除。
 
 用法(替代 deploy.yml 里的 cp report.html index.html):
   python3 radar/inject_banner.py report.html
-   -> 输出 index.html (report.html + 横幅), 与 cp 同目录语义一致
+   -> 输出 index.html (report.html + header 右上按钮 + 适配CSS), 与 cp 同目录语义一致
 """
 import os
 import re
 import sys
-import json
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+# P2: header 右上角胶囊按钮 + 三断点适配CSS(桌面/窄屏/矮横屏)。
+# 桌面: header 非flex, 按钮 absolute 定位右上, h1 右侧留白避让;
+#        header 自带 position:relative(主样式), 这里再保险声明一次。
+# 窄屏(<=720px 手机竖屏): h1 标题占满整行, 按钮仍贴右上, p 说明文字加右距避让。
+# 矮横屏(max-height:560px): report.html 自带 header flex(space-between)紧凑版,
+#        按钮改为 flex 第三项贴右, 与 h1/p 同行, 不遮文字。
+RADAR_BTN_CSS = """
+<style>
+/* ===== P2 全市场雷达入口按钮(替代旧顶部信号横幅) ===== */
+.wrap > header { position: relative; }
+.wrap > header > h1 { padding-right: 158px; box-sizing: border-box; }
+a.radar-btn {
+  position: absolute; top: 50%; right: 24px; transform: translateY(-50%);
+  z-index: 3; display: inline-flex; align-items: center; gap: 5px;
+  background: rgba(255,255,255,.13); border: 1px solid rgba(255,255,255,.30);
+  color: #fff; font-size: 13px; font-weight: 600; line-height: 1;
+  padding: 8px 14px; border-radius: 999px; text-decoration: none;
+  white-space: nowrap; -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px);
+  box-shadow: 0 2px 8px rgba(0,0,0,.16); transition: background .2s, transform .2s;
+  font-family: inherit;
+}
+a.radar-btn:hover { background: rgba(255,255,255,.24); }
+a.radar-btn .rb-dot {
+  width: 7px; height: 7px; border-radius: 50%; background: #ffd43b;
+  box-shadow: 0 0 0 0 rgba(255,212,59,.55); animation: rbPulse 2s infinite;
+}
+@keyframes rbPulse {
+  0%   { box-shadow: 0 0 0 0 rgba(255,212,59,.5); }
+  70%  { box-shadow: 0 0 0 6px rgba(255,212,59,0); }
+  100% { box-shadow: 0 0 0 0 rgba(255,212,59,0); }
+}
+@media (max-width: 720px) {
+  a.radar-btn { right: 12px; font-size: 12px; padding: 6px 11px; }
+  .wrap > header > h1 { padding-right: 0; }
+  .wrap > header > p { padding-right: 108px; }   /* 说明文字右端避让按钮 */
+}
+@media (max-height: 560px) {
+  /* 矮横屏: report.html 自带 header flex(space-between)紧凑版 —— 改为首行左对齐,
+     让按钮作为 flex 第三项 margin-left:auto 贴右, 与 h1/p 同行不遮字 */
+  .wrap > header { justify-content: flex-start; flex-wrap: nowrap; }
+  a.radar-btn { position: static; transform: none; margin-left: auto; flex: 0 0 auto; padding: 5px 10px; font-size: 12px; }
+  .wrap > header > h1 { padding-right: 0; flex: 0 1 auto; }
+  .wrap > header > p { padding-right: 0; flex: 0 1 auto; }
+}
+</style>
+"""
 
-def report_build_time(html):
-    """从主报告 report.html 提取生成时间(BUILD_TIME__="...")。主报告时间戳才是首页时间轴。"""
-    m = re.search(r'BUILD_TIME__\s*=\s*"([^"]+)"', html)
-    if m:
-        return m.group(1).strip()
-    m = re.search(r"生成时间[：:]\s*([^<\s][^<\n]*)", html)
-    return m.group(1).strip() if m else ""
 
-
-def build_banner(radar_json, deploy_ts=""):
-    """由 radar.json 拼横幅 HTML; 任何异常返回 None(调用方走纯cp)。
-    deploy_ts = 主报告生成时间(与首页其他时间戳一致), 为空则不显示时刻。"""
-    try:
-        meta = radar_json.get("meta", {})
-        signals = radar_json.get("signals", []) or []
-        n = len(signals)
-        asof = meta.get("asof", "")
-        strong = [s for s in signals if s.get("strong", 0) >= 2][:3]
-        pills = ""
-        for s in strong:
-            nm = s.get("name", "")
-            dr = "底背驰" if s.get("dir") == "bottom" else "顶背驰"
-            pills += ('<span style="display:inline-block;background:rgba(255,255,255,.14);'
-                      'border-radius:10px;padding:1px 9px;margin:0 4px;font-size:12px">%s %s</span>'
-                      % (nm, dr))
-        col = "#ffd43b"
-        if n == 0:
-            title = "今日全市场缠论信号：暂无近端背驰信号"
-        else:
-            title = "今日全市场缠论信号：%d 个" % n
-        inner = []
-        inner.append('<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">')
-        inner.append('<span style="font-weight:700">🎯 %s</span>' % title)
-        if asof:
-            inner.append('<span style="opacity:.8;font-size:12px">数据截至 %s%s</span>'
-                         % (asof, " · 更新于 " + deploy_ts if deploy_ts else ""))
-        inner.append(pills)
-        inner.append('<a href="radar/radar.html" style="margin-left:auto;color:%s;font-weight:700;'
-                     'text-decoration:none;font-size:13px;white-space:nowrap">查看全市场雷达 →</a>' % col)
-        inner.append('</div>')
-        return (
-            '<div style="position:sticky;top:0;z-index:99;background:linear-gradient(135deg,#16233c,#1d3a63);'
-            'color:#fff;font:13px/1.6 \'Microsoft YaHei\',\'PingFang SC\',sans-serif;'
-            'padding:9px 16px;box-shadow:0 2px 8px rgba(0,0,0,.18)">'
-            + "".join(inner) + '</div>')
-    except Exception:   # noqa: BLE001
-        return None
+def build_button():
+    """P2: 纯静态跳转按钮(不依赖 radar.json, 恒可注入)。"""
+    return ('<a class="radar-btn" href="radar/radar.html" title="全市场缠论信号雷达 · '
+            '按申万一级行业聚合，点击行业看行业K线与个股详情">'
+            '<span class="rb-dot"></span>📡 缠论雷达 →</a>')
 
 
 def main():
@@ -74,30 +80,39 @@ def main():
         sys.exit(1)
     with open(src, "r", encoding="utf-8") as f:
         html = f.read()
-    radar_path = os.path.join(BASE, "radar", "radar.json")
-    banner = ""
-    if os.path.exists(radar_path):
-        try:
-            radar_json = json.load(open(radar_path, "r", encoding="utf-8"))
-            b = build_banner(radar_json, report_build_time(html))
-            if b:
-                banner = b
-        except Exception as e:   # noqa: BLE001
-            print("WARN 横幅注入失败(降级纯cp): %s" % e, file=sys.stderr)
-    if banner:
-        if "<body" in html:
-            j = html.index("<body")
-            i = html.index(">", j) + 1
-            html = html[:i] + banner + html[i:]
+
+    # 1) 注入 CSS 到 </head> 前
+    head_end = html.find("</head>")
+    if head_end > 0:
+        html = html[:head_end] + RADAR_BTN_CSS + "\n" + html[head_end:]
+    else:
+        print("WARN 未找到 </head>, 按钮样式追加到文件头", file=sys.stderr)
+        html = RADAR_BTN_CSS + html
+
+    # 2) 注入按钮到第一个 <header> 内(末尾, h1/p 之后作兄弟节点; 绝对定位不受 DOM 顺序影响,
+    #    矮横屏 flex 下作为第三项由 margin-left:auto 贴右)
+    hdr = re.search(r"<header[^>]*>.*?</header>", html, re.S)
+    if hdr:
+        tag_end = html.find("</header>", hdr.start())
+        html = html[:tag_end] + build_button() + html[tag_end:]
+    else:
+        print("WARN 未找到 <header>, 按钮追加到 <body> 后", file=sys.stderr)
+        b = html.find("<body")
+        if b >= 0:
+            j = html.find(">", b) + 1
+            html = html[:j] + build_button() + html[j:]
         else:
-            print("WARN 未找到 <body>, 横幅追加到文件头", file=sys.stderr)
-            html = banner + html
+            html = build_button() + html
+
     out = os.path.join(BASE, "index.html")
     tmp = out + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         f.write(html)
     os.replace(tmp, out)
-    print("index.html 就绪(横幅=%s), %d KB" % ("有" if banner else "无", os.path.getsize(out) // 1024))
+    size_kb = os.path.getsize(out) // 1024
+    has_btn = "class=\"radar-btn\"" in html
+    print("index.html 就绪(按钮=%s, 样式=%s), %d KB"
+          % ("有" if has_btn else "无", "有" if "a.radar-btn" in html else "无", size_kb))
 
 
 if __name__ == "__main__":

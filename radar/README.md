@@ -1,22 +1,43 @@
-# A股全市场缠论雷达 (radar/ · P1)
+# A股全市场缠论雷达 (radar/ · P2 行业视角)
 
 对 **沪深A股 + 北交所 + 场内基金/ETF（约 7200 只）** 每日收盘后全量跑一遍缠论结构分析，
-产出「近端背驰信号」与全市场结构索引，供雷达页与首页信号条消费。
+产出「近端背驰信号」与全市场结构索引，按**申万一级行业**聚合展示。
+
+## 页面（三级导航 · 与主看板同宽 1160px · 深蓝渐变同款）
+
+| 层级 | 路由 | 内容 |
+|------|------|------|
+| 一级 | `#/` | 状态胶囊 + 今日信号区 + 左「行业指数列表」右「行业缠论总览」 |
+| 二级 | 点击行业 | 行业成分股**总市值加权合成K线**（缠论笔/中枢/背驰叠加，SVG矢量）+ 行业缠论结构 + 成分股信号分布 |
+| 三级 | `#/stk/<sym>` | 个股详情：600px 主K线（浏览器实时拉腾讯 qfq 660根 + 缠论标注）+ 结构明细 |
+
+- 顶背驰 = 红▼ / 底背驰 = 绿▲（A股约定：涨红跌绿），笔=紫折线、中枢=紫半透明矩形。
+- K 线全部 ECharts **SVG 矢量**渲染（`renderer:"svg"`），MA5/10/20 + 量能副图 + 缩放。
+
+## 行业维度（P2 新增）
+
+- **行业归属**：东财 clist f100 返回**二级细分行业（129 个）**；`industry_map.py` 自建静态映射
+  细分→申万一级 31（实测全 A+北交 **5566 股票零遗漏**，ETF/无行业标的归「-」不进行业聚合）。
+- **行业K线合成**：`synth_industry_kline()` 成分股最新总市值定权 → 单日收益率加权 → 链式合成指数
+  （基准 1000 起点，v=行业成交额/亿元），再复用 `chanlun.analyze` 做行业级缠论分析。
+- 仅**通过门禁**的股票计入行业成分（信号分布与成分列表口径一致）。
 
 ## 产物
 
 | 文件 | 说明 | 生命周期 |
 |------|------|----------|
-| `radar.json` | 全市场结构摘要 + 今日信号（meta/signals/universe 三段，约 2~4 MB） | CI 每日提交(tracked) |
-| `radar.html` | 雷达页（静态模板，运行时 fetch radar.json，信号区置顶+NEW高亮+实操卡） | 随 Pages 发布 |
-| `scan_radar.py` | 每日扫描主脚本 | 代码(tracked) |
-| `inject_banner.py` | 首页 index.html 顶部注入信号条（deploy 时执行，失败降级纯cp） | 代码(tracked) |
+| `radar.json` | meta/signals/industries/universe 四段（P2 起每票带 mark 绘图标注，约 5~8 MB） | CI 每日提交(tracked) |
+| `radar.html` | 雷达页（静态模板，运行时 fetch radar.json；个股K线浏览器实时拉腾讯） | 随 Pages 发布 |
+| `scan_radar.py` | 每日扫描主脚本（行业聚合 + mark 标注） | 代码(tracked) |
+| `industry_map.py` | 129 细分 → 申万一级 31 静态映射 | 代码(tracked) |
+| `inject_banner.py` | 主看板 index.html header 右上注入「📡 缠论雷达」按钮（P2 起不再注入顶部横幅） | 代码(tracked) |
+| `vendor/echarts.min.js` | 本地化 ECharts（1MB，离线可用，SVG 渲染） | 随 Pages 发布 |
 
 ## 数据链（多源降级）
 
 1. **标的池**：东财 clist（push2delay/push2 镜像轮询）拉沪深A/北交所/场内基金；
    名称含 `ST`/`*ST`/`退` 直接剔除（2026-09-05 实测：全池 7225 = 6750 有效 + 475 ST/退）。
-   新股上市进 clist 即自动入池（代码段天然覆盖，无需维护名单）。
+   每票带 f100 细分行业 + f20 总市值（f20 缺失 "-" 时置 0，不参与加权）。
 2. **K线**：腾讯 fqkline 纯 count qfq（R248 形态，前复权，CI 境外最稳）→ 失败自动降级新浪日K
    （不复权，800 根）。本地被腾讯 WAF 降速时可用 `--src sina` 强制新浪。
    全局限速 + 501/WAF 退避 + 失败重试。
@@ -39,19 +60,17 @@
   距背驰日 ≤ 10 交易日。
 - 强信号 = 趋势背驰 或 段级同步；量能确认为附加置信。
 - 排序：强信号优先 → 新鲜度 → 面积比。
-- 全量统计(2026-09-05 200票样本)对照 P0：背驰见底/见顶场景占比约 10~20% 为常态，
-  但大量为 30+ 天前的旧背驰残留（场景挂载），新鲜窗口过滤后信号数显著收敛。
 
 ## 用法
 
 ```bash
 python3 radar/scan_radar.py --src sina --limit 200   # 本地冒烟(新浪源快; 腾讯源被WAF时)
 python3 radar/scan_radar.py                          # 全量, CI 默认(腾讯qfq优先)
-python3 radar/inject_banner.py report.html           # 生成带信号条的 index.html
+python3 radar/inject_banner.py report.html           # 生成 index.html(header 右上雷达按钮)
 ```
 
 ## CI
 
 - `.github/workflows/radar-scan.yml`：交易日北京 18:35 全量扫描 → 自检(n_ok>4000)
-  → commit radar.json → push 触发 deploy.yml 发布雷达页 + 首页信号条。
+  → commit radar.json → push 触发 deploy.yml 发布雷达页 + 首页入口按钮。
 - 休市/无变化自动跳过提交（git diff 为空即 exit 0）。
