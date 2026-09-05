@@ -183,7 +183,7 @@ a{color:var(--primary);text-decoration:none}
 <script>
 /* ============================================================
    全市场缠论雷达 v3 · 行业为根 + 个股K线内嵌切换
-   数据: radar/radar.json (scan_radar.py P3b-r1) · 前端 R253: 基准/温度透视/指标带/回撤列/MA60/相对强弱/异动徽章
+   数据: radar/radar.json (scan_radar.py P3b-r1) · 前端 R252+R253 · R253-hotfix: 修 drawChart 不清 loading 残留 + legend 重复声明
    K线: 行业=radar.json 内嵌合成; 个股=腾讯 fqkline (CORS 已开)
    ============================================================ */
 var UP="#e54545", DN="#18a058", ACC="#2b6cb0";
@@ -459,17 +459,28 @@ function drawChart(){
   var el=$("mainChart");if(!el)return;
   if(curTab==="stk"&&curStk){
     drawStkInto(el,curStk);
-  }else if(curTab==="ind"&&curInd){
-    var ind=INDS[curInd],kl=ind.kline||[];
-    if(!kl.length){el.innerHTML='<div class="err">该行业合成K线为空</div>';return}
-    var opt=indKlineOption(kl);
-    opt.series=opt.series.concat(chanMarkOption(ind.mark,kl.map(function(x){return x.date})));
-    opt.legend.data.push("笔","顶背驰","底背驰");
-    if(myChart){myChart.dispose()}
+    return;
+  }
+  if(curTab!=="ind"||!curInd){el.innerHTML='<div class="loading" style="padding:60px 0">点击下方股票查看个股K线</div>';return;}
+  var ind=INDS[curInd],kl=ind.kline||[];
+  if(!kl.length){el.innerHTML='<div class="err">该行业合成K线为空</div>';return;}
+  // [R253 bug fix] 关键: 行业主路径此前不清 el.innerHTML,
+  // 上一次残留的 <div class="loading sk">K线渲染中…</div> 会卡死 mainChart.
+  // echarts.init(zrender) 不会清空 DOM 子节点,只追加 svg,loading 文字盖在 svg 上.
+  el.innerHTML="";
+  var opt=indKlineOption(kl);
+  opt.series=opt.series.concat(chanMarkOption(ind.mark,kl.map(function(x){return x.date})));
+  // legend 只 push 实际存在的系列,避免 "底背驰" 等 0 信号行业报 warning
+  ["笔","顶背驰","底背驰"].forEach(function(n){
+    if(opt.series.some(function(s){return s.name===n;}) && opt.legend.data.indexOf(n)<0) opt.legend.data.push(n);
+  });
+  try{
+    if(myChart)myChart.dispose();
     myChart=echarts.init(el,null,{renderer:"svg"});
     myChart.setOption(opt);
-  }else{
-    el.innerHTML='<div class="loading" style="padding:60px 0">点击下方股票查看个股K线</div>';
+  }catch(err){
+    console.error("[radar.drawChart] setOption failed",err);
+    el.innerHTML='<div class="err">K线渲染失败: '+(err&&err.message||err)+'<br>请刷新页面重试</div>';
   }
 }
 function drawStkInto(el,sym){
