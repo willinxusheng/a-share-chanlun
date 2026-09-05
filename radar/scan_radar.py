@@ -58,6 +58,7 @@ EM_FS_STOCK = "m:1+t:2,m:1+t:23,m:0+t:6,m:0+t:80"      # 沪深A股(含主板/�
 EM_FS_BJ = "m:0+t:81+s:2048"                            # 北交所
 EM_FS_FUND = "b:MK0021"                                 # 场内基金(ETF/LOF)
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "radar.json")
+ETF_KEY = "ETF板块"             # 场内基金/ETF 归为独立板块(P3b), 与申万一级并列展示
 
 # ---------- 全局限速器 ----------
 class _Throttle:
@@ -599,6 +600,12 @@ def main():
             ind_total[uind] = ind_total.get(uind, 0) + 1
         if not gate and uind not in ("", "-") and uni[sym]["type"] in ("股", "北交"):
             ind_qual[uind] = ind_qual.get(uind, 0) + 1
+        # ETF/场内基金 -> 聚合为「ETF板块」并列(按总规模加权合成板块K线)
+        if uni[sym]["type"] == "ETF":
+            ind_total[ETF_KEY] = ind_total.get(ETF_KEY, 0) + 1
+            if not gate:
+                ind_qual[ETF_KEY] = ind_qual.get(ETF_KEY, 0) + 1
+                ind_members.setdefault(ETF_KEY, []).append((sym, uni[sym]["mcap"]))
         uind = uni[sym].get("ind", "-") if sym in uni else "-"
         row = {"name": uni[sym]["name"], "type": uni[sym]["type"],
                "code": uni[sym]["code"], "src": st.pop("src", ""),
@@ -609,7 +616,8 @@ def main():
             row["mark"] = marks[sym]
         universe[sym] = row
         if sig:
-            sig["ind"] = uind
+            # ETF 信号归到 ETF板块 (行业计数/分组用)
+            sig["ind"] = ETF_KEY if uni[sym]["type"] == "ETF" else uind
             signals.append((sym, sig))
         if uind not in ("-", "") and uni[sym]["type"] in ("股", "北交") and gate == "":
             ind_members.setdefault(uind, []).append((sym, uni[sym]["mcap"]))
@@ -644,9 +652,11 @@ def main():
         total_cap = sum(m for _s, m in members if m)
         industries[ind] = {
             "n_member": len(members),
+            "n_total": ind_total.get(ind, len(members)),
             "n_sig_top": n_top, "n_sig_bot": n_bot,
             "cap": round(total_cap / 1e8, 0),      # 亿元
             "chg1d": chg1d,
+            "is_etf": 1 if ind == ETF_KEY else 0,
             "rsi14": _rsi14(iks),
             "amp20": _amp20(iks),
             "qual_rate": _qual_rate(ind, ind_total, ind_qual),
@@ -678,7 +688,7 @@ def main():
         "title": "A股全市场缠论雷达",
         "asof": asof, "build_time": datetime.datetime.now(
             datetime.timezone(datetime.timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S"),
-        "version": "P3-r1",
+        "version": "P3b-r1",
         "n_universe": len(uni), "n_fetch": len(got), "n_fail": len(fails),
         "n_ok": len(sts), "n_gate": sum(gate_cnt.values()) - gate_cnt.get("", 0),
         "n_signal": len(signals), "n_ind": len(industries),

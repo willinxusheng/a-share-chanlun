@@ -28,7 +28,9 @@ SYMBOLS = {
 #       起始日期由 fetch_tx 内按 MIN_DATE=2021-01-01 裁剪保证(与看板"2021 至今"契约一致)。
 def _tx_url(symbol, period):
     _b = (datetime.now().minute * 60 + datetime.now().second) % 300
-    return ("https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=%s,%s,,,%d,qfq") % (
+    # R249(2026-09-06): web.ifzq.gtimg.cn 对本机出口被腾讯 WAF 501 拦截(跳 waf.tencent.com
+    # 验证页), 同源 ifzq.gtimg.cn(无 web. 前缀) 实测 200 正常 —— host 去掉 web. 前缀。
+    return ("https://ifzq.gtimg.cn/appstock/app/fqkline/get?param=%s,%s,,,%d,qfq") % (
         symbol, period, 1700 + _b)
 
 # 看板数据契约起点(标题"2021 至今")。纯 count 接口会返回更早历史(如日线 2019-04 起),

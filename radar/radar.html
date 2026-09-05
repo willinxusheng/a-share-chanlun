@@ -17,14 +17,14 @@ body{font-family:"Microsoft YaHei","PingFang SC","Hiragino Sans GB",sans-serif;b
 .wrap{max-width:1160px;margin:0 auto;padding:18px 18px 40px}
 /* ===== 顶部(与主看板同款深蓝渐变) ===== */
 header.top{position:sticky;top:0;z-index:50;background:var(--grad);color:#fff;box-shadow:0 2px 12px rgba(15,23,42,.25)}
-header.top .inner{max-width:1160px;margin:0 auto;padding:14px 18px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
-.brand{display:flex;flex-direction:column}
+header.top .inner{max-width:1160px;margin:0 auto;padding:14px 18px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;position:relative;min-height:54px}
+.brand{display:flex;flex-direction:column;flex:1 1 auto;min-width:0;padding-right:120px}
 h1{font-size:20px;font-weight:700;letter-spacing:.5px}
 h1 .dot{color:#ffd43b}
 .sub{color:#c8d3e2;font-size:12px;margin-top:3px}
 .sub b{color:#fff}
-.spacer{flex:1}
-.goback{background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.35);color:#fff;padding:7px 14px;border-radius:999px;font-size:13px;cursor:pointer;text-decoration:none;transition:.15s;white-space:nowrap}
+.spacer{display:none}
+.goback{position:absolute;top:14px;right:18px;background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.35);color:#fff;padding:7px 14px;border-radius:999px;font-size:13px;cursor:pointer;text-decoration:none;transition:.15s;white-space:nowrap}
 .goback:hover{background:rgba(255,255,255,.26)}
 /* ===== 概要条 ===== */
 .bar{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0 0}
@@ -42,11 +42,18 @@ h1 .dot{color:#ffd43b}
 .ind-panel .head .tabs{display:flex;gap:4px;background:#f1f5f9;border-radius:8px;padding:2px}
 .ind-panel .head .tabs a{font-size:12px;padding:4px 10px;border-radius:6px;cursor:pointer;color:var(--muted);text-decoration:none}
 .ind-panel .head .tabs a.on{background:#fff;color:var(--ink);font-weight:700;box-shadow:0 1px 2px rgba(0,0,0,.06)}
-.ind-grid{display:grid;grid-template-columns:1.4fr .8fr .8fr 1.5fr .7fr .7fr 26px;gap:8px;align-items:center;padding:9px 16px;font-size:11px;background:#f8fafc;color:var(--muted);border-bottom:1px solid #eef2f7;border-top:1px solid #eef2f7;position:sticky;top:56px;z-index:5}
-.ind-row{display:grid;grid-template-columns:1.4fr .8fr .8fr 1.5fr .7fr .7fr 26px;gap:8px;align-items:center;padding:10px 16px;border-top:1px solid #f1f5f9;cursor:pointer;transition:.12s}
+.ind-grid{display:grid;grid-template-columns:1.35fr .72fr .72fr 1.45fr .58fr 1.05fr 26px;gap:8px;align-items:center;padding:9px 16px;font-size:11px;background:#f8fafc;color:var(--muted);border-bottom:1px solid #eef2f7;border-top:1px solid #eef2f7;position:sticky;top:64px;z-index:30;box-shadow:0 1px 0 #fff}
+.ind-row:first-of-type{margin-top:0}
+.ind-row{display:grid;grid-template-columns:1.35fr .72fr .72fr 1.45fr .58fr 1.05fr 26px;gap:8px;align-items:center;padding:10px 16px;border-top:1px solid #f1f5f9;cursor:pointer;transition:.12s}
 .ind-row:hover{background:#f8fafc}
 .ind-row:first-of-type{border-top:0}
 .ind-row.hl{background:#eaf2fb}
+.ind-row.strong-top{border-left:3px solid var(--up);padding-left:13px;background:linear-gradient(90deg,#fff8f8,#fff)}
+.ind-row.strong-bot{border-left:3px solid var(--down);padding-left:13px;background:linear-gradient(90deg,#f3fbf6,#fff)}
+.rsi-cell{display:inline-block;padding:1px 7px;border-radius:4px;font-weight:700;font-variant-numeric:tabular-nums}
+.rsi-cell.hot{background:#fdecec;color:#c92a2a}
+.rsi-cell.cold{background:#e6f9f0;color:#087f5b}
+.rsi-cell.mid{background:#f1f5f9;color:var(--ink)}
 .ind-row .nm{font-weight:700;font-size:14px;display:flex;align-items:center;gap:6px}
 .ind-row .meta{font-size:11px;color:var(--muted);line-height:1.5}
 .ind-row .spark{width:100%;height:34px}
@@ -62,6 +69,12 @@ h1 .dot{color:#ffd43b}
 .regime.up{background:#fef3c7;color:#92400e}
 .regime.dn{background:#e0f2fe;color:#075985}
 .regime.flat{background:#eef2f8;color:#64748b}
+/* 行业详情头部专业指标带 */
+.dstrip{display:flex;flex-wrap:wrap;align-items:center;gap:6px 16px;padding:9px 16px;background:#fbfcfe;border-bottom:1px solid #eef2f7;font-size:12px;color:#475569}
+.dstrip b{font-variant-numeric:tabular-nums}
+.dstrip .rsi-cell{margin:0}
+/* 涨跌单元格内 相对大盘 次级文案 */
+.vsub{font-size:10px;font-weight:400;text-align:right;margin-top:1px;line-height:1.2;white-space:nowrap;opacity:.95}
 /* 行业详情(K线/成分股) */
 #indDetail{margin-top:14px}
 .chart-note{font-size:11px;color:var(--muted);padding:6px 16px 8px;line-height:1.7}
@@ -72,10 +85,10 @@ h1 .dot{color:#ffd43b}
 /* ===== 表格(成分股信号列表) ===== */
 .sec-t{display:flex;align-items:center;gap:8px;padding:14px 16px 0;font-size:15px;font-weight:700}
 .sec-t .cnt{font-size:12px;color:var(--muted);font-weight:400}
-.stk-grid{display:grid;grid-template-columns:minmax(170px,1.3fr) repeat(7,minmax(52px,.7fr)) 22px;gap:6px;align-items:center;padding:9px 16px;font-size:12px;border-top:1px solid #f1f5f9;cursor:pointer;transition:.12s}
+.stk-grid{display:grid;grid-template-columns:minmax(170px,1.3fr) repeat(8,minmax(48px,.66fr)) 22px;gap:6px;align-items:center;padding:9px 16px;font-size:12px;border-top:1px solid #f1f5f9;cursor:pointer;transition:.12s}
 .stk-grid:hover{background:#f8fafc}
-.stk-grid.head{background:#f8fafc;color:var(--muted);font-size:11px;cursor:default;border-top:0;position:sticky;top:56px;z-index:5}
-.stk-grid .nm{font-weight:700;color:var(--ink);font-size:13px}
+.stk-grid.head{background:#f8fafc;color:var(--muted);font-size:11px;cursor:default;border-top:0;position:sticky;top:64px;z-index:20;box-shadow:0 1px 0 #fff}
+.stk-grid .nm{font-weight:700;color:var(--ink);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px}
 .stk-grid .cd{color:var(--muted);font-size:10px}
 .stk-grid .val{text-align:right;font-variant-numeric:tabular-nums}
 .stk-grid .vhl{font-weight:700}
@@ -103,7 +116,7 @@ h1 .dot{color:#ffd43b}
 .gate-pill b{color:#475569}
 .chart-sec{display:grid;grid-template-columns:1fr 1fr;gap:14px}
 @media(max-width:980px){.chart-sec{grid-template-columns:1fr}}
-@media(max-width:980px){.ind-grid,.ind-row{grid-template-columns:1fr .7fr .7fr 1.2fr .6fr .6fr 22px}}
+@media(max-width:980px){.ind-grid,.ind-row{grid-template-columns:1fr .7fr .7fr 1.2fr .6fr .9fr 22px}}
 .loading{text-align:center;padding:80px 0;color:var(--muted);font-size:14px}
 .err{text-align:center;padding:60px 20px;color:#c92a2a;font-size:13px;line-height:1.8}
 .foot{text-align:center;color:#94a3b8;font-size:11px;padding:26px 0 6px;line-height:1.9}
@@ -111,6 +124,9 @@ h1 .dot{color:#ffd43b}
 .sk{animation:sk 1.2s ease-in-out infinite;border-radius:8px}
 @keyframes sk{0%,100%{opacity:.5}50%{opacity:1}}
 a{color:var(--primary);text-decoration:none}
+#toTop{position:fixed;right:22px;bottom:56px;width:38px;height:38px;border-radius:50%;background:var(--primary);color:#fff;font-size:17px;line-height:38px;text-align:center;box-shadow:0 3px 10px rgba(43,108,176,.35);opacity:0;pointer-events:none;transition:.2s;z-index:90}
+#toTop.show{opacity:1;pointer-events:auto}
+#toTop:hover{background:#245a94}
 </style>
 </head>
 <body>
@@ -132,18 +148,18 @@ a{color:var(--primary);text-decoration:none}
     <!-- 行业指数列表: 平铺到顶部 + 专业信息 -->
     <div class="ind-panel">
       <div class="head">
-        <h2>行业指数</h2>
+        <h2>行业 · ETF 板块</h2>
         <span class="badge" id="indCnt">…</span>
         <span class="tabs">
-          <a id="tabSig" class="on" onclick="sortInds('sig')">📊 信号优先</a>
+          <a id="tabSig" onclick="sortInds('sig')">📊 信号优先</a>
           <a id="tabCap" onclick="sortInds('cap')">💰 市值优先</a>
           <a id="tabChg" onclick="sortInds('chg')">⚡ 涨跌极端</a>
-          <a id="tabRsi" onclick="sortInds('rsi')">📈 RSI 极端</a>
+          <a id="tabRsi" class="on" onclick="sortInds('rsi')">📈 RSI 超买优先</a>
         </span>
-        <span class="hint">点击行业查看总K线与成分股·P3 加 4 项专业指标</span>
+        <span class="hint">申万一级 31 行业 + ETF 板块 · 默认收折叠起，点击展开</span>
       </div>
       <div class="ind-grid">
-        <div>行业</div><div style="text-align:right">市值·成分</div><div style="text-align:right">走势·状态</div>
+        <div>板块</div><div style="text-align:right">市值/规模·成分</div><div style="text-align:right">走势·状态</div>
         <div>近120日走势</div><div style="text-align:right">涨跌</div><div style="text-align:right">RSI·振幅·门禁</div><div></div>
       </div>
       <div id="indList"><div class="loading sk">行业加载中…</div></div>
@@ -156,16 +172,18 @@ a{color:var(--primary);text-decoration:none}
   <!-- 三级: 个股详情 -->
   <div id="viewStk" class="hidden"></div>
 </div>
+<a id="toTop" href="javascript:void(0)" onclick="window.scrollTo({top:0,behavior:'smooth'})" title="回到顶部">↑</a>
 <script src="vendor/echarts.min.js"></script>
 <script>
 /* ============================================================
    全市场缠论雷达 v3 · 行业为根 + 个股K线内嵌切换
-   数据: radar/radar.json (scan_radar.py P3-r1)
+   数据: radar/radar.json (scan_radar.py P3b-r1) · 前端 R252: 上证基准/温度透视/详情指标带/回撤列
    K线: 行业=radar.json 内嵌合成; 个股=腾讯 fqkline (CORS 已开)
    ============================================================ */
 var UP="#e54545", DN="#18a058", ACC="#2b6cb0";
 var M=null, UNI={}, SIG=[], INDS={};
 var curInd=null, curStk=null, curTab="ind", myChart=null;
+var IDX=null, detailOpen=false;   // IDX=上证基准(close/chg) · detailOpen=行业详情是否已展开
 function $(id){return document.getElementById(id)}
 function esc(s){return (s==null?"":String(s)).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]})}
 function pct(v,d){if(v==null||isNaN(v))return "-";return (v>0?"+":"")+(v*100).toFixed(d==null?2:d)+"%"}
@@ -178,25 +196,55 @@ fetch("radar.json").then(function(r){if(!r.ok)throw new Error("HTTP "+r.status);
   if(qs.indexOf("stk/")===0)showStk(decodeURIComponent(qs.slice(4)));
   else if(qs.indexOf("ind/")===0)pickInd(decodeURIComponent(qs.slice(4)));
   else renderInds();
+  kickIndex();
 }).catch(function(e){$("topSub").textContent="数据加载失败";$("indList").innerHTML='<div class="err">无法加载 radar.json：'+esc(e.message)+'<br>请确认已与 radar.json 同目录部署（GitHub Pages / 本地静态服务）。</div>'});
+
+/* ===== 上证基准(相对强弱对照) ===== */
+function idxParse(j){
+  var o=(j.data||{})["sh000001"]||{};var arr=o.qfqday||o.day||[];
+  if(arr.length<2)return null;
+  var c1=+arr[arr.length-1][2],c0=+arr[arr.length-2][2];
+  if(!c1||!c0)return null;
+  return {close:c1,chg:c1/c0-1,date:arr[arr.length-1][0]};
+}
+function kickIndex(){
+  var urls=["https://ifzq.gtimg.cn/appstock/app/fqkline/get?param=sh000001,day,,,8,qfq",
+            "https://ifzq.gtimg.cn/appstock/app/fqkline/get?param=sh000001,day,,,8,"];
+  var tryNext=function(list){
+    if(!list.length)return;
+    fetch(list[0]).then(function(r){return r.json()}).then(function(j){
+      var v=idxParse(j);
+      if(!v){tryNext(list.slice(1));return;}
+      IDX=v;renderBar();renderInds();
+      var dw=$("dstripWrap");if(dw&&curInd&&INDS[curInd])dw.innerHTML=detailStrip(INDS[curInd]);
+    }).catch(function(){tryNext(list.slice(1));});
+  };
+  tryNext(urls);
+}
 
 function renderHeader(){
   var m=M||{};
-  $("topSub").innerHTML="申万一级 <b>"+(m.n_ind||Object.keys(INDS).length)+"</b> 行业 · 覆盖 <b>"+(m.n_ok||0)+"</b> 只 · 信号 <b>"+(m.n_signal||0)+"</b> · 数据截至 <b>"+(m.asof||"-")+"</b> · "+ (m.build_time||"");
-  $("indCnt").textContent=(m.n_ind||0)+" 个";
+  $("topSub").innerHTML="申万一级 <b>"+(m.n_ind||Object.keys(INDS).length)+"</b> 行业 + ETF · 覆盖 <b>"+(m.n_ok||0)+"</b> 只 · 信号 <b>"+(m.n_signal||0)+"</b> · 数据截至 <b>"+(m.asof||"-")+"</b> · "+ (m.build_time||"");
+  $("indCnt").textContent=(m.n_ind||0)+"+1";
   document.title="A股全市场缠论雷达 · "+(m.asof||"");
 }
 function renderBar(){
   var m=M||{},scen=m.scen_cnt||{};
+  // 横截面温度: 剔除 ETF 合成板块后, 统计全市场超买/超卖行业数
+  var ob=0,os=0;
+  Object.keys(INDS).forEach(function(k){var x=INDS[k];if(x.is_etf)return;if(x.rsi14==null)return;if(x.rsi14>=70)ob++;else if(x.rsi14<=30)os++;});
+  var idxV=IDX?'<b class="'+(IDX.chg>=0?"up":"down")+'">'+IDX.close.toFixed(1)+'</b> <span class="'+(IDX.chg>=0?"up":"down")+'">'+pct(IDX.chg,2)+'</span>':'<span style="color:#94a3b8">加载中…</span>';
   var pills=[
+    {l:"上证指数 · 强弱基准",v:idxV},
+    {l:"超买行业(RSI≥70)",v:ob,c:ob>0?"hot":""},
+    {l:"超卖行业(RSI≤30)",v:os,c:os>0?"cool":""},
     {l:"覆盖标的",v:(m.n_ok||0),c:""},
     {l:"门禁剔除",v:(m.n_gate||0),c:""},
     {l:"今日顶背驰(风险)",v:(scen["背驰见顶风险"]||0),c:"hot"},
     {l:"今日底背驰(机会)",v:(scen["背驰见底机会"]||0),c:"cool"},
-    {l:"行业合成数",v:Object.keys(INDS).length,c:""},
   ];
   $("barRow").innerHTML=pills.map(function(p){
-    return '<div class="pill '+(p.c||"")+'"><div class="l">'+esc(p.l)+'</div><div class="v">'+esc(p.v)+'</div></div>';
+    return '<div class="pill '+(p.c||"")+'"><div class="l">'+esc(p.l)+'</div><div class="v">'+p.v+'</div></div>';
   }).join("");
 }
 /* ===== 行业列表排序 ===== */
@@ -206,53 +254,123 @@ function sortInds(mode){
   $("tab"+mode.charAt(0).toUpperCase()+mode.slice(1)).classList.add("on");
   renderInds();
 }
-var curSortMode="sig";
+var curSortMode="rsi";
 function indScore(mode,k){
   var x=INDS[k];if(!x)return 0;
   if(mode==="sig")return (x.n_sig_top||0)*10+(x.n_sig_bot||0)*5+((x.st&&x.st.agree)||0);
   if(mode==="cap")return x.cap||0;
   if(mode==="chg")return Math.abs(x.chg1d||0);
-  if(mode==="rsi")return Math.abs((x.rsi14||50)-50);
+  if(mode==="rsi")return x.rsi14!=null?x.rsi14:-1;   // 超买超卖值从大到小(降序): RSI 高(超买)在前
   return 0;
 }
 /* ===== 行业迷你SVG ===== */
 function sparkSVG(d,w,h){
   if(!d||d.length<2)return '<svg width="'+w+'" height="'+h+'"></svg>';
-  var ps=d.map(function(k){return k[3]}),min=Math.min.apply(0,ps),max=Math.max.apply(0,ps),rng=(max-min)||1;
+  var cs=d.map(function(k){return k[3]}),min=Math.min.apply(0,cs),max=Math.max.apply(0,cs),rng=(max-min)||1;
   var X=function(i){return 2+(w-4)*i/(d.length-1)},Y=function(v){return 2+(h-4)*(max-v)/rng};
-  var up=d[d.length-1][3]>=d[0][3];
-  var col=up?UP:DN;
-  var pts=d.map(function(k,i){return X(i).toFixed(1)+","+Y(k[3]).toFixed(1)}).join(" ");
-  return '<svg width="'+w+'" height="'+h+'" viewBox="0 0 '+w+' '+h+'"><polyline points="'+pts+'" fill="none" stroke="'+col+'" stroke-width="1.6" stroke-linejoin="round"/></svg>';
+  var up=cs[cs.length-1]>=cs[0],col=up?UP:DN;
+  var pts=cs.map(function(v,i){return X(i).toFixed(1)+","+Y(v).toFixed(1)}).join(" ");
+  // MA5(5日均价): 前4点空,从第4点起画紫色虚线
+  var maPts=[];
+  for(var i=4;i<cs.length;i++){
+    var s=0;for(var j=i-4;j<=i;j++)s+=cs[j];
+    maPts.push(X(i).toFixed(1)+","+Y(s/5).toFixed(1));
+  }
+  var maLine=maPts.length?'<polyline points="'+maPts.join(" ")+'" fill="none" stroke="#7f77dd" stroke-width="1.2" stroke-dasharray="3,2"/>':'';
+  return '<svg width="'+w+'" height="'+h+'" viewBox="0 0 '+w+' '+h+'" xmlns="http://www.w3.org/2000/svg">'+
+    '<polyline points="'+pts+'" fill="none" stroke="'+col+'" stroke-width="1.6" stroke-linejoin="round"/>'+
+    maLine+
+    '</svg>';
 }
-/* ===== 一级: 行业列表(平铺+专业信息) ===== */
+/* RSI 近60日分位: 用行业 kline(320根) 算近60个 RSI, 当前 RSI 所处百分位 */
+function rsiPctileOf(ind){
+  var kl=ind.kline;if(!kl||kl.length<20||ind.rsi14==null)return null;
+  var seq=rsiSeries(kl,14).filter(function(v){return v!=null});
+  if(seq.length<20)return null;
+  var win=seq.slice(-60);
+  var cur=ind.rsi14;
+  var below=0;win.forEach(function(v){if(v<=cur)below++});
+  return Math.round(below/win.length*100);
+}
+/* RSI 温度条: 绿(超卖)→灰→红(超买) 渐变, 黑色游标指当前值 */
+function rsiBarHtml(rv){
+  if(rv==null)return"";
+  var p=Math.max(0,Math.min(100,rv)).toFixed(0);
+  return '<div style="position:relative;width:58px;height:4px;border-radius:2px;margin:3px 0 0 auto;background:linear-gradient(90deg,#18a058 0%,#b8e6d0 30%,#eef1f5 50%,#f6d0d0 70%,#e54545 100%)">'+
+    '<div style="position:absolute;top:-2px;left:calc('+p+'% - 1px);width:2px;height:8px;background:#334155;border-radius:1px"></div></div>';
+}
+/* RSI 单元格块: 彩色徽章 + 温度条 + 60日分位/振幅/门禁率 */
+function ctrBlock(x){
+  var rv=x.rsi14;
+  var rsiTxt=rv!=null?rv.toFixed(0):"-";
+  var rsiCls=rv==null?"":(rv>=70?"hot":(rv<=30?"cold":"mid"));
+  var pp=rsiPctileOf(x);
+  var ampTxt=(x.amp20!=null?x.amp20.toFixed(1)+"%":"-");
+  var qrtTxt=(x.qual_rate!=null?x.qual_rate.toFixed(0)+"%":"-");
+  return '<div style="display:flex;align-items:center;justify-content:flex-end;gap:5px">'+
+    '<span class="rsi-cell '+rsiCls+'">RSI '+rsiTxt+'</span>'+rsiBarHtml(rv)+'</div>'+
+    '<div style="font-size:10px;color:var(--muted);margin-top:2px;text-align:right">'+
+    (pp==null?"60日-":"60日"+pp+"%分位")+' · 振'+ampTxt+' · 门禁'+qrtTxt+'</div>';
+}
+/* ===== 行业详情头部专业指标带(点开行业即见完整面板) ===== */
+function detailStrip(ind){
+  var rv=ind.rsi14,pp=rsiPctileOf(ind);
+  var capTxt=(ind.cap==null)?"-":(ind.cap>=10000?(ind.cap/10000).toFixed(2)+"万亿":ind.cap.toFixed(0)+"亿");
+  var h='<span class="rsi-cell '+(rv==null?"mid":(rv>=70?"hot":(rv<=30?"cold":"mid")))+'">RSI '+(rv!=null?rv.toFixed(0):"-")+'</span>';
+  h+='<span style="display:inline-flex;align-items:center">'+rsiBarHtml(rv)+'</span>';
+  h+='<span>60日'+(pp==null?"分位 -":pp+"% 分位")+'</span>';
+  h+='<span>20日振幅 '+(ind.amp20!=null?ind.amp20.toFixed(1)+"%":"-")+'</span>';
+  h+='<span>门禁通过 '+(ind.qual_rate!=null?ind.qual_rate.toFixed(0)+"%":"-")+'</span>';
+  h+='<span>顶背驰 <b class="up">'+(ind.n_sig_top||0)+'</b> / 底背驰 <b class="down">'+(ind.n_sig_bot||0)+'</b></span>';
+  h+='<span>'+(ind.is_etf?"总规模 ":"总市值 ")+capTxt+'</span>';
+  h+='<span>指数 '+pct(ind.chg1d,2)+'</span>';
+  if(IDX){var rel=(ind.chg1d-IDX.chg)*100;h+='<span class="'+(rel>=0?"up":"down")+'">'+(rel>=0?"▲ 跑赢":"▼ 跑输")+'上证 '+Math.abs(rel).toFixed(1)+'pp</span>';}
+  return '<div class="dstrip">'+h+'</div>';
+}
+/* ===== 一级: 行业列表(平铺+专业信息, 折叠) ===== */
+var IND_SHOW=8;                 // 折叠态默认展示行数(P3b 减少铺开)
+var indExpanded=false;          // true=全部展开
+function toggleInds(){indExpanded=!indExpanded;renderInds()}
 function renderInds(){
   var keys=Object.keys(INDS).slice().sort(function(a,b){
-    var s=indScore(curSortMode,b)-indScore(curSortMode,a);
-    if(curSortMode==="chg"||curSortMode==="rsi")s=-s;  // 极端度从大到小
-    return s;
+    return indScore(curSortMode,b)-indScore(curSortMode,a);  // 统一降序(极端度大者在前)
   });
   var html="";
-  keys.forEach(function(k){
+  keys.forEach(function(k,i){
     var x=INDS[k];
     var sg=(x.n_sig_top||0)+(x.n_sig_bot||0);
     var hl = curInd===k?" hl":"";
     var rCls=regimeCls(x.regime);
-    var rsiTxt=(x.rsi14!=null?x.rsi14.toFixed(0):"-");
-    var ampTxt=(x.amp20!=null?x.amp20.toFixed(1)+"%":"-");
-    var qrtTxt=(x.qual_rate!=null?x.qual_rate.toFixed(0)+"%":"-");
-    html+='<div class="ind-row'+hl+'" onclick="pickInd(\''+esc(k)+'\')">'+
-      '<div class="nm">'+esc(k)+(sg?' <span class="badge2 '+(x.n_sig_top?'r':'g')+'">'+(x.n_sig_top?'顶'+x.n_sig_top:'底'+x.n_sig_bot)+'</span>':'')+'</div>'+
-      '<div class="meta" style="text-align:right">'+capStr(x.cap)+'<br><span style="color:var(--muted)">'+(x.n_member||0)+'只</span></div>'+
+    var etfTag=x.is_etf?'<span class="badge2 o" style="margin-left:4px">ETF</span>':'';
+    var capLbl=x.is_etf?"规模":"市值";
+    var capTxt=(x.cap==null)?"-":(x.cap>=10000?(x.cap/10000).toFixed(2)+"万亿":x.cap.toFixed(0)+"亿");
+    // 强信号行业: 顶信号>=2 红色左侧条 / 底信号>=2 绿色左侧条
+    var strongCls="";
+    if((x.n_sig_top||0)>=2)strongCls=" strong-top";
+    else if((x.n_sig_bot||0)>=2)strongCls=" strong-bot";
+    if(!indExpanded&&i>=IND_SHOW&&!hl)return;   // 折叠: 高亮行业恒显示
+    html+='<div class="ind-row'+hl+strongCls+'" onclick="pickInd(\''+esc(k)+'\')">'+
+      '<div class="nm">'+esc(k)+etfTag+(sg?' <span class="badge2 '+(x.n_sig_top?'r':'g')+'">'+(x.n_sig_top?'顶'+x.n_sig_top:'底'+x.n_sig_bot)+'</span>':'')+'</div>'+
+      '<div class="meta" style="text-align:right">'+capTxt+'<br><span style="color:var(--muted)">'+(x.is_etf?(x.n_member||0)+"/"+(x.n_total||0)+"只":(x.n_member||0)+"只")+'</span></div>'+
       '<div><span class="regime '+rCls+'">'+esc(x.regime||"-")+'</span></div>'+
       '<div class="spark">'+sparkSVG(x.spark,160,34)+'</div>'+
-      '<div class="chg '+(x.chg1d>0?"up":(x.chg1d<0?"down":""))+'">'+pct(x.chg1d,1)+'</div>'+
-      '<div class="ctr">RSI '+rsiTxt+' · 振'+ampTxt+'<br>门禁率 '+qrtTxt+'</div>'+
+      '<div class="chg '+(x.chg1d>0?"up":(x.chg1d<0?"down":""))+'">'+pct(x.chg1d,1)+
+      (IDX?'<div class="vsub '+(x.chg1d>=IDX.chg?"up":"down")+'">'+(x.chg1d>=IDX.chg?"强":"弱")+'于沪 '+Math.abs((x.chg1d-IDX.chg)*100).toFixed(1)+'pp</div>':'')+'</div>'+
+      '<div class="ctr">'+ctrBlock(x)+'</div>'+
       '<div class="arrow">›</div></div>';
   });
   if(!keys.length){html='<div class="loading">暂无行业数据</div>';}
   $("indList").innerHTML=html;
-  $("indDetail").innerHTML='<div class="panel" style="margin-top:14px;padding:60px 20px;text-align:center;color:var(--muted);background:#fff;border:1px solid var(--border);border-radius:14px"><div style="font-size:30px;opacity:.4">📈</div><div style="margin-top:8px">点击上方任意行业，查看该行业总K线 + 缠论结构 + 成分股列表</div></div>';
+  // 折叠/展开按钮
+  if(keys.length>IND_SHOW){
+    var shown=indExpanded?keys.length:Math.max(IND_SHOW,1);
+    var more='<div style="text-align:center;padding:10px;background:linear-gradient(180deg,transparent,#fff)"><a onclick="toggleInds()" style="cursor:pointer;color:var(--primary);font-size:13px;font-weight:600">'+(indExpanded?'▲ 收起':'▼ 展开其余 '+(keys.length-shown)+' 个板块')+'</a></div>';
+    $("indList").insertAdjacentHTML("beforeend",more);
+  }
+  // 详情已展开时保留 indDetail, 避免排序/折叠/大盘刷新时把面板清掉
+  if(!(detailOpen&&curInd)){
+    $("indDetail").innerHTML='<div class="panel" style="margin-top:14px;padding:60px 20px;text-align:center;color:var(--muted);background:#fff;border:1px solid var(--border);border-radius:14px"><div style="font-size:30px;opacity:.4">📈</div><div style="margin-top:8px">点击上方任意板块，查看总K线 + 缠论结构 + 成分列表</div></div>';
+  }
 }
 /* ===== 二级: 行业详情(顶部tab: 行业 / 个股) ===== */
 function pickInd(k){
@@ -267,24 +385,31 @@ function pickInd(k){
   $("viewInd").classList.add("hidden");
   $("viewStk").classList.add("hidden");
   var st=ind.st||{};
-  var html='<div class="panel" style="margin-top:14px;background:#fff;border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow);overflow:hidden">'+
+  var capTxt=(ind.cap==null)?"-":(ind.cap>=10000?(ind.cap/10000).toFixed(2)+"万亿":ind.cap.toFixed(0)+"亿");
+  var grpLbl=ind.is_etf?"场内ETF/LOF 合成板块":"申万一级行业";
+  var capLbl=ind.is_etf?"总规模":"总市值";
+  var html='<div id="indDetailPanel" class="panel" style="scroll-margin-top:70px;margin-top:14px;background:#fff;border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow);overflow:hidden">'+
     '<div style="display:flex;align-items:center;gap:12px;padding:13px 16px;flex-wrap:wrap;border-bottom:1px solid #eef2f7">'+
-      '<h2 style="font-size:17px">'+esc(k)+' <span style="color:var(--muted);font-size:13px;font-weight:400">申万一级 · '+capStr(ind.cap)+' · '+(ind.n_member||0)+'成分 · 行业指数'+pct(ind.chg1d,2)+'</span></h2>'+
+      '<h2 style="font-size:17px">'+esc(k)+(ind.is_etf?' <span class="badge2 o">ETF</span>':'')+' <span style="color:var(--muted);font-size:13px;font-weight:400">'+grpLbl+' · '+capLbl+' '+capTxt+' · '+(ind.n_member||0)+'只通过门禁'+(ind.n_total?' / 全 '+(ind.n_total||0)+'':'')+' · 指数'+pct(ind.chg1d,2)+'</span></h2>'+
       '<span class="regime '+regimeCls(ind.regime)+'" style="font-size:11px;padding:2px 8px">'+esc(ind.regime||"-")+'</span>'+
       '<div style="display:flex;gap:6px;background:#f1f5f9;border-radius:8px;padding:2px;margin-left:auto">'+
         '<a id="tInd" class="ind-tab '+(curTab==="ind"?"on":"")+'" onclick="switchTab(\'ind\')" style="font-size:12px;padding:5px 12px;border-radius:6px;cursor:pointer;color:'+(curTab==="ind"?"#1f2937":"#64748b")+';background:'+(curTab==="ind"?"#fff":"transparent")+';font-weight:'+(curTab==="ind"?"700":"400")+'">📊 行业 K 线</a>'+
         '<a id="tStk" class="ind-tab '+(curTab==="stk"?"on":"")+'" onclick="switchTab(\'stk\')" style="font-size:12px;padding:5px 12px;border-radius:6px;cursor:pointer;color:'+(curTab==="stk"?"#1f2937":"#64748b")+';background:'+(curTab==="stk"?"#fff":"transparent")+';font-weight:'+(curTab==="stk"?"700":"400")+'">📈 个股 K 线'+(curStk?(" · "+esc((UNI[curStk]||{}).name||curStk)):"")+'</a>'+
       '</div>'+
     '</div>'+
+    '<div id="dstripWrap">'+detailStrip(ind)+'</div>'+
     '<div class="chart-note"><span class="legend-tag"><i style="background:#e54545"></i>涨</span><span class="legend-tag"><i style="background:#18a058"></i>跌</span><span class="legend-tag"><i style="background:#7f77dd"></i>笔</span><span class="legend-tag"><i style="background:rgba(127,119,221,.25)"></i>中枢</span><span class="legend-tag"><i style="background:#c92a2a"></i>顶背驰(红▼)</span><span class="legend-tag"><i style="background:#087f5b"></i>底背驰(绿▲)</span></div>'+
     '<div id="mainChart"><div class="loading sk">K线渲染中…</div></div>'+
     '</div>';
-  html+='<div class="sec-t">成分股 <span class="cnt">'+k+' 行业 · 信号票 + 通过门禁成分股(共 '+(ind.n_member||0)+' · RSI/振幅/门禁率综合排序) · 点击任意股票 → 主图K线即时切换</span></div>'+
+  html+='<div class="sec-t">'+(ind.is_etf?"成分基金":"成分股")+' <span class="cnt">'+k+' · 通过门禁成分(共 '+(ind.n_member||0)+') · 点击任意一行 → 主图K线即时切换(不跳页)</span></div>'+
     '<div id="indStkList" class="panel" style="padding:0;background:#fff;border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow);overflow:hidden"><div class="loading sk">加载中…</div></div>';
   $("indDetail").innerHTML=html;
+  detailOpen=true;
   drawChart();
   renderIndStkList(k);
-  window.scrollTo({top:document.body.scrollTop||document.documentElement.scrollTop||0,behavior:"smooth"});
+  // 滚动到详情区顶部(避开吸顶header, 解决"第一行被挡住")
+  var dp=$("indDetailPanel");
+  setTimeout(function(){if(dp)dp.scrollIntoView({behavior:"smooth",block:"start"})},60);
 }
 function switchTab(tab){
   curTab=tab;
@@ -314,7 +439,7 @@ function drawChart(){
 }
 function drawStkInto(el,sym){
   el.innerHTML='<div class="loading sk">实时行情拉取中('+esc(sym)+')…</div>';
-  fetch("https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param="+sym+",day,,,660,qfq").then(function(r){return r.json()}).then(function(j){
+  fetch("https://ifzq.gtimg.cn/appstock/app/fqkline/get?param="+sym+",day,,,660,qfq").then(function(r){return r.json()}).then(function(j){
     var kl=(j.data[sym]||{}).qfqday||[];
     if(!kl.length)throw new Error("empty");
     var k2=kl.map(function(r){return {date:r[0],open:+r[1],close:+r[2],high:+r[3],low:+r[4],volume:(+r[5])/100}});
@@ -330,8 +455,11 @@ function drawStkInto(el,sym){
 }
 /* ===== 行业成分股列表(点击切主图) ===== */
 function renderIndStkList(k){
+  var isETF=(INDS[k]||{}).is_etf===1;
   var members=[];Object.keys(UNI).forEach(function(sym){
-    var u=UNI[sym];if(u.ind===k&&!u.gate)members.push(sym);
+    var u=UNI[sym];
+    var match=isETF?(u.type==="ETF"):(u.ind===k);
+    if(match&&!u.gate)members.push(sym);
   });
   var sigBy={};SIG.forEach(function(s){sigBy[s.sym]=s});
   var list=members.map(function(sym){
@@ -347,7 +475,9 @@ function renderIndStkList(k){
   gRest.sort(function(a,b){return (b.st.agree||0)-(a.st.agree||0)||(b.u.mcap||0)-(a.u.mcap||0)});
   function sec(title,cnt,rows,opt){
     if(!rows.length)return'';
-    var head='<div style="padding:8px 16px;background:#f8fafc;border-top:1px solid #eef2f7;font-size:12px;color:var(--muted)">'+(opt.ic||"")+' '+title+' <b style="color:var(--ink)">'+cnt+'</b>'+(opt.note?' · '+opt.note:'')+'</div>';
+    var sum=0,cv=0;rows.forEach(function(r){var c=(r.st||{}).chg1d;if(c!=null){sum+=c;cv++;}});
+    var avg=cv?sum/cv:null;
+    var head='<div style="display:flex;align-items:center;flex-wrap:wrap;gap:4px 8px;padding:8px 16px;background:#f8fafc;border-top:1px solid #eef2f7;font-size:12px;color:var(--muted)">'+(opt.ic||"")+' '+title+' <b style="color:var(--ink)">'+cnt+'</b>'+(opt.note?'<span>· '+opt.note+'</span>':'')+(avg!=null?'<span style="margin-left:auto;font-weight:700" class="'+(avg>0?"up":"down")+'">组均 '+pct(avg,1)+'</span>':'')+'</div>';
     var body=rows.slice(0,opt.max||30).map(function(x){
       var u=x.u,s=x.st;var chg=s.chg1d;var sigTxt=x.sg?((x.sg.dir==="top"?"顶背驰":"底背驰")+" "+(x.sg.bc_date||"")):(s.scenario||"");
       var hl=curStk===x.sym?"background:#eaf2fb;border-left:3px solid "+ACC:"";
@@ -365,11 +495,12 @@ function renderIndStkList(k){
         '<div class="val">'+(s.zs_n||0)+'</div>'+
         '<div class="val">'+(s.agree!=null?(s.agree*100).toFixed(0)+"%":"-")+'</div>'+
         '<div class="val vhl '+(chg>0?"up":(chg<0?"down":""))+'">'+pct(chg,2)+'</div>'+
+        '<div class="val '+(s.dd!=null&&s.dd<0?"down":"")+'">'+(s.dd==null?"-":Math.abs(s.dd*100).toFixed(0)+"%")+'</div>'+
         '<div class="arr" style="color:#cbd5e1">›</div></div>';
     }).join("");
     return '<div>'+head+body+(rows.length>(opt.max||30)?'<div style="padding:8px 16px;font-size:11px;color:#a3adb8;text-align:center">仅显示前'+(opt.max||30)+'只(共'+rows.length+')</div>':'')+'</div>';
   }
-  var head='<div class="stk-grid head"><div>名称</div><div class="val">信号</div><div class="val">趋势</div><div class="val">末中枢</div><div class="val">笔</div><div class="val">中枢</div><div class="val">自洽</div><div class="val">涨跌</div><div></div></div>';
+  var head='<div class="stk-grid head"><div>名称</div><div class="val">信号</div><div class="val">趋势</div><div class="val">末中枢</div><div class="val">笔</div><div class="val">中枢</div><div class="val">自洽</div><div class="val">涨跌</div><div class="val">距高回撤</div><div></div></div>';
   $("indStkList").innerHTML=head+
     sec("见顶风险",gTop.length,gTop,{ic:"🔴",note:"顶背驰·注意回落"})+
     sec("见底机会",gBot.length,gBot,{ic:"🟢",note:"底背驰·关注企稳"})+
@@ -394,7 +525,7 @@ function pickStkInInd(sym){
 /* ===== 个股完整详情页(由 #/stk/xxx hash 直达, 仍保留) ===== */
 function showStk(sym){
   var u=UNI[sym];if(!u){alert("未收录 "+sym);return}
-  curStk=sym;curTab="stk";
+  curStk=sym;curTab="stk";detailOpen=false;
   $("viewHome").classList.add("hidden");
   $("viewInd").classList.add("hidden");
   $("viewStk").classList.remove("hidden");
@@ -402,8 +533,9 @@ function showStk(sym){
   location.hash="#stk/"+sym;
   window.scrollTo(0,0);
   var scen=s.scenario||"";
-  var titleHtml='<div class="subcrumb"><a href="javascript:backHome()">📡 雷达首页</a> <span class="arr">›</span> '+(u.ind?'<a href="javascript:pickIndFromStk(\''+esc(u.ind)+'\')">'+esc(u.ind)+'</a> <span class="arr">›</span> ':'')+'<span style="color:var(--ink)">'+esc(u.name)+'</span></div>';
-  titleHtml+='<div class="big-title"><h2>'+esc(u.name)+'</h2><span class="cd">'+esc(sym)+' · '+esc(u.code)+' · '+esc(u.type)+' · '+esc(u.ind||"-")+'</span></div>';
+  var grp=(u.type==="ETF")?"ETF板块":(u.ind||"");
+  var titleHtml='<div class="subcrumb"><a href="javascript:backHome()">📡 雷达首页</a> <span class="arr">›</span> '+(grp?'<a href="javascript:pickIndFromStk(\''+esc(grp)+'\')">'+esc(grp)+'</a> <span class="arr">›</span> ':'')+'<span style="color:var(--ink)">'+esc(u.name)+'</span></div>';
+  titleHtml+='<div class="big-title"><h2>'+esc(u.name)+'</h2><span class="cd">'+esc(sym)+' · '+esc(u.code)+' · '+esc(u.type)+' · '+esc(grp||"-")+'</span></div>';
   titleHtml+='<div class="metric-strip">'+
     '<span>现价 <b class="'+(s.chg1d>0?"up":(s.chg1d<0?"down":""))+'">'+(s.close!=null?s.close:"-")+'</b>'+pct(s.chg1d,2)+'</span>'+
     '<span>场景 <b>'+esc(scen||"-")+'</b></span>'+
@@ -438,7 +570,7 @@ function showStk(sym){
   if(hasMini)drawStkMini(sp);
 }
 function loadStkChart(sym){
-  fetch("https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param="+sym+",day,,,660,qfq").then(function(r){return r.json()}).then(function(j){
+  fetch("https://ifzq.gtimg.cn/appstock/app/fqkline/get?param="+sym+",day,,,660,qfq").then(function(r){return r.json()}).then(function(j){
     var kl=(j.data[sym]||{}).qfqday||[];
     if(!kl.length)throw new Error("empty");
     var k2=kl.map(function(r){return {date:r[0],open:+r[1],close:+r[2],high:+r[3],low:+r[4],volume:(+r[5])/100}});
@@ -461,32 +593,58 @@ function drawStkMini(sp){
     yAxis:{type:"value",scale:true,show:false},
     series:[{type:"line",data:data.map(function(x){return x.close}),smooth:false,symbol:"none",lineStyle:{width:1.2,color:(data[data.length-1].close>=data[0].close?UP:DN)}}]});
 }
-function backHome(){$("viewStk").classList.add("hidden");$("viewInd").classList.add("hidden");$("viewHome").classList.remove("hidden");location.hash="#/";curStk=null;curTab="ind";renderInds();$("indDetail").innerHTML=''}
+function backHome(){$("viewStk").classList.add("hidden");$("viewInd").classList.add("hidden");$("viewHome").classList.remove("hidden");location.hash="#/";curStk=null;curTab="ind";curInd=null;detailOpen=false;renderInds()}
 function pickIndFromStk(k){backHome();renderInds();pickInd(k)}
 function toIndex(){location.href=location.href.split("/radar/")[0]+"/index.html"}
 /* ===== 通用: K线 option + 缠论标注 ===== */
+/* Wilder 平滑 RSI(14) 全序列(与 scan_radar._rsi14 同算法), 前 n 根 null */
+function rsiSeries(kl,n){
+  n=n||14;
+  var cs=kl.map(function(k){return +k.close});
+  var out=new Array(cs.length).fill(null);
+  if(cs.length<n+1)return out;
+  var gains=[],losses=[];
+  for(var i=1;i<cs.length;i++){var d=cs[i]-cs[i-1];gains.push(d>0?d:0);losses.push(d<0?-d:0);}
+  var ag=0,al=0;
+  for(var j=0;j<n;j++){ag+=gains[j];al+=losses[j];}
+  ag/=n;al/=n;
+  out[n]=al<=0?100:(100-100/(1+ag/al));
+  for(var i=n;i<gains.length;i++){
+    ag=(ag*(n-1)+gains[i])/n;al=(al*(n-1)+losses[i])/n;
+    out[i+1]=al<=0?100:(100-100/(1+ag/al));
+  }
+  return out;
+}
 function indKlineOption(kl){
   var dates=kl.map(function(k){return k.date});
   var kdata=kl.map(function(k){return [k.open,k.close,k.low,k.high]});
   var vols=kl.map(function(k){var up=k.close>=k.open;return {value:k.volume,itemStyle:{color:up?UP:DN,opacity:.75}}});
   var ma=function(n,col){var r=[];for(var i=0;i<kl.length;i++){if(i<n-1){r.push("-");continue}var s=0;for(var j=i-n+1;j<=i;j++)s+=kl[j].close;r.push(+(s/n).toFixed(2))}return {name:"MA"+n,type:"line",data:r,smooth:false,symbol:"none",lineStyle:{width:1,color:col}}};
+  var rsiRaw=rsiSeries(kl,14);
+  var rsiData=rsiRaw.map(function(v){return v==null?"-":(+v.toFixed(1))});
   return {
     animation:false,backgroundColor:"#fff",
     tooltip:{trigger:"axis",axisPointer:{type:"cross"},backgroundColor:"rgba(15,23,42,.9)",textStyle:{fontSize:11},borderWidth:0,
       formatter:function(ps){var p=ps[0];if(!p||!p.axisValue)return"";var i=ps[0].dataIndex;var k=kl[i];if(!k)return p.axisValue;
-        var up=k.close>=k.open;return "<b>"+k.date+"</b><br/>开 "+k.open+"　收 "+k.close+(up?" ▲":" ▼")+"<br/>高 "+k.high+"　低 "+k.low;}},
-    legend:{data:["K线","MA5","MA10","MA20"],top:6,textStyle:{fontSize:11},itemWidth:14,itemHeight:8},
+        var up=k.close>=k.open;return "<b>"+k.date+"</b><br/>开 "+k.open+"　收 "+k.close+(up?" ▲":" ▼")+"<br/>高 "+k.high+"　低 "+k.low+(rsiRaw[i]!=null?"<br/>RSI14 <b>"+(+rsiRaw[i].toFixed(1))+"</b>":"");}},
+    legend:{data:["K线","MA5","MA10","MA20","RSI14"],top:6,textStyle:{fontSize:11},itemWidth:14,itemHeight:8},
     axisPointer:{link:[{xAxisIndex:"all"}]},
-    grid:[{left:58,right:16,top:34,height:"62%"},{left:58,right:16,top:"76%",height:"15%"}],
+    grid:[{left:58,right:16,top:30,height:"52%"},{left:58,right:16,top:"66%",height:"11%"},{left:58,right:16,top:"80%",height:"12%"}],
     xAxis:[{type:"category",data:dates,boundaryGap:true,axisLine:{lineStyle:{color:"#d7dee8"}},axisLabel:{fontSize:10,color:"#8a94a3"},axisTick:{show:false}},
-           {type:"category",gridIndex:1,data:dates,boundaryGap:true,axisLabel:{show:false},axisLine:{lineStyle:{color:"#e8edf4"}}}],
-    yAxis:[{scale:true,axisLabel:{fontSize:10,color:"#8a94a3"},splitLine:{lineStyle:{color:"f0f3f8"}}},
-           {scale:true,gridIndex:1,axisLabel:{show:false},splitLine:{show:false},axisLine:{show:false},axisTick:{show:false}}],
-    dataZoom:[{type:"inside",xAxisIndex:[0,1],start:30,end:100},{type:"slider",xAxisIndex:[0,1],start:30,end:100,height:16,bottom:4,brushSelect:false}],
+           {type:"category",gridIndex:1,data:dates,boundaryGap:true,axisLabel:{show:false},axisLine:{lineStyle:{color:"#e8edf4"}},axisTick:{show:false}},
+           {type:"category",gridIndex:2,data:dates,boundaryGap:true,axisLabel:{show:false},axisLine:{lineStyle:{color:"#e8edf4"}},axisTick:{show:false}}],
+    yAxis:[{scale:true,axisLabel:{fontSize:10,color:"#8a94a3"},splitLine:{lineStyle:{color:"#f0f3f8"}}},
+           {scale:true,gridIndex:1,axisLabel:{show:false},splitLine:{show:false},axisLine:{show:false},axisTick:{show:false}},
+           {scale:false,min:0,max:100,gridIndex:2,axisLabel:{fontSize:9,color:"#8a94a3"},splitLine:{show:false},axisLine:{show:false},axisTick:{show:false}}],
+    dataZoom:[{type:"inside",xAxisIndex:[0,1,2],start:30,end:100},{type:"slider",xAxisIndex:[0,1,2],start:30,end:100,height:16,bottom:4,brushSelect:false}],
     series:[
       {name:"K线",type:"candlestick",data:kdata,itemStyle:{color:UP,color0:DN,borderColor:UP,borderColor0:DN},barWidth:"65%"},
       {name:"量",type:"bar",xAxisIndex:1,yAxisIndex:1,data:vols,barWidth:"65%"},
-      ma(5,"#f59f00"),ma(10,"#3b82f6"),ma(20,"#a855f7")
+      ma(5,"#f59f00"),ma(10,"#3b82f6"),ma(20,"#a855f7"),
+      {name:"RSI14",type:"line",xAxisIndex:2,yAxisIndex:2,data:rsiData,smooth:false,symbol:"none",lineStyle:{width:1,color:"#7c5cd6"},
+       markLine:{symbol:"none",silent:true,label:{show:false},
+         lineStyle:{type:"dashed",width:.8},
+         data:[{yAxis:70,lineStyle:{color:"#e54545",opacity:.55}},{yAxis:30,lineStyle:{color:"#18a058",opacity:.55}}]}}
     ]
   };
 }
@@ -520,6 +678,7 @@ window.addEventListener("hashchange",function(){
   else if(!h)backHome();
 });
 window.addEventListener("resize",function(){if(myChart)myChart.resize()});
+window.addEventListener("scroll",function(){var t=document.documentElement.scrollTop||document.body.scrollTop;var b=$("toTop");if(b)b.className=t>560?"show":""},{passive:true});
 </script>
 </body>
 </html>
