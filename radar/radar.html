@@ -1330,35 +1330,34 @@ function addSlTpLine(opt,u){
   if(!opt.series||!opt.series.length)return;
   var kSer=opt.series[0];                          // series[0]=candlestick 主K线
   if(!kSer||kSer.type!=="candlestick")return;
-  var data=[];
-  // R293: 止损/入场/止盈/顶确认/反抽参考线标签强化 —— 加主题色描边+加深背景+阴影+字号↑, 防止参考线字样在网格/K线背景下被淹没
-  if(z){data.push(
-      {yAxis:+z.sl.toFixed(2),lineStyle:{color:"#18a058"},
-       label:{formatter:"止损 "+z.sl.toFixed(2),color:"#0e7d4a",fontSize:11,
-         backgroundColor:"rgba(255,255,255,.96)",borderColor:"#18a058",borderWidth:1,borderRadius:4,padding:[2,5],
-         shadowColor:"rgba(0,0,0,.18)",shadowBlur:3}},
-      {yAxis:+z.en.toFixed(2),lineStyle:{color:"#1c7ed6"},
-       label:{formatter:"入场参考 "+z.en.toFixed(2),color:"#1864ab",fontSize:11,
-         backgroundColor:"rgba(255,255,255,.96)",borderColor:"#1c7ed6",borderWidth:1,borderRadius:4,padding:[2,5],
-         shadowColor:"rgba(0,0,0,.18)",shadowBlur:3}},
-      {yAxis:+z.tp.toFixed(2),lineStyle:{color:"#e54545"},
-       label:{formatter:"止盈参考 "+z.tp.toFixed(2),color:"#c92a2a",fontSize:11,
-         backgroundColor:"rgba(255,255,255,.96)",borderColor:"#e54545",borderWidth:1,borderRadius:4,padding:[2,5],
-         shadowColor:"rgba(0,0,0,.18)",shadowBlur:3}});}
-  if(tz){
-    if(tz.confirm!=null)data.push({yAxis:+tz.confirm.toFixed(2),lineStyle:{color:"#18a058",width:1.4},
-      label:{formatter:"顶确认·破位离场 "+tz.confirm.toFixed(2),color:"#0e7d4a",fontSize:11,
-        backgroundColor:"rgba(255,255,255,.96)",borderColor:"#18a058",borderWidth:1,borderRadius:4,padding:[2,5],
-        shadowColor:"rgba(0,0,0,.18)",shadowBlur:3}});
-    if(tz.ref!=null)data.push({yAxis:+tz.ref.toFixed(2),lineStyle:{color:"#e8590c"},
-      label:{formatter:"反抽减仓参考 "+tz.ref.toFixed(2),color:"#d9480f",fontSize:11,
-        backgroundColor:"rgba(255,255,255,.96)",borderColor:"#e8590c",borderWidth:1,borderRadius:4,padding:[2,5],
-        shadowColor:"rgba(0,0,0,.18)",shadowBlur:3}});
+  // R294: 收集所有参考线 → 按 yAxis 升序 → 奇偶左右错位 position, 解决 R293 加粗后多条标签挤在右侧重叠的问题
+  // 策略: items=[{yAxis, lineColor, textColor, name, value, lineWidth?}]; 按价格排序; idx 偶=右上 insideEndTop, 奇=左上 insideStartTop
+  var items=[];
+  if(z){
+    items.push({yAxis:+z.sl.toFixed(2),lineColor:"#18a058",textColor:"#0e7d4a",name:"止损",value:z.sl});
+    items.push({yAxis:+z.en.toFixed(2),lineColor:"#1c7ed6",textColor:"#1864ab",name:"入场参考",value:z.en});
+    items.push({yAxis:+z.tp.toFixed(2),lineColor:"#e54545",textColor:"#c92a2a",name:"止盈参考",value:z.tp});
   }
-  if(!data.length)return;
+  if(tz){
+    if(tz.confirm!=null)items.push({yAxis:+tz.confirm.toFixed(2),lineColor:"#18a058",textColor:"#0e7d4a",name:"顶确认·破位离场",value:tz.confirm,lineWidth:1.4});
+    if(tz.ref!=null)items.push({yAxis:+tz.ref.toFixed(2),lineColor:"#e8590c",textColor:"#d9480f",name:"反抽减仓参考",value:tz.ref});
+  }
+  if(!items.length)return;
+  items.sort(function(a,b){return a.yAxis-b.yAxis;});
+  // R294: 4 象限循环 position 错位 —— 右上/左上/右下/左下, 即使相邻 yAxis 像素差极小也不会重叠
+  var POS=["insideEndTop","insideStartTop","insideEndBottom","insideStartBottom"];
+  var data=items.map(function(it,idx){
+    var pos=POS[idx%4];
+    var ls={color:it.lineColor};
+    if(it.lineWidth)ls.width=it.lineWidth;
+    return {yAxis:it.yAxis,lineStyle:ls,
+      label:{formatter:it.name+" "+it.value.toFixed(2),color:it.textColor,fontSize:11,position:pos,
+        backgroundColor:"rgba(255,255,255,.96)",borderColor:it.lineColor,borderWidth:1,borderRadius:4,padding:[2,5],
+        shadowColor:"rgba(0,0,0,.18)",shadowBlur:3}};
+  });
   kSer.markLine={symbol:"none",silent:true,animation:false,
     lineStyle:{type:"dashed",width:1},
-    label:{show:true,fontSize:11,fontWeight:"700",position:"insideEndTop",distance:8},
+    label:{show:true,fontSize:11,fontWeight:"700",distance:8},
     data:data};
 }
 /* ===== 路由 ===== */
