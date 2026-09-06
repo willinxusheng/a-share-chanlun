@@ -29,6 +29,12 @@ def audit_history(data):
     ok = True
     for sym, d in data.items():
         kl = d["klines"]
+        # R281: 空/损坏序列须记 FAIL 跳过而非崩(kl[0] IndexError 会中断整份总审计,
+        # 使关2/关3/schema/rt 全跑不出、无汇总输出, 数据损坏时审计工具自身先倒)。
+        if not isinstance(kl, list) or not kl:
+            ok = False
+            print("  %-9s 序列为空或非 list —— FAIL" % sym)
+            continue
         issues = fd.validate(kl)
         status = "OK" if not issues else "FAIL(%d)" % len(issues)
         if issues:

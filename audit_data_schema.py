@@ -117,11 +117,13 @@ def run():
             if sk in d:
                 _check_series("%s.%s" % (sym, sk), d[sk], today, problems)
         # 跨序列: 周/月末日期不应晚于日线末日期(否则时序错位)。
+        # R281: 原 for 循环把 s2 覆盖成仅最后一个(month_klines), week_klines 从未被校验,
+        # 其末日期晚于日线的时序错位数据被静默放行 —— 判定块须移入循环内使两序列各自检查。
         kl = d.get("klines")
         for sk in ("week_klines", "month_klines"):
             s2 = d.get(sk)
-        if isinstance(kl, list) and kl and isinstance(s2, list) and s2 and isinstance(s2[-1], dict):
-            if s2[-1].get("date", "") > kl[-1].get("date", ""):
+            if isinstance(kl, list) and kl and isinstance(s2, list) and s2 and isinstance(s2[-1], dict):
+                if s2[-1].get("date", "") > kl[-1].get("date", ""):
                     problems.append("%s: %s 末日期 %s 晚于日线末 %s" % (
                         sym, sk, s2[-1].get("date"), kl[-1].get("date")))
 
