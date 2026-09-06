@@ -891,7 +891,7 @@ function renderIndStkList(k){
         '<div class="val '+(s.dd!=null&&s.dd<0?"down":"")+'">'+(s.dd==null?"-":Math.abs(s.dd*100).toFixed(0)+"%")+'</div>'+
         '<div class="arr">›</div></div>';
     }).join("");
-    return '<div>'+head+body+(rows.length>(opt.max||30)?'<div class="list-note">仅显示前'+(opt.max||30)+'只 · 共'+rows.length+'只</div>':'')+'</div>';
+    return '<div>'+head+body+(rows.length>(opt.max||30)?'<div class="list-note">'+(opt.maxNote?'<b>'+esc(opt.maxNote)+' · </b>':'')+'仅显示前 '+(opt.max||30)+' 只 · 已通过门禁 '+rows.length+' 只</div>':'')+'</div>';
   }
   var head='<div class="stk-grid head"><div>名称</div><div class="val">信号</div><div class="val">趋势</div><div class="val">末中枢</div><div class="val">笔</div><div class="val">中枢</div><div class="val">自洽</div><div class="val">涨跌</div><div class="val">净流入</div><div class="val">距高回撤</div><div class="arr">›</div></div>';
   // 浮动表头 clone(JS 控制显示, 避免遮挡首只股票)
@@ -899,7 +899,7 @@ function renderIndStkList(k){
   $("indStkList").innerHTML=head+
     sec("见顶风险",gTop.length,gTop,{ic:"🔴",note:"顶背驰·注意回落"})+
     sec("见底机会",gBot.length,gBot,{ic:"🟢",note:"底背驰·关注企稳"})+
-    sec("其余通过门禁",gRest.length,gRest,{ic:"📄",note:"按自洽率排序",max:50})+
+    sec("其余通过门禁",gRest.length,gRest,{ic:"📄",note:"按自洽率+市值排序（混入持有期跟踪，机会需自分辨）",max:50,maxNote:"K线/自洽/流动性门禁"})+
     (members.length?"":'<div class="empty" style="padding:36px 20px"><div class="etx">该行业无通过门禁的成分</div></div>');
   // 确保 body 有且仅有一个 float 表头元素
   var $fh=$("stkFloatHead");
