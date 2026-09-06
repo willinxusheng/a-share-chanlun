@@ -694,7 +694,7 @@ function renderIndStkList(k){
       else if(s.scenario&&s.scenario.indexOf("见")>=0)tag='<span class="badge2 '+(s.scenario.indexOf("见底")>=0?"g":"r")+'">'+esc(s.scenario)+'</span>';
       else if(s.scenario)tag='<span class="badge2 z">'+esc(s.scenario)+'</span>';
       else tag='<span class="badge2 o">震荡</span>';
-      var tip=esc((u.name||"")+" | "+(x.sg?(x.sg.dir==="top"?"顶背驰":"底背驰")+" "+x.sg.bc_date+" "+x.sg.bc_type+" 强度"+(x.sg.strong||0)+"/2"+(x.sg.vol?" 量缩确认":"")+" 距今"+(x.sg.fresh!=null?x.sg.fresh+"个交易日": "?") :(s.scenario||"震荡"))+(s.trend?" | 趋势"+s.trend:"")+(s.agree!=null?" | 自洽"+(s.agree*100).toFixed(0)+"%":""));
+      var tip=esc((u.name||"")+" | "+(x.sg?(x.sg.dir==="top"?"顶背驰":"底背驰")+" "+x.sg.bc_date+" "+x.sg.bc_type+" 强度"+(x.sg.strong||0)+"/2"+(x.sg.vol?" 量缩确认":"")+" 距今"+(x.sg.fresh!=null?x.sg.fresh+"天": "?") :(s.scenario||"震荡"))+(s.trend?" | 趋势"+s.trend:"")+(s.agree!=null?" | 自洽"+(s.agree*100).toFixed(0)+"%":""));
       return '<div class="stk-grid'+hl+'" title="'+tip+'" onclick="pickStkInInd(\''+x.sym+'\')">'+
         '<div><div class="nm">'+esc(u.name)+'</div><div class="cd">'+esc(x.sym)+'</div></div>'+
         '<div class="val">'+tag+fsub+'</div>'+
@@ -782,11 +782,11 @@ function showStk(sym){
     '<span>笔/中枢 <b>'+(s.bi_n||0)+'/'+(s.zs_n||0)+'</b></span>'+
     '<span>自洽 <b>'+(s.agree!=null?(s.agree*100).toFixed(0)+"%":"-")+'</b></span>'+
     '<span>区间 <b>'+(s.first||"-")+'~'+(s.last||"-")+'</b></span>'+
-    '<span>数据 <b>'+(s.n_bars||0)+'根</b> '+srcTag(s.src)+'</span></div>';
+    '<span>数据 <b>'+(s.n_bars||0)+'根</b> '+srcTag(u.src)+'</span></div>';   // R276: src 在后端 universe row 顶层(u.src), 不在 st 内 —— 原取 s.src 恒 undefined, 源徽标详情页永远"-"
   var banner='';
   if(stk){
     var t=stk.dir==="top";
-    banner+='<div class="signals-box"><div class="signal-pill '+(t?"t":"b")+'"><b>'+(t?"⚠️ 顶背驰风险":"✅ 底背驰机会")+'</b> · '+(stk.bc_date||"")+'前('+(stk.fresh||"?")+'个交易日) · '+(stk.bc_type||"")+' · 强度'+(stk.strong||0)+'/2'+(stk.vol?" · 量缩确认":"")+'<br><span style="opacity:.85;font-size:12px">'+(t?"上攻动能减弱，注意中枢上沿/前高压力":"下跌动能衰竭，关注中枢下沿支撑与企稳信号")+'</span></div></div>';
+    banner+='<div class="signals-box"><div class="signal-pill '+(t?"t":"b")+'"><b>'+(t?"⚠️ 顶背驰风险":"✅ 底背驰机会")+'</b> · '+(stk.bc_date||"")+'前('+(stk.fresh!=null?stk.fresh:"?")+'天) · '+(stk.bc_type||"")+' · 强度'+(stk.strong||0)+'/2'+(stk.vol?" · 量缩确认":"")+'<br><span style="opacity:.85;font-size:12px">'+(t?"上攻动能减弱，注意中枢上沿/前高压力":"下跌动能衰竭，关注中枢下沿支撑与企稳信号")+'</span></div></div>';
   }else if(u.gate){
     banner='<div class="signals-box"><div class="gate-pill"><b>门禁：'+esc(u.gate)+'</b><br>'+esc(u.gd||"")+'　<span style="font-size:12px">(仍展示K线与结构，但不进信号区)</span></div></div>';
   }else if(scen){
@@ -1048,7 +1048,10 @@ window.addEventListener("hashchange",function(){
   else if(h.indexOf("ind/")===0){var k=decodeURIComponent(h.slice(4));if(curInd!==k)pickInd(k);}
   else if(!h)backHome();
 });
-window.addEventListener("resize",function(){if(myChart)myChart.resize()});
+window.addEventListener("resize",function(){   // R276: 个股详情页图实例登记在 CH_POOL 而非 myChart, 原 resize 只缩 myChart → 页面缩放后个股图不自适应
+  if(myChart){try{myChart.resize()}catch(e){}}
+  CH_POOL.forEach(function(c){try{if(c&&c.resize)c.resize()}catch(e){}});
+});
 window.addEventListener("scroll",function(){var t=document.documentElement.scrollTop||document.body.scrollTop;var b=$("toTop");if(b)b.className=t>560?"show":""},{passive:true});
 </script>
 </body>
