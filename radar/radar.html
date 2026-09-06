@@ -80,7 +80,7 @@ h1 .dot{color:#ffd43b}
 .rsi-cell.hot{background:var(--up-soft);color:#c92a2a}
 .rsi-cell.cold{background:var(--down-soft);color:#087f5b}
 .rsi-cell.mid{background:#f1f5f9;color:#475569}
-.ind-row .nm{font-weight:700;font-size:14.5px;display:flex;align-items:center;gap:6px;line-height:1.45;letter-spacing:.2px}
+.ind-row .nm{font-weight:700;font-size:14.5px;display:flex;align-items:center;gap:6px;line-height:1.45;letter-spacing:.2px;min-width:0;overflow:hidden}   /* R315: min-width:0+overflow:hidden 让 grid 1.35fr 列按比例缩(默认 min-content 会被 ETF 长龙头名"沪深300ETF华泰柏瑞"撑大 box 推右后续所有列); overflow hidden 给子项 ellipsis 兜底 */
 .ind-row .meta{display:inline-grid;grid-template-columns:max-content;justify-content:end;row-gap:0;font-size:11px;color:var(--muted);line-height:1.6;font-variant-numeric:tabular-nums}
 .ind-row .meta .cap,.ind-row .meta .cnt{grid-column:1;text-align:center;white-space:nowrap}   /* R306→R307→R308: meta 用 grid 列宽=max(cap,cnt 文本宽) 自适应, 两行文本**视觉重心对齐**(center), 不再 min-width 拉死短文本占满列 */
 /* R269: 数据准确性警示 — 源降级/数据陈旧(全局 sticky 横幅) + 个股行情缓存滞后(图表内黄条) */
@@ -194,7 +194,7 @@ h1 .dot{color:#ffd43b}
 .ffv small{display:block;font-size:10px;color:#94a3b8;font-weight:400;line-height:1.4}
 .lead-tag{display:inline-block;font-size:10.5px;font-weight:700;background:linear-gradient(135deg,#fff7e0,#ffe9b8);color:#92600a;border:1px solid #f2d48a;border-radius:6px;padding:0 6px;line-height:1.7;vertical-align:1px;white-space:nowrap}
 /* R286: 行业行龙头直显(点击直达个股) + 信号行资金微标 */
-.indlead{display:inline-block;font-size:10.5px;font-weight:600;color:#92600a;background:linear-gradient(135deg,#fff7e0,#ffe9b8);border:1px solid #f2d48a;border-radius:5px;padding:0 5px;line-height:1.6;margin-top:2px;cursor:pointer;white-space:nowrap}
+.indlead{display:inline-block;font-size:10.5px;font-weight:600;color:#92600a;background:linear-gradient(135deg,#fff7e0,#ffe9b8);border:1px solid #f2d48a;border-radius:5px;padding:0 5px;line-height:1.6;margin-top:2px;cursor:pointer;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis;vertical-align:bottom}   /* R315: max-width:100%+ellipsis 配合 .nm min-width:0 让长龙头名(ETF"沪深300ETF华泰柏瑞"10字 vs 申万"长盈科技"4字)不再撑大 nm cell, title 属性保留全名悬停见 */
 .indlead:hover{background:#ffe9b8;text-decoration:underline}
 .ffmini{display:inline-block;font-size:10px;font-weight:700;margin-left:4px;vertical-align:1px;white-space:nowrap}
 .ffmini.up{color:#e54545}.ffmini.down{color:#18a058}.ffmini.muted{color:#b0b9c6}
