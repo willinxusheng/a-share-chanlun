@@ -2280,8 +2280,18 @@ def _sent_main_chart(forecast, hist, buy_th, sell_th, acc=None):
     fp25 = (forecast or {}).get("p25") or []
     fp75 = (forecast or {}).get("p75") or []
     fdates = (forecast or {}).get("dates") or []
+    # R280: dates/median/p25/p75 等长对齐(R211 同族防御) —— 数据源异常(预测尾部 None 被省略)
+    # 致 dates 长于各值序列时, 下方 fc_series/band_lo 将短于 xcats → ECharts 序列与类目错位;
+    # fp25 若短于 median 还会在 band_lo 循环越界 IndexError(R205f 仅防了 fp75)。统一截断/补 None。
+    _Hd = len(fdates)
+    if _Hd:
+        for _arr in (fmed, fp25, fp75):
+            if len(_arr) > _Hd:
+                del _arr[_Hd:]
+            elif len(_arr) < _Hd:
+                _arr.extend([None] * (_Hd - len(_arr)))
     H = len(fmed)
-    x_fc = [d for d in fdates]
+    x_fc = fdates
     xcats = x_hist + x_fc
     _wb = _sent_warm_band(y_hist, x_hist)
     _ma = [
@@ -2947,10 +2957,7 @@ def main():
     avg_health = sum(v[0] for v in scores.values()) / len(scores)
     avg_conf = sum(v[1] for v in scores.values()) / len(scores)
     avg_agree = sum(results[s]["agreement"]["rate"] for s in data) / len(data) * 100
-    avg_vol = sum((realized_vol_annualized([k["close"] for k in d["klines"]]) or 0) for d in data.values()) / len(data)
     total = len(data)
-    n_m_bull = sum(1 for s in data if results_month[s]["classify"]["scenario"] in SC_BULL)
-    n_m_bear = sum(1 for s in data if results_month[s]["classify"]["scenario"] in SC_BEAR)
 
     cards, sections, conclusions = [], [], []
     forecast_info = {}
@@ -2971,7 +2978,6 @@ def main():
             # 注：日线 classify 已在此前预扫描中用周/月线重算（含 interval_nesting / ma_alignment 回写），
             # 此处 r["classify"] 即为统一口径，下游 card / forecast 行为一致。
             health, conf = scores[sym]
-            horizon = adaptive_horizon(r["bis"], r["merged"])
             sigma = forward_vol([k["close"] for k in d["klines"]], horizon)
             cards.append(card_html(sym, d["name"], d["klines"], r, wcls, health, conf))
             cls = r["classify"]
@@ -2984,9 +2990,6 @@ def main():
                 if _sf.get("dates") and _sf.get("median"):
                     sent_fc = _sf
             fs_svg, fs_note, fs_probs, fs_legend, fc_data = forecast_svg(d["klines"], r, wcls, conf, sigma, sym, horizon, backtests[sym], paths_bt[sym], breadth_score=bd["composite"]["score"], sent_fc=sent_fc)
-            div_txt = ('⚠️ 周线向下笔运行中，以上路径的兑现以周线底分型确认为前提；若周线续创新低，风险路径概率上升。'
-                       if cls.get("last_bi_dir") != wcls.get("last_bi_dir")
-                       else "日周级别共振，主路径置信度较高。")
             # R177: 情绪徽章 + 情绪×结构联动行(与情绪板块互联; 数据缺失时为空串, 不影响原布局)
             _sent_badge, _sent_row = "", ""
             if sent_full and _s_score is not None:
@@ -3034,7 +3037,12 @@ def main():
     </section>""")
             conclusions.append(f'<li><b>{d["name"]}</b>（{sym}）：渲染异常，已降级占位。</li>')
 
-    fc_blob = {sym: forecast_info[sym]["fc"] for sym in data}
+    # R280: 单指数降级防御漏网点 —— 循环 try/except(R173)已对该 sym 降级占位但未写
+    # forecast_info, 此处若按 data 全键取 forecast_info[sym]["fc"] 会 KeyError 崩掉整份报告
+    # (与 R206 在 forecast_summary_table 已做的占位防御同族漏网, 实证: 模拟 sh000905 渲染
+    # 异常 → 循环内降级成功但 fc_blob 构建 KeyError)。改为仅取成功渲染的指数; 缺失 sym 的
+    # 情绪背离/锚点对照自动不显示(下方调用点已对 None 优雅降级)。
+    fc_blob = {sym: forecast_info[sym]["fc"] for sym in data if sym in forecast_info}
     diverge_note = ""
     if divergent:
         diverge_note = f"""<p style="margin-top:10px;color:#b45309;font-size:14px;line-height:1.8">
@@ -3074,14 +3082,6 @@ def main():
         "（R247：周末恒休含补班日——交易所不随调休补班开市，腾讯 K线实测 2021 至今无任何周末 K线，已删除原 _A_SHARE_MAKEUP 补班交易表）。两项均为监控/防御层，不改动预测数学；<br>"
         "• <b>用法</b>：用带宽管理波动/止损，用「跌破 ZD 即主路径失效」做条件应对，方向仅作参考。</p>")
 
-    # 全局可信度指标（用于一句话结论）
-    avg_cap = sum(results[s]["capture_rate"] for s in data) / len(data) * 100
-    avg_agree2 = avg_agree
-    worst_rel = max((d["meta"].get("consistency", {}).get("max_rel_dev") or 0) for d in data.values())
-    avg_stable = sum(1 for s in data if results[s]["stability"]["stable"]) / len(data) * 100
-    n_robust = sum(1 for s in data if results[s]["stability"].get("level") == "稳健")
-    n_edge = sum(1 for s in data if results[s]["stability"].get("level") == "边缘")
-    n_sens = sum(1 for s in data if results[s]["stability"].get("level") == "敏感·待确认")
 
     # 数据驱动的市场格局描述（不写死，随每日自动刷新保持准确）
     n_daily_up = sum(1 for s in data if results[s]["classify"]["last_bi_dir"] == 1)
@@ -3099,14 +3099,23 @@ def main():
         stance = "；仓位与预期应低于\"日周共振多头\"的情形"
     else:
         stance = ""
-    n_above = sum(1 for s in data if results[s]["classify"].get("position") == "中枢上方")
-    n_inside = sum(1 for s in data if results[s]["classify"].get("position") == "中枢内部")
+    # R280: 全部指数均降级(forecast_info 空, 极端但 R173 哲学防"不可能")时 min()/max() 空序列
+    # ValueError 崩 —— 预抽区间, 空时推演结论行降级为提示(与 R206 占位风格一致)。
+    _fc_pmains = [v["p_main"] for v in forecast_info.values()] if forecast_info else []
+    if _fc_pmains:
+        _pmn = int(round(min(_fc_pmains) * 100))
+        _pmx = int(round(max(_fc_pmains) * 100))
+        _fc_line = (f"<li><b>推演结论：</b>各指数主路径概率约 {_pmn}%~{_pmx}%；"
+                    f"跌破中枢 ZD 即主路径失效。详见<a href=\"#s4\">第四节</a>。</li>")
+    else:
+        _fc_line = ("<li><b>推演结论：</b>全部指数渲染降级（数据异常），推演概率暂不可用，"
+                    "详见各指数占位提示。</li>")
     exec_summary = f"""
     <div class="panel exec">
       <h4>一句话结论</h4>
       <ul>
         <li><b>市场格局：</b>{pat}{stance}。</li>
-        <li><b>推演结论：</b>各指数主路径概率约 {int(round(min((forecast_info[s]['p_main'] for s in forecast_info))*100))}%~{int(round(max((forecast_info[s]['p_main'] for s in forecast_info))*100))}%；跌破中枢 ZD 即主路径失效。详见<a href="#s4">第四节</a>。</li>
+        {_fc_line}
       </ul>
     </div>"""
 
@@ -3115,9 +3124,11 @@ def main():
                 + ''.join(f'<a class="chip" href="#sec-{sym}" data-sym="{sym}" data-jump>{d["name"]}</a>' for sym, d in data.items())
                 + '</nav>')
     # R177: 市场情绪板块（与决策总览 KPI / 分指数 panel 徽章 / 情绪×结构矩阵互联; 数据缺失时内部降级为提示条）
+    # R280: sh000001 自身也可能降级(不入 fc_blob) —— 显式取行再取字段, 避免 None.get 二次崩
+    _sh_fc = fc_blob.get("sh000001") or {}
     sent_board = sentiment_board_html(_base, data, results, results_week, scores, last_date,
-                                     idx_proj=fc_blob.get("sh000001", {}).get("proj"),
-                                     idx_last=fc_blob.get("sh000001", {}).get("last"))
+                                     idx_proj=_sh_fc.get("proj"),
+                                     idx_last=_sh_fc.get("last"))
 
     html = f"""<!DOCTYPE html>
 <html lang="zh-CN">
