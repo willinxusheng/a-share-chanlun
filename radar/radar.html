@@ -843,14 +843,8 @@ function indMovers(k){
     var u=UNI[sym];if(u.gate)return;
     if(!(isETF?(u.type==="ETF"):(u.ind===k)))return;
     var c=(u.st||{}).chg1d;if(c==null)return;
-    if(isETF){
-      // ETF 池代表性涨跌幅度(1273 只, ETF 单日窄幅无 ±5% 阈值, 始终记极值供 mvmini 展示 spread)
-      if(!m.top||c>m.top.chg)m.top={name:u.name,chg:c};
-      if(!m.bot||c<m.bot.chg)m.bot={name:u.name,chg:c};
-    }else{
-      if(c>=0.05){m.up++;if(!m.top||c>m.top.chg)m.top={name:u.name,chg:c};}
-      else if(c<=-0.05){m.down++;if(!m.bot||c<m.bot.chg)m.bot={name:u.name,chg:c};}
-    }
+    if(c>=0.05){m.up++;if(!m.top||c>m.top.chg)m.top={name:u.name,chg:c};}
+    else if(c<=-0.05){m.down++;if(!m.bot||c<m.bot.chg)m.bot={name:u.name,chg:c};}
   });
   MOV[k]=m;return m;
 }
@@ -904,9 +898,9 @@ function renderInds(){
     if((x.n_sig_top||0)>=2)strongCls=" strong-top";
     else if((x.n_sig_bot||0)>=2)strongCls=" strong-bot";
     if(!indExpanded&&i>=IND_SHOW&&!hl)return;   // 折叠: 高亮行业恒显示
-    var mv=indMovers(k);   // 板块异动 — 申万行业=涨跌≥5%家数, ETF=代表性涨跌幅度(无 ±5% 阈值, 极值 spread)
+    var mv=indMovers(k);   // 板块异动(涨跌≥5%家数) — 申万与 ETF 同口径, ETF 即便 0/0 也渲染以保结构对称
     var mvLine=x.is_etf
-      ?((mv.top||mv.bot)?'<span class="mvmini">'+(mv.top?'<span class="up">▲+'+(mv.top.chg*100).toFixed(2)+'%</span>':'')+(mv.top&&mv.bot?' ':'')+(mv.bot?'<span class="down">▼'+(mv.bot.chg*100).toFixed(2)+'%</span>':'')+'</span>':'')
+      ?'<span class="mvmini"><span class="up">▲'+(mv.up||0)+'</span> <span class="down">▼'+(mv.down||0)+'</span> ≥5%</span>'
       :((mv.up||mv.down)?'<span class="mvmini">'+(mv.up?'<span class="up">▲'+mv.up+'</span>':'')+(mv.up&&mv.down?' ':'')+(mv.down?'<span class="down">▼'+mv.down+'</span>':'')+' ≥5%</span>':'');
     html+='<div class="ind-row'+hl+strongCls+'" onclick="pickInd(\''+esc(k)+'\')">'+
       '<div class="nm">'+esc(k)+etfTag+(sg?' <span class="badge2 '+(x.n_sig_top?(x.n_sig_bot?'y':'r'):'g')+'" title="该行业成分股近端背驰信号｜顶='+(x.n_sig_top||0)+'(动能减弱·防回落)｜底='+(x.n_sig_bot||0)+'(动能衰竭·关注企稳)｜≥2只时左侧色条=集中风险/机会">顶 '+(x.n_sig_top||0)+' / 底 '+(x.n_sig_bot||0)+'</span>':'')+
