@@ -368,6 +368,13 @@ function regimeTip(x){
     "｜顶背驰=板块内成分见顶信号集中(非板块指数自身必跌), 底背驰同理";
 }
 var qs=(location.hash||"").replace(/^#\/?/,"");
+/* R297: mark 拆分加载 — marks.json(缠论标注, 大头)与 radar.json 并行异步预取, 不阻塞首页渲染;
+   点个股时若尚未就绪则等其完成后再画(保证缠论标注完整); 旧部署无 marks.json 时回落 u.mark 兼容 */
+var MARKS={},MARKS_READY=false;
+var marksP=fetch("marks.json",{cache:"no-cache"}).then(function(r){if(!r.ok)throw new Error("HTTP "+r.status);return r.json()})
+  .then(function(d){MARKS=d||{};MARKS_READY=true;return d})
+  .catch(function(){MARKS={};MARKS_READY=true;return null});   // 404/失败 → 回落 universe.mark(旧结构)
+function markOf(sym){return MARKS[sym]||(UNI[sym]&&UNI[sym].mark)||null}   // R297: 新结构 MARKS 优先, 旧结构兜底
 fetch("radar.json",{cache:"no-cache"}).then(function(r){if(!r.ok)throw new Error("HTTP "+r.status);return r.json()}).then(function(d){
   M=d.meta;UNI=d.universe||{};SIG=d.signals||[];INDS=d.industries||{};
   renderHeader();renderBar();renderSigRadar();renderBanner();   // R269: 数据降级/陈旧警示 · R285: 实操信号雷达
@@ -813,7 +820,7 @@ function drawChart(){
 function drawStkInto(el,sym){
   var seq=++drawSeq;
   el.innerHTML='<div class="loading sk">实时行情拉取中('+esc(sym)+')…</div>';
-  fetch("https://ifzq.gtimg.cn/appstock/app/fqkline/get?param="+sym+",day,,,660,qfq",{cache:"no-cache"}).then(function(r){return r.json()}).then(function(j){
+  Promise.all([fetch("https://ifzq.gtimg.cn/appstock/app/fqkline/get?param="+sym+",day,,,660,qfq",{cache:"no-cache"}).then(function(r){return r.json()}),marksP]).then(function(rs){var j=rs[0];   // R297: 合流 marks.json 预取, 未就绪时等它再画(保证缠论标注完整)
     if(seq!==drawSeq)return;   // R258: 快速连点时丢弃过期响应
     // 腾讯 fqkline 对股票返回 qfqday、对 ETF/LOF 只返回 day(不除权)——优先 qfqday 回退 day
     var kl=(j.data[sym]||{}).qfqday||(j.data[sym]||{}).day||[];
@@ -825,7 +832,7 @@ function drawStkInto(el,sym){
     el.innerHTML="";
     var opt=indKlineOption(k2,"stk");
     var u=UNI[sym];var mm=visKlMinMax(k2,opt.dataZoom[0].start||30);   // R268: 末段可视 K 线 min/max 过滤早期飞脱 mark
-    var extra=chanMarkOption(u&&u.mark,k2.map(function(x){return x.date}),mm.lo,mm.hi,k2);
+    var extra=chanMarkOption(markOf(sym),k2.map(function(x){return x.date}),mm.lo,mm.hi,k2);   // R297: MARKS 优先
     opt.series=opt.series.concat(extra);
     addSlTpLine(opt,u);   // R262+R266: 底背驰个股标 止损(背驰低点)/入场参考(现价下R/2)/止盈参考(中枢上沿或2R)
     ["笔","买点","卖点","顶背驰","底背驰"].forEach(function(n){if(opt.series.some(function(s){return s.name===n;})&&opt.legend.data.indexOf(n)<0)opt.legend.data.push(n);});
@@ -1055,7 +1062,7 @@ function showStk(sym){
 }
 function loadStkChart(sym){
   var seq=++stkSeq;
-  fetch("https://ifzq.gtimg.cn/appstock/app/fqkline/get?param="+sym+",day,,,660,qfq",{cache:"no-cache"}).then(function(r){return r.json()}).then(function(j){
+  Promise.all([fetch("https://ifzq.gtimg.cn/appstock/app/fqkline/get?param="+sym+",day,,,660,qfq",{cache:"no-cache"}).then(function(r){return r.json()}),marksP]).then(function(rs){var j=rs[0];   // R297: 合流 marks.json 预取, 未就绪时等它再画(保证缠论标注完整)
     if(seq!==stkSeq)return;   // R258: 丢弃过期响应
     // 腾讯 fqkline 对股票返回 qfqday、对 ETF/LOF 只返回 day(不除权)——优先 qfqday 回退 day
     var kl=(j.data[sym]||{}).qfqday||(j.data[sym]||{}).day||[];
@@ -1067,7 +1074,7 @@ function loadStkChart(sym){
     var el=$("stkChart");if(!el)return;el.innerHTML="";
     var opt=indKlineOption(k2,"stk");
     var u=UNI[sym];var mm=visKlMinMax(k2,opt.dataZoom[0].start||30);   // R268: 末段可视 K 线 min/max 过滤早期飞脱 mark
-    var extra=chanMarkOption(u.mark,k2.map(function(x){return x.date}),mm.lo,mm.hi,k2);
+    var extra=chanMarkOption(markOf(sym),k2.map(function(x){return x.date}),mm.lo,mm.hi,k2);   // R297: MARKS 优先
     opt.series=opt.series.concat(extra);
     addSlTpLine(opt,u);   // R262+R266: 底背驰个股标 止损(背驰低点)/入场参考(现价下R/2)/止盈参考(中枢上沿或2R)
     ["笔","买点","卖点","顶背驰","底背驰"].forEach(function(n){if(opt.series.some(function(s){return s.name===n;})&&opt.legend.data.indexOf(n)<0)opt.legend.data.push(n);});

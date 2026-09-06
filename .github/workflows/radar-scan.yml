@@ -85,14 +85,14 @@ jobs:
         if: steps.guard.outputs.skip != 'true'
         run: |
           set -euo pipefail
-          if git diff --quiet radar/radar.json; then
-            echo "radar.json 无变化(休市/扫描结果同昨), 跳过提交"
+          if git diff --quiet radar/radar.json && git diff --quiet radar/marks.json; then
+            echo "radar.json/marks.json 无变化(休市/扫描结果同昨), 跳过提交"
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git pull --rebase --autostash origin "${GITHUB_REF_NAME}" || true
-          git add radar/radar.json
+          git add radar/radar.json radar/marks.json
           git commit -m "chore: 全市场缠论雷达数据刷新 asof=$(python3 -c 'import json;print(json.load(open("radar/radar.json"))["meta"]["asof"])')"
           git push
           echo "已提交并推送雷达数据"

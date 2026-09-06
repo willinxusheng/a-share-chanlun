@@ -84,6 +84,9 @@ EM_KLINE_HOSTS = ["https://push2his.eastmoney.com",
                   "http://push2his.eastmoney.com",
                   "http://92.push2his.eastmoney.com"]
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "radar.json")
+MARKS_OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "marks.json")
+# R297: mark(笔/中枢/背驰/买卖点标注, ~10.4MB) 从 radar.json 拆到 marks.json —
+# radar.json 15.9→5.5MB 首页秒开; marks 由前端异步预取, 点个股时按需就绪。
 ETF_KEY = "ETF板块"             # 场内基金/ETF 归为独立板块(P3b), 与申万一级并列展示
 # R283: 当日主力资金流(东财 ulist.np 批量, 免key) —— f62=主力净流入(元, 负=净流出,
 # 正=净流入), f184=主力净占比%。与标的池同域(push2), CI 境外/本地同链路可达; 限速复用
@@ -1243,8 +1246,7 @@ def main():
         sig["st"] = sts[sym]
         zs = sts[sym].get("zs_last")
         sig["levels"] = {"zd": zs["zd"], "zg": zs["zg"]} if zs else {}
-        if sym in marks:
-            sig["mark"] = marks[sym]
+        # R297: sig 不再内嵌 mark(与 universe.mark 重复, 前端统一从 MARKS[sym] 取)
 
     signals.sort(key=lambda x: (-x[1]["strong"], x[1]["fresh"], -x[1]["area"] if x[1]["area"] > 0 else 0))
 
@@ -1342,7 +1344,7 @@ def main():
         "title": "A股全市场缠论雷达",
         "asof": asof, "build_time": datetime.datetime.now(
             datetime.timezone(datetime.timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S"),
-        "version": "P3b-r3",   # R283: 龙头+当日主力资金流
+        "version": "P3b-r4",   # R297: mark 拆分到 marks.json(radar.json 瘦身 65%)
         "n_universe": len(uni), "n_fetch": len(got), "n_fail": len(fails),
         "n_ok": len(sts), "n_gate": sum(gate_cnt.values()) - gate_cnt.get("", 0),
         "n_signal": len(signals), "n_ind": len(industries),
@@ -1360,15 +1362,20 @@ def main():
                  "资金流=东财当日主力净额(超大+大单, 元), 正=净流入红 负=净流出绿"
                  % FRESH_MAX_DAYS),
     }
+    # R297: mark 拆分 — universe 各标的的 mark(笔/中枢/背驰/买卖点, ~10.4MB)独立成 marks.json,
+    # radar.json 白名单不再含 "mark"; 行业合成标的(industries.*.mark, 仅32个)保留在 radar.json。
+    marks_out = {s: row["mark"] for s, row in universe.items() if row.get("mark")}
+    meta["marks_n"] = len(marks_out)
     out = {"meta": meta,
            "signals": [{"sym": s, **sig} for s, sig in signals],
            "industries": industries,
            "universe": {s: {k: v for k, v in row.items()
                             if k in ("name", "type", "code", "gate", "gd", "ind", "mcap",
-                                     "st", "mark", "ff", "lead")}
+                                     "st", "ff", "lead")}
                         for s, row in universe.items()}}
     # R275: 显式 UTF-8 —— 读侧(L1002)已带 encoding, 写侧遗漏; CI runner 若 locale 非 UTF-8
     # (如 C/POSIX), ensure_ascii=False 写中文 meta 文案会 UnicodeEncodeError 崩掉全量 run 无产物。
+    json.dump(marks_out, open(MARKS_OUT, "w", encoding="utf-8"), ensure_ascii=False, separators=(",", ":"))
     json.dump(out, open(OUT, "w", encoding="utf-8"), ensure_ascii=False, separators=(",", ":"))
     print("\n======== 雷达产物 %s ========" % OUT)
     print(json.dumps({k: v for k, v in meta.items() if not isinstance(v, dict)}, ensure_ascii=False, indent=1))
