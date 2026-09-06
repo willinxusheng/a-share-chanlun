@@ -1037,9 +1037,8 @@ function showStk(sym){
   var grp=(u.type==="ETF")?"ETF板块":(u.ind||"");
   var leadTag=u.lead?' <span class="lead-tag" title="'+(u.type==="ETF"?"场内规模最大的基金":"该行业总市值最大的龙头股")+'">👑 '+(u.type==="ETF"?"板块规模最大":"行业龙头")+'</span>':'';   // R283
   var _uff=u.ff||{};   // R283: 当日主力净流入(元)
-  var titleHtml='<div class="subcrumb">'+(prevStkSrc==="sigrad"
-    ?'<a class="subcrumb-back" href="javascript:backSigRadar()" title="返回上一页·实操信号雷达">← 返回信号雷达</a>'
-    :'<a href="javascript:backHome()">📡 雷达首页</a>')+
+  // R303: 返回按钮视觉完全一致(胶囊样式 + 文案「← 返回」), 行为 gotoPrev() 按 prevStkSrc 分发回 sigrad / home
+  var titleHtml='<div class="subcrumb">'+'<a class="subcrumb-back" href="javascript:gotoPrev()" title="返回上一页">← 返回</a>'+
     ' <span class="arr">›</span> '+(grp?'<a href="javascript:pickIndFromStk(\''+esc(grp)+'\')">'+esc(grp)+'</a> <span class="arr">›</span> ':'')+'<span style="color:var(--ink)">'+esc(u.name)+'</span></div>';
   titleHtml+='<div class="big-title"><h2>'+esc(u.name)+leadTag+'</h2><span class="cd">'+esc(sym)+' · '+esc(u.code)+' · '+esc(u.type)+' · '+esc(grp||"-")+'</span></div>';
   titleHtml+='<div class="metric-strip">'+
@@ -1186,6 +1185,9 @@ function hsGo(sym){   // 搜索直达个股页: 来源按搜索发起处语境�
   hsHot=-1;
   prevStkSrc=hsFrom();
   showStk(sym);   // showStk 内置先回顶(instant), 此处不再 smooth 双滚防闪
+}
+function gotoPrev(){   // R303: 返回按钮统一点击 — 视觉一致/文案「← 返回」, 行为按 prevStkSrc 分发到原入口
+  if(prevStkSrc==="sigrad"){backSigRadar()}else{backHome()}
 }
 function toIndex(){location.href=location.href.split("/radar/")[0]+"/index.html"}
 /* ===== 通用: K线 option + 缠论标注 ===== */
