@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
 # R180→R188 预测精度门禁: 校验情绪 KNN 预测的样本外回测精度(forecast_acc)是否仍处合理区间。
-# 现已升为 CI 阻断: 覆盖率偏离名义 50% 过多 / MAE 退化 / 方向命中率异常时返回 exit 1,
-# 由 deploy.yml 在 calc_v2 之后、report 之前调用, set -euo pipefail 捕获非0 即阻断 Pages 部署。
+# 覆盖率偏离名义 50% 过多 / MAE 退化 / 方向命中率异常时返回 exit 1。
+# 调用方式(deploy.yml, R238 降级): 数据刷新日(未改代码)按 `|| echo ::warning::` 降级为告警不阻断,
+# 保证当日数据照常上线; 若持续偏离应人工检查模型。R279: 更新头注释使其与实际调用语义一致
+# (原注释称"set -euo pipefail 捕获非0 即阻断"已过时)。
 # 仅"数据缺失(SKIP: 文件不存在/forecast_acc 缺失)"保持 exit 0 不阻断。
 # 反选依据见 sentiment/calc_v2.py 内 analysis(_grid.py): 最优 k=15/ctx=15/等权全局。
 import json

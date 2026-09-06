@@ -649,7 +649,7 @@ def backtest_sentiment_forecast(valid, horizon=30, k=10, ctx=20,
     for t in range(ctx + horizon, n - horizon, step):
         cur = scores[t - ctx: t]
         cur_norm = [x - cur[0] for x in cur]
-        cur_regime = regimes[t] if t < len(regimes) else None
+        cur_regime = regimes[t - 1]  # R279: 锚点当日(today 索引=t-1)的 regime —— 原 regimes[t] 取 T+1(预测首日)的 regime 筛邻居, 属 1 日前视泄漏(仅 regime 切换日改变邻居池, 但语义确定错误)
         today = scores[t - 1]
         # R245: 度量口径统一 —— 展示层情绪分为 clamp(score,0,100), 预测带亦钳制在 [0,100];
         # 回测 actual/today 若用未钳制原始分(极端恐惧 -7.7 / 狂热 107.3), 与预测带尺度不对称,
@@ -843,7 +843,7 @@ def _build_band_anchors(valid, horizon=30, k=15, ctx=15, regime_weight=False,
     for t in range(ctx + horizon, n - horizon, step):
         cur = scores[t - ctx: t]
         cur_norm = [x - cur[0] for x in cur]
-        cur_regime = regimes[t] if t < len(regimes) else None
+        cur_regime = regimes[t - 1]  # R279: 同 backtest 修复 —— 锚点当日(t-1)的 regime, 原 regimes[t] 为 T+1 前视
         today = scores[t - 1]
         pool = []
         for (i, cn, rg, c_end) in cand_pool:
