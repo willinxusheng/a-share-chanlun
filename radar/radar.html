@@ -556,9 +556,10 @@ function drawStkInto(el,sym){
   el.innerHTML='<div class="loading sk">实时行情拉取中('+esc(sym)+')…</div>';
   fetch("https://ifzq.gtimg.cn/appstock/app/fqkline/get?param="+sym+",day,,,660,qfq",{cache:"no-cache"}).then(function(r){return r.json()}).then(function(j){
     if(seq!==drawSeq)return;   // R258: 快速连点时丢弃过期响应
-    var kl=(j.data[sym]||{}).qfqday||[];
+    // 腾讯 fqkline 对股票返回 qfqday、对 ETF/LOF 只返回 day(不除权)——优先 qfqday 回退 day
+    var kl=(j.data[sym]||{}).qfqday||(j.data[sym]||{}).day||[];
     if(!kl.length)throw new Error("empty");
-    var k2=kl.map(function(r){return {date:r[0],open:+r[1],close:+r[2],high:+r[3],low:+r[4],volume:+r[5]}});   // 腾讯 volume 单位=手(实测 333102=33.3万手), 不再 /100
+    var k2=kl.map(function(r){return {date:r[0],open:+r[1],close:+r[2],high:+r[3],low:+r[4],volume:+r[5]}});   // 腾讯 volume 单位=手(实测 333102=33.3万手/ETF 同量级), 不再 /100
     el.innerHTML="";
     var opt=indKlineOption(k2,"stk");
     var u=UNI[sym];var extra=chanMarkOption(u&&u.mark,k2.map(function(x){return x.date}));
@@ -733,9 +734,10 @@ function loadStkChart(sym){
   var seq=++stkSeq;
   fetch("https://ifzq.gtimg.cn/appstock/app/fqkline/get?param="+sym+",day,,,660,qfq",{cache:"no-cache"}).then(function(r){return r.json()}).then(function(j){
     if(seq!==stkSeq)return;   // R258: 丢弃过期响应
-    var kl=(j.data[sym]||{}).qfqday||[];
+    // 腾讯 fqkline 对股票返回 qfqday、对 ETF/LOF 只返回 day(不除权)——优先 qfqday 回退 day
+    var kl=(j.data[sym]||{}).qfqday||(j.data[sym]||{}).day||[];
     if(!kl.length)throw new Error("empty");
-    var k2=kl.map(function(r){return {date:r[0],open:+r[1],close:+r[2],high:+r[3],low:+r[4],volume:+r[5]}});   // 腾讯=手, 不再 /100
+    var k2=kl.map(function(r){return {date:r[0],open:+r[1],close:+r[2],high:+r[3],low:+r[4],volume:+r[5]}});   // 腾讯 volume 单位=手(ETF 同量级), 不再 /100
     var el=$("stkChart");if(!el)return;el.innerHTML="";
     var opt=indKlineOption(k2,"stk");
     var u=UNI[sym];var extra=chanMarkOption(u.mark,k2.map(function(x){return x.date}));
