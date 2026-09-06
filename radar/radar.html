@@ -611,7 +611,7 @@ function drawChart(){
   // 全段 kmin/kmax 范围过宽 → 早期脱离可视 mark 飞脱主体 K 线. 改用末段可视 K 线 min/max,
   // dates 仍全段(保持 mark date 索引映射, 横向位置不变).
   var mm=visKlMinMax(kl,opt.dataZoom[0].start||30);
-  opt.series=opt.series.concat(chanMarkOption(ind.mark,kl.map(function(x){return x.date}),mm.lo,mm.hi));
+  opt.series=opt.series.concat(chanMarkOption(ind.mark,kl.map(function(x){return x.date}),mm.lo,mm.hi,kl));
   // legend 只 push 实际存在的系列,避免 "底背驰" 等 0 信号行业报 warning
   ["笔","买点","卖点","顶背驰","底背驰"].forEach(function(n){
     if(opt.series.some(function(s){return s.name===n;}) && opt.legend.data.indexOf(n)<0) opt.legend.data.push(n);
@@ -639,7 +639,7 @@ function drawStkInto(el,sym){
     el.innerHTML="";
     var opt=indKlineOption(k2,"stk");
     var u=UNI[sym];var mm=visKlMinMax(k2,opt.dataZoom[0].start||30);   // R268: 末段可视 K 线 min/max 过滤早期飞脱 mark
-    var extra=chanMarkOption(u&&u.mark,k2.map(function(x){return x.date}),mm.lo,mm.hi);
+    var extra=chanMarkOption(u&&u.mark,k2.map(function(x){return x.date}),mm.lo,mm.hi,k2);
     opt.series=opt.series.concat(extra);
     addSlTpLine(opt,u);   // R262+R266: 底背驰个股标 止损(背驰低点)/入场参考(现价下R/2)/止盈参考(中枢上沿或2R)
     ["笔","买点","卖点","顶背驰","底背驰"].forEach(function(n){if(opt.series.some(function(s){return s.name===n;})&&opt.legend.data.indexOf(n)<0)opt.legend.data.push(n);});
@@ -822,7 +822,7 @@ function loadStkChart(sym){
     var el=$("stkChart");if(!el)return;el.innerHTML="";
     var opt=indKlineOption(k2,"stk");
     var u=UNI[sym];var mm=visKlMinMax(k2,opt.dataZoom[0].start||30);   // R268: 末段可视 K 线 min/max 过滤早期飞脱 mark
-    var extra=chanMarkOption(u.mark,k2.map(function(x){return x.date}),mm.lo,mm.hi);
+    var extra=chanMarkOption(u.mark,k2.map(function(x){return x.date}),mm.lo,mm.hi,k2);
     opt.series=opt.series.concat(extra);
     addSlTpLine(opt,u);   // R262+R266: 底背驰个股标 止损(背驰低点)/入场参考(现价下R/2)/止盈参考(中枢上沿或2R)
     ["笔","买点","卖点","顶背驰","底背驰"].forEach(function(n){if(opt.series.some(function(s){return s.name===n;})&&opt.legend.data.indexOf(n)<0)opt.legend.data.push(n);});
@@ -917,9 +917,63 @@ function indKlineOption(kl,kind){   // kind:"ind"=行业合成(量=成交额亿�
     ]
   };
 }
-function chanMarkOption(mark,dates,kmin,kmax){
+function chanMarkOption(mark,dates,kmin,kmax,klForMatch){
   var ser=[];
   if(!mark)return ser;
+  // R282: mark 深拷贝避免污染原对象 (resize/重复调用不重复校正); 接收 klForMatch(完整 K 线数组)
+  // 按 date 锚定 mark 价格 —— R270 三级源降级后, radar.json 用新浪源. 已实测 sh588890 早期
+  // 569 根 K 线价格是腾讯源的 3 倍(新浪单位换算异常/份额折算遗留), mark.bc 基于此算 → 整体 ×3 错位.
+  // 前端用腾讯实时 K 线画图 → mark 标注脱离 K 线 N 倍. 修复: 按 date 匹配, 用 K 线 bar 的
+  // high(top)/low(bottom) 替换 mark.bc 价格; 找不到日期的 mark 点剔除(防飞脱).
+  var m = JSON.parse(JSON.stringify(mark));
+  if(klForMatch && klForMatch.length){
+    var kMap = {};
+    for(var ki=0;ki<klForMatch.length;ki++){ kMap[klForMatch[ki].date]=klForMatch[ki]; }
+    // mark.bc=[type, date, price] → top 取 high, bottom 取 low
+    if(m.bc && m.bc.length){
+      var bcOut = [];
+      for(var bi=0;bi<m.bc.length;bi++){
+        var b = m.bc[bi]; if(!b || b.length<3) continue;
+        var k = kMap[b[1]]; if(!k) continue;       // 日期不在 K 线 → 剔除(早期飞脱)
+        var isTop = b[0]==="top"||b[0]===1||String(b[0]).indexOf("顶")>=0;
+        bcOut.push([b[0], b[1], isTop ? k.high : k.low]);
+      }
+      m.bc = bcOut;
+    }
+    // mark.line=[date_start, start_price, date_end, end_price, dir] → 按 dir 取 high/low
+    if(m.line && m.line.length){
+      var lnOut = [];
+      for(var li=0;li<m.line.length;li++){
+        var l = m.line[li]; if(!l || l.length<5) continue;
+        var ks = kMap[l[0]], ke = kMap[l[2]]; if(!ks || !ke) continue;
+        var d = +l[4];
+        lnOut.push([l[0], d===1 ? ks.high : ks.low, l[2], d===1 ? ke.high : ke.low, l[4]]);
+      }
+      m.line = lnOut;
+    }
+    // mark.sig=[dir, kind, date, price] → 一买/一卖点也是笔端点(同源), 价格同样需要按日期锚定
+    if(m.sig && m.sig.length){
+      var sgOut = [];
+      for(var si=0;si<m.sig.length;si++){
+        var g = m.sig[si]; if(!g || g.length<4) continue;
+        var kg = kMap[g[2]]; if(!kg) continue;
+        var buy = (g[0]===1||g[0]==="1");
+        sgOut.push([g[0], g[1], g[2], buy ? kg.high : kg.low]);  // 买点=红(看涨)→high; 卖点=绿(看跌)→low
+      }
+      m.sig = sgOut;
+    }
+    // mark.zs=[zg, zd, date_start, date_end] → 中枢任一端日期不在 K 线则剔除
+    if(m.zs && m.zs.length){
+      var zsOut = [];
+      for(var zi=0;zi<m.zs.length;zi++){
+        var z = m.zs[zi]; if(!z || z.length<4) continue;
+        if(kMap[z[2]] && kMap[z[3]]) zsOut.push(z);
+      }
+      m.zs = zsOut;
+    }
+  } else {
+    m = mark;  // 无 K 线匹配时直接用原 mark (向后兼容旧快照)
+  }
   var di={};dates.forEach(function(d,i){di[d]=i});
   function xi(dt){return di[dt]!=null?di[dt]:null}
   // R263+R268: mark 偏离 K 线可视范围的防御 — band 已用"末段可视 K 线 min/max"(R268 visKlMinMax),
@@ -927,17 +981,17 @@ function chanMarkOption(mark,dates,kmin,kmax){
   // 把飞脱 mark 也放行, 如 sh588870 ETF 末段 [0.95,1.85] ×1.6 = 2.96, 早期中枢 [1.95,2.30] 仍通过)
   var band=kmin!=null&&kmax!=null&&isFinite(kmin)&&isFinite(kmax)&&kmin>0&&kmax>kmin;
   var inRange=function(p){if(!band)return true;if(!isFinite(p))return false;return p>=kmin*0.7&&p<=kmax*1.2};
-  if(mark.line&&mark.line.length){
+  if(m.line&&m.line.length){
     var data=[];
-    mark.line.forEach(function(b){var x1=xi(b[0]),x2=xi(b[2]);if(x1==null||x2==null)return;
+    m.line.forEach(function(b){var x1=xi(b[0]),x2=xi(b[2]);if(x1==null||x2==null)return;
       // 任一端价位越界 → 整段笔排除(防笔折线拉脱主体)
       if(!inRange(b[1])||!inRange(b[3]))return;
       data.push([x1,b[1]],[x2,b[3]]);});
     if(data.length)ser.push({name:"笔",type:"line",data:data,symbol:"none",lineStyle:{width:1,color:"#7f77dd"},z:2,clip:true});
   }
-  if(mark.zs&&mark.zs.length){
+  if(m.zs&&m.zs.length){
     var areas=[];
-    mark.zs.forEach(function(z){var x1=xi(z[2]),x2=xi(z[3]);if(x1==null||x2==null)return;
+    m.zs.forEach(function(z){var x1=xi(z[2]),x2=xi(z[3]);if(x1==null||x2==null)return;
       var zd=+z[1],zg=+z[0];
       if(!isFinite(zd)||!isFinite(zg))return;
       var lo=Math.min(zd,zg),hi=Math.max(zd,zg);
@@ -952,7 +1006,7 @@ function chanMarkOption(mark,dates,kmin,kmax){
   // 一类买卖点本就是背驰点, 有 sig 时用分类点(一买/二买/三买/一卖/二卖/三卖)替代通用背驰三角,
   // 避免同一点双标; 旧快照(radar.json 无 sig 字段)回退 legacy 背驰三角渲染。
   // 颜色语义与主看板一致: 买点=红(看涨) 卖点=绿(看跌); 趋势背驰·趋/盘整背驰·盘 后缀, 悬停 tooltip 显全名。
-  var sig=(mark.sig||[]),bu=[],sl=[];
+  var sig=(m.sig||[]),bu=[],sl=[];
   sig.forEach(function(g){
     if(!g||g.length<4)return;
     var x=xi(g[2]);if(x==null)return;
@@ -974,7 +1028,7 @@ function chanMarkOption(mark,dates,kmin,kmax){
     return ser;
   }
   var tp=[],bp=[];
-  (mark.bc||[]).forEach(function(b){var x=xi(b[1]);if(x==null)return;
+  (m.bc||[]).forEach(function(b){var x=xi(b[1]);if(x==null)return;
     // 背驰三角价位越界也排除(防散点飞脱)
     if(!inRange(b[2]))return;
     var isTop=b[0]==="top"||b[0]===1||String(b[0]).indexOf("顶")>=0;(isTop?tp:bp).push({value:[x,b[2]]});});
