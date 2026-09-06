@@ -263,6 +263,21 @@ h1 .dot{color:#ffd43b}
 .sigrad .srow.div{border-left:3px solid #f59f00}
 @media(max-width:980px){.sigrad .sbody{grid-template-columns:1fr}.sigrad .sgrp+.sgrp{border-left:0;border-top:1px dashed #e8edf4}}
 @media(max-width:980px){.sigrad .srow{grid-template-columns:minmax(100px,1.2fr) .8fr 56px 90px 72px;padding:7px 12px}.sigrad .gtt{padding:6px 12px}.sigrad .shead{padding:12px}}
+/* ===== R305: 逆向观察池(首页中部, 超窗底背驰埋伏候选) ===== */
+.revpool{margin-top:16px;background:var(--card);border:1px solid #d9e2ef;border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden;border-left:3px solid #18a058}
+.revpool .phead{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid #eef2f7;flex-wrap:wrap}
+.revpool .phead h2{font-size:16px}
+.revpool .phint{font-size:11.5px;color:var(--muted);line-height:1.7;width:100%}
+.revpool .prow{display:grid;grid-template-columns:minmax(140px,1.35fr) minmax(74px,.7fr) minmax(64px,.62fr) minmax(120px,1.05fr) minmax(96px,.92fr);gap:8px;align-items:center;padding:7px 16px;cursor:pointer;border-top:1px solid #f5f8fb;transition:background .12s;font-size:12px}
+.revpool .prow:hover{background:#f2f9f5}
+.revpool .prow .nm{font-weight:700;color:var(--ink);font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.5}
+.revpool .prow .sub{font-size:10.5px;color:#94a3b8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.45}
+.revpool .prow .big{font-size:13px;font-weight:800;line-height:1.5}
+.revpool .prow .small{font-size:10px;color:#94a3b8;line-height:1.5}
+.revpool .prow .devv{font-weight:800}
+@media(max-width:980px){.revpool .prow{grid-template-columns:minmax(110px,1.2fr) .75fr .6fr 90px 84px;padding:7px 12px;font-size:11px}.revpool .phead{padding:12px}}
+.gate-tag{font-size:9px;font-weight:700;border-radius:4px;padding:0 4px;margin-left:3px;vertical-align:1px}
+.gate-tag.g1{background:#fff3cd;color:#92400e}.gate-tag.g2{background:#fde2e2;color:#c92a2a}.gate-tag.g3{background:#e0f2fe;color:#075985}
 .chart-sec{display:grid;grid-template-columns:1fr 1fr;gap:14px}
 @media(max-width:980px){.chart-sec{grid-template-columns:1fr}}
 @media(max-width:980px){.ind-grid,.ind-row{grid-template-columns:1fr .7fr .7fr 1.2fr .6fr .6fr .9fr 22px}}
@@ -315,6 +330,8 @@ a{color:var(--primary);text-decoration:none}
     <div class="bar" id="barRow"></div>
     <!-- R285: 实操信号雷达 — 近端全市场背驰信号, 直连个股实操 (顶风险/底机会左右分栏) -->
     <div class="sigrad" id="sigRadar" style="display:none"></div>
+    <!-- R305: 逆向观察池 — 超窗(fresh>10)底背驰 + 深跌(距高≥30%) + 未破背驰低点 的老结构埋伏候选 -->
+    <div class="revpool" id="revPool" style="display:none"></div>
     <!-- 行业指数列表: 平铺到顶部 + 专业信息 -->
     <div class="ind-panel">
       <div class="head">
@@ -437,7 +454,7 @@ function markOf(sym){return MARKS[sym]||(UNI[sym]&&UNI[sym].mark)||null}   // R2
 fetch("radar.json",{cache:"no-cache"}).then(function(r){if(!r.ok)throw new Error("HTTP "+r.status);return r.json()}).then(function(d){
   M=d.meta;UNI=d.universe||{};SIG=d.signals||[];INDS=d.industries||{};
   initSearch();   // R298: 数据就绪后激活全局搜索(UNI 已加载)
-  renderHeader();renderBar();renderSigRadar();renderBanner();   // R269: 数据降级/陈旧警示 · R285: 实操信号雷达
+  renderHeader();renderBar();renderSigRadar();renderRevPool();renderBanner();   // R269: 数据降级/陈旧警示 · R285: 实操信号雷达 · R305: 逆向观察池
   if(qs.indexOf("stk/")===0)showStk(decodeURIComponent(qs.slice(4)));
   else if(qs.indexOf("ind/")===0)pickInd(decodeURIComponent(qs.slice(4)));
   else renderInds();
@@ -641,7 +658,113 @@ function renderSigRadar(){
     '<div class="sbody">'+grp("⚠️","顶背驰 · 风险",pt)+grp("✅","底背驰 · 机会",pb)+'</div>'+
     '<div class="foot">信号=自研缠论引擎背驰确认 · 数据截至 '+(M.asof||"-")+' · 仅供研究参考，不构成投资建议</div>';
 }
-/* ===== 行业列表排序 ===== */
+/* ===== R305: 逆向观察池(首页中部) — 老结构埋伏候选 =====
+   选样: 全量 UNI 中 scenario=背驰见底机会 + 有 bottom_bc + fresh>10(已超实操窗, 归老结构)
+         + 距历史高回撤≥30%(深跌) + 现价>背驰低点 end_price(未破位, 结构仍有效) + 剔除 ETF(dd 失真/埋伏对象=个股)
+   语义: 与顶部"实操信号雷达"(近端 fresh≤10)互补 — 近端管"当下", 观察池管"提前埋伏/跟踪"
+   操作参考: 止损参考=end_price(跌破结构失效) · 埋伏区=现价贴近 end_price 时(dev 小) · 勿追 dev>8% */
+var REV_SHOW=12;            // 折叠态默认展示行数
+var revExpanded=false;
+var curRevMode="dd";        // dd=最深回撤先行 | dev=最贴低点(埋伏参考) | fr=最新触发
+function revCand(sym,v){
+  if(v.type==="ETF")return null;                 // R305: ETF 剔除
+  var st=v.st||{};
+  if(st.scenario!=="背驰见底机会")return null;
+  var bb=st.bottom_bc||{};
+  if(!bb.end_price)return null;
+  var fd=bb.fresh_days;
+  if(fd==null||fd<=10)return null;               // 超窗(fresh>10)才进观察池
+  var dd=st.dd;
+  if(dd==null||dd>-0.30)return null;             // 距历史高回撤≥30%
+  var close=st.close;
+  if(close==null||+close<=+bb.end_price)return null;   // 现价>背驰低点(未破位)
+  var dev=(close/bb.end_price-1)*100;
+  return {sym:sym,st:st,bb:bb,fd:fd,dd:dd,dev:dev,close:close};
+}
+function revList(){
+  var out=[];
+  Object.keys(UNI).forEach(function(sym){var c=revCand(sym,UNI[sym]);if(c)out.push(c);});
+  if(curRevMode==="dev")out.sort(function(a,b){return a.dev-b.dev||a.dd-b.dd});
+  else if(curRevMode==="fr")out.sort(function(a,b){return a.fd-b.fd||a.dd-b.dd});
+  else out.sort(function(a,b){return a.dd-b.dd});   // dd: 最深回撤(最负)先行
+  return out;
+}
+function revRow(c){
+  var v=UNI[c.sym]||{},u=v||{};
+  var st=c.st,bb=c.bb;
+  var nm=u.name||c.sym;
+  var lead=u.lead?' <span class="lead-tag" title="该行业总市值最大的龙头股">👑龙头</span>':'';
+  var gtag="";
+  if(v.gate==="低自洽")gtag='<span class="gate-tag g2" title="缠论结构自洽度低于门禁, 参考价值打折">低自洽</span>';
+  else if(v.gate==="次新")gtag='<span class="gate-tag g1" title="上市较新, 结构样本少">次新</span>';
+  else if(v.gate==="低流动性")gtag='<span class="gate-tag g3" title="60日均成交额偏低">低流动</span>';
+  var indName=(v.ind&&v.ind!=="-"?v.ind:"-");
+  var ffNet=(v.ff||{}).net;
+  var ffMini=(ffNet!=null)?'<span class="ffmini '+ffCls(ffNet)+'" title="当日主力净流入: '+ffTxt(ffNet)+'">'+ffTxt(ffNet)+'</span>':'';
+  var amtTxt=(st.avg_amt60!=null?(st.avg_amt60>=1e4?(st.avg_amt60/1e4).toFixed(1)+"亿":st.avg_amt60.toFixed(0)+"万"):"-")+"/日";   // avg_amt60=万元
+  var ddCls=c.dd<=-0.5?"down":"";
+  var devCls=c.dev<=5?"down":"up";        // ≤5%=还在背驰低点附近=埋伏参考区; >5%=已走高
+  var devLbl=c.dev<=5?"·参考区":"";
+  var fdTxt=bb.bi_date_end+" 触发";
+  var bcTag=bb.bc_type?('<span style="color:#94a3b8">'+esc(String(bb.bc_type))+'</span>'):'';
+  var tip="🧭 逆向观察候选 | "+nm+" "+(c.sym||"")+
+    "\n底背驰确认于 "+fdTxt+" · 距今 "+c.fd+" 天(已超实操窗, 结构仍有效)"+
+    "\n距历史高回撤 "+Math.abs(c.dd*100).toFixed(1)+"% (深跌)"+
+    "\n背驰低点参考: "+bb.end_price+" · 现价距低点 "+(c.dev>=0?"+":"")+c.dev.toFixed(1)+"%"+(c.dev<=5?" → 埋伏参考区(贴近)":" → 已走高, 谨慎追")+
+    "\n止损参考: 跌破 "+bb.end_price+" 结构失效"+
+    (ffNet!=null?"\n当日主力净流入: "+ffTxt(ffNet):"")+
+    (amtTxt!=null?"\n60日均成交: "+amtTxt:"")+
+    "\n\n点击查看个股完整 K 线与缠论结构";
+  return '<div class="prow" title="'+esc(tip)+'" onclick="pickRev(\''+c.sym+'\')">'+
+    '<div><div class="nm">'+esc(nm)+lead+ffMini+gtag+'</div><div class="sub">'+esc(c.sym)+" · "+esc(indName)+' · '+esc(st.one_word||"-")+'</div></div>'+
+    '<div><div class="big '+ddCls+'">'+(c.dd*100).toFixed(1)+'%</div><div class="small">距历史高</div></div>'+
+    '<div><div class="big">'+esc(st.close!=null?st.close:"-")+'</div><div class="small '+(st.chg1d>0?"up":(st.chg1d<0?"down":""))+'">'+pct(st.chg1d,2)+'</div></div>'+
+    '<div><div class="big" style="font-size:11px;color:#087f5b">'+esc(fdTxt)+'</div><div class="small">'+c.fd+"天前 · "+bcTag+'</div></div>'+
+    '<div><div class="devv '+devCls+'">'+(c.dev>=0?"+":"")+c.dev.toFixed(1)+'%</div><div class="small">距背驰低点'+esc(devLbl)+'</div></div>'+
+    '</div>';
+}
+function pickRev(sym){prevStkSrc="rev";showStk(sym)}   // R305: 观察池入口 → 返回键回观察池
+function backRevPool(){                                 // 同 backSigRadar: 回首页 + 平滑滚到观察池
+  disposePool();hideFloatHead();
+  if(myChart){try{myChart.dispose()}catch(e){};myChart=null}
+  $("viewStk").classList.add("hidden");
+  $("viewHome").classList.remove("hidden");
+  location.hash="#/";
+  curStk=null;curTab="ind";curInd=null;detailOpen=false;
+  requestAnimationFrame(function(){
+    var el=$("revPool");
+    if(el)el.scrollIntoView({behavior:"smooth",block:"start"});
+    setTimeout(function(){
+      var rows=document.querySelectorAll("#revPool .prow");
+      rows.forEach(function(r){r.style.transition="background .8s";r.style.background="rgba(217,245,230,.75)"});
+      setTimeout(function(){rows.forEach(function(r){r.style.background=""})},900);
+    },350);
+  });
+}
+function setRevMode(m){curRevMode=m;renderRevPool();}
+function toggleRev(){revExpanded=!revExpanded;renderRevPool();}
+function renderRevPool(){
+  var box=$("revPool");
+  if(!box)return;
+  var all=revList();
+  var n=all.length;
+  if(!n){box.style.display="none";return;}
+  box.style.display="";
+  var shown=revExpanded?all:all.slice(0,REV_SHOW);
+  var chipOn=function(m){return curRevMode===m?' on':'';};
+  var sortTxt=curRevMode==="dd"?"最深回撤先行":(curRevMode==="dev"?"最贴背驰低点(埋伏优先)":"最新触发先行");
+  var rowsHtml=shown.map(revRow).join('');
+  var moreHtml=(all.length>REV_SHOW)?'<div class="more"><a onclick="toggleRev()">'+(revExpanded?'▲ 收起':'▼ 展开全部 '+all.length+' 只')+'</a></div>':'';
+  box.innerHTML='<div class="phead"><h2>🧭 逆向观察池</h2>'+
+    '<div class="chips">'+
+      '<span class="chip'+chipOn("dd")+'" onclick="setRevMode(\'dd\')" title="距历史高点回撤最深的在前 — 看谁跌得最透">📉 最深回撤</span>'+
+      '<span class="chip'+chipOn("dev")+'" onclick="setRevMode(\'dev\')" title="现价距背驰低点最近的在前 — 还在埋伏参考区(≤5%)的优先">🎯 最贴低点</span>'+
+      '<span class="chip'+chipOn("fr")+'" onclick="setRevMode(\'fr\')" title="底背驰触发时间最近的在前">🕐 最新触发</span>'+
+    '</div>'+
+    '<span class="phint">已超实操窗的底背驰老结构 · 深跌(距历史高≥30%)+未破背驰低点 · 埋伏候选 <b style="color:#18a058">'+n+' 只</b> · <b style="color:#18a058">绿=贴近低点(参考区)</b>/<b style="color:#c92a2a">红=已走高</b> · 与顶部"实操信号雷达"(近端≤10天)互补 — 这里管提前埋伏/跟踪 · '+sortTxt+'</span></div>'+
+    '<div style="padding:6px 0 8px">'+rowsHtml+moreHtml+'</div>'+
+    '<div class="foot">候选=底背驰(fresh&gt;10) + 距历史高≥30% + 现价&gt;背驰低点 · 止损参考=背驰低点(跌破失效) · 数据截至 '+(M.asof||"-")+' · 仅供研究参考，不构成投资建议</div>';
+}
 function sortInds(mode){
   curSortMode=mode;
   ["tabSig","tabCap","tabChg","tabFlow","tabRel","tabRsi"].forEach(function(id){$(id).classList.remove("on")});
@@ -1211,7 +1334,7 @@ function hsFrom(){   // R302: 搜索发起时的页面语境 → 返回按钮/�
     }
     return "home";
   }
-  return prevStkSrc==="sigrad"?"sigrad":"home";  // 已在个股页: 保持上一入口来源(从哪来回哪)
+  return prevStkSrc==="sigrad"?"sigrad":(prevStkSrc==="rev"?"rev":"home");  // 已在个股页: 保持上一入口来源(从哪来回哪)
 }
 function hsGo(sym){   // 搜索直达个股页: 来源按搜索发起处语境判定(sigrad=返回信号雷达 / 其它=雷达首页)
   if(!UNI[sym])return;
@@ -1223,7 +1346,9 @@ function hsGo(sym){   // 搜索直达个股页: 来源按搜索发起处语境�
   showStk(sym);   // showStk 内置先回顶(instant), 此处不再 smooth 双滚防闪
 }
 function gotoPrev(){   // R303: 返回按钮统一点击 — 视觉一致/文案「← 返回」, 行为按 prevStkSrc 分发到原入口
-  if(prevStkSrc==="sigrad"){backSigRadar()}else{backHome()}
+  if(prevStkSrc==="sigrad")backSigRadar();
+  else if(prevStkSrc==="rev")backRevPool();   // R305: 逆向观察池入口 → 回观察池
+  else backHome();
 }
 function toIndex(){location.href=location.href.split("/radar/")[0]+"/index.html"}
 /* ===== 通用: K线 option + 缠论标注 ===== */
