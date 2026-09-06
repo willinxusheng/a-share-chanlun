@@ -489,20 +489,41 @@ def _amp20(kline, win=20):
     return round((hi - lo) / o0 * 100, 2)
 
 
-def _regime_of(ist, n_top, n_bot):
-    """行业走势背驰状态: 基于最后一笔方向 + 顶/底背驰计数。
-    顶背驰占优 → '顶背驰区'; 底背驰占优 → '底背驰区';
-    末笔向下 + 顶背驰少 → '下跌趋势'; 末笔向上 + 底背驰少 → '上涨趋势';
-    其余 → '震荡中'。"""
-    bis = ist.get("bis") or []
-    last_dir = bis[-1].get("dir", "") if bis else ""
-    if n_top >= 2 and n_bot == 0 and last_dir == "down":
-        return "顶背驰区"
-    if n_bot >= 2 and n_top == 0 and last_dir == "up":
-        return "底背驰区"
+def _regime_of(ist, n_top, n_bot, rsi14=None):
+    """行业走势状态标签: 成分顶/底背驰计数 + 板块自身位置(收盘 vs 末中枢 + RSI)。
+
+    [R260] 修复 2 处:
+    1) bug: 原代码读 ist["bis"]——但 analyze_one 构造 st 时从未写入 "bis" 键,
+       该键恒空 → last_dir 永远 "" → "上涨趋势/下跌趋势" 两个分支永不命中,
+       regime 退化成纯成分计数(全市场只见 顶背驰区/震荡中 两种, CSS 预留的趋势配色从未生效)。
+       实际方向字段为 ist["last_bi_dir"](-1 末笔向下 / 1 末笔向上)。
+    2) 板块位置门控: "顶背驰区" 的语义是"板块处相对高位、上攻动能衰竭"。
+       当板块自身已跌破末中枢下沿(close<zd)、或回落至中枢下半部且 RSI<45 时,
+       成分的顶背驰预警多半已经兑现(信号后普跌), 继续标"顶背驰区"会误导逆向判断,
+       故前者按末笔给"下跌趋势/震荡中", 后者给"震荡中"(除非成分底背驰显著集中)。
+       反之板块处中枢上半/上方时, 成分顶背驰计数占优 → "顶背驰区" 语义成立, 保留。"""
+    # 末笔方向: last_bi_dir=-1 末笔向下 / 1 末笔向上 / 0 缺省
+    last_dir = {1: "up", -1: "down"}.get(ist.get("last_bi_dir"), "")
+    close = ist.get("close")
+    zs = ist.get("zs_last") or {}
+    zd, zg = zs.get("zd"), zs.get("zg")
+    # —— 位置门控 1: 收盘已跌破末中枢下沿 = 破位下行区 ——
+    if close is not None and zd is not None and close < zd:
+        return "下跌趋势" if last_dir == "down" else "震荡中"
+    # —— 位置门控 2: 中枢下半部 且 RSI<45 = 弱势回落区(顶背驰预警已兑现) ——
+    if close is not None and zd is not None and zg is not None and close < (zd + zg) / 2:
+        if rsi14 is not None and rsi14 < 45:
+            if n_bot >= 2 and n_bot > n_top * 2:   # 成分底背驰集中仍提示
+                return "底背驰区"
+            return "震荡中"
+    # —— 成分信号计数(板块处中枢上半/上方时, 位置语义成立) ——
     if n_top >= 2 and n_top > n_bot * 2:
         return "顶背驰区"
     if n_bot >= 2 and n_bot > n_top * 2:
+        return "底背驰区"
+    if n_top >= 2 and n_bot == 0 and last_dir == "down":
+        return "顶背驰区"
+    if n_bot >= 2 and n_top == 0 and last_dir == "up":
         return "底背驰区"
     if last_dir == "down":
         return "下跌趋势"
@@ -650,6 +671,7 @@ def main():
         # 行业当日加权涨跌(合成K线末两根)
         chg1d = round(iks[-1]["close"] / iks[-2]["close"] - 1, 4) if len(iks) >= 2 else 0
         total_cap = sum(m for _s, m in members if m)
+        rsi14 = _rsi14(iks) if len(iks) >= 15 else None   # R260: regime 位置门控需 RSI 弱态信号
         industries[ind] = {
             "n_member": len(members),
             "n_total": ind_total.get(ind, len(members)),
@@ -657,10 +679,10 @@ def main():
             "cap": round(total_cap / 1e8, 0),      # 亿元
             "chg1d": chg1d,
             "is_etf": 1 if ind == ETF_KEY else 0,
-            "rsi14": _rsi14(iks),
+            "rsi14": rsi14,
             "amp20": _amp20(iks),
             "qual_rate": _qual_rate(ind, ind_total, ind_qual),
-            "regime": _regime_of(ist, n_top, n_bot),
+            "regime": _regime_of(ist, n_top, n_bot, rsi14),
             "st": ist, "mark": imark,
             "kline": iks[-IND_KLINE_N:],           # 最近 N 根(画行业K线)
             "spark": _spark_of(iks[-SPARK_N:])["data"],

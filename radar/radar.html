@@ -262,6 +262,22 @@ var drawSeq=0,stkSeq=0;   // 竞态令牌: 快速连续切换股票/页面时只
 /* 行业合成K线量: scan_radar 存 vol=Σ(成分手×价)/1e8, 即 板块成交额(亿元)/100 → ×100 还原为亿元 */
 function amtYi(v){if(v==null||isNaN(v))return "-";var x=v*100;return x>=10000?(x/10000).toFixed(2)+"万亿":x.toFixed(0)+"亿"}
 function regimeCls(r){if(!r)return "flat";if(r.indexOf("顶")>=0)return "top";if(r.indexOf("底")>=0)return "bot";if(r.indexOf("涨")>=0)return "up";if(r.indexOf("跌")>=0)return "dn";return "flat"}
+// R260: regime 胶囊 tooltip — 说明板块标签=成分信号聚合 + 板块自身位置/RSI, 防"已深跌仍标顶背驰区"式误读
+function regimeTip(x){
+  if(!x)return "";
+  var pos="";
+  var st=x.st||{},zs=st.zs_last||{};
+  if(st.close!=null&&zs.zd!=null&&zs.zg!=null){
+    if(st.close<zs.zd)pos="收盘已跌破末中枢"+zs.zd;
+    else if(st.close>zs.zg)pos="收盘位于末中枢上沿之上";
+    else pos="收盘于末中枢内";
+  }
+  return "成分信号 顶"+((x.n_sig_top||0))+"/底"+((x.n_sig_bot||0))+
+    (pos?" · "+pos:"")+
+    (x.rsi14!=null?" · RSI14 "+(+x.rsi14.toFixed(1)):"")+
+    " · 近20日振幅"+(x.amp20!=null?(x.amp20+"%"):"-")+
+    "｜顶背驰=板块内成分见顶信号集中(非板块指数自身必跌), 底背驰同理";
+}
 var qs=(location.hash||"").replace(/^#\/?/,"");
 fetch("radar.json",{cache:"no-cache"}).then(function(r){if(!r.ok)throw new Error("HTTP "+r.status);return r.json()}).then(function(d){
   M=d.meta;UNI=d.universe||{};SIG=d.signals||[];INDS=d.industries||{};
@@ -457,7 +473,7 @@ function renderInds(){
     html+='<div class="ind-row'+hl+strongCls+'" onclick="pickInd(\''+esc(k)+'\')">'+
       '<div class="nm">'+esc(k)+etfTag+(sg?' <span class="badge2 '+(x.n_sig_top?'r':'g')+'">'+(x.n_sig_top?'顶'+x.n_sig_top:'底'+x.n_sig_bot)+'</span>':'')+'</div>'+
       '<div class="meta ta-r">'+capTxt+'<br><span>'+(x.is_etf?(x.n_member||0)+"/"+(x.n_total||0)+"只":(x.n_member||0)+"只")+'</span>'+(mvLine?'<br>'+mvLine:'')+'</div>'+
-      '<div><span class="regime '+rCls+'">'+esc(x.regime||"-")+'</span></div>'+
+      '<div><span class="regime '+rCls+'" title="'+regimeTip(x)+'">'+esc(x.regime||"-")+'</span></div>'+
       '<div class="spark">'+sparkSVG(x.spark,160,34)+'</div>'+
       '<div class="chg '+(x.chg1d>0?"up":(x.chg1d<0?"down":""))+'">'+pct(x.chg1d,1)+
       (IDX?'<div class="vsub '+(x.chg1d>=IDX.chg?"up":"down")+'">'+(x.chg1d>=IDX.chg?"强":"弱")+'于沪 '+Math.abs((x.chg1d-IDX.chg)*100).toFixed(1)+'pp</div>':'')+'</div>'+
@@ -495,7 +511,7 @@ function pickInd(k){
   var html='<div id="indDetailPanel" class="panel" style="scroll-margin-top:70px;margin-top:14px;background:#fff;border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow);overflow:hidden">'+
     '<div class="det-head">'+
       '<h2 class="det-title">'+esc(k)+(ind.is_etf?' <span class="badge2 o">ETF</span>':'')+' <span class="det-sub">'+grpLbl+' · '+capLbl+' '+capTxt+' · '+(ind.n_member||0)+'只通过门禁'+(ind.n_total?' / 全 '+(ind.n_total||0)+'':'')+' · 指数'+pct(ind.chg1d,2)+'</span></h2>'+
-      '<span class="regime '+regimeCls(ind.regime)+'">'+esc(ind.regime||"-")+'</span>'+
+      '<span class="regime '+regimeCls(ind.regime)+'" title="'+regimeTip(ind)+'">'+esc(ind.regime||"-")+'</span>'+
       '<div class="det-tabs">'+
         '<a id="tInd" class="ind-tab '+(curTab==="ind"?"on":"")+'" onclick="switchTab(\'ind\')">📊 行业 K 线</a>'+
         '<a id="tStk" class="ind-tab '+(curTab==="stk"?"on":"")+'" onclick="switchTab(\'stk\')">📈 个股 K 线'+(curStk?(" · "+esc((UNI[curStk]||{}).name||curStk)):"")+'</a>'+
