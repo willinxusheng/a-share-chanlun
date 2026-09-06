@@ -263,6 +263,16 @@ def _bj_today():
     return datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8))).date()
 
 
+def _src_degraded(sc):
+    """R269: 数据源降级判定 — 腾讯qfq(前复权)主源不可用时, 新浪裸价(不复权)兜底占主导,
+    除权日裸价会留假跳空污染缠论结构(R267 曾见 09-04 快照 src_cnt 全 sina=6736 而看板无提示)。
+    规则: 新浪>0 且 腾讯占比<10% → 降级 True。"""
+    ns = sum(sc.values()) or 1
+    tx = sc.get("tx", 0)
+    sina = sc.get("sina", 0)
+    return bool(sina > 0 and tx * 100.0 / ns < 10.0)
+
+
 def _days_ago(date_s, _today=None):
     try:
         y, m, d = (int(x) for x in date_s.split("-"))
@@ -763,6 +773,7 @@ def main():
         "n_ok": len(sts), "n_gate": sum(gate_cnt.values()) - gate_cnt.get("", 0),
         "n_signal": len(signals), "n_ind": len(industries),
         "scen_cnt": scen_cnt, "gate_cnt": gate_cnt, "src_cnt": src_cnt,
+        "degraded": _src_degraded(src_cnt),        # R269: 腾讯qfq主源失效→新浪裸价降级, 前端展示警示
         "ind_cnt": ind_cnt,
         "excl_st": excl.get("st", 0),
         "note": ("信号=近端背驰场景(背驰见底/见顶) 距背驰日<=%d天; 门禁剔除项仅展示不进信号; "

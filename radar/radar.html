@@ -64,6 +64,14 @@ h1 .dot{color:#ffd43b}
 .rsi-cell.mid{background:#f1f5f9;color:#475569}
 .ind-row .nm{font-weight:700;font-size:14.5px;display:flex;align-items:center;gap:6px;line-height:1.45;letter-spacing:.2px}
 .ind-row .meta{font-size:11px;color:var(--muted);line-height:1.6}
+/* R269: 数据准确性警示 — 源降级/数据陈旧(全局 sticky 横幅) + 个股行情缓存滞后(图表内黄条) */
+#dataBanner{display:none;position:sticky;top:0;z-index:999;background:#fff7e0;color:#7a5b00;
+  border-bottom:1px solid #f0dc9a;font-size:12px;line-height:1.7;padding:6px 16px;
+  text-align:center;box-shadow:0 2px 8px rgba(122,91,0,.08)}
+#dataBanner.err{background:#ffe3e3;color:#a61e1e;border-color:#ffb3b3}
+#dataBanner b{font-weight:700}
+.chart-warn{display:block;background:#fff7e0;border:1px solid #f0dc9a;color:#7a5b00;
+  font-size:12px;line-height:1.7;padding:6px 12px;margin:8px 2px 0;border-radius:8px}
 .ind-row .spark{width:100%;height:34px;display:block}
 .ind-row .spark svg{width:100%;height:34px;display:block}   /* R258: 小屏列宽不足160时 svg 跟随容器缩放 */
 .ind-row .chg{font-weight:700;font-size:13.5px;text-align:center;line-height:1.3}
@@ -292,14 +300,38 @@ function regimeTip(x){
 var qs=(location.hash||"").replace(/^#\/?/,"");
 fetch("radar.json",{cache:"no-cache"}).then(function(r){if(!r.ok)throw new Error("HTTP "+r.status);return r.json()}).then(function(d){
   M=d.meta;UNI=d.universe||{};SIG=d.signals||[];INDS=d.industries||{};
-  renderHeader();renderBar();
+  renderHeader();renderBar();renderBanner();   // R269: 数据降级/陈旧警示
   if(qs.indexOf("stk/")===0)showStk(decodeURIComponent(qs.slice(4)));
   else if(qs.indexOf("ind/")===0)pickInd(decodeURIComponent(qs.slice(4)));
   else renderInds();
   kickIndex();
 }).catch(function(e){$("topSub").textContent="数据加载失败";$("indList").innerHTML='<div class="err">无法加载 radar.json：'+esc(e.message)+'<br>请确认已与 radar.json 同目录部署（GitHub Pages / 本地静态服务）。</div>'});
 
+/* ===== R269: 数据准确性警示条 =====
+   1) 源降级: meta.degraded (腾讯qfq主源失效→新浪裸价兜底, 除权日假跳空会污染结构)
+   2) 数据陈旧: build_time 距今 >4 自然日(避开周末+CI当日延迟) → 数据未更新警示 */
+function renderBanner(){
+  var b=$("dataBanner");
+  if(!b){b=document.createElement("div");b.id="dataBanner";document.body.insertBefore(b,document.body.firstChild);}
+  var m=M||{},msgs=[];
+  if(m.degraded)msgs.push('<b>⚠ 数据源降级</b>：腾讯前复权源本次不可用，全市场转新浪裸价(不复权)兜底 — 除权日K线可能有假跳空，结构标注精度下降');
+  if(m.build_time){
+    var t=new Date(String(m.build_time).replace(" ","T")+"+08:00").getTime();
+    if(isFinite(t)&&Date.now()-t>4*864e5)
+      msgs.push('<b>⚠ 数据已 '+(Date.now()-t<0?0:Math.floor((Date.now()-t)/864e5))+' 天未更新</b>：截至 '+(m.asof||"-")+'（构建于 '+esc(m.build_time)+'），请检查云端流水线');
+  }
+  if(msgs.length){b.className="";b.innerHTML=msgs.join('<br>');b.style.display="block";}
+  else{b.innerHTML="";b.style.display="none";}
+}
+/* 个股/行业 K 线拉取后的缓存滞后提示: 在图表容器前插/更新一条黄条(幂等) */
+function noteStale(el,msg){
+  if(!el||!el.parentNode)return;
+  var w=el.previousElementSibling;
+  if(!w||!w.classList||!w.classList.contains("chart-warn")){w=document.createElement("div");w.className="chart-warn";el.parentNode.insertBefore(w,el);}
+  w.innerHTML=msg;
+}
 /* ===== 上证基准(相对强弱对照) ===== */
+
 function idxParse(j){
   var o=(j.data||{})["sh000001"]||{};var arr=o.qfqday||o.day||[];
   if(arr.length<2)return null;
@@ -591,6 +623,9 @@ function drawStkInto(el,sym){
     // 腾讯 fqkline 对股票返回 qfqday、对 ETF/LOF 只返回 day(不除权)——优先 qfqday 回退 day
     var kl=(j.data[sym]||{}).qfqday||(j.data[sym]||{}).day||[];
     if(!kl.length)throw new Error("empty");
+    // R269: 腾讯CDN陈旧缓存校验 — K线末根落后于结构快照日(st.last)时提示, 防缠论标注错位(静默污染)
+    var _u=UNI[sym],_sl=_u&&_u.st&&_u.st.last;
+    if(_sl&&kl[kl.length-1][0]<_sl)noteStale(el,'<b>⚠ 行情缓存滞后：</b>腾讯K线至 <b>'+kl[kl.length-1][0]+'</b>，快照结构至 '+_sl+' — 缠论标注可能错位（腾讯CDN缓存陈旧，稍后刷新可恢复）');
     var k2=kl.map(function(r){return {date:r[0],open:+r[1],close:+r[2],high:+r[3],low:+r[4],volume:+r[5]}});   // 腾讯 volume 单位=手(实测 333102=33.3万手/ETF 同量级), 不再 /100
     el.innerHTML="";
     var opt=indKlineOption(k2,"stk");
@@ -771,6 +806,9 @@ function loadStkChart(sym){
     // 腾讯 fqkline 对股票返回 qfqday、对 ETF/LOF 只返回 day(不除权)——优先 qfqday 回退 day
     var kl=(j.data[sym]||{}).qfqday||(j.data[sym]||{}).day||[];
     if(!kl.length)throw new Error("empty");
+    // R269: 腾讯CDN陈旧缓存校验 — K线末根落后于结构快照日(st.last)时提示(同 drawStkInto)
+    var _u=UNI[sym],_sl=_u&&_u.st&&_u.st.last;
+    if(_sl&&kl[kl.length-1][0]<_sl)noteStale($("stkChart"),'<b>⚠ 行情缓存滞后：</b>腾讯K线至 <b>'+kl[kl.length-1][0]+'</b>，快照结构至 '+_sl+' — 缠论标注可能错位（腾讯CDN缓存陈旧，稍后刷新可恢复）');
     var k2=kl.map(function(r){return {date:r[0],open:+r[1],close:+r[2],high:+r[3],low:+r[4],volume:+r[5]}});   // 腾讯 volume 单位=手(ETF 同量级), 不再 /100
     var el=$("stkChart");if(!el)return;el.innerHTML="";
     var opt=indKlineOption(k2,"stk");
