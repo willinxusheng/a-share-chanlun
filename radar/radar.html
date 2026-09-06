@@ -247,7 +247,7 @@ a{color:var(--primary);text-decoration:none}
       <div id="indList"><div class="loading sk">行业加载中…</div></div>
     </div>
     <div id="indDetail"></div>
-    <div class="foot">数据源：标的池/市值 东财行情 · K线 腾讯前复权(主)/新浪日K(备) · 行业K线=成分股总市值加权合成 · 缠论=自研分笔中枢背驰引擎<br>⚠️ 仅供研究参考，不构成投资建议。页宽与主看板一致(1160px)。</div>
+    <div class="foot">数据源：标的池/市值 东财行情 · K线 腾讯前复权(主)/东财前复权(次)/新浪日K(备) · 行业K线=成分股总市值加权合成 · 缠论=自研分笔中枢背驰引擎<br>⚠️ 仅供研究参考，不构成投资建议。页宽与主看板一致(1160px)。</div>
   </div>
   <!-- 二级: 行业详情(内嵌于首页 #indDetail, 无独立视图) -->
   <!-- 三级: 个股详情 -->
@@ -308,13 +308,14 @@ fetch("radar.json",{cache:"no-cache"}).then(function(r){if(!r.ok)throw new Error
 }).catch(function(e){$("topSub").textContent="数据加载失败";$("indList").innerHTML='<div class="err">无法加载 radar.json：'+esc(e.message)+'<br>请确认已与 radar.json 同目录部署（GitHub Pages / 本地静态服务）。</div>'});
 
 /* ===== R269: 数据准确性警示条 =====
-   1) 源降级: meta.degraded (腾讯qfq主源失效→新浪裸价兜底, 除权日假跳空会污染结构)
+   1) 源降级: meta.degraded (前复权源不可用→新浪裸价兜底, 除权日假跳空会污染结构)
+      R270: 文案优先用后端 meta.degraded_reason(动态占比/源明细), 旧数据无该字段回落默认文案
    2) 数据陈旧: build_time 距今 >4 自然日(避开周末+CI当日延迟) → 数据未更新警示 */
 function renderBanner(){
   var b=$("dataBanner");
   if(!b){b=document.createElement("div");b.id="dataBanner";document.body.insertBefore(b,document.body.firstChild);}
   var m=M||{},msgs=[];
-  if(m.degraded)msgs.push('<b>⚠ 数据源降级</b>：腾讯前复权源本次不可用，全市场转新浪裸价(不复权)兜底 — 除权日K线可能有假跳空，结构标注精度下降');
+  if(m.degraded)msgs.push('<b>⚠ 数据源降级</b>：'+(m.degraded_reason||'前复权源本次不可用，全市场转新浪裸价(不复权)兜底 — 除权日K线可能有假跳空，结构标注精度下降'));
   if(m.build_time){
     var t=new Date(String(m.build_time).replace(" ","T")+"+08:00").getTime();
     if(isFinite(t)&&Date.now()-t>4*864e5)

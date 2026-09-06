@@ -7,7 +7,8 @@
 数据链(多源降级, 任一源失败不影响整体):
   标的池  东财 clist (push2delay/push2 镜像轮询, 免key): 名称含 ST/退 直接排除
   K线主源 腾讯 fqkline 纯count qfq (R248 形态, 前复权, ~640根/个股, CI境外最稳)
-  K线备源 新浪 CN_MarketDataService 日K (不复权, ~800根, 本地/境内外双可达)
+  K线次源 东财 push2his fqt=1 前复权 (R270: 腾讯不可用时替代裸价; 北交secid未实证跳过)
+  K线备源 新浪 CN_MarketDataService 日K (不复权, ~1500根, 本地/境内外双可达)
 分析     chanlun.analyze (chanlun.py 生产级, P0 已 200 票抽样验证可信)
 门禁     ST/次新(<120根)/低流动性(近60日均额<3000万)/一字板(>=10日)/低自洽/停牌
 信号     近端场景 classify ∈ {背驰见底机会, 背驰见顶风险} (P0 定论: 近端口径, 非全历史尾笔)
@@ -45,18 +46,35 @@ ONE_WORD_MAX = 10              # 一字板天数 >= -> 结构失真, 不进信�
 AGREE_TOTAL_MIN = 8
 AGREE_RATE_MIN = 0.6
 FRESH_MAX_DAYS = 10            # 最近背驰距今天数 <= -> 才算"近端信号"
-SINA_LEN = 800                 # 新浪兜底K线根数(约3.2年, 与腾讯qfq窗口同量级)
+# R270: 新浪 datalen 实测支持 1500(2020-07 起), 扩至与腾讯qfq窗口(2021至今)同量级,
+# 避免新浪兜底时缠论结构起点(原800根≈3.2年自2023-05)与腾讯不一致导致的笔/中枢划分差异。
+SINA_LEN = 1500                # 新浪兜底K线根数(~6年, 2021至今全覆盖)
+EM_KLINE_LEN = 1600            # 东财前复权K线根数(2021起含裕量)
 SPARK_N = 150                  # 信号票内嵌迷你K线根数(前端实操卡用)
 IND_KLINE_N = 320              # 行业K线入库根数(画行业走势; 合成全量更长仅用于行业缠论)
 CONCURRENCY = 4
 TX_INTERVAL = 0.35             # 腾讯全局限速 ~2.9 rps (P0实证突发连发会501)
+EM_INTERVAL = 0.25             # 东财全局限速 ~4 rps (K线下行接口, 温和节流)
 SINA_INTERVAL = 0.18           # 新浪限速 ~5.5 rps (新浪无501挑战, 温和节流, 实测稳定)
-SRC_ONLY = "auto"              # auto=腾讯优先失败切新浪 | tx=仅腾讯 | sina=仅新浪(本地被腾讯WAF降速时)
+SRC_ONLY = "auto"              # auto=腾讯qfq→东财qfq→新浪 | tx=仅腾讯 | em=仅东财 | sina=仅新浪
+# R270: 源停用/复探参数 —— 腾讯(CI境外被风控整段失败)与东财(境外可能不可达)各自独立:
+# 连续失败 TX_FAIL_MAX 次 → 整段停用该源(避免逐票空耗 timeout); 停用中每 REPROBE_EVERY 票
+# 轻量复探一次, 源恢复即自动切回(一次抖动不再废掉整 run 主源)。
+TX_FAIL_MAX = 6
+EM_FAIL_MAX = 6
+TX_REPROBE_EVERY = 300
+EM_REPROBE_EVERY = 300
+EM_TIMEOUT = 10                # 东财单请求超时(不可达时快速失败, 不拖全量)
 EM_HOSTS = ["https://push2delay.eastmoney.com", "https://push2.eastmoney.com",
             "http://82.push2.eastmoney.com", "http://push2delay.eastmoney.com"]
 EM_FS_STOCK = "m:1+t:2,m:1+t:23,m:0+t:6,m:0+t:80"      # 沪深A股(含主板/中小/创业/科创)
 EM_FS_BJ = "m:0+t:81+s:2048"                            # 北交所
 EM_FS_FUND = "b:MK0021"                                 # 场内基金(ETF/LOF)
+# R270: 东财前复权K线下行镜像 —— https 优先(境外 CI 直连可达, R177b 情绪管线实证),
+# http 兜底(境内自托管/沙箱, 东财 http 仅境内 CDN 节点可达)。
+EM_KLINE_HOSTS = ["https://push2his.eastmoney.com",
+                  "http://push2his.eastmoney.com",
+                  "http://92.push2his.eastmoney.com"]
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "radar.json")
 ETF_KEY = "ETF板块"             # 场内基金/ETF 归为独立板块(P3b), 与申万一级并列展示
 
@@ -76,9 +94,45 @@ class _Throttle:
             time.sleep(delay)
 
 _tx_th = _Throttle(TX_INTERVAL)
+_em_th = _Throttle(EM_INTERVAL)
 _sina_th = _Throttle(SINA_INTERVAL)
-_tx_down = {"flag": False, "count": 0}
+# R270: 源停用状态机(腾讯/东财独立)。字段: flag=整段停用 | count=连续失败数 |
+# reasons={失败原因:次数} 供 meta.src_fail 统计 | n=停用后调用计数(复探节拍) |
+# max=停用阈值 | every=复探周期 | probe=轻量复探函数(第2节定义后回填)。
+_tx_down = {"flag": False, "count": 0, "reasons": {}, "n": 0,
+            "max": TX_FAIL_MAX, "every": TX_REPROBE_EVERY, "probe": None}
+_em_down = {"flag": False, "count": 0, "reasons": {}, "n": 0,
+            "max": EM_FAIL_MAX, "every": EM_REPROBE_EVERY, "probe": None}
+
+def _src_down(d, lock):
+    """读停用状态并累计调用; 停用中每 every 次调用执行一次轻量复探, 成功则复位切回。
+    (复探为网络请求, 在锁外执行避免阻塞其他取数线程; 状态写回再取锁。)"""
+    with lock:
+        d["n"] = d.get("n", 0) + 1
+        if not d["flag"]:
+            return False
+        do_probe = (d["n"] % d["every"] == 0 and d["probe"])
+    if do_probe and d["probe"]():
+        with lock:
+            d["flag"] = False
+            d["count"] = 0
+            d["n"] = 0
+        print("[scan_radar] 源复探成功, 已恢复使用", flush=True)
+        return False
+    return True
+
+def _src_fail(d, lock, reason=""):
+    """记录一次源失败; 达阈值整段停用(flag=True)。reason 汇入统计供 meta 展示。"""
+    with lock:
+        d["count"] += 1
+        if reason:
+            d["reasons"][reason] = d["reasons"].get(reason, 0) + 1
+        if d["count"] >= d["max"]:
+            d["flag"] = True
+            print("[scan_radar] 源连续失败 >=%d 次, 整段停用 (末因: %s)" % (d["max"], reason or "-"), flush=True)
+
 _tx_lock = threading.Lock()
+_em_lock = threading.Lock()
 
 
 def _get(url, timeout=20, referer=""):
@@ -186,12 +240,92 @@ def fetch_universe():
     return uni, excl, ""
 
 
-# ================= 2. K线抓取(腾讯 qfq 主 / 新浪 备) =================
+# ================= 2. K线抓取(腾讯qfq 主 / 东财qfq 次 / 新浪裸价 备) =================
 def _fetch_tx(sym):
-    ks, dirty = fd.fetch_tx(sym, "day")   # 纯count qfq (R248), 返回2021-01-01起
-    if ks and ks[-1]["date"] >= "2024-01-01":
+    """腾讯 qfq(前复权)主源: 纯 count 形态(R248), 2021-01-01 起裁剪。
+    R270: 新鲜度判定由 `>=2024-01-01`(过松, R267 注释自我批评却未在 scan 链路落实)
+    收紧为 _last_fresh 分级(gap<=3 常规 / 4~12 仅长假窗口内合法) —— 腾讯 CDN 陈旧缓存
+    (R248: 缓存键含日期段曾停 12h+)不再被静默当有效数据吞下。"""
+    ks, _dirty = fd.fetch_tx(sym, "day")
+    if ks and _last_fresh(ks[-1]["date"]):
         return ks, "tx"
-    return [], "tx"
+    return [], ("tx_stale" if ks else "tx_empty")
+
+
+_EM_MKT_PFX = {"sh": "1.", "sz": "0."}   # 东财 secid 市场前缀(沪=1 深=0); 北交段归属未实证, 跳过东财
+
+
+def _em_secid(sym):
+    """sh600000 -> 1.600000; sz300274 -> 0.300274; bj* -> None(北交 K线 secid 归属未实证, 不盲试)。"""
+    pre = _EM_MKT_PFX.get(sym[:2])
+    return (pre + sym[2:]) if pre else None
+
+
+def _fetch_em(sym):
+    """东财前复权(fqt=1)日K第二复权源: 腾讯不可用时替代新浪裸价(同为前复权, 无除权假跳空)。
+    境外 CI 经 https 直连可达(与 fetch_data.fetch_em 同接口家族, R177b 起情绪管线生产验证);
+    http 镜像仅供境内网络兜底。返回 (ks, "em") 或 ([], 原因标签)。"""
+    sec = _em_secid(sym)
+    if not sec:
+        return [], "em_skip"
+    last_err = "em_empty"
+    for host in EM_KLINE_HOSTS:
+        u = ("%s/api/qt/stock/kline/get?secid=%s&fields1=f1,f2,f3,f4,f5,f6"
+             "&fields2=f51,f52,f53,f54,f55,f56&klt=101&fqt=1&lmt=%d"
+             % (host, sec, EM_KLINE_LEN))
+        try:
+            data = json.loads(_get(u, timeout=EM_TIMEOUT,
+                                   referer="https://quote.eastmoney.com/")
+                              .decode("utf-8", "ignore")).get("data") or {}
+            out = []
+            for row in (data.get("klines") or []):
+                c = row.split(",")
+                if len(c) < 6:
+                    continue
+                try:
+                    # 东财 klines 字段序: date,open,close,high,low,volume(手),amount...
+                    out.append({"date": c[0], "open": float(c[1]), "close": float(c[2]),
+                                "high": float(c[3]), "low": float(c[4]),
+                                "volume": float(c[5])})
+                except (ValueError, IndexError):
+                    continue
+            out = [k for k in out if k["date"] >= fd.MIN_DATE]   # 2021起, 与腾讯契约一致
+            out.sort(key=lambda k: k["date"])
+            if len(out) >= MIN_BARS:
+                return out, "em"
+            last_err = "em_short:%d" % len(out)
+        except Exception as e:   # noqa: BLE001
+            last_err = "em_err:" + str(e)[:60]
+    return [], last_err
+
+
+def _probe_tx():
+    """腾讯源轻量复探(整段停用后周期调用): 单票纯count请求 + 新鲜度判定, 成功即复位。"""
+    _tx_th.wait()
+    try:
+        raw = _get(fd._tx_url("sh600000", "day"), timeout=8).decode("utf-8", "ignore")
+        node = (json.loads(raw).get("data") or {}).get("sh600000") or {}
+        kl = node.get("qfqday") or node.get("day") or []
+        return bool(kl and _last_fresh(kl[-1][0]))
+    except Exception:
+        return False
+
+
+def _probe_em():
+    """东财源轻量复探(https 首选镜像)。"""
+    try:
+        u = ("https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=1.600000"
+             "&fields1=f1&fields2=f51,f56&klt=101&fqt=1&lmt=3")
+        d = json.loads(_get(u, timeout=EM_TIMEOUT, referer="https://quote.eastmoney.com/")
+                       .decode("utf-8", "ignore"))
+        return bool((d.get("data") or {}).get("klines"))
+    except Exception:
+        return False
+
+
+# 回填 probe(需在 _probe_* 定义之后)
+_tx_down["probe"] = _probe_tx
+_em_down["probe"] = _probe_em
 
 
 def _fetch_sina(sym):
@@ -211,40 +345,8 @@ def _fetch_sina(sym):
     return out, "sina"
 
 
-def _is_waf(text):
-    return (not text.lstrip().startswith("{")
-            and ("waf" in text.lower() or "<!doctype" in text.lower()
-                 or "<html" in text.lower()))
-
-
-def fetch_kline(sym):
-    """按 SRC_ONLY: 腾讯 qfq 主源(默认, CI用) -> 新浪 备源; --src sina 时仅新浪(本地WAF降速场景)。"""
-    # 腾讯主源
-    with _tx_lock:
-        tx_down = _tx_down["flag"]
-    if SRC_ONLY != "sina" and not tx_down:
-        _tx_th.wait()
-        try:
-            ks, src = _fetch_tx(sym)
-            if ks:
-                return ks, src
-        except Exception as e:   # noqa: BLE001
-            msg = str(e)[:200]
-            if "json" in msg.lower() or "waf" in msg.lower() or "501" in msg:
-                # 疑似腾讯 WAF/风控: 累计触发则整段切新浪源
-                _tx_th.wait()
-                try:
-                    _probe = _get(fd._tx_url(sym, "day"), timeout=8).decode("utf-8", "ignore")
-                    if _is_waf(_probe):
-                        with _tx_lock:
-                            _tx_down["count"] += 1
-                            if _tx_down["count"] >= 6:
-                                _tx_down["flag"] = True
-                except Exception:
-                    pass
-    if SRC_ONLY == "tx":
-        return None, "tx_only"
-    # 新浪备源
+def _fetch_sina_checked(sym):
+    """新浪裸价兜底(限速 + 异常兜底)。"""
     _sina_th.wait()
     try:
         ks, src = _fetch_sina(sym)
@@ -253,6 +355,61 @@ def fetch_kline(sym):
     except Exception as e:   # noqa: BLE001
         return None, "sina_err:%s" % str(e)[:60]
     return None, "empty"
+
+
+def _try_tx(sym):
+    """腾讯qfq一次尝试: 成功 (ks,"tx"); 失败(异常/空/陈旧) 计入停用统计后返回 ([],tag)。"""
+    try:
+        ks, tag = _fetch_tx(sym)
+    except Exception:   # noqa: BLE001
+        _src_fail(_tx_down, _tx_lock, "err")     # 归一化(原始消息多变, 不入 reasons)
+        return [], ""
+    if not ks:
+        _src_fail(_tx_down, _tx_lock, tag.split(":")[0])
+        return [], tag
+    return ks, "tx"
+
+
+def _try_em(sym):
+    """东财qfq一次尝试: 成功 (ks,"em"); 失败计入停用统计后返回 ([],tag)。"""
+    if _src_down(_em_down, _em_lock):
+        return [], "em_down"
+    _em_th.wait()
+    ks, tag = _fetch_em(sym)
+    if not ks:
+        _src_fail(_em_down, _em_lock, tag.split(":")[0])   # em_err:/em_short: 归一化
+        return [], tag
+    return ks, "em"
+
+
+def fetch_kline(sym):
+    """三级源(按 SRC_ONLY):
+      auto: 腾讯qfq(复权) → 东财qfq(复权) → 新浪裸价(最后兜底, 除权假跳空风险由黄条提示)
+      tx / em / sina: 仅指定源(本地调试/降速场景)。
+    R270: 每级失败计入源统计, 连续 >=MAX 次整段停用 + 周期复探自动恢复 —— 单次抖动不再
+    废掉整 run 主源, 也避免境外不可达源逐票空耗 timeout。"""
+    if SRC_ONLY == "sina":
+        return _fetch_sina_checked(sym)
+    if SRC_ONLY == "tx":
+        if _src_down(_tx_down, _tx_lock):
+            return None, "tx_down"
+        ks, _tag = _try_tx(sym)
+        return (ks, "tx") if ks else (None, "tx_only")
+    if SRC_ONLY == "em":
+        if _em_secid(sym) is None or _src_down(_em_down, _em_lock):
+            return None, "em_unavail"
+        ks, _tag = _try_em(sym)
+        return (ks, "em") if ks else (None, "em_only")
+    # ---- auto ----
+    if not _src_down(_tx_down, _tx_lock):
+        ks, _tag = _try_tx(sym)
+        if ks:
+            return ks, "tx"
+    if _em_secid(sym) is not None and not _src_down(_em_down, _em_lock):
+        ks, _tag = _try_em(sym)
+        if ks:
+            return ks, "em"
+    return _fetch_sina_checked(sym)
 
 
 # ================= 3. 结构摘要 + 门禁 + 近端信号 =================
@@ -264,13 +421,28 @@ def _bj_today():
 
 
 def _src_degraded(sc):
-    """R269: 数据源降级判定 — 腾讯qfq(前复权)主源不可用时, 新浪裸价(不复权)兜底占主导,
-    除权日裸价会留假跳空污染缠论结构(R267 曾见 09-04 快照 src_cnt 全 sina=6736 而看板无提示)。
-    规则: 新浪>0 且 腾讯占比<10% → 降级 True。"""
+    """R270: 数据源降级判定(复权源占比视角) —— 新浪裸价(不复权)占主导即降级:
+    裸价在除权日留假跳空, 污染缠论结构(R267 曾见 09-04 快照 src_cnt 全 sina=6736 而看板无提示;
+    R269 规则"腾讯占比<10%"未覆盖"腾讯/东财部分恢复但裸价仍占 1/3"的混源场景)。
+    规则: 新浪票占比 > 30% → 降级 True(>30% 标的无复权保护, 提示精度下降)。"""
     ns = sum(sc.values()) or 1
-    tx = sc.get("tx", 0)
     sina = sc.get("sina", 0)
-    return bool(sina > 0 and tx * 100.0 / ns < 10.0)
+    return bool(sina > 0 and sina * 100.0 / ns > 30.0)
+
+
+def _degraded_reason(sc):
+    """降级黄条的具体文案(前端优先展示; 旧数据无此字段时前端回落 R269 默认文案)。"""
+    ns = sum(sc.values()) or 1
+    sina = sc.get("sina", 0)
+    tx = sc.get("tx", 0)
+    em = sc.get("em", 0)
+    if tx == 0 and em == 0:
+        return ("前复权源(腾讯qfq/东财qfq)本次全部不可用, 全市场 %d 票转新浪裸价(不复权)"
+                " — 除权日K线可能有假跳空, 结构标注精度下降" % sina)
+    if sina:
+        return ("%d 票(%.0f%%)无前复权源, 转新浪裸价(不复权) — 除权日K线可能有假跳空"
+                % (sina, sina * 100.0 / ns))
+    return ""
 
 
 def _days_ago(date_s, _today=None):
@@ -283,25 +455,47 @@ def _days_ago(date_s, _today=None):
 
 
 _STALE_GAP_DAYS = 12   # 末根距今天数上限: 覆盖最长真实休市(周末2 + 国庆/春节长假≈9), 12 安全裕量
+# R270: 2026 超长假窗口(自然日, 含节后周末保守外扩)。gap 4~12 天仅在窗口内合法
+# (真实休市); 窗口外出现 4+ 天滞后 = 腾讯 CDN 陈旧缓存(或数据源停更), 拒绝采用。
+# 短假(清明/五一/端午/中秋/元旦休市<=5自然日)由 gap<=3 覆盖; 窗口外长假期间误拒只会
+# 触发切东财/新浪一次, 次交易日自动恢复 —— 宁切源勿吞陈旧数据。
+_LONG_HOLIDAY_WINDOWS = (("2026-02-13", "2026-02-24"),   # 春节(休市2/16~2/22一带)
+                         ("2026-10-01", "2026-10-11"))   # 国庆(休市10/1~10/8一带)
+
+
+def _in_long_holiday(today=None):
+    t = (today or _bj_today()).isoformat()
+    return any(a <= t <= b for a, b in _LONG_HOLIDAY_WINDOWS)
 
 
 def _last_fresh(last_date, today=None):
-    """末根K线是否够新鲜(距北京今天 <= _STALE_GAP_DAYS 自然日)。
-
-    R267: 原 _fetch_tx 判定 `last_date >= "2024-01-01"` 过松 —— 腾讯 CDN 陈旧缓存
-    (R248: 缓存键含日期段, 曾停 12h+ 乃至次日才追平)只要落在 2024 后就被当有效,
-    全市场会静默用旧 K 线扫描出"昨日/数日前"的信号而 meta 无感。改为相对今天收紧,
-    缓存停留超过最长真实休市即判陈旧 -> 触发新浪兜底(当日实时)而不是吞下旧数据。
-    1~3 天内的短滞后无法用自然日区分(真实休市也如此), 由 meta.asof + radar.json
-    build_date 守卫的次日自动重扫自愈。未来日期(>今天)同样判 False(数据泄漏防御,
-    与 fetch_data.validate 的未来拦截同口径)。"""
+    """末根K线是否够新鲜(相对北京今天)。R270 分级:
+      gap 0~3          → 新鲜(常规周末/短假/当日, 一律放行)
+      gap 4~12         → 仅"今天处于长假窗口"才放行(真实休市最长≈9自然日+裕量);
+                        窗口外此量级滞后 = CDN 陈旧缓存, 判 False 触发切备用源(东财qfq/新浪)。
+      未来日期(>今天)  → 判 False(数据泄漏防御)。
+    1~3 天内的短滞后无法用自然日区分(真实休市也如此), 由 meta.asof + build_date 的
+    次日自动重扫自愈。"""
     try:
         y, m, d = (int(x) for x in last_date.split("-"))
         t = today or _bj_today()
         gap = (t - datetime.date(y, m, d)).days
-        return 0 <= gap <= _STALE_GAP_DAYS
     except Exception:
         return False
+    if not (0 <= gap <= _STALE_GAP_DAYS):
+        return False
+    if gap <= 3:
+        return True
+    return _in_long_holiday(t)
+
+
+def _should_weekend_skip(asof, today):
+    """R270: 周末且现有数据已覆盖最近交易日 → 跳过全量重扫。
+    (workflow guard 的 shell 兜底 —— 09-06 曾现周日凌晨仍触发全量 sina 扫描拖 15h 的
+    反例: guard 失效/排队时序时 scan 内自守卫兜底, 避免周末空跑烧源+CI 额度。)"""
+    if today.weekday() < 5:
+        return False
+    return bool(asof and _last_fresh(asof, today=today))
 
 
 def _bc_tail(bc, bis, btype, n_last=10):
@@ -613,6 +807,19 @@ def main():
         elif a == "--src" and i + 1 < len(argv):
             SRC_ONLY = argv[i + 1]
     t0 = time.time()
+    # R270: 周末自守卫(workflow guard 的 shell 兜底 —— 曾现 guard 失效/排队时序下周末凌晨
+    # 触发全量 sina 扫描拖 15h 的反例): 周末且现有数据已含最近交易日 → 直接跳过。
+    # 人工调试(--only/--limit/--src)不受限, 照常可跑。
+    _old = {}
+    if not only and not limit and SRC_ONLY == "auto":
+        try:
+            _old = json.load(open(OUT, encoding="utf-8")).get("meta") or {}
+        except Exception:
+            _old = {}
+        if _should_weekend_skip(_old.get("asof", ""), _bj_today()):
+            print("[scan_radar] 周末(%s)且数据已覆盖最近交易日(asof=%s), 跳过全量重扫"
+                  % (_bj_today().isoformat(), _old.get("asof", "")))
+            return
     print("[scan_radar] 拉取全市场标的池(东财 clist)... src模式=%s" % SRC_ONLY)
     uni, excl, host = fetch_universe()
     if not uni:
@@ -764,6 +971,16 @@ def main():
     for r in universe.values():
         i = r["ind"]
         ind_cnt[i] = ind_cnt.get(i, 0) + 1
+    deg = _src_degraded(src_cnt)
+    deg_reason = _degraded_reason(src_cnt) if deg else ""
+    # R270: 各源失败原因统计(停用状态机 reasons) -> meta.src_fail, 前端/人工可查腾讯为何不可用
+    _tx_r = dict(_tx_down.get("reasons") or {})
+    _em_r = dict(_em_down.get("reasons") or {})
+    src_fail = {}
+    if _tx_r:
+        src_fail["tx"] = _tx_r
+    if _em_r:
+        src_fail["em"] = _em_r
     meta = {
         "title": "A股全市场缠论雷达",
         "asof": asof, "build_time": datetime.datetime.now(
@@ -773,11 +990,14 @@ def main():
         "n_ok": len(sts), "n_gate": sum(gate_cnt.values()) - gate_cnt.get("", 0),
         "n_signal": len(signals), "n_ind": len(industries),
         "scen_cnt": scen_cnt, "gate_cnt": gate_cnt, "src_cnt": src_cnt,
-        "degraded": _src_degraded(src_cnt),        # R269: 腾讯qfq主源失效→新浪裸价降级, 前端展示警示
+        "degraded": deg,                       # R270: 新浪裸价占比>30% 即降级(复权源占比视角)
+        "degraded_reason": deg_reason,         # 降级黄条文案(前端优先展示)
+        "src_fail": src_fail,                  # 各源失败原因计数(诊断腾讯/东财为何不可用)
         "ind_cnt": ind_cnt,
         "excl_st": excl.get("st", 0),
         "note": ("信号=近端背驰场景(背驰见底/见顶) 距背驰日<=%d天; 门禁剔除项仅展示不进信号; "
-                 "K线源 腾讯qfq优先/新浪兜底; 行业=申万一级31个, K线=成分股总市值加权合成" % FRESH_MAX_DAYS),
+                 "K线源 腾讯qfq优先/东财qfq次之/新浪兜底; 行业=申万一级31个, K线=成分股总市值加权合成"
+                 % FRESH_MAX_DAYS),
     }
     out = {"meta": meta,
            "signals": [{"sym": s, **sig} for s, sig in signals],
