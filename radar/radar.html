@@ -509,13 +509,16 @@ function renderSigRadar(){
   var box=$("sigRadar");
   if(!box)return;
   var top=[],bot=[];
-  var nRes=0,nDiv=0,nNear=0;
+  var nRes=0,nDiv=0,nNear=0,nTopDn=0,nBotCl=0;
   SIG.forEach(function(s){
     if(!s||!s.sym)return;
     var f=(UNI[s.sym]||{}).ff||{};
     var fn=f.net,t=s.dir==="top";
     if(fn!=null){if((!t&&fn>0)||(t&&fn<0))nRes++;else if((!t&&fn<0)||(t&&fn>0))nDiv++;}
     if((s.fresh!=null&&s.fresh<=5))nNear++;
+    // R288b: 兑现速览(横截面口径, 现价相对信号位) — 顶信号已回落>3%=方向兑现; 底信号仍贴近低点(≤8%)=待启动
+    var dv=sigDev(s,s.st||{});
+    if(dv!=null){if(t){if(dv<=-3)nTopDn++;}else if(dv<=8)nBotCl++;}
     if(s.dir==="top")top.push(s);else if(s.dir==="bottom")bot.push(s);
   });
   var gRes=function(s){var fn=(UNI[s.sym]||{}).ff||{};fn=fn.net;if(fn==null)return false;return (s.dir==="bottom"&&fn>0)||(s.dir==="top"&&fn<0);};
@@ -541,8 +544,10 @@ function renderSigRadar(){
       if(inTop==null||nf>inTop.nf)inTop={k:k,nf:nf};if(inBot==null||nf<inBot.nf)inBot={k:k,nf:nf};});
     smark='<div class="smark">'+
       '<span>📡 全市场信号 <b class="tt">顶'+top.length+'</b>/<b class="bb">底'+bot.length+'</b> · 近端≤5天 <b>'+nNear+'</b></span>'+
-      (nRes?'<span>💰资金共振 <b class="fn" style="color:#c92a2a">'+nRes+'</b></span>':'')+
+      (nRes?'<span>💰资金共振 <b style="color:#c92a2a">'+nRes+'</b></span>':'')+
       (nDiv?'<span>⚠️背离警示 <b style="color:#f59f00">'+nDiv+'</b></span>':'')+
+      (nTopDn?'<span title="顶信号已从背驰高点回落超过3%的数量(横截面口径, 非时间序列回测)">顶信号已回落&gt;3% <b class="fd">'+nTopDn+'/'+top.length+'</b></span>':'')+
+      (nBotCl&&bot.length?'<span title="底信号现价仍贴近背驰低点(+8%以内, 尚未走高=待启动, 横截面口径)">底待启动 <b class="bb">'+nBotCl+'/'+bot.length+'</b></span>':'')+
       (inTop?'<span>主力净流入 <b class="fn">'+esc(inTop.k)+' '+ffTxt(inTop.nf)+'</b></span>':'')+
       (inBot?'<span>净流出 <b class="fd">'+esc(inBot.k)+' '+ffTxt(inBot.nf)+'</b></span>':'')+
       '</div>';
@@ -1262,23 +1267,49 @@ function visKlMinMax(kl,startPct){
   var hi=Math.max.apply(null,vis.map(function(k){return +k.high;}));
   return {lo:isFinite(lo)?lo:null,hi:isFinite(hi)?hi:null,vis:vis};
 }
+/* ===== R288: 顶背驰结构参考线(与 R262 底背驰对称) =====
+   top_bc=最近顶背驰高点 end_price. 缠论顶背驰确认=跌破最后一个中枢下沿(zs_last.zd).
+   confirm(绿线)=末中枢下沿: 收盘跌破即顶背离成立, 纪律性离场位
+   ref(橙线)=末中枢上沿 zs_last.zg(仅当上方仍有 >=0.5% 空间): 反抽到中枢上沿减仓参考 */
+function topRefOf(u){
+  if(!u)return null;
+  var st=u.st||{};var tbc=st.top_bc;
+  if(!tbc||tbc.end_price==null)return null;
+  var close=(st.close==null?null:+st.close);
+  if(close==null)return null;
+  var zs=st.zs_last||{};
+  var zd=(zs.zd==null?null:+zs.zd),zg=(zs.zg==null?null:+zs.zg);
+  var o={close:close};
+  if(zd!=null&&close>zd)o.confirm=zd;           // 现价仍在中枢下沿上方才画确认线(已破则已确认, 线无意义)
+  if(zg!=null&&zg>close*1.005)o.ref=zg;         // 反抽到中枢上沿附近减仓(空间>=0.5%才给)
+  if(o.confirm==null&&o.ref==null)return null;
+  return o;
+}
 function addSlTpLine(opt,u){
-  var z=slTpOf(u);
-  if(!z)return;
+  var z=slTpOf(u),tz=topRefOf(u);
+  if(!z&&!tz)return;
   if(!opt.series||!opt.series.length)return;
   var kSer=opt.series[0];                          // series[0]=candlestick 主K线
   if(!kSer||kSer.type!=="candlestick")return;
-  kSer.markLine={symbol:"none",silent:true,animation:false,
-    lineStyle:{type:"dashed",width:1},
-    label:{show:true,fontSize:10,fontWeight:"700",position:"insideEndTop",distance:6},
-    data:[
+  var data=[];
+  if(z){data.push(
       {yAxis:+z.sl.toFixed(2),lineStyle:{color:"#18a058"},
        label:{formatter:"止损 "+z.sl.toFixed(2),color:"#0e7d4a",backgroundColor:"rgba(255,255,255,.88)",padding:[1,4],borderRadius:3}},
       {yAxis:+z.en.toFixed(2),lineStyle:{color:"#1c7ed6"},
        label:{formatter:"入场参考 "+z.en.toFixed(2),color:"#1864ab",backgroundColor:"rgba(255,255,255,.88)",padding:[1,4],borderRadius:3}},
       {yAxis:+z.tp.toFixed(2),lineStyle:{color:"#e54545"},
-       label:{formatter:"止盈参考 "+z.tp.toFixed(2),color:"#c92a2a",backgroundColor:"rgba(255,255,255,.88)",padding:[1,4],borderRadius:3}}
-    ]};
+       label:{formatter:"止盈参考 "+z.tp.toFixed(2),color:"#c92a2a",backgroundColor:"rgba(255,255,255,.88)",padding:[1,4],borderRadius:3}});}
+  if(tz){
+    if(tz.confirm!=null)data.push({yAxis:+tz.confirm.toFixed(2),lineStyle:{color:"#18a058",width:1.4},
+      label:{formatter:"顶确认·破位离场 "+tz.confirm.toFixed(2),color:"#0e7d4a",backgroundColor:"rgba(255,255,255,.88)",padding:[1,4],borderRadius:3}});
+    if(tz.ref!=null)data.push({yAxis:+tz.ref.toFixed(2),lineStyle:{color:"#e8590c"},
+      label:{formatter:"反抽减仓参考 "+tz.ref.toFixed(2),color:"#d9480f",backgroundColor:"rgba(255,255,255,.88)",padding:[1,4],borderRadius:3}});
+  }
+  if(!data.length)return;
+  kSer.markLine={symbol:"none",silent:true,animation:false,
+    lineStyle:{type:"dashed",width:1},
+    label:{show:true,fontSize:10,fontWeight:"700",position:"insideEndTop",distance:6},
+    data:data};
 }
 /* ===== 路由 ===== */
 window.addEventListener("hashchange",function(){
