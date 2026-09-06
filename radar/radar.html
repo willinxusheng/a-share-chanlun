@@ -343,6 +343,7 @@ function poolChart(ch){if(ch&&CH_POOL.indexOf(ch)<0)CH_POOL.push(ch)}
 function disposePool(){CH_POOL.forEach(function(c){try{if(c&&c.dispose)c.dispose()}catch(e){}});CH_POOL=[]}
 function hideFloatHead(){var f=$("stkFloatHead");if(f)f.classList.remove("show")}
 var drawSeq=0,stkSeq=0;   // 竞态令牌: 快速连续切换股票/页面时只渲染最后一次请求
+var prevStkSrc="home";   // R291: 入场来源("home"=雷达首页直达 / "sigrad"=实操信号雷达行, 控制返回按钮文案)
 /* 行业合成K线量: scan_radar 存 vol=Σ(成分手×价)/1e8, 即 板块成交额(亿元)/100 → ×100 还原为亿元 */
 function amtYi(v){if(v==null||isNaN(v))return "-";var x=v*100;return x>=10000?(x/10000).toFixed(2)+"万亿":x.toFixed(0)+"亿"}
 function regimeCls(r){if(!r)return "flat";if(r.indexOf("顶")>=0)return "top";if(r.indexOf("底")>=0)return "bot";if(r.indexOf("涨")>=0)return "up";if(r.indexOf("跌")>=0)return "dn";return "flat"}
@@ -498,7 +499,7 @@ function sigRow(s){
   var resMode=(ffNet!=null)&&((!t&&ffNet>0)||(t&&ffNet<0));   // R287: 资金同向共振(顶+流出/底+流入)
   var divMode=(ffNet!=null)&&((!t&&ffNet<0)||(t&&ffNet>0));   // 资金背离警示
   var rowCls='srow'+(resMode?' res'+(t?'':' bsig'):'')+(divMode?' div':'');
-  return '<div class="'+rowCls+'" title="'+esc(sigTip)+'" onclick="showStk(\''+s.sym+'\')">'+
+  return '<div class="'+rowCls+'" title="'+esc(sigTip)+'" onclick="pickSigRad(\''+s.sym+'\')">'+
     '<div><div class="nm">'+(t?"⚠️ ":"✅ ")+esc(nm)+lead+ffMini+'</div><div class="sub">'+esc(s.sym)+" · "+esc(indName)+'</div></div>'+
     '<div class="st">'+(t?'<b style="color:#c92a2a">顶背驰</b>':'<b style="color:#087f5b">底背驰</b>')+'<span>强'+(s.strong||0)+'/'+(s.vol?"缩":"")+((s.area!=null&&s.area>0)?" 面"+s.area:"")+'</span></div>'+
     '<div class="st">'+(fr!=null?fr+"天前":"-")+frTag+'</div>'+
@@ -945,6 +946,27 @@ function pickStkInInd(sym){
   // 滚到顶部让用户看到主图变化
   var el=$("mainChart");if(el)el.scrollIntoView({behavior:"smooth",block:"start"});
 }
+/* ===== R291: 实操信号雷达行点击 → 标记来源, 个股页"返回信号雷达" ===== */
+function pickSigRad(sym){prevStkSrc="sigrad";showStk(sym)}
+function backSigRadar(){
+  disposePool();hideFloatHead();   // 同 backHome: 释放图表实例 + 隐藏浮层表头
+  if(myChart){try{myChart.dispose()}catch(e){};myChart=null}
+  $("viewStk").classList.add("hidden");
+  $("viewHome").classList.remove("hidden");
+  location.hash="#/";
+  curStk=null;curTab="ind";curInd=null;detailOpen=false;
+  // 实操信号雷达是 viewHome 内的 div, 不必重建首页; 仅平滑滚到信号雷达位置
+  requestAnimationFrame(function(){
+    var el=$("sigRadar");
+    if(el)el.scrollIntoView({behavior:"smooth",block:"start"});
+    // 短暂高亮一组卡片, 帮用户立刻锚定"已回信号雷达"
+    setTimeout(function(){
+      var rows=document.querySelectorAll("#sigRadar .srow");
+      rows.forEach(function(r){r.style.transition="background .8s";r.style.background="rgba(255,229,170,.45)"});
+      setTimeout(function(){rows.forEach(function(r){r.style.background=""})},900);
+    },350);
+  });
+}
 /* ===== 个股完整详情页(由 #/stk/xxx hash 直达, 仍保留) ===== */
 function showStk(sym){
   var u=UNI[sym];if(!u){alert("未收录 "+sym);return}
@@ -959,7 +981,10 @@ function showStk(sym){
   var grp=(u.type==="ETF")?"ETF板块":(u.ind||"");
   var leadTag=u.lead?' <span class="lead-tag" title="'+(u.type==="ETF"?"场内规模最大的基金":"该行业总市值最大的龙头股")+'">👑 '+(u.type==="ETF"?"板块规模最大":"行业龙头")+'</span>':'';   // R283
   var _uff=u.ff||{};   // R283: 当日主力净流入(元)
-  var titleHtml='<div class="subcrumb"><a href="javascript:backHome()">📡 雷达首页</a> <span class="arr">›</span> '+(grp?'<a href="javascript:pickIndFromStk(\''+esc(grp)+'\')">'+esc(grp)+'</a> <span class="arr">›</span> ':'')+'<span style="color:var(--ink)">'+esc(u.name)+'</span></div>';
+  var titleHtml='<div class="subcrumb">'+(prevStkSrc==="sigrad"
+    ?'<a href="javascript:backSigRadar()" title="返回上一页·实操信号雷达" style="background:#fff3cd;border:1px solid #f0d98c;padding:1px 8px;border-radius:7px">🔥 返回信号雷达</a>'
+    :'<a href="javascript:backHome()">📡 雷达首页</a>')+
+    ' <span class="arr">›</span> '+(grp?'<a href="javascript:pickIndFromStk(\''+esc(grp)+'\')">'+esc(grp)+'</a> <span class="arr">›</span> ':'')+'<span style="color:var(--ink)">'+esc(u.name)+'</span></div>';
   titleHtml+='<div class="big-title"><h2>'+esc(u.name)+leadTag+'</h2><span class="cd">'+esc(sym)+' · '+esc(u.code)+' · '+esc(u.type)+' · '+esc(grp||"-")+'</span></div>';
   titleHtml+='<div class="metric-strip">'+
     '<span>现价 <b class="'+(s.chg1d>0?"up":(s.chg1d<0?"down":""))+'">'+(s.close!=null?s.close:"-")+'</b>'+pct(s.chg1d,2)+'</span>'+
