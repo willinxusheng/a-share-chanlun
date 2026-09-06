@@ -124,6 +124,12 @@ h1 .dot{color:#ffd43b}
 .regime.up{background:#fef3c7;color:#92400e}
 .regime.dn{background:#e0f2fe;color:#075985}
 .regime.flat{background:#eef2f8;color:#64748b}
+/* R304: 位置小字(regime 旁) — up=站上上沿(强,红) / dn=破位(弱,绿) / mid=中枢内(中性灰) */
+.zsb{font-size:9.5px;font-weight:700;margin-left:3px;vertical-align:1px;white-space:nowrap}
+.zsb.up{color:#e03131}
+.zsb.dn{color:#087f5b}
+.zsb.mid{color:#94a3b8}
+.zsb::before{content:"·";margin-right:1px;color:#cbd5e1}
 /* 行业详情头部专业指标带 */
 .dstrip{display:flex;flex-wrap:wrap;align-items:center;gap:7px 18px;padding:10px 16px;background:#f8fafc;border-bottom:1px solid #eef2f7;font-size:12px;color:#475569;line-height:1.8}
 .dstrip>span{display:inline-flex;align-items:center;gap:4px;white-space:nowrap}
@@ -376,6 +382,33 @@ var drawSeq=0,stkSeq=0;   // 竞态令牌: 快速连续切换股票/页面时只
 var prevStkSrc="home";   // R291: 入场来源("home"=雷达首页直达 / "sigrad"=实操信号雷达行, 控制返回按钮文案)
 /* 行业合成K线量: scan_radar 存 vol=Σ(成分手×价)/1e8, 即 板块成交额(亿元)/100 → ×100 还原为亿元 */
 function amtYi(v){if(v==null||isNaN(v))return "-";var x=v*100;return x>=10000?(x/10000).toFixed(2)+"万亿":x.toFixed(0)+"亿"}
+// R304: 板块收盘相对末中枢的位置 — 返回 {cat:"up"|"mid"|"dn", txt:"上沿上方+6.9%"/"中枢内"/"破位-1.2%", pct:相对幅度}
+//   cat: up=收盘在上沿上方 / dn=跌破下沿(破位) / mid=中枢内(含上下沿之间)
+//   pct: up → (close-zg)/zg; dn → (close-zd)/zd; mid → 相对最近沿
+function zsPos(x){
+  var st=x&&x.st?x.st:{},zs=st.zs_last||{};
+  var close=st.close,zd=zs.zd,zg=zs.zg;
+  if(close==null||zd==null||zg==null||zg<=zd)return null;
+  var mid=(zd+zg)/2;
+  if(close>zg)return {cat:"up",txt:"上沿上方",pct:(close-zg)/zg*100};
+  if(close<zd)return {cat:"dn",txt:"破位",pct:(close-zd)/zd*100};
+  return {cat:"mid",txt:"中枢内",pct:close>=mid?(close-zg)/zg*100:(close-zd)/zd*100};
+}
+// R304: 位置小字 — regime 胶囊旁 "上沿上方+6.9%"(红强) / "破位-1.2%"(绿弱) / "中枢内"(中性)
+function zsPosBadge(x){
+  var p=zsPos(x);
+  if(!p)return "";
+  if(p.cat==="up")return ' <span class="zsb up" title="板块指数收盘已站上末中枢上沿(zg='+((x.st.zs_last||{}).zg)+')之上 — 结构强势">'+p.txt+(p.pct>0?"+":"")+p.pct.toFixed(1)+"%</span>";
+  if(p.cat==="dn")return ' <span class="zsb dn" title="板块指数收盘已跌破末中枢下沿(zd='+((x.st.zs_last||{}).zd)+') — 结构走弱">'+p.txt+p.pct.toFixed(1)+"%</span>";
+  var side=(p.pct||0)<=0?"(上半区)":"(下半区)";
+  return ' <span class="zsb mid" title="板块指数收盘于末中枢内">中枢内</span>';
+}
+// R304: 概要条位置温度 — 统计 32 板块: 上沿上方 / 中枢内 / 破位
+function zsTemp(){
+  var up=0,mid=0,dn=0;
+  Object.keys(INDS).forEach(function(k){var p=zsPos(INDS[k]);if(!p)return;p.cat==="up"?up++:p.cat==="dn"?dn++:mid++;});
+  return {up:up,mid:mid,dn:dn,n:up+mid+dn};
+}
 function regimeCls(r){if(!r)return "flat";if(r.indexOf("顶")>=0)return "top";if(r.indexOf("底")>=0)return "bot";if(r.indexOf("涨")>=0)return "up";if(r.indexOf("跌")>=0)return "dn";return "flat"}
 // R260: regime 胶囊 tooltip — 说明板块标签=成分信号聚合 + 板块自身位置/RSI, 防"已深跌仍标顶背驰区"式误读
 function regimeTip(x){
@@ -474,10 +507,13 @@ function renderBar(){
   var ob=0,os=0;
   Object.keys(INDS).forEach(function(k){var x=INDS[k];if(x.is_etf)return;if(x.rsi14==null)return;if(x.rsi14>=70)ob++;else if(x.rsi14<=30)os++;});
   var idxV=IDX?'<b class="'+(IDX.chg>=0?"up":"down")+'">'+IDX.close.toFixed(1)+'</b> <span class="'+(IDX.chg>=0?"up":"down")+'">'+pct(IDX.chg,2)+'</span>':'<span class="idx-ld">加载中…</span>';
+  var zt=zsTemp();
+  var ztV='<b class="up">'+zt.up+'</b><span class="dsep">/</span><b>'+zt.mid+'</b><span class="dsep">/</span><b class="down">'+zt.dn+'</b>';
   var pills=[
     {l:"上证指数 · 强弱基准",v:idxV},
     {l:"超买行业(RSI≥70)",v:ob,c:ob>0?"hot":""},
     {l:"超卖行业(RSI≤30)",v:os,c:os>0?"cool":""},
+    {l:"站上沿/中枢内/破位",v:ztV,c:zt.dn>=3?"cool":(zt.dn>0?"":"")},   // R304: 板块位置温度计 — 收盘在上沿上方/中枢内/破位(下沿下)板块数
     {l:"覆盖标的",v:(m.n_ok||0),c:""},
     {l:"门禁剔除",v:(m.n_gate||0),c:""},
     {l:"今日顶背驰(风险)",v:(scen["背驰见顶风险"]||0),c:"hot"},
@@ -744,7 +780,7 @@ function renderInds(){
       '<div class="nm">'+esc(k)+etfTag+(sg?' <span class="badge2 '+(x.n_sig_top?(x.n_sig_bot?'y':'r'):'g')+'" title="该行业成分股近端背驰信号｜顶='+(x.n_sig_top||0)+'(动能减弱·防回落)｜底='+(x.n_sig_bot||0)+'(动能衰竭·关注企稳)｜≥2只时左侧色条=集中风险/机会">顶 '+(x.n_sig_top||0)+' / 底 '+(x.n_sig_bot||0)+'</span>':'')+
       (x.leader?'<br><a class="indlead" title="'+(x.is_etf?"场内规模最大的基金 · 点击直达":"该行业总市值最大的龙头股 · 点击直达")+'" onclick="event.stopPropagation();prevStkSrc=\'home\';showStk(\''+esc(x.leader.sym)+'\')">👑 '+esc(x.leader.name)+'</a>':'')+'</div>'+
       '<div class="meta ta-r">'+capTxt+'<br><span>'+(x.is_etf?(x.n_member||0)+"/"+(x.n_total||0)+"只":(x.n_member||0)+"只")+'</span>'+(mvLine?'<br>'+mvLine:'')+'</div>'+
-      '<div><span class="regime '+rCls+'" title="'+regimeTip(x)+'">'+esc(x.regime||"-")+'</span></div>'+
+      '<div><span class="regime '+rCls+'" title="'+regimeTip(x)+'">'+esc(x.regime||"-")+'</span>'+zsPosBadge(x)+'</div>'+
       '<div class="spark">'+sparkSVG(x.spark,160,34)+'</div>'+
       '<div class="ffv '+ffCls(x.netflow)+'" title="当日主力净流入(超大+大单) · '+(x.netflow_n||0)+'只成分加总, 正=流入 负=流出">'+ffTxt(x.netflow)+'</div>'+
       '<div class="chg '+(x.chg1d>0?"up":(x.chg1d<0?"down":""))+'">'+pct(x.chg1d,1)+
