@@ -272,6 +272,14 @@ function esc(s){return (s==null?"":String(s)).replace(/[&<>"']/g,function(c){ret
 function pct(v,d){if(v==null||isNaN(v))return "-";return (v>0?"+":"")+(v*100).toFixed(d==null?2:d)+"%"}
 function fmtVol(v){if(v==null||isNaN(v))return "-";if(v>=1e8)return (v/1e8).toFixed(2)+"亿手";if(v>=1e4)return (v/1e4).toFixed(0)+"万手";return v.toFixed(0)+"手"}
 function capStr(y){if(y==null)return "-";if(y>=1e8)return (y/1e8).toFixed(0)+"亿";if(y>=1e4)return (y/1e4).toFixed(1)+"万";return y}
+/* R271: K线源徽标 —— 让"数据准确性"可感知到票级: sina裸价(除权日假跳空风险)橙标警示, 复权源绿标 */
+function srcTag(s){
+  var map={"tx":"腾讯qfq","em":"东财qfq","sina":"新浪裸价","synth":"成分合成"};
+  var t=map[s]||s||"-";var warn=(s==="sina");
+  return '<span style="font-size:11px;padding:1px 6px;border-radius:8px;white-space:nowrap;'+(
+    warn?"background:#fff3cd;color:#92400e;border:1px solid #f0d98c"
+        :"background:#e8f4ec;color:#1a7f4b;border:1px solid #bfe0cc")+'">'+t+(warn?'<span title="新浪裸价不复权，除权日K线可能有假跳空">⚠</span>':"")+'</span>';
+}
 /* ===== R258: 图表实例池 + K线拉取竞态令牌 ===== */
 var CH_POOL=[];   // 全页图表实例登记(showStk/backHome 整页重建时统一 dispose, 防孤儿实例泄漏)
 function poolChart(ch){if(ch&&CH_POOL.indexOf(ch)<0)CH_POOL.push(ch)}
@@ -774,7 +782,7 @@ function showStk(sym){
     '<span>笔/中枢 <b>'+(s.bi_n||0)+'/'+(s.zs_n||0)+'</b></span>'+
     '<span>自洽 <b>'+(s.agree!=null?(s.agree*100).toFixed(0)+"%":"-")+'</b></span>'+
     '<span>区间 <b>'+(s.first||"-")+'~'+(s.last||"-")+'</b></span>'+
-    '<span>数据 <b>'+(s.n_bars||0)+'根/'+(s.src||"-")+'</b></span></div>';
+    '<span>数据 <b>'+(s.n_bars||0)+'根</b> '+srcTag(s.src)+'</span></div>';
   var banner='';
   if(stk){
     var t=stk.dir==="top";

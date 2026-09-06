@@ -292,8 +292,11 @@ def _fetch_em(sym):
             out = [k for k in out if k["date"] >= fd.MIN_DATE]   # 2021起, 与腾讯契约一致
             out.sort(key=lambda k: k["date"])
             if len(out) >= MIN_BARS:
-                return out, "em"
-            last_err = "em_short:%d" % len(out)
+                if _last_fresh(out[-1]["date"]):                  # R271: 与tx对称 —— em陈旧缓存/CDN滞后同样拒用
+                    return out, "em"
+                last_err = "em_stale"
+            else:
+                last_err = "em_short:%d" % len(out)
         except Exception as e:   # noqa: BLE001
             last_err = "em_err:" + str(e)[:60]
     return [], last_err
@@ -342,6 +345,7 @@ def _fetch_sina(sym):
                         "volume": float(row["volume"]) / 100.0})   # 新浪=股 -> 统一手
         except (KeyError, ValueError, TypeError):
             continue
+    out = [k for k in out if k["date"] >= fd.MIN_DATE]   # R271: 对齐2021契约起点(腾讯/东财已裁), 保跨源结构起点一致
     return out, "sina"
 
 
@@ -520,9 +524,44 @@ def _bc_tail(bc, bis, btype, n_last=10):
             "fresh_days": fresh}
 
 
+_KS_MIN_BARS = 30    # R271: 净化绝对底线(防字段错乱/空壳) —— 次新30~120根仍进分析, 由门禁"次新"剔除展示
+
+
+def _sanitize_ks(ks):
+    """R271: K线净化防线 —— 任何源进缠论引擎前统一过滤。
+    脏/坏 bar(字段截断、重复日期、OHLC 矛盾、越出 2021 契约窗/未来日期)会静默污染
+    笔/中枢/背驰结构(R265~R269 多轮结构错位里数据层坏根是隐性来源), 宁缺毋滥:
+    净化后不足 _KS_MIN_BARS 根即整段作废(交上层切备用源/记失败)。"""
+    if not ks:
+        return []
+    seen, out = set(), []
+    t_today = _bj_today().isoformat()
+    for k in ks:
+        d = k.get("date", "")
+        try:
+            o, h, l, c = (float(k[x]) for x in ("open", "high", "low", "close"))
+            v = float(k.get("volume") or 0)
+        except (KeyError, TypeError, ValueError):
+            continue
+        if d in seen or not (len(d) == 10 and fd.MIN_DATE <= d <= t_today):
+            continue
+        if not (o > 0 and h > 0 and l > 0 and c > 0 and v >= 0):
+            continue
+        if h < max(o, c) or l > min(o, c):     # OHLC 自洽: high>=max(o,c) 且 low<=min(o,c)
+            continue
+        seen.add(d)
+        out.append({"date": d, "open": o, "high": h, "low": l, "close": c, "volume": v})
+    out.sort(key=lambda x: x["date"])
+    return out if len(out) >= _KS_MIN_BARS else []
+
+
 def analyze_one(sym, ks):
     """chanlun.analyze -> 精简摘要(雷达schema) + 轻量绘图标注 mark。
-    返回 (st, err, mark)。mark 仅供前端详情页叠画, 门禁剔除票也尽量给(可点看结构)。"""
+    返回 (st, err, mark)。mark 仅供前端详情页叠画, 门禁剔除票也尽量给(可点看结构)。
+    R271: 入口统一过 _sanitize_ks 净化(日期有序去重/OHLC自洽/契约窗), 坏数据不进引擎。"""
+    ks = _sanitize_ks(ks)
+    if not ks:
+        return None, "ks_bad", {}
     try:
         r = cl.analyze(ks, with_stability=False)
     except Exception as e:   # noqa: BLE001
