@@ -565,7 +565,7 @@ def analyze_one(sym, ks):
         "seg_bot": bool(cls.get("seg_bc_bottom")), "seg_top": bool(cls.get("seg_bc_top")),
     }
     # 轻量绘图标注(详情页叠画用): 近中枢矩形 + 近背驰点 + 近笔折线(限通过票)
-    mark = {"zs": [], "bc": [], "line": []}
+    mark = {"zs": [], "bc": [], "line": [], "sig": []}
     for z in zss[-3:]:
         mark["zs"].append([round(z["zg"], 2), round(z["zd"], 2), z["date_start"], z["date_end"]])
     for b in bc[-6:]:
@@ -575,6 +575,12 @@ def analyze_one(sym, ks):
     for b in bis[-10:]:
         mark["line"].append([b["date_start"], round(b["start_price"], 2),
                              b["date_end"], round(b["end_price"], 2), b["dir"]])
+    # R271: 分类买卖点(一/二/三类) — 前端个股/行业K线叠画「一买/二买/三买/一卖/二卖/三卖」。
+    # signals 已由 find_signals 去重(每笔仅一类信号, 优先级 一类>三类>二类), 携带 date/price,
+    # 直接取近端 14 条入库; 一类点与 bc 背驰点同源, 前端有 sig 时不再重复画通用背驰三角。
+    # 格式 [dir(1买/-1卖), kind全名, date_end, price] — 与 zs/bc/line 一致的紧凑数组。
+    mark["sig"] = [[s["dir"], s["kind"], s["date"], round(s["price"], 2)]
+                   for s in signals[-14:]]
     return st, None, mark
 
 
