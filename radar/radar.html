@@ -596,7 +596,7 @@ function drawStkInto(el,sym){
       Math.min.apply(null,k2.map(function(x){return x.low})),
       Math.max.apply(null,k2.map(function(x){return x.high})));
     opt.series=opt.series.concat(extra);
-    addSlTpLine(opt,u);   // R262: 底背驰个股标 止损(背驰低点)/止盈(中枢上沿或2R)
+    addSlTpLine(opt,u);   // R262+R266: 底背驰个股标 止损(背驰低点)/入场参考(现价下R/2)/止盈参考(中枢上沿或2R)
     ["笔","顶背驰","底背驰"].forEach(function(n){if(opt.series.some(function(s){return s.name===n;})&&opt.legend.data.indexOf(n)<0)opt.legend.data.push(n);});
     if(myChart){try{myChart.dispose()}catch(e){}}
     myChart=echarts.init(el,null,{renderer:"svg"});
@@ -777,7 +777,7 @@ function loadStkChart(sym){
       Math.min.apply(null,k2.map(function(x){return x.low})),
       Math.max.apply(null,k2.map(function(x){return x.high})));
     opt.series=opt.series.concat(extra);
-    addSlTpLine(opt,u);   // R262: 底背驰个股标 止损(背驰低点)/止盈(中枢上沿或2R)
+    addSlTpLine(opt,u);   // R262+R266: 底背驰个股标 止损(背驰低点)/入场参考(现价下R/2)/止盈参考(中枢上沿或2R)
     ["笔","顶背驰","底背驰"].forEach(function(n){if(opt.series.some(function(s){return s.name===n;})&&opt.legend.data.indexOf(n)<0)opt.legend.data.push(n);});
     var ch=echarts.init(el,null,{renderer:"svg"});
     poolChart(ch);   // R258: 登记到实例池, backHome/showStk 时统一释放
@@ -905,13 +905,15 @@ function chanMarkOption(mark,dates,kmin,kmax){
   if(bp.length)ser.push(sc("#087f5b","底背驰"));
   return ser;
 }
-/* ===== R262: 底背驰个股的止损/止盈参考线 =====
+/* ===== R262+R266: 底背驰个股的 止损/入场/止盈参考线 =====
    语义: st.bottom_bc=最近一次底背驰(自研引擎确认位)
-   SL 止损 = 底背驰低点 end_price —— 跌破即背驰结构失败(离场位, 缠论标准)
-   TP 止盈 = 自适应:
-     · 末中枢上沿 zs_last.zg 高于现价且空间>=0.3R → 用 zg(反弹到中枢上沿减仓, 最缠论)
+   SL 止损 = 底背驰低点 end_price —— 跌破即背驰结构失败(离场位, 缠论标准, 纪律性最强)
+   EN 入场参考 = 现价下方 R/2(即 SL 与现价的中点) —— "次低吸位"概率参考, 非保证;
+     破 SL 前二次回踩不破可分批低吸, 破 SL 则该参考作废
+   TP 止盈参考 = 自适应(结构参考位, 非保证到价):
+     · 末中枢上沿 zs_last.zg 高于现价且空间>=0.3R → 用 zg(中枢上沿=压力概率位, 反弹到可减仓分批)
      · 否则(已收复中枢/无上方空间) → 现价+2R 盈亏比兜底
-   R = 现价-止损(假设现价附近入场). 红线=止盈目标/绿线=止损位(虚线), 图例自带数值 */
+   R = 现价-止损(假设现价附近入场). 红线=止盈参考/蓝线=入场参考/绿线=止损位(虚线), 图例自带数值 */
 function slTpOf(u){
   if(!u)return null;
   var st=u.st||{};var bbc=st.bottom_bc;
@@ -919,12 +921,13 @@ function slTpOf(u){
   var sl=+bbc.end_price, close=(st.close==null?null:+st.close);
   if(close==null||close<=sl)return null;          // 现价已破背驰低点: 结构已失效, 不误导画线
   var R=close-sl;
+  var en=close-R/2;                               // R266: 入场参考=现价下方 R/2(次低吸位, 介于 SL 与现价之间)
   var zg=(st.zs_last&&st.zs_last.zg!=null)?+st.zs_last.zg:null;
   var tp=null;
   if(zg!=null&&zg>close+R*0.3)tp=zg;              // 中枢上沿在上方且有足够空间
   else tp=close+2*R;                              // 2R 盈亏比兜底
   if(tp==null||tp<=close)return null;
-  return {sl:sl,tp:tp,close:close,R:R};
+  return {sl:sl,en:en,tp:tp,close:close,R:R};
 }
 function addSlTpLine(opt,u){
   var z=slTpOf(u);
@@ -938,8 +941,10 @@ function addSlTpLine(opt,u){
     data:[
       {yAxis:+z.sl.toFixed(2),lineStyle:{color:"#18a058"},
        label:{formatter:"止损 "+z.sl.toFixed(2),color:"#0e7d4a",backgroundColor:"rgba(255,255,255,.88)",padding:[1,4],borderRadius:3}},
+      {yAxis:+z.en.toFixed(2),lineStyle:{color:"#1c7ed6"},
+       label:{formatter:"入场参考 "+z.en.toFixed(2),color:"#1864ab",backgroundColor:"rgba(255,255,255,.88)",padding:[1,4],borderRadius:3}},
       {yAxis:+z.tp.toFixed(2),lineStyle:{color:"#e54545"},
-       label:{formatter:"止盈 "+z.tp.toFixed(2),color:"#c92a2a",backgroundColor:"rgba(255,255,255,.88)",padding:[1,4],borderRadius:3}}
+       label:{formatter:"止盈参考 "+z.tp.toFixed(2),color:"#c92a2a",backgroundColor:"rgba(255,255,255,.88)",padding:[1,4],borderRadius:3}}
     ]};
 }
 /* ===== 路由 ===== */
