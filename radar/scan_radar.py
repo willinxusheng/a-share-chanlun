@@ -525,6 +525,21 @@ def _regime_of(ist, n_top, n_bot, rsi14=None):
         return "顶背驰区"
     if n_bot >= 2 and n_top == 0 and last_dir == "up":
         return "底背驰区"
+    # —— 位置门控 3 [R264]: 趋势词必须与收盘位置自洽 ——
+    # 末笔方向只反映最近一笔(约3~5根K线)的端点方向, 高位钝化时一笔向下的小回调
+    # 会把"明明在主升/高位横盘"的板块误标成"下跌趋势" (实证: 农林牧渔 RSI67.6、
+    # 收盘超末中枢上沿9.6%、近10日+10.1% 却被标"下跌趋势", 商贸零售同型)。
+    # 趋势语义=结构方向: 需收盘位置同向支持 ——
+    #   close<mid 末笔向下 → 中枢下半回落, 结构偏空, 才是"下跌趋势";
+    #   close>mid 末笔向下 → 高位回调, 只算"震荡中"(防误导);
+    #   close>mid 末笔向上 → 中枢上半推进, 结构向上, 才是"上涨趋势";
+    #   close<mid 末笔向上 → 低位反抽, 只算"震荡中"。
+    if close is not None and zd is not None and zg is not None:
+        mid = (zd + zg) / 2
+        if last_dir == "down":
+            return "下跌趋势" if close < mid else "震荡中"
+        if last_dir == "up":
+            return "上涨趋势" if close > mid else "震荡中"
     if last_dir == "down":
         return "下跌趋势"
     if last_dir == "up":
