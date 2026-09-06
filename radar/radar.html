@@ -872,10 +872,11 @@ function drawStkInto(el,sym){
 }
 /* ===== 行业成分股列表(点击切主图) ===== */
 var EXPAND_ALL=false;   // R295: 成分列表"其余组"展开全部状态(默认折叠前 50)
-function toggleRestAll(){EXPAND_ALL=!EXPAND_ALL;if(curInd)renderIndStkList(curInd)}
+var EXPAND_IND=null;    // R299: 展开态归属板块(切板块自动折叠防残留)
+function toggleRestAll(){EXPAND_ALL=!EXPAND_ALL;EXPAND_IND=curInd;if(curInd)renderIndStkList(curInd)}
 function renderIndStkList(k){
   var isETF=(INDS[k]||{}).is_etf===1;
-  if(!isETF&&EXPAND_ALL)EXPAND_ALL=false;   // R295: 非 ETF 板块重置展开态(股票行业无展开按钮, 防状态残留)
+  if(EXPAND_ALL&&EXPAND_IND!==k)EXPAND_ALL=false;   // R299: 展开态只属于当前板块, 切板块即折叠(ETF/股票行业通用)
   var members=[];Object.keys(UNI).forEach(function(sym){
     var u=UNI[sym];
     var match=isETF?(u.type==="ETF"):(u.ind===k);
@@ -894,14 +895,9 @@ function renderIndStkList(k){
   function frDays(x){return x.sg.fresh==null?9:x.sg.fresh}
   gTop.sort(function(a,b){return (b.sg.strong||0)-(a.sg.strong||0)||frDays(a)-frDays(b)});
   gBot.sort(function(a,b){return (b.sg.strong||0)-(a.sg.strong||0)||frDays(a)-frDays(b)});
-  // R295(ETF): 板块成分"其余"组排序 = 热度优先(60日成交额 avg_amt60 降序, 稳定抗单日噪音) → 规模次键(mcap 降序兜底).
-  //   自洽率对 ETF 一篮子基金意义弱; 热度高=流动性好=缠论信号执行不打滑. 前 50 = 热度最高的 50 只.
-  //   股票行业维持 R290 已透明口径: 自洽率 → 市值(与 ETF 分行排序, 防误改股票口径用户困惑)
-  if(isETF){
-    gRest.sort(function(a,b){return (b.st.avg_amt60||0)-(a.st.avg_amt60||0)||(b.u.mcap||0)-(a.u.mcap||0)});
-  }else{
-    gRest.sort(function(a,b){return (b.st.agree||0)-(a.st.agree||0)||(b.u.mcap||0)-(a.u.mcap||0)});
-  }
+  // R295(ETF)+R299(股票行业, 旭总拍板): 板块成分"其余"组排序 = 热度优先(60日成交额 avg_amt60 降序, 稳定抗单日噪音) → 规模次键(mcap 降序兜底).
+  //   热度高=流动性好=缠论信号执行不打滑; 自洽率(agree)不参与排序, 仅作表格展示列参考
+  gRest.sort(function(a,b){return (b.st.avg_amt60||0)-(a.st.avg_amt60||0)||(b.u.mcap||0)-(a.u.mcap||0)});
   function sec(title,cnt,rows,opt){
     if(!rows.length)return'';
     var sum=0,cv=0;rows.forEach(function(r){var c=(r.st||{}).chg1d;if(c!=null){sum+=c;cv++;}});
@@ -960,9 +956,7 @@ function renderIndStkList(k){
   $("indStkList").innerHTML=head+
     sec("见顶风险",gTop.length,gTop,{ic:"🔴",note:"顶背驰·注意回落"})+
     sec("见底机会",gBot.length,gBot,{ic:"🟢",note:"底背驰·关注企稳"})+
-    (isETF
-      ? sec("其余通过门禁",gRest.length,gRest,{ic:"📄",note:"按热度排序（60日成交额↓ = 资金关注度/流动性, 规模次之）",max:50,maxNote:"K线/自洽/流动性门禁",canExpand:true,sortLbl:"热度"})
-      : sec("其余通过门禁",gRest.length,gRest,{ic:"📄",note:"按自洽率+市值排序（混入持有期跟踪，机会需自分辨）",max:50,maxNote:"K线/自洽/流动性门禁"}))+
+    sec("其余通过门禁",gRest.length,gRest,{ic:"📄",note:"按热度排序（60日成交额↓ = 资金关注度/流动性, 规模次之）",max:50,maxNote:"K线/自洽/流动性门禁",canExpand:true,sortLbl:"热度"})+
     (members.length?"":'<div class="empty" style="padding:36px 20px"><div class="etx">该行业无通过门禁的成分</div></div>');
   // 确保 body 有且仅有一个 float 表头元素
   var $fh=$("stkFloatHead");

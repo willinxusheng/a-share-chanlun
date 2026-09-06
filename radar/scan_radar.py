@@ -45,6 +45,14 @@ UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
 # ---------- 参数 ----------
 MIN_BARS = 120                 # 少于120根日线(约半年) -> 次新/数据不足, 不进信号
 LOW_AMT60 = 3000.0             # 近60日均成交额(万元) 低于 -> 低流动性
+
+
+def _vol_share_per_unit(sym):
+    """腾讯 fqkline volume 单位换算为「股」的倍数: 主板/深市/ETF 返回 100(volume=手, 1手=100股);
+    科创板(sh688/sh689)返回 1(volume=股).
+    R300 实证(09-06): 招行 sh600036 volume=845229(手,×100×41≈34.6亿✓), 寒武纪 sh688256 volume=8282775(股,×1072≈88.8亿✓) —
+    统一乘 100 会让科创板成交额虚高 100 倍(avg_amt60 虚高、行业合成 K 线成交额列失真)。"""
+    return 1 if sym.startswith(("sh688", "sh689")) else 100
 ONE_WORD_MAX = 10              # 一字板天数 >= -> 结构失真, 不进信号
 # R277: 一字板统计窗口(交易日数) —— "结构失真"语义=近期无量封板无法交易, 与 MIN_BARS
 # (120≈半年)门禁同窗口口径。全历史累计会把上市初期连板(次新常态 10~24 个一字)或多年前
@@ -761,7 +769,7 @@ def analyze_one(sym, ks):
         d0, d1 = ks[0]["date"], last["date"]
         span_days = _days_ago(d0) - _days_ago(d1) if _days_ago(d0) < 30000 else -1
         tail60 = ks[-60:]
-        avg_amt = sum(k["volume"] * 100 * k["close"] for k in tail60) / max(1, len(tail60)) / 1e4
+        avg_amt = sum(k["volume"] * _vol_share_per_unit(sym) * k["close"] for k in tail60) / max(1, len(tail60)) / 1e4  # R300: 科创板 volume 单位=股, 勿再 ×100
         amp = [h / l - 1 for h, l in zip(highs, lows) if l > 0]
         one_word = _one_word_count(ks)   # R277: 近端120根窗口(原全历史累计误杀上市初期连板的正常票)
         med_amp = (sorted(amp)[len(amp) // 2] if amp else 0.0) * 100
@@ -969,7 +977,8 @@ def synth_industry_kline(members, got):
                 if abs(c / prev_c - 1) <= th:      # 正常日 -> 入桶; 除权假跳空日 -> 剔除该成分当日
                     days.setdefault(k["date"], []).append(
                         (mcap, k["open"] / prev_c - 1, k["high"] / prev_c - 1,
-                         k["low"] / prev_c - 1, c / prev_c - 1, k.get("volume", 0) * c))
+                         k["low"] / prev_c - 1, c / prev_c - 1,
+                         k.get("volume", 0) * _vol_share_per_unit(sym) * c / 100.0))   # R300: 行业合成按手·元当量(volume×股数/手×价/100), 科创板 volume=股不虚高
             prev_c = c
     dates = sorted(days)
     if len(dates) < 120:
@@ -1344,7 +1353,7 @@ def main():
         "title": "A股全市场缠论雷达",
         "asof": asof, "build_time": datetime.datetime.now(
             datetime.timezone(datetime.timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S"),
-        "version": "P3b-r4",   # R297: mark 拆分到 marks.json(radar.json 瘦身 65%)
+        "version": "P3b-r5",   # R300: 科创板(sh688/689) volume 单位=股非手, avg_amt60/行业合成成交额修正
         "n_universe": len(uni), "n_fetch": len(got), "n_fail": len(fails),
         "n_ok": len(sts), "n_gate": sum(gate_cnt.values()) - gate_cnt.get("", 0),
         "n_signal": len(signals), "n_ind": len(industries),
