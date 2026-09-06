@@ -130,13 +130,17 @@ def _src_down(d, lock):
     return True
 
 def _src_fail(d, lock, reason=""):
-    """记录一次源失败; 达阈值整段停用(flag=True)。reason 汇入统计供 meta 展示。"""
+    """记录一次源失败; 达阈值整段停用(flag=True)。reason 汇入统计供 meta 展示。
+    R275: 置停用时把 n 归零 —— 此前 n 在源健康期也持续自增, 停用后首个复探触发点
+    被该偏移污染(每 every 次调用才 probe 的语义实际漂移 0~every-1 次); 归零后
+    复探节拍严格从停用时刻起算(停用后第 every 次调用轻量复探)。"""
     with lock:
         d["count"] += 1
         if reason:
             d["reasons"][reason] = d["reasons"].get(reason, 0) + 1
         if d["count"] >= d["max"]:
             d["flag"] = True
+            d["n"] = 0                     # R275: 复探节拍原点 = 停用时刻
             print("[scan_radar] 源连续失败 >=%d 次, 整段停用 (末因: %s)" % (d["max"], reason or "-"), flush=True)
 
 _tx_lock = threading.Lock()
@@ -424,6 +428,26 @@ def fetch_kline(sym):
     return _fetch_sina_checked(sym)
 
 
+# R275: 无需重试的失败标签 —— 源停用/不可用类由状态机或代码段判定, 重试必然同结果
+# (R270 整段停用后重试只会再打一次空请求); tx_stale/em_stale 为 CDN 陈旧缓存(R248: 缓存
+# 停 12h+), 0.4s 后重试不可能刷新。其余(网络闪断/超时/空响应)才值得重试一次。
+_NO_RETRY_SRCS = frozenset(("tx_down", "em_down", "em_unavail", "em_skip",
+                            "tx_only", "em_only", "tx_stale", "em_stale"))
+
+
+def _need_retry(src):
+    return src not in _NO_RETRY_SRCS
+
+
+def _fetch_one(sym):
+    """单票抓取(worker): 失败且属"可恢复"类才重试一次(网络抖动/限流偶发)。"""
+    ks, src = fetch_kline(sym)
+    if not ks and _need_retry(src):
+        time.sleep(0.4)
+        ks, src = fetch_kline(sym)      # 重试一次(网络抖动/限流偶发)
+    return sym, (ks, src) if ks else (None, src)
+
+
 # ================= 3. 结构摘要 + 门禁 + 近端信号 =================
 # R267: 统一北京时区日期 —— CI runner 本地是 UTC, datetime.date.today() 在 UTC 跨日窗口
 # (北京已过午夜而 UTC 未过)会差一天, 使停牌天数/背驰新鲜度/陈旧判定系统性偏移 ±1。
@@ -579,6 +603,9 @@ def _bc_tail(bc, bis, btype, n_last=10):
 
 
 _KS_MIN_BARS = 30    # R271: 净化绝对底线(防字段错乱/空壳) —— 次新30~120根仍进分析, 由门禁"次新"剔除展示
+# R275: 净化丢弃 bar 累计(诊断用) —— 坏根是 R265~R269 多轮结构错位里的隐性来源, R271 加净化防线后
+# 却无任何丢弃量化; 此计数汇入 meta.sanit_drop_bars, 供排查"某日结构错位=数据坏根激增"直接对照。
+_sanit_drop_bars = 0
 
 
 def _sanitize_ks(ks):
@@ -586,6 +613,7 @@ def _sanitize_ks(ks):
     脏/坏 bar(字段截断、重复日期、OHLC 矛盾、越出 2021 契约窗/未来日期)会静默污染
     笔/中枢/背驰结构(R265~R269 多轮结构错位里数据层坏根是隐性来源), 宁缺毋滥:
     净化后不足 _KS_MIN_BARS 根即整段作废(交上层切备用源/记失败)。"""
+    global _sanit_drop_bars
     if not ks:
         return []
     seen, out = set(), []
@@ -596,12 +624,16 @@ def _sanitize_ks(ks):
             o, h, l, c = (float(k[x]) for x in ("open", "high", "low", "close"))
             v = float(k.get("volume") or 0)
         except (KeyError, TypeError, ValueError):
+            _sanit_drop_bars += 1          # 字段缺失/非数值
             continue
         if d in seen or not (len(d) == 10 and fd.MIN_DATE <= d <= t_today):
+            _sanit_drop_bars += 1          # 重复日期 / 出契约窗 / 未来日期
             continue
         if not (o > 0 and h > 0 and l > 0 and c > 0 and v >= 0):
+            _sanit_drop_bars += 1          # 非正价/负量
             continue
         if h < max(o, c) or l > min(o, c):     # OHLC 自洽: high>=max(o,c) 且 low<=min(o,c)
+            _sanit_drop_bars += 1          # OHLC 矛盾
             continue
         seen.add(d)
         out.append({"date": d, "open": o, "high": h, "low": l, "close": c, "volume": v})
@@ -784,7 +816,9 @@ def signal_of(sym, name, typ, st):
         if not b or b["fresh_days"] > FRESH_MAX_DAYS:
             return None
         strong = 2 if (b["bc_type"] == "趋势背驰" or st["seg_bot"]) else 1
-        return {"sym": sym, "name": name, "type": typ, "dir": "bottom",
+        # R275: 去掉冗余 "sym" 键 —— 外层 JSON 展开 {"sym": s, **sig} 已带同值 sym,
+        # 双写同键纯增体积(信号多时 JSON 膨胀); 后端下游全部经元组 (sym, sig) 取 sym。
+        return {"name": name, "type": typ, "dir": "bottom",
                 "sig": "背驰见底", "strong": strong,
                 "vol": b["vol_confirm"], "fresh": b["fresh_days"],
                 "area": b["area_ratio"], "bc_date": b["bi_date_end"],
@@ -795,7 +829,7 @@ def signal_of(sym, name, typ, st):
         if not b or b["fresh_days"] > FRESH_MAX_DAYS:
             return None
         strong = 2 if (b["bc_type"] == "趋势背驰" or st["seg_top"]) else 1
-        return {"sym": sym, "name": name, "type": typ, "dir": "top",
+        return {"name": name, "type": typ, "dir": "top",
                 "sig": "背驰见顶", "strong": strong,
                 "vol": b["vol_confirm"], "fresh": b["fresh_days"],
                 "area": b["area_ratio"], "bc_date": b["bi_date_end"],
@@ -1028,14 +1062,6 @@ def main():
 
     # --- 抓K线(并发, 全局限速由 fetch_kline 内 throttle 保证; 失败重试一轮) ---
     got, fails = {}, {}
-
-    def _fetch_one(sym):
-        ks, src = fetch_kline(sym)
-        if not ks:
-            time.sleep(0.4)
-            ks, src = fetch_kline(sym)      # 重试一次(网络抖动/限流偶发)
-        return sym, (ks, src) if ks else (None, src)
-
     t_f = time.time()
     with ThreadPoolExecutor(max_workers=CONCURRENCY) as ex:
         for n_done, (sym, res) in enumerate(ex.map(_fetch_one, syms), 1):
@@ -1189,7 +1215,7 @@ def main():
         "title": "A股全市场缠论雷达",
         "asof": asof, "build_time": datetime.datetime.now(
             datetime.timezone(datetime.timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S"),
-        "version": "P3b-r1",
+        "version": "P3b-r2",
         "n_universe": len(uni), "n_fetch": len(got), "n_fail": len(fails),
         "n_ok": len(sts), "n_gate": sum(gate_cnt.values()) - gate_cnt.get("", 0),
         "n_signal": len(signals), "n_ind": len(industries),
@@ -1198,6 +1224,7 @@ def main():
         "degraded_reason": deg_reason,         # 降级黄条文案(前端优先展示)
         "src_fail": src_fail,                  # 各源失败原因计数(诊断腾讯/东财为何不可用)
         "mkt_last": _mkt_last or "",           # R272: 市场末交易日锚(新浪探测; 空=探测失败回落窗口表)
+        "sanit_drop_bars": _sanit_drop_bars,   # R275: 净化丢弃 bar 数(坏根量化诊断; 正常≈0, 激增=源数据异常)
         "ind_cnt": ind_cnt,
         "excl_st": excl.get("st", 0),
         "note": ("信号=近端背驰场景(背驰见底/见顶) 距背驰日<=%d天; 门禁剔除项仅展示不进信号; "
@@ -1210,7 +1237,9 @@ def main():
            "universe": {s: {k: v for k, v in row.items()
                             if k in ("name", "type", "code", "gate", "gd", "ind", "mcap", "st", "mark")}
                         for s, row in universe.items()}}
-    json.dump(out, open(OUT, "w"), ensure_ascii=False, separators=(",", ":"))
+    # R275: 显式 UTF-8 —— 读侧(L1002)已带 encoding, 写侧遗漏; CI runner 若 locale 非 UTF-8
+    # (如 C/POSIX), ensure_ascii=False 写中文 meta 文案会 UnicodeEncodeError 崩掉全量 run 无产物。
+    json.dump(out, open(OUT, "w", encoding="utf-8"), ensure_ascii=False, separators=(",", ":"))
     print("\n======== 雷达产物 %s ========" % OUT)
     print(json.dumps({k: v for k, v in meta.items() if not isinstance(v, dict)}, ensure_ascii=False, indent=1))
     print("场景分布:", json.dumps(scen_cnt, ensure_ascii=False))
