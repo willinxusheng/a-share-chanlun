@@ -1253,7 +1253,7 @@ def bias_indicator(closes):
     if n < 20:
         return None
     ma20 = sum(closes[-20:]) / 20 or 1e-9  # R173(BUG2): 退化全0价 ma20==0 时避免 ZeroDivisionError
-    ma60 = (sum(closes[-60:]) / 60) if n >= 60 else ma20
+    ma60 = ((sum(closes[-60:]) / 60) if n >= 60 else ma20) or 1e-9  # R278: 同族漏网 —— R173 只兜 ma20 漏了相邻行 ma60, n>=60 全0价时 bias60 除零(实测 analyze 全0K 崩于此)
     close = closes[-1]
     bias20 = (close - ma20) / ma20
     bias60 = (close - ma60) / ma60 if n >= 60 else 0.0
@@ -1343,6 +1343,12 @@ def max_drawdown(closes, dates=None):
         if c > peak:
             peak = c
             peak_i = i
+        # R278: peak<=0(全0/全负退化序列)时跳过回撤计算 —— 与 R173 bias_indicator
+        # ma20==0 除零防护同族, 彼时只补了 bias 漏了 mdd: dd=(c-peak)/peak 在全 0 价
+        # 序列下 ZeroDivisionError(实测 analyze(全0 K线) 崩在此处, 系全链路唯一除零盲点)。
+        # 上游净化(R271)保证生产价>0 不可达, 但防御先例下补齐消除同族漏洞。
+        if peak <= 0:
+            continue
         dd = (c - peak) / peak
         if dd < mdd:
             mdd = dd
