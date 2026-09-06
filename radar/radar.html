@@ -566,9 +566,11 @@ function drawChart(){
   // echarts.init(zrender) 不会清空 DOM 子节点,只追加 svg,loading 文字盖在 svg 上.
   el.innerHTML="";
   var opt=indKlineOption(kl,"ind");   // R258: 行业量=板块成交额(亿元), 不走个股"手"格式
-  opt.series=opt.series.concat(chanMarkOption(ind.mark,kl.map(function(x){return x.date}),
-    Math.min.apply(null,kl.map(function(x){return x.low})),
-    Math.max.apply(null,kl.map(function(x){return x.high}))));
+  // R268: 行业主图 dataZoom 默认 start=30% 仅显示末段, scan_radar.py 写入的 mark 是全段窗口产物,
+  // 全段 kmin/kmax 范围过宽 → 早期脱离可视 mark 飞脱主体 K 线. 改用末段可视 K 线 min/max,
+  // dates 仍全段(保持 mark date 索引映射, 横向位置不变).
+  var mm=visKlMinMax(kl,opt.dataZoom[0].start||30);
+  opt.series=opt.series.concat(chanMarkOption(ind.mark,kl.map(function(x){return x.date}),mm.lo,mm.hi));
   // legend 只 push 实际存在的系列,避免 "底背驰" 等 0 信号行业报 warning
   ["笔","顶背驰","底背驰"].forEach(function(n){
     if(opt.series.some(function(s){return s.name===n;}) && opt.legend.data.indexOf(n)<0) opt.legend.data.push(n);
@@ -592,9 +594,8 @@ function drawStkInto(el,sym){
     var k2=kl.map(function(r){return {date:r[0],open:+r[1],close:+r[2],high:+r[3],low:+r[4],volume:+r[5]}});   // 腾讯 volume 单位=手(实测 333102=33.3万手/ETF 同量级), 不再 /100
     el.innerHTML="";
     var opt=indKlineOption(k2,"stk");
-    var u=UNI[sym];var extra=chanMarkOption(u&&u.mark,k2.map(function(x){return x.date}),
-      Math.min.apply(null,k2.map(function(x){return x.low})),
-      Math.max.apply(null,k2.map(function(x){return x.high})));
+    var u=UNI[sym];var mm=visKlMinMax(k2,opt.dataZoom[0].start||30);   // R268: 末段可视 K 线 min/max 过滤早期飞脱 mark
+    var extra=chanMarkOption(u&&u.mark,k2.map(function(x){return x.date}),mm.lo,mm.hi);
     opt.series=opt.series.concat(extra);
     addSlTpLine(opt,u);   // R262+R266: 底背驰个股标 止损(背驰低点)/入场参考(现价下R/2)/止盈参考(中枢上沿或2R)
     ["笔","顶背驰","底背驰"].forEach(function(n){if(opt.series.some(function(s){return s.name===n;})&&opt.legend.data.indexOf(n)<0)opt.legend.data.push(n);});
@@ -773,9 +774,8 @@ function loadStkChart(sym){
     var k2=kl.map(function(r){return {date:r[0],open:+r[1],close:+r[2],high:+r[3],low:+r[4],volume:+r[5]}});   // 腾讯 volume 单位=手(ETF 同量级), 不再 /100
     var el=$("stkChart");if(!el)return;el.innerHTML="";
     var opt=indKlineOption(k2,"stk");
-    var u=UNI[sym];var extra=chanMarkOption(u.mark,k2.map(function(x){return x.date}),
-      Math.min.apply(null,k2.map(function(x){return x.low})),
-      Math.max.apply(null,k2.map(function(x){return x.high})));
+    var u=UNI[sym];var mm=visKlMinMax(k2,opt.dataZoom[0].start||30);   // R268: 末段可视 K 线 min/max 过滤早期飞脱 mark
+    var extra=chanMarkOption(u.mark,k2.map(function(x){return x.date}),mm.lo,mm.hi);
     opt.series=opt.series.concat(extra);
     addSlTpLine(opt,u);   // R262+R266: 底背驰个股标 止损(背驰低点)/入场参考(现价下R/2)/止盈参考(中枢上沿或2R)
     ["笔","顶背驰","底背驰"].forEach(function(n){if(opt.series.some(function(s){return s.name===n;})&&opt.legend.data.indexOf(n)<0)opt.legend.data.push(n);});
@@ -872,10 +872,11 @@ function chanMarkOption(mark,dates,kmin,kmax){
   if(!mark)return ser;
   var di={};dates.forEach(function(d,i){di[d]=i});
   function xi(dt){return di[dt]!=null?di[dt]:null}
-  // R263: mark 偏离 K 线可视范围的防御 — mark 基于 scan 窗口生成, 个股路径拉更长腾讯 K 线
-  // (660 根) 时早期 mark 可能远超/低过可视区, markArea 进入 yAxis range 会撑爆主图, 笔/散点"飞脱"主体 K 线
+  // R263+R268: mark 偏离 K 线可视范围的防御 — band 已用"末段可视 K 线 min/max"(R268 visKlMinMax),
+  // buffer 1.2×/0.7× 是末段边缘留少量余量(早期 R263 1.6× 系数在"全段 K 线 vs 可视窗口"差异大时会
+  // 把飞脱 mark 也放行, 如 sh588870 ETF 末段 [0.95,1.85] ×1.6 = 2.96, 早期中枢 [1.95,2.30] 仍通过)
   var band=kmin!=null&&kmax!=null&&isFinite(kmin)&&isFinite(kmax)&&kmin>0&&kmax>kmin;
-  var inRange=function(p){if(!band)return true;if(!isFinite(p))return false;return p>=kmin*0.5&&p<=kmax*1.6};
+  var inRange=function(p){if(!band)return true;if(!isFinite(p))return false;return p>=kmin*0.7&&p<=kmax*1.2};
   if(mark.line&&mark.line.length){
     var data=[];
     mark.line.forEach(function(b){var x1=xi(b[0]),x2=xi(b[2]);if(x1==null||x2==null)return;
@@ -890,8 +891,10 @@ function chanMarkOption(mark,dates,kmin,kmax){
       var zd=+z[1],zg=+z[0];
       if(!isFinite(zd)||!isFinite(zg))return;
       var lo=Math.min(zd,zg),hi=Math.max(zd,zg);
-      // 中枢完全脱离 K 线可视区时排除(整块漂浮)
-      if(band&&(hi<kmin*0.5||lo>kmax*1.6))return;
+      // 中枢任一端越出可视区即排除(主体飞脱): R268 band=末段可视 K 线, R263 1.6× 全段判断
+      // "中枢完全脱离"已不够 — 象 sh588870 [1.95, 2.30] 横跨末段上沿 1.90, 1.2×=2.28 时仅部分越界
+      // 但视觉上 zg=2.30 仍在主体外飞脱. 严格判断 lo<kmin || hi>kmax (可视末段贴合).
+      if(band&&(lo<kmin||hi>kmax))return;
       areas.push([{name:"中枢",xAxis:x1,yAxis:zg,itemStyle:{color:"rgba(127,119,221,.16)",borderColor:"#7f77dd",borderWidth:.8}},{xAxis:x2,yAxis:zd}]);});
     if(areas.length)ser.push({name:"中枢",type:"line",data:[],markArea:{silent:true,itemStyle:{color:"transparent"},data:areas}});
   }
@@ -928,6 +931,22 @@ function slTpOf(u){
   else tp=close+2*R;                              // 2R 盈亏比兜底
   if(tp==null||tp<=close)return null;
   return {sl:sl,en:en,tp:tp,close:close,R:R};
+}
+/* ===== R268: mark 过滤范围 = 末段可视 K 线 =====
+   主图 dataZoom 默认 start=30% 仅显示末段, 传"全段 K 线" min/max 给 chanMarkOption 会把早期
+   脱离可视的 mark 放行 → 飞脱主体 K 线. 例如 sh588870 ETF 标的, 全段 [0.889, 2.31] 倍率 1.63
+   1.6×=3.696, 但 echarts 默认 yAxis 只看末段 [~0.95, ~1.85], 早期 [1.95, 2.30] 中枢飞脱.
+   修复点按 opt.dataZoom[0].start(默认 30)切末段 K 线算 min/max, dates 仍传全段(保持 mark date 索引).
+   startPct 可覆盖, 如想看更早期 mark 可传 0. */
+function visKlMinMax(kl,startPct){
+  startPct=startPct==null?30:+startPct;
+  if(!kl||!kl.length)return {lo:null,hi:null,vis:kl};
+  var s=Math.max(0,Math.floor(kl.length*startPct/100));
+  var vis=kl.slice(s);
+  if(!vis.length)vis=kl;
+  var lo=Math.min.apply(null,vis.map(function(k){return +k.low;}));
+  var hi=Math.max.apply(null,vis.map(function(k){return +k.high;}));
+  return {lo:isFinite(lo)?lo:null,hi:isFinite(hi)?hi:null,vis:vis};
 }
 function addSlTpLine(opt,u){
   var z=slTpOf(u);
