@@ -169,7 +169,10 @@ def fetch_em(secid):
 # 腾讯仅给 6 列 OHLCV, 无成交额/换手率; 对指数 成交额≈成交量×指数点位(市值加权
 # Σvol_c·price_c≈(Σvol_c)·均价, 常数项在滚动分位/比值中抵消), 故派生 amount/to 代理,
 # 使 calc_v2 滚动分位/分层比值保持形状一致(scale-invariant), 模型权重/阈值/13门禁零改动。
-TX_SENT_URL = "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=%s,day,,,1300,qfq"
+# R267(2026-09-06): 去掉 web. 前缀 —— R249 实证 web.ifzq.gtimg.cn 出口被腾讯 WAF 501 拦截,
+# 同源 ifzq.gtimg.cn(无 web.) 200 正常(_tx_url 已于 R249 修复, 此处同步遗漏)。此前东财限流
+# 触发腾讯回退时, 回退请求实际必挂 -> 情绪 txt 停在旧快照(08-2x 曾发生), 回退形同虚设。
+TX_SENT_URL = "https://ifzq.gtimg.cn/appstock/app/fqkline/get?param=%s,day,,,1300,qfq"
 
 
 def fetch_tx_sentiment(tx_code):

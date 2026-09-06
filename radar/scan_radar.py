@@ -256,12 +256,42 @@ def fetch_kline(sym):
 
 
 # ================= 3. 结构摘要 + 门禁 + 近端信号 =================
-def _days_ago(date_s):
+# R267: 统一北京时区日期 —— CI runner 本地是 UTC, datetime.date.today() 在 UTC 跨日窗口
+# (北京已过午夜而 UTC 未过)会差一天, 使停牌天数/背驰新鲜度/陈旧判定系统性偏移 ±1。
+# 与 fetch_data._bj_now (R236/R167) 口径一致。
+def _bj_today():
+    return datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8))).date()
+
+
+def _days_ago(date_s, _today=None):
     try:
         y, m, d = (int(x) for x in date_s.split("-"))
-        return (datetime.date.today() - datetime.date(y, m, d)).days
+        t = _today or _bj_today()
+        return (t - datetime.date(y, m, d)).days
     except Exception:
         return 999
+
+
+_STALE_GAP_DAYS = 12   # 末根距今天数上限: 覆盖最长真实休市(周末2 + 国庆/春节长假≈9), 12 安全裕量
+
+
+def _last_fresh(last_date, today=None):
+    """末根K线是否够新鲜(距北京今天 <= _STALE_GAP_DAYS 自然日)。
+
+    R267: 原 _fetch_tx 判定 `last_date >= "2024-01-01"` 过松 —— 腾讯 CDN 陈旧缓存
+    (R248: 缓存键含日期段, 曾停 12h+ 乃至次日才追平)只要落在 2024 后就被当有效,
+    全市场会静默用旧 K 线扫描出"昨日/数日前"的信号而 meta 无感。改为相对今天收紧,
+    缓存停留超过最长真实休市即判陈旧 -> 触发新浪兜底(当日实时)而不是吞下旧数据。
+    1~3 天内的短滞后无法用自然日区分(真实休市也如此), 由 meta.asof + radar.json
+    build_date 守卫的次日自动重扫自愈。未来日期(>今天)同样判 False(数据泄漏防御,
+    与 fetch_data.validate 的未来拦截同口径)。"""
+    try:
+        y, m, d = (int(x) for x in last_date.split("-"))
+        t = today or _bj_today()
+        gap = (t - datetime.date(y, m, d)).days
+        return 0 <= gap <= _STALE_GAP_DAYS
+    except Exception:
+        return False
 
 
 def _bc_tail(bc, bis, btype, n_last=10):
@@ -448,7 +478,10 @@ def synth_industry_kline(members, got):
         cl = px * (1 + rc)
         out.append({"date": d, "open": round(o, 2), "high": round(max(hi, o, cl), 2),
                     "low": round(min(lo, o, cl), 2), "close": round(cl, 2),
-                    "volume": round(vol / 1e8, 2)})          # 亿元
+                    # R267 注释更正: vol=Σ(成分手×价), 单位=手·元, 非元(差100倍=手→股)。
+                    # 存值 = vol/1e8 = 板块成交额(亿元)/100 —— 前端 radar.html amtYi ×100 还原为亿元,
+                    # 勿把本字段当"亿元"直接用(会小100倍)。
+                    "volume": round(vol / 1e8, 2)})          # = 成交额(亿元)/100
         px = cl
     return out if len(out) >= 120 else None
 
