@@ -148,6 +148,8 @@ h1 .dot{color:#ffd43b}
 .ghead .gnote{color:var(--muted);font-size:11.5px}
 .ghead .gavg{margin-left:auto;font-weight:700;font-size:12px}
 .list-note{padding:8px 16px;font-size:11px;color:#94a3b8;text-align:center;background:#fcfdff;border-top:1px dashed #eef2f7}
+.list-note a{display:inline-block;margin:0 2px;padding:2px 10px;border-radius:10px;background:#fff;border:1px solid #c9d6e8;color:var(--primary);font-weight:700;cursor:pointer;text-decoration:none;transition:.15s;box-shadow:0 1px 3px rgba(15,23,42,.06)}
+.list-note a:hover{border-color:var(--primary);box-shadow:0 2px 8px rgba(43,108,176,.18)}
 .stk-grid{display:grid;grid-template-columns:minmax(150px,1.2fr) repeat(9,minmax(40px,.6fr)) 20px;gap:6px;align-items:center;padding:9.5px 16px;font-size:12px;border-top:1px solid #f1f5f9;cursor:pointer;transition:background .12s}
 .stk-grid:hover{background:#f4f8fc}
 .stk-grid.hl{background:#e8f1fb;box-shadow:inset 3px 0 0 var(--primary)}
@@ -833,8 +835,11 @@ function drawStkInto(el,sym){
     el.innerHTML='<div class="err">实时行情拉取失败：'+esc(e.message)+'<br>（腾讯 fqkline 需在浏览器环境访问，file:// 可能被拦；可用 GitHub Pages / 本地 http 服务）</div>'});
 }
 /* ===== 行业成分股列表(点击切主图) ===== */
+var EXPAND_ALL=false;   // R295: 成分列表"其余组"展开全部状态(默认折叠前 50)
+function toggleRestAll(){EXPAND_ALL=!EXPAND_ALL;if(curInd)renderIndStkList(curInd)}
 function renderIndStkList(k){
   var isETF=(INDS[k]||{}).is_etf===1;
+  if(!isETF&&EXPAND_ALL)EXPAND_ALL=false;   // R295: 非 ETF 板块重置展开态(股票行业无展开按钮, 防状态残留)
   var members=[];Object.keys(UNI).forEach(function(sym){
     var u=UNI[sym];
     var match=isETF?(u.type==="ETF"):(u.ind===k);
@@ -848,12 +853,19 @@ function renderIndStkList(k){
   var gTop=list.filter(function(x){return x.sg&&x.sg.dir==="top"});
   var gBot=list.filter(function(x){return x.sg&&x.sg.dir==="bottom"});
   var gRest=list.filter(function(x){return !x.sg});
-  // 综合排序: 信号(强>新) > 其余(自洽率降序, 市值降序)
+  // 综合排序: 信号(强>新) > 其余
   // R258: fresh 可为 0(当日信号), 原 (x.fresh||9) 会把 0 误当 9, 新鲜信号反而排后 → 改 null 感知
   function frDays(x){return x.sg.fresh==null?9:x.sg.fresh}
   gTop.sort(function(a,b){return (b.sg.strong||0)-(a.sg.strong||0)||frDays(a)-frDays(b)});
   gBot.sort(function(a,b){return (b.sg.strong||0)-(a.sg.strong||0)||frDays(a)-frDays(b)});
-  gRest.sort(function(a,b){return (b.st.agree||0)-(a.st.agree||0)||(b.u.mcap||0)-(a.u.mcap||0)});
+  // R295(ETF): 板块成分"其余"组排序 = 热度优先(60日成交额 avg_amt60 降序, 稳定抗单日噪音) → 规模次键(mcap 降序兜底).
+  //   自洽率对 ETF 一篮子基金意义弱; 热度高=流动性好=缠论信号执行不打滑. 前 50 = 热度最高的 50 只.
+  //   股票行业维持 R290 已透明口径: 自洽率 → 市值(与 ETF 分行排序, 防误改股票口径用户困惑)
+  if(isETF){
+    gRest.sort(function(a,b){return (b.st.avg_amt60||0)-(a.st.avg_amt60||0)||(b.u.mcap||0)-(a.u.mcap||0)});
+  }else{
+    gRest.sort(function(a,b){return (b.st.agree||0)-(a.st.agree||0)||(b.u.mcap||0)-(a.u.mcap||0)});
+  }
   function sec(title,cnt,rows,opt){
     if(!rows.length)return'';
     var sum=0,cv=0;rows.forEach(function(r){var c=(r.st||{}).chg1d;if(c!=null){sum+=c;cv++;}});
@@ -863,7 +875,9 @@ function renderIndStkList(k){
       (opt.note?'<span class="gnote">'+esc(opt.note)+'</span>':'')+
       (avg!=null?'<span class="gavg '+(avg>0?"up":"down")+'">组均 '+pct(avg,1)+'</span>':'')+
       '</div>';
-    var body=rows.slice(0,opt.max||30).map(function(x){
+    var lim=opt.max||30;
+    if(opt.canExpand&&EXPAND_ALL)lim=rows.length;   // R295: ETF 板块"其余组"默认折叠前 50, 展开看全表
+    var body=rows.slice(0,lim).map(function(x){
       var u=x.u,s=x.st;var chg=s.chg1d;
       var hl=curStk===x.sym?" hl":"";
       var tag='',fsub='';
@@ -892,7 +906,17 @@ function renderIndStkList(k){
         '<div class="val '+(s.dd!=null&&s.dd<0?"down":"")+'">'+(s.dd==null?"-":Math.abs(s.dd*100).toFixed(0)+"%")+'</div>'+
         '<div class="arr">›</div></div>';
     }).join("");
-    return '<div>'+head+body+(rows.length>(opt.max||30)?'<div class="list-note">'+(opt.maxNote?'<b>'+esc(opt.maxNote)+' · </b>':'')+'仅显示前 '+(opt.max||30)+' 只 · 已通过门禁 '+rows.length+' 只</div>':'')+'</div>';
+    // R295: 底部状态行 —— 折叠态: 按钮「▼ 展开全部 N 只」+ 默认显示前 lim; 展开态: 「▲ 收起」+ 已展开全部
+    //   展开后 rows.length==lim, 故 noteShow 必须含 EXPAND_ALL 分支, 否则收起按钮消失
+    var noteShow=rows.length>lim||(opt.canExpand&&EXPAND_ALL);
+    return '<div>'+head+body+(noteShow?'<div class="list-note">'+
+      (opt.maxNote?'<b>'+esc(opt.maxNote)+' · </b>':'')+
+      (opt.canExpand
+        ?(EXPAND_ALL
+            ?'<a onclick="toggleRestAll()">▲ 收起</a> · 已展开全部 '+rows.length+' 只'
+            :'<a onclick="toggleRestAll()">▼ 展开全部 '+rows.length+' 只</a> · 默认显示 '+(opt.sortLbl?esc(opt.sortLbl)+' ':'')+'前 '+lim+' 只')
+        :'仅显示前 '+lim+' 只 · 已通过门禁 '+rows.length+' 只')+
+      '</div>':'')+'</div>';
   }
   var head='<div class="stk-grid head"><div>名称</div><div class="val">信号</div><div class="val">趋势</div><div class="val">末中枢</div><div class="val">笔</div><div class="val">中枢</div><div class="val">自洽</div><div class="val">涨跌</div><div class="val">净流入</div><div class="val">距高回撤</div><div class="arr">›</div></div>';
   // 浮动表头 clone(JS 控制显示, 避免遮挡首只股票)
@@ -900,7 +924,9 @@ function renderIndStkList(k){
   $("indStkList").innerHTML=head+
     sec("见顶风险",gTop.length,gTop,{ic:"🔴",note:"顶背驰·注意回落"})+
     sec("见底机会",gBot.length,gBot,{ic:"🟢",note:"底背驰·关注企稳"})+
-    sec("其余通过门禁",gRest.length,gRest,{ic:"📄",note:"按自洽率+市值排序（混入持有期跟踪，机会需自分辨）",max:50,maxNote:"K线/自洽/流动性门禁"})+
+    (isETF
+      ? sec("其余通过门禁",gRest.length,gRest,{ic:"📄",note:"按热度排序（60日成交额↓ = 资金关注度/流动性, 规模次之）",max:50,maxNote:"K线/自洽/流动性门禁",canExpand:true,sortLbl:"热度"})
+      : sec("其余通过门禁",gRest.length,gRest,{ic:"📄",note:"按自洽率+市值排序（混入持有期跟踪，机会需自分辨）",max:50,maxNote:"K线/自洽/流动性门禁"}))+
     (members.length?"":'<div class="empty" style="padding:36px 20px"><div class="etx">该行业无通过门禁的成分</div></div>');
   // 确保 body 有且仅有一个 float 表头元素
   var $fh=$("stkFloatHead");
