@@ -253,9 +253,9 @@ h1 .dot{color:#ffd43b}
 .sigrad .foot{padding:7px 16px;font-size:10.5px;color:#b0b9c6;text-align:center;border-top:1px solid #f1f5f9;background:#fcfdff;line-height:1.5}
 /* R287: 盘面摘要行 + 共振/背离 chips + 行首色条 */
 .sigrad .chips{display:flex;gap:6px;margin-left:auto}
-.sigrad .chip{font-size:11px;font-weight:600;color:#64748b;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:20px;padding:2px 10px;line-height:1.8;cursor:pointer;white-space:nowrap;transition:all .12s}
-.sigrad .chip:hover{background:#e8eef5}
-.sigrad .chip.on{background:#1c2a3a;color:#fff;border-color:#1c2a3a}
+.sigrad .chip,.revpool .chip{font-size:11px;font-weight:600;color:#64748b;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:20px;padding:2px 10px;line-height:1.8;cursor:pointer;white-space:nowrap;transition:all .12s}
+.sigrad .chip:hover,.revpool .chip:hover{background:#e8eef5}
+.sigrad .chip.on,.revpool .chip.on{background:#1c2a3a;color:#fff;border-color:#1c2a3a}
 .sigrad .smark{width:100%;padding:7px 16px 2px;font-size:11px;color:#475569;line-height:1.7;display:flex;flex-wrap:wrap;gap:3px 14px;align-items:center}
 .sigrad .smark b{font-weight:700}
 .sigrad .smark .tt{color:#c92a2a;font-weight:700}.sigrad .smark .bb{color:#087f5b;font-weight:700}
@@ -268,6 +268,7 @@ h1 .dot{color:#ffd43b}
 .revpool{margin-top:16px;background:var(--card);border:1px solid #d9e2ef;border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden;border-left:3px solid #18a058}
 .revpool .phead{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid #eef2f7;flex-wrap:wrap}
 .revpool .phead h2{font-size:16px}
+.revpool .chips{display:flex;gap:6px;margin-left:auto}
 .revpool .phint{font-size:11.5px;color:var(--muted);line-height:1.7;width:100%}
 .revpool .prow{display:grid;grid-template-columns:minmax(140px,1.35fr) minmax(74px,.7fr) minmax(64px,.62fr) minmax(120px,1.05fr) minmax(96px,.92fr);gap:8px;align-items:center;padding:7px 16px;cursor:pointer;border-top:1px solid #f5f8fb;transition:background .12s;font-size:12px}
 .revpool .prow:hover{background:#f2f9f5}
@@ -418,8 +419,8 @@ function zsPosBadge(x){
   if(!p)return "";
   if(p.cat==="up")return ' <span class="zsb up" title="板块指数收盘已站上末中枢上沿(zg='+((x.st.zs_last||{}).zg)+')之上 — 结构强势">'+p.txt+(p.pct>0?"+":"")+p.pct.toFixed(1)+"%</span>";
   if(p.cat==="dn")return ' <span class="zsb dn" title="板块指数收盘已跌破末中枢下沿(zd='+((x.st.zs_last||{}).zd)+') — 结构走弱">'+p.txt+p.pct.toFixed(1)+"%</span>";
-  var side=(p.pct||0)<=0?"(上半区)":"(下半区)";
-  return ' <span class="zsb mid" title="板块指数收盘于末中枢内">中枢内</span>';
+  var side=p.pct<=0?"上":"下";
+  return ' <span class="zsb mid" title="板块指数收盘于末中枢内 ('+side+'半区, 距'+(p.pct<=0?"上沿 ":"下沿 ")+Math.abs(p.pct).toFixed(1)+'%)">中枢内</span>';
 }
 // R304: 概要条位置温度 — 统计 32 板块: 上沿上方 / 中枢内 / 破位
 function zsTemp(){
@@ -1219,8 +1220,9 @@ function showStk(sym){
     var _dv=sigDev(stk,s);
     var _dvTxt=_dv!=null?((_dv>=0?"现价已高于信号位 ":"现价已低于信号位 ")+Math.abs(_dv).toFixed(1)+"%"):"";
     banner+='<div class="signals-box"><div class="signal-pill '+(t?"t":"b")+'"><b>'+(t?"⚠️ 顶背驰风险":"✅ 底背驰机会")+'</b> · '+(stk.bc_date||"")+'触发('+(stk.fresh!=null?stk.fresh:"?")+'天前) · '+(stk.bc_type||"")+' · 强度'+(stk.strong||0)+'/2'+(stk.vol?" · 量缩确认":"")+
-      (_dvTxt?' · <b style="'+(t?(_dv<0?"color:#0e7d4a":"color:#c92a2a"):(_dv<=8?"color:#0e7d4a":"color:#c92a2a"))+'">'+_dvTxt+'</b>':'')+
-      '<br><span style="opacity:.85;font-size:12px">'+(t?( _dv!=null&&_dv<0?"已从顶背驰高点回落 "+Math.abs(_dv).toFixed(1)+"%，风险有所释放，仍防反抽遇压":(_dv!=null?"现价仍高于顶背驰高点，回落风险未解除":"上攻动能减弱，注意中枢上沿/前高压力")):( _dv!=null&&_dv<=8?"现价仍贴近背驰低点(+"+_dv.toFixed(1)+"%)，属低吸参考区，跌破"+((s.bottom_bc&&s.bottom_bc.end_price)!=null?s.bottom_bc.end_price:"背驰低点")+"则结构失效":"下跌动能衰竭，关注中枢下沿支撑与企稳信号"))+'</span></div></div>';
+      // R313-fix: 底信号 dv<0(现价已跌破背驰低点=结构失效)不能再当"低吸参考区"引导 — R289 sigRow 已修, showStk banner 漏修同源
+      (_dvTxt?' · <b style="'+(t?(_dv<0?"color:#0e7d4a":"color:#c92a2a"):(!t&&_dv<0?"color:#c92a2a":(_dv<=8?"color:#0e7d4a":"color:#c92a2a")))+'">'+_dvTxt+'</b>':'')+
+      '<br><span style="opacity:.85;font-size:12px">'+(t?( _dv!=null&&_dv<0?"已从顶背驰高点回落 "+Math.abs(_dv).toFixed(1)+"%，风险有所释放，仍防反抽遇压":(_dv!=null?"现价仍高于顶背驰高点，回落风险未解除":"上攻动能减弱，注意中枢上沿/前高压力")):( _dv!=null&&_dv<0?"已跌破背驰低点 "+Math.abs(_dv).toFixed(1)+"%，底背驰结构失效 · 暂不低吸，等重新企稳再评估":(_dv!=null&&_dv<=8?"现价仍贴近背驰低点(+"+_dv.toFixed(1)+"%)，属低吸参考区，跌破"+((s.bottom_bc&&s.bottom_bc.end_price)!=null?s.bottom_bc.end_price:"背驰低点")+"则结构失效":"下跌动能衰竭，关注中枢下沿支撑与企稳信号")))+'</span></div></div>';
   }else if(u.gate){
     banner='<div class="signals-box"><div class="gate-pill"><b>门禁：'+esc(u.gate)+'</b><br>'+esc(u.gd||"")+'　<span style="font-size:12px">(仍展示K线与结构，但不进信号区)</span></div></div>';
   }else if(scen){
@@ -1232,9 +1234,9 @@ function showStk(sym){
   var miniCol=hasMini?'<div><div class="chart-note">近60日迷你走势(K线快照)</div><div id="stkMini" style="height:150px"></div></div>':'';
   var infoCol='<div style="font-size:12px;line-height:2.1;color:#475569;padding:6px 2px'+(hasMini?'':';grid-column:1/-1')+'">'+
       '<b style="font-size:13px">缠论结构</b><br>· 笔数 '+(s.bi_n||0)+' / 中枢 '+(s.zs_n||0)+' / 背驰 '+(s.bc_n||0)+' / 买卖点 '+(s.sig_n||0)+'<br>· 末段中枢 '+(s.zs_last?("["+s.zs_last.zd+" ~ "+s.zs_last.zg+"] 结束于 "+s.zs_last.date_end):"无")+'<br>· 分笔自洽率 '+(s.agree!=null?(s.agree*100).toFixed(1)+"%": "-")+' ('+(s.agree_n||0)+'笔)'+
-      '<br>· 近60日均额 '+(s.avg_amt60!=null?capStr(s.avg_amt60*1e4)+"元":"-")+' · 振幅中位 '+(s.med_amp!=null?s.med_amp+"%":"-")+'<br>· 一字板 '+(s.one_word||0)+'日 · 距高点回撤 '+(s.dd!=null?(s.dd*100).toFixed(1)+"%":"-")+'</div>';
+      '<br>· 近60日均额 '+(s.avg_amt60!=null?(s.avg_amt60>=1e4?(s.avg_amt60/1e4).toFixed(1)+"亿":s.avg_amt60.toFixed(0)+"万")+"/日":"-")+' · 振幅中位 '+(s.med_amp!=null?s.med_amp+"%":"-")+'<br>· 一字板 '+(s.one_word||0)+'日 · 距高点回撤 '+(s.dd!=null?(s.dd*100).toFixed(1)+"%":"-")+'</div>';
   var stkHtml=banner+
-    '<div class="panel"><div class="chart-note"><span class="legend-tag"><i style="background:#e54545"></i>涨</span><span class="legend-tag"><i style="background:#18a058"></i>跌</span><span class="legend-tag"><i style="background:#7f77dd"></i>笔</span><span class="legend-tag"><i style="background:rgba(127,119,221,.25)"></i>中枢</span><span class="legend-tag"><i style="background:#c92a2a"></i>顶背驰(红▼)</span><span class="legend-tag"><i style="background:#087f5b"></i>底背驰(绿▲)</span></div><div id="stkChart" style="width:100%;height:600px"><div class="loading sk">行情加载中…</div></div></div>'+
+    '<div class="panel"><div class="chart-note"><span class="legend-tag"><i style="background:#e54545"></i>涨</span><span class="legend-tag"><i style="background:#18a058"></i>跌</span><span class="legend-tag"><i style="background:#7f77dd"></i>笔</span><span class="legend-tag"><i style="background:rgba(127,119,221,.25)"></i>中枢</span><span class="legend-tag"><i style="background:#c92a2a"></i>顶背驰(红▼)</span><span class="legend-tag"><i style="background:#087f5b"></i>底背驰(绿▲)</span></div><div id="stkChart" style="width:100%;height:620px"><div class="loading sk">行情加载中…</div></div></div>'+
     '<div class="sec-t">结构明细 <span class="cnt">来自扫描快照(截至 '+esc(s.last||"")+')</span></div>'+
     '<div class="panel" style="padding:10px 16px"><div class="chart-sec">'+miniCol+infoCol+'</div></div>'+
     '<div class="foot">行情为浏览器实时拉取(腾讯前复权)；缠论标注按扫描时结构对齐日期。研究参考，不构成投资建议。</div>';
@@ -1327,14 +1329,13 @@ function initSearch(){
   drop.addEventListener("mousedown",function(e){var it=e.target.closest?e.target.closest(".hd-it"):null;if(it){e.preventDefault();hsGo(it.getAttribute("data-sym"))}});
   document.addEventListener("click",function(e){var h=$("hsearch");if(h&&!h.contains(e.target))drop.classList.add("hidden")});
 }
-function hsFrom(){   // R302: 搜索发起时的页面语境 → 返回按钮/回跳与同区域直接点击完全一致
+function hsFrom(){   // R302+R313: 搜索发起时的页面语境 → 返回按钮/回跳与同区域直接点击完全一致(含逆向观察池)
   var vh=$("viewHome");
-  if(vh&&!vh.classList.contains("hidden")){   // 在雷达首页(顶部实操信号雷达 / 下方行业列表)
-    var sr=$("sigRadar");
-    if(sr&&sr.style.display!=="none"){        // 信号雷达有内容且主体在视口内 → 语境=信号雷达
-      var r=sr.getBoundingClientRect(),iH=window.innerHeight||document.documentElement.clientHeight;
-      if(r.bottom>0&&r.top<iH*0.85)return "sigrad";
-    }
+  if(vh&&!vh.classList.contains("hidden")){   // 在雷达首页(顶部实操信号雷达 / 逆向观察池 / 下方行业列表)
+    var iH=window.innerHeight||document.documentElement.clientHeight;
+    var inView=function(el){if(!el||el.style.display==="none")return false;var r=el.getBoundingClientRect();return r.bottom>0&&r.top<iH*0.85;};
+    if(inView($("sigRadar")))return "sigrad";   // 信号雷达有内容且主体在视口内 → 语境=信号雷达
+    if(inView($("revPool")))return "rev";       // R313: 逆向观察池在视口 → 语境=观察池(返回回观察池)
     return "home";
   }
   return prevStkSrc==="sigrad"?"sigrad":(prevStkSrc==="rev"?"rev":"home");  // 已在个股页: 保持上一入口来源(从哪来回哪)
