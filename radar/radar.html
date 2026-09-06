@@ -563,7 +563,9 @@ function drawChart(){
   // echarts.init(zrender) 不会清空 DOM 子节点,只追加 svg,loading 文字盖在 svg 上.
   el.innerHTML="";
   var opt=indKlineOption(kl,"ind");   // R258: 行业量=板块成交额(亿元), 不走个股"手"格式
-  opt.series=opt.series.concat(chanMarkOption(ind.mark,kl.map(function(x){return x.date})));
+  opt.series=opt.series.concat(chanMarkOption(ind.mark,kl.map(function(x){return x.date}),
+    Math.min.apply(null,kl.map(function(x){return x.low})),
+    Math.max.apply(null,kl.map(function(x){return x.high}))));
   // legend 只 push 实际存在的系列,避免 "底背驰" 等 0 信号行业报 warning
   ["笔","顶背驰","底背驰"].forEach(function(n){
     if(opt.series.some(function(s){return s.name===n;}) && opt.legend.data.indexOf(n)<0) opt.legend.data.push(n);
@@ -587,7 +589,9 @@ function drawStkInto(el,sym){
     var k2=kl.map(function(r){return {date:r[0],open:+r[1],close:+r[2],high:+r[3],low:+r[4],volume:+r[5]}});   // 腾讯 volume 单位=手(实测 333102=33.3万手/ETF 同量级), 不再 /100
     el.innerHTML="";
     var opt=indKlineOption(k2,"stk");
-    var u=UNI[sym];var extra=chanMarkOption(u&&u.mark,k2.map(function(x){return x.date}));
+    var u=UNI[sym];var extra=chanMarkOption(u&&u.mark,k2.map(function(x){return x.date}),
+      Math.min.apply(null,k2.map(function(x){return x.low})),
+      Math.max.apply(null,k2.map(function(x){return x.high})));
     opt.series=opt.series.concat(extra);
     addSlTpLine(opt,u);   // R262: 底背驰个股标 止损(背驰低点)/止盈(中枢上沿或2R)
     ["笔","顶背驰","底背驰"].forEach(function(n){if(opt.series.some(function(s){return s.name===n;})&&opt.legend.data.indexOf(n)<0)opt.legend.data.push(n);});
@@ -766,7 +770,9 @@ function loadStkChart(sym){
     var k2=kl.map(function(r){return {date:r[0],open:+r[1],close:+r[2],high:+r[3],low:+r[4],volume:+r[5]}});   // 腾讯 volume 单位=手(ETF 同量级), 不再 /100
     var el=$("stkChart");if(!el)return;el.innerHTML="";
     var opt=indKlineOption(k2,"stk");
-    var u=UNI[sym];var extra=chanMarkOption(u.mark,k2.map(function(x){return x.date}));
+    var u=UNI[sym];var extra=chanMarkOption(u.mark,k2.map(function(x){return x.date}),
+      Math.min.apply(null,k2.map(function(x){return x.low})),
+      Math.max.apply(null,k2.map(function(x){return x.high})));
     opt.series=opt.series.concat(extra);
     addSlTpLine(opt,u);   // R262: 底背驰个股标 止损(背驰低点)/止盈(中枢上沿或2R)
     ["笔","顶背驰","底背驰"].forEach(function(n){if(opt.series.some(function(s){return s.name===n;})&&opt.legend.data.indexOf(n)<0)opt.legend.data.push(n);});
@@ -858,23 +864,39 @@ function indKlineOption(kl,kind){   // kind:"ind"=行业合成(量=成交额亿�
     ]
   };
 }
-function chanMarkOption(mark,dates){
+function chanMarkOption(mark,dates,kmin,kmax){
   var ser=[];
   if(!mark)return ser;
   var di={};dates.forEach(function(d,i){di[d]=i});
   function xi(dt){return di[dt]!=null?di[dt]:null}
+  // R263: mark 偏离 K 线可视范围的防御 — mark 基于 scan 窗口生成, 个股路径拉更长腾讯 K 线
+  // (660 根) 时早期 mark 可能远超/低过可视区, markArea 进入 yAxis range 会撑爆主图, 笔/散点"飞脱"主体 K 线
+  var band=kmin!=null&&kmax!=null&&isFinite(kmin)&&isFinite(kmax)&&kmin>0&&kmax>kmin;
+  var inRange=function(p){if(!band)return true;if(!isFinite(p))return false;return p>=kmin*0.5&&p<=kmax*1.6};
   if(mark.line&&mark.line.length){
     var data=[];
-    mark.line.forEach(function(b){var x1=xi(b[0]),x2=xi(b[2]);if(x1==null||x2==null)return;data.push([x1,b[1]],[x2,b[3]]);});
+    mark.line.forEach(function(b){var x1=xi(b[0]),x2=xi(b[2]);if(x1==null||x2==null)return;
+      // 任一端价位越界 → 整段笔排除(防笔折线拉脱主体)
+      if(!inRange(b[1])||!inRange(b[3]))return;
+      data.push([x1,b[1]],[x2,b[3]]);});
     if(data.length)ser.push({name:"笔",type:"line",data:data,symbol:"none",lineStyle:{width:1,color:"#7f77dd"},z:2,clip:true});
   }
   if(mark.zs&&mark.zs.length){
     var areas=[];
-    mark.zs.forEach(function(z){var x1=xi(z[2]),x2=xi(z[3]);if(x1==null||x2==null)return;areas.push([{name:"中枢",xAxis:x1,yAxis:z[1],itemStyle:{color:"rgba(127,119,221,.16)",borderColor:"#7f77dd",borderWidth:.8}},{xAxis:x2,yAxis:z[0]}]);});
+    mark.zs.forEach(function(z){var x1=xi(z[2]),x2=xi(z[3]);if(x1==null||x2==null)return;
+      var zd=+z[1],zg=+z[0];
+      if(!isFinite(zd)||!isFinite(zg))return;
+      var lo=Math.min(zd,zg),hi=Math.max(zd,zg);
+      // 中枢完全脱离 K 线可视区时排除(整块漂浮)
+      if(band&&(hi<kmin*0.5||lo>kmax*1.6))return;
+      areas.push([{name:"中枢",xAxis:x1,yAxis:zg,itemStyle:{color:"rgba(127,119,221,.16)",borderColor:"#7f77dd",borderWidth:.8}},{xAxis:x2,yAxis:zd}]);});
     if(areas.length)ser.push({name:"中枢",type:"line",data:[],markArea:{silent:true,itemStyle:{color:"transparent"},data:areas}});
   }
   var tp=[],bp=[];
-  (mark.bc||[]).forEach(function(b){var x=xi(b[1]);if(x==null)return;var isTop=b[0]==="top"||b[0]===1||String(b[0]).indexOf("顶")>=0;(isTop?tp:bp).push({value:[x,b[2]]});});
+  (mark.bc||[]).forEach(function(b){var x=xi(b[1]);if(x==null)return;
+    // 背驰三角价位越界也排除(防散点飞脱)
+    if(!inRange(b[2]))return;
+    var isTop=b[0]==="top"||b[0]===1||String(b[0]).indexOf("顶")>=0;(isTop?tp:bp).push({value:[x,b[2]]});});
   function sc(col,dir){return {name:dir,type:"scatter",data:dir==="顶背驰"?tp:bp,symbol:"triangle",symbolSize:12,symbolRotate:dir==="顶背驰"?180:0,itemStyle:{color:col,borderColor:"#fff",borderWidth:1},z:6,label:{show:true,formatter:dir,fontSize:9,position:dir==="顶背驰"?"top":"bottom",color:col,fontWeight:"700"}}}
   if(tp.length)ser.push(sc("#c92a2a","顶背驰"));
   if(bp.length)ser.push(sc("#087f5b","底背驰"));
