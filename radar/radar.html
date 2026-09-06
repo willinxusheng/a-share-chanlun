@@ -1208,13 +1208,18 @@ function indKlineOption(kl,kind){   // kind:"ind"=行业合成(量=成交额亿�
     tooltip:{trigger:"axis",axisPointer:{type:"cross",label:{fontSize:11}},backgroundColor:"rgba(15,23,42,.92)",textStyle:{fontSize:12,lineHeight:20},borderWidth:0,padding:[8,12],
       extraCssText:"border-radius:10px;box-shadow:0 8px 24px rgba(15,23,42,.28);font-variant-numeric:tabular-nums;",
       formatter:function(ps){var p=ps[0];if(!p||!p.axisValue)return"";var i=ps[0].dataIndex;var k=kl[i];if(!k)return p.axisValue;
-        var up=k.close>=k.open;
+        // R301: tooltip 加该K线涨跌幅(收/前收, 首根以开盘为基准)。颜色/收字按真实涨跌而非开收阴阳
+        // —— 原逻辑 up=close>=open, 低开高走收阴但实际较前收上涨时会被误标绿▼
+        var pv=i>0?kl[i-1].close:k.open;
+        var eq=pv>0&&k.close===pv, up=pv>0&&k.close>pv;
+        var chgTxt=pv>0?(eq?"0.00%":(up?"+":"-")+Math.abs((k.close-pv)/pv*100).toFixed(2)+"%"):"--";
+        var colChg=eq?"#94a3b8":(up?"#ff6b6b":"#4ade80");
         var volTxt=kind==="ind"?"板块成交额 "+amtYi(k.volume):"量 "+fmtVol(k.volume);   // R258: 行业合成量=成交额(亿元), 个股=手
         // R271: 当日命中分类买卖点时追加一行全名(一买/二买/三买/一卖/二卖/三卖+背驰级别)
         var sigLine="";
         (ps||[]).forEach(function(q){if((q.seriesName==="买点"||q.seriesName==="卖点")&&q.data&&q.data.meta&&q.dataIndex===i){sigLine="<br/>📌 缠论 <b style='color:#f59f00'>"+q.data.meta+"</b>";}});
         return "<div style='font-size:12px;font-weight:700;margin-bottom:3px'>"+k.date+"</div>"+
-          "开 "+k.open+"　收 <b style='color:"+(up?"#ff6b6b":"#4ade80")+"'>"+k.close+"</b>"+(up?" ▲":" ▼")+
+          "开 "+k.open+"　收 <b style='color:"+colChg+"'>"+k.close+"</b>　涨跌 <b style='color:"+colChg+"'>"+chgTxt+"</b>"+
           "<br/>高 "+k.high+"　低 "+k.low+(rsiRaw[i]!=null?"<br/>RSI14 <b style='color:#b39ddb'>"+(+rsiRaw[i].toFixed(1))+"</b>":"")+
           "<br/><span style='color:#94a3b8'>"+volTxt+"</span>"+sigLine;}},
     legend:{data:["K线","MA5","MA10","MA20","MA60","RSI14","量"],top:6,textStyle:{fontSize:11},itemWidth:14,itemHeight:8},
