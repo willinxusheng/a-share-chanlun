@@ -132,7 +132,11 @@ h1 .dot{color:#ffd43b}
 .stk-grid.hl{background:#e8f1fb;box-shadow:inset 3px 0 0 var(--primary)}
 .stk-grid .arr{color:#cbd5e1;text-align:center;font-size:13px;opacity:.85}
 .stk-grid:hover .arr{opacity:1;color:#94a3b8}
-.stk-grid.head{background:#f8fafc;color:#5b6b81;font-size:11px;font-weight:600;letter-spacing:.3px;cursor:default;border-top:0;border-bottom:1px solid #e8edf4;position:sticky;top:64px;z-index:20;box-shadow:0 1px 0 #fff}
+.stk-grid.head{background:#f8fafc;color:#5b6b81;font-size:11px;font-weight:600;letter-spacing:.3px;cursor:default;border-top:0;border-bottom:1px solid #e8edf4}
+/* 浮动表头 clone: 仅 JS 在真实表头滚出视口时插入, 避免遮挡首只股票 */
+.stk-head-float{position:fixed;left:50%;transform:translateX(-50%);width:var(--wrap-w,1160px);max-width:calc(100vw - 36px);background:rgba(248,250,252,.96);backdrop-filter:saturate(160%) blur(8px);-webkit-backdrop-filter:saturate(160%) blur(8px);color:#5b6b81;font-size:11px;font-weight:600;letter-spacing:.3px;border-bottom:1px solid #e8edf4;box-shadow:0 4px 12px rgba(15,23,42,.06);z-index:35;display:none}
+.stk-head-float.show{display:grid}
+.stk-head-float .arr{display:none}
 .stk-grid .nm{font-weight:700;color:var(--ink);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px;line-height:1.5}
 .stk-grid .cd{color:var(--muted);font-size:10.5px;line-height:1.4;margin-top:1px}
 .stk-grid .val{text-align:right}
@@ -610,13 +614,41 @@ function renderIndStkList(k){
     }).join("");
     return '<div>'+head+body+(rows.length>(opt.max||30)?'<div class="list-note">仅显示前'+(opt.max||30)+'只 · 共'+rows.length+'只</div>':'')+'</div>';
   }
-  var head='<div class="stk-grid head"><div>名称</div><div class="val">信号</div><div class="val">趋势</div><div class="val">末中枢</div><div class="val">笔</div><div class="val">中枢</div><div class="val">自洽</div><div class="val">涨跌</div><div class="val">距高回撤</div><div></div></div>';
+  var head='<div class="stk-grid head"><div>名称</div><div class="val">信号</div><div class="val">趋势</div><div class="val">末中枢</div><div class="val">笔</div><div class="val">中枢</div><div class="val">自洽</div><div class="val">涨跌</div><div class="val">距高回撤</div><div class="arr">›</div></div>';
+  // 浮动表头 clone(JS 控制显示, 避免遮挡首只股票)
+  var floatHead='<div id="stkFloatHead" class="stk-head-float stk-grid" data-orig="1"><div>名称</div><div class="val">信号</div><div class="val">趋势</div><div class="val">末中枢</div><div class="val">笔</div><div class="val">中枢</div><div class="val">自洽</div><div class="val">涨跌</div><div class="val">距高回撤</div><div class="arr">›</div></div>';
   $("indStkList").innerHTML=head+
     sec("见顶风险",gTop.length,gTop,{ic:"🔴",note:"顶背驰·注意回落"})+
     sec("见底机会",gBot.length,gBot,{ic:"🟢",note:"底背驰·关注企稳"})+
     sec("其余通过门禁",gRest.length,gRest,{ic:"📄",note:"按自洽率排序",max:50})+
     (members.length?"":'<div class="empty" style="padding:36px 20px"><div class="etx">该行业无通过门禁的成分</div></div>');
+  // 确保 body 有且仅有一个 float 表头元素
+  var $fh=$("stkFloatHead");
+  if(!$fh){var w=document.createElement("div");w.innerHTML=floatHead;document.body.appendChild(w.firstChild);}
+  // 浮动表头需知道 panel 宽度
+  var wrap=document.querySelector(".wrap")||document.body;
+  if(wrap){var ww=getComputedStyle(wrap).width;document.documentElement.style.setProperty("--wrap-w",ww);}
+  pinStkHead();
 }
+
+function pinStkHead(){
+  var heads=document.querySelectorAll(".stk-grid.head");
+  var $h2=$("stkFloatHead");
+  if(!heads.length||!$h2){if($h2)$h2.classList.remove("show");return;}
+  var h=heads[0],r=h.getBoundingClientRect();
+  // 当真实表头顶端到达/越过 64px 才接管(浮层), 其它时间用户能看到真实表头, 列表平整无遮挡
+  var trigger=r.top<=64;
+  if(trigger){
+    $h2.classList.add("show");
+    // 列对齐: 用 panel(不超出 main wrap 宽度) 几何同步浮层宽/位
+    var panel=h.closest(".panel");
+    if(panel){var pr=panel.getBoundingClientRect();$h2.style.left=pr.left+"px";$h2.style.width=pr.width+"px";$h2.style.transform="none";}
+  }else{
+    $h2.classList.remove("show");
+  }
+}
+window.addEventListener("scroll",function(){requestAnimationFrame(pinStkHead)},{passive:true});
+window.addEventListener("resize",function(){requestAnimationFrame(pinStkHead)});
 /* 在行业页内点股票: 切到个股K线 tab,不跳转 */
 function pickStkInInd(sym){
   curStk=sym;curTab="stk";
@@ -629,6 +661,8 @@ function pickStkInInd(sym){
   if(curInd)renderIndStkList(curInd);
   // 重画图(切到个股)
   drawChart();
+  // 同步浮层表头列宽(panel 宽度变化极小, 但保险)
+  requestAnimationFrame(pinStkHead);
   // 滚到顶部让用户看到主图变化
   var el=$("mainChart");if(el)el.scrollIntoView({behavior:"smooth",block:"start"});
 }
