@@ -742,7 +742,7 @@ function renderInds(){
     var mvLine=(mv.up||mv.down)?'<span class="mvmini">'+(mv.up?'<span class="up">▲'+mv.up+'</span>':'')+(mv.up&&mv.down?' ': '')+(mv.down?'<span class="down">▼'+mv.down+'</span>':'')+' ≥5%</span>':'';
     html+='<div class="ind-row'+hl+strongCls+'" onclick="pickInd(\''+esc(k)+'\')">'+
       '<div class="nm">'+esc(k)+etfTag+(sg?' <span class="badge2 '+(x.n_sig_top?(x.n_sig_bot?'y':'r'):'g')+'" title="该行业成分股近端背驰信号｜顶='+(x.n_sig_top||0)+'(动能减弱·防回落)｜底='+(x.n_sig_bot||0)+'(动能衰竭·关注企稳)｜≥2只时左侧色条=集中风险/机会">顶 '+(x.n_sig_top||0)+' / 底 '+(x.n_sig_bot||0)+'</span>':'')+
-      (x.leader?'<br><a class="indlead" title="'+(x.is_etf?"场内规模最大的基金 · 点击直达":"该行业总市值最大的龙头股 · 点击直达")+'" onclick="event.stopPropagation();showStk(\''+esc(x.leader.sym)+'\')">👑 '+esc(x.leader.name)+'</a>':'')+'</div>'+
+      (x.leader?'<br><a class="indlead" title="'+(x.is_etf?"场内规模最大的基金 · 点击直达":"该行业总市值最大的龙头股 · 点击直达")+'" onclick="event.stopPropagation();prevStkSrc=\'home\';showStk(\''+esc(x.leader.sym)+'\')">👑 '+esc(x.leader.name)+'</a>':'')+'</div>'+
       '<div class="meta ta-r">'+capTxt+'<br><span>'+(x.is_etf?(x.n_member||0)+"/"+(x.n_total||0)+"只":(x.n_member||0)+"只")+'</span>'+(mvLine?'<br>'+mvLine:'')+'</div>'+
       '<div><span class="regime '+rCls+'" title="'+regimeTip(x)+'">'+esc(x.regime||"-")+'</span></div>'+
       '<div class="spark">'+sparkSVG(x.spark,160,34)+'</div>'+
@@ -1028,11 +1028,11 @@ function showStk(sym){
   var u=UNI[sym];if(!u){alert("未收录 "+sym);return}
   curStk=sym;curTab="stk";detailOpen=false;
   disposePool();hideFloatHead();   // R258: 整页重建前释放旧页图表实例 / 隐藏浮层表头
+  window.scrollTo(0,0);            // R302: 先回顶再切视图 — viewHome 隐藏瞬间文档高度收缩, 深滚动位置会被浏览器 clamp 造成视口跳闪("点进去闪一下")
   $("viewHome").classList.add("hidden");
   $("viewStk").classList.remove("hidden");
   var s=u.st||{};var stk=SIG.filter(function(x){return x.sym===sym})[0]||null;
   location.hash="#stk/"+sym;
-  window.scrollTo(0,0);
   var scen=s.scenario||"";
   var grp=(u.type==="ETF")?"ETF板块":(u.ind||"");
   var leadTag=u.lead?' <span class="lead-tag" title="'+(u.type==="ETF"?"场内规模最大的基金":"该行业总市值最大的龙头股")+'">👑 '+(u.type==="ETF"?"板块规模最大":"行业龙头")+'</span>':'';   // R283
@@ -1125,7 +1125,7 @@ function backHome(){
   $("viewStk").classList.add("hidden");
   $("viewHome").classList.remove("hidden");
   location.hash="#/";
-  curStk=null;curTab="ind";curInd=null;detailOpen=false;renderInds();
+  curStk=null;curTab="ind";curInd=null;detailOpen=false;prevStkSrc="home";renderInds();   // R302: 返回总览后语境复位 home(防残留 sigrad 污染后续入口按钮)
 }
 function pickIndFromStk(k){backHome();renderInds();pickInd(k)}
 /* ===== R298: 全局搜索 个股/ETF(代码/名称实时过滤, 点选或回车直达个股页) ===== */
@@ -1166,15 +1166,26 @@ function initSearch(){
   drop.addEventListener("mousedown",function(e){var it=e.target.closest?e.target.closest(".hd-it"):null;if(it){e.preventDefault();hsGo(it.getAttribute("data-sym"))}});
   document.addEventListener("click",function(e){var h=$("hsearch");if(h&&!h.contains(e.target))drop.classList.add("hidden")});
 }
-function hsGo(sym){   // 搜索直达个股页(来源=home → 返回按钮回雷达首页)
+function hsFrom(){   // R302: 搜索发起时的页面语境 → 返回按钮/回跳与同区域直接点击完全一致
+  var vh=$("viewHome");
+  if(vh&&!vh.classList.contains("hidden")){   // 在雷达首页(顶部实操信号雷达 / 下方行业列表)
+    var sr=$("sigRadar");
+    if(sr&&sr.style.display!=="none"){        // 信号雷达有内容且主体在视口内 → 语境=信号雷达
+      var r=sr.getBoundingClientRect(),iH=window.innerHeight||document.documentElement.clientHeight;
+      if(r.bottom>0&&r.top<iH*0.85)return "sigrad";
+    }
+    return "home";
+  }
+  return prevStkSrc==="sigrad"?"sigrad":"home";  // 已在个股页: 保持上一入口来源(从哪来回哪)
+}
+function hsGo(sym){   // 搜索直达个股页: 来源按搜索发起处语境判定(sigrad=返回信号雷达 / 其它=雷达首页)
   if(!UNI[sym])return;
   var drop=$("hsDrop"),inp=$("hsIn");
   if(drop)drop.classList.add("hidden");
   if(inp)inp.value="";
   hsHot=-1;
-  prevStkSrc="home";
-  showStk(sym);
-  window.scrollTo({top:0,behavior:"smooth"});
+  prevStkSrc=hsFrom();
+  showStk(sym);   // showStk 内置先回顶(instant), 此处不再 smooth 双滚防闪
 }
 function toIndex(){location.href=location.href.split("/radar/")[0]+"/index.html"}
 /* ===== 通用: K线 option + 缠论标注 ===== */
