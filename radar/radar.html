@@ -890,7 +890,7 @@ function renderInds(){
     var sg=(x.n_sig_top||0)+(x.n_sig_bot||0);
     var hl = curInd===k?" hl":"";
     var rCls=regimeCls(x.regime);
-    var etfTag=x.is_etf?'<span class="badge2 o" style="margin-left:4px">ETF</span>':'';
+    var etfTag=x.is_etf?'<i class="badge2 o" aria-label="ETF板块" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#e0f2fe;border:1px solid #075985;margin-left:4px;vertical-align:-1px" title="ETF板块"></i>':'';
     var capLbl=x.is_etf?"规模":"市值";
     var capTxt=(x.cap==null)?"-":(x.cap>=10000?(x.cap/10000).toFixed(2)+"万亿":x.cap.toFixed(0)+"亿");
     // 强信号行业: 顶信号>=2 红色左侧条 / 底信号>=2 绿色左侧条
