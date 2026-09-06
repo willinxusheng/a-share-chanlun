@@ -677,6 +677,40 @@ def analyze_one(sym, ks):
     return st, None, mark
 
 
+def _price_limit(sym):
+    """板块单日涨跌幅上限(涨跌停制度, 比例): 主板0.10 / 创业·科创0.20 / 北交0.30;
+    ETF·LOF·指数·基准等无涨跌停返回 None。R273: 用于裸价源(新浪)除权假跳空识别 ——
+    个股真实单日涨跌不可能超上限, 超上限 = 除权除息日(送转/大比例分红)的假跳空。"""
+    m, code = (sym or "")[:2], (sym or "")[2:]
+    if m == "bj":
+        return 0.30
+    if code.startswith(("300", "301", "688", "689")):
+        return 0.20
+    if code.startswith(("600", "601", "603", "605", "000", "001", "002", "003")):
+        return 0.10
+    return None
+
+
+_EXDIV_BUF = 1.05    # 缓冲: 涨停收盘可因四舍五入略超上限, *1.05 防误伤真实涨停
+
+
+def _exdiv_dates(ks, sym):
+    """扫描 K 线中疑似除权日(裸价源): 单日 |chg| 超 板块上限*缓冲 = 假跳空。
+    返回升序 [date,...]; 无涨跌停段(ETF等)/无命中返回 []。复权源(qfq)不会命中
+    (除权已被平滑), 故检测天然只作用于裸价降级票。"""
+    lim = _price_limit(sym)
+    if not lim:
+        return []
+    th = lim * _EXDIV_BUF
+    out, prev_c = [], None
+    for k in ks:
+        c = k["close"]
+        if prev_c and prev_c > 0 and c > 0 and abs(c / prev_c - 1) > th:
+            out.append(k["date"])
+        prev_c = c
+    return out
+
+
 def gate_of(st):
     """门禁: 返回 (gate_code, desc)。gate="" 表示可通过。"""
     if st is None:
@@ -694,6 +728,36 @@ def gate_of(st):
     if st["bi_n"] < 4:
         return "次新", "笔数不足(%d)" % st["bi_n"]
     return "", ""
+
+
+def _apply_exdiv_immune(st, ks, sym, fresh_days=None):
+    """R273: 裸价源(新浪)除权假跳空免疫(在 analyze_one 后、信号生成前调用)。
+    除权日单日|chg|超板块涨跌停上限是复权源不会出现的假跳空(真实涨跌被制度锁死),
+    会伪造笔/背驰与当日涨跌幅:
+      1) 末根为除权日 -> chg1d 不可信置 null(前端显示"-", 免误读为真实暴跌)
+      2) 近端(末根前 <= fresh_days+2 交易日)有除权 -> 结构/背驰可能被假跳空污染,
+         scenario 免疫(灰标"疑似除权·结构失真"), 清近端背驰字段(防详情页误导)。
+    返回是否命中近端免疫。"""
+    ex = _exdiv_dates(ks, sym)
+    if not ex:
+        return False
+    fd = FRESH_MAX_DAYS if fresh_days is None else fresh_days
+    st["exdiv_d"] = ex[-1]                       # 最近疑似除权日(诊断/展示)
+    if ks and ks[-1]["date"] == ex[-1]:
+        st["chg1d"] = None                       # 末根除权: 当日涨跌幅不可信
+    near = False
+    for j in range(len(ks) - 1, -1, -1):     # 含末根本身(除权日可为末根)
+        if ks[j]["date"] == ex[-1]:
+            near = (len(ks) - 1 - j) <= fd + 2
+            break
+    if near:
+        st["exdiv"] = 1
+        st["scenario"] = "疑似除权·结构失真"
+        st["bottom_bc"] = None
+        st["top_bc"] = None
+        st["seg_bot"] = False
+        st["seg_top"] = False
+    return near
 
 
 def signal_of(sym, name, typ, st):
@@ -736,7 +800,9 @@ def _spark_of(ks):
 def synth_industry_kline(members, got):
     """行业成分股(市值加权收益率链式)合成行业日K [o,h,l,c,v,date]。
     members: [(sym, mcap)]; got: {sym: (ks, src)}。市值缺失票剔除。
-    权重 w_i = 最新总市值占比; 当日停牌(缺K线/昨收)剔除并重归一。"""
+    权重 w_i = 最新总市值占比; 当日停牌(缺K线/昨收)剔除并重归一。
+    R273: 裸价成分的除权假跳空日(单日|chg|超板块上限)当日剔除 —— 防行业K线
+    被单只成分的除权大跳空打出假阴线/假结构(除权不改变行业真实收益率)。"""
     rows = []
     for sym, mcap in members:
         if mcap <= 0 or sym not in got:
@@ -744,19 +810,22 @@ def synth_industry_kline(members, got):
         ks = got[sym][0]
         if len(ks) < 60:
             continue
-        rows.append((mcap, ks))
+        rows.append((sym, mcap, ks))
     if len(rows) < 3:                       # 成分太少 -> 无行业K线
         return None
     # 建日期->各股 map: date -> [(mcap, k), ...]
     days = {}
-    for mcap, ks in rows:
+    for sym, mcap, ks in rows:
+        lim = _price_limit(sym) or 1.0      # 无涨跌停段(ETF成分不免疫): 阈值1.0单日翻倍才剔除
+        th = lim * _EXDIV_BUF
         prev_c = None
         for k in ks:
             c = k["close"]
             if prev_c and prev_c > 0 and c > 0 and k["open"] > 0 and k["high"] > 0 and k["low"] > 0:
-                days.setdefault(k["date"], []).append(
-                    (mcap, k["open"] / prev_c - 1, k["high"] / prev_c - 1,
-                     k["low"] / prev_c - 1, c / prev_c - 1, k.get("volume", 0) * c))
+                if abs(c / prev_c - 1) <= th:      # 正常日 -> 入桶; 除权假跳空日 -> 剔除该成分当日
+                    days.setdefault(k["date"], []).append(
+                        (mcap, k["open"] / prev_c - 1, k["high"] / prev_c - 1,
+                         k["low"] / prev_c - 1, c / prev_c - 1, k.get("volume", 0) * c))
             prev_c = c
     dates = sorted(days)
     if len(dates) < 120:
@@ -971,6 +1040,9 @@ def main():
         st, err, mark = analyze_one(sym, ks)
         if st:
             st["src"] = src
+            # R273: 裸价源(新浪)除权假跳空免疫(见 _apply_exdiv_immune) —— 复权源
+            # 不会命中(除权已平滑), ETF/LOF 等无涨跌停段自动跳过。
+            _apply_exdiv_immune(st, ks, sym)
             sts[sym] = st
             if mark:
                 marks[sym] = mark
