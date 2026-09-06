@@ -116,7 +116,7 @@ h1 .dot{color:#ffd43b}
 .chart-note{font-size:11.5px;color:var(--muted);padding:8px 16px 9px;line-height:1.8}
 .legend-tag{display:inline-flex;align-items:center;font-size:11.5px;margin-right:16px;color:var(--muted);line-height:1}
 .legend-tag i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px}
-#mainChart{width:100%;height:560px}
+#mainChart{width:100%;height:620px}
 .mini-chart{width:100%;height:300px}
 /* ===== 表格(成分股信号列表) ===== */
 .sec-t{display:flex;align-items:baseline;gap:8px;padding:16px 16px 0;font-size:16px;font-weight:700;letter-spacing:.2px}
@@ -778,7 +778,7 @@ function indKlineOption(kl){
           "<br/><span style='color:#94a3b8'>量 "+fmtVol(k.volume)+"</span>";}},
     legend:{data:["K线","MA5","MA10","MA20","MA60","RSI14"],top:6,textStyle:{fontSize:11},itemWidth:14,itemHeight:8},
     axisPointer:{link:[{xAxisIndex:"all"}]},
-    grid:[{left:58,right:16,top:30,height:"52%"},{left:58,right:16,top:"66%",height:"11%"},{left:58,right:16,top:"80%",height:"12%"}],
+    grid:[{left:58,right:16,top:34,height:340},{left:58,right:16,top:395,height:60},{left:58,right:16,top:480,height:110}],
     xAxis:[{type:"category",data:dates,boundaryGap:true,axisLine:{lineStyle:{color:"#d7dee8"}},axisLabel:{fontSize:10,color:"#8a94a3"},axisTick:{show:false}},
            {type:"category",gridIndex:1,data:dates,boundaryGap:true,axisLabel:{show:false},axisLine:{lineStyle:{color:"#e8edf4"}},axisTick:{show:false}},
            {type:"category",gridIndex:2,data:dates,boundaryGap:true,axisLabel:{show:false},axisLine:{lineStyle:{color:"#e8edf4"}},axisTick:{show:false}}],
