@@ -891,7 +891,6 @@ function renderInds(){
     var sg=(x.n_sig_top||0)+(x.n_sig_bot||0);
     var hl = curInd===k?" hl":"";
     var rCls=regimeCls(x.regime);
-    var etfTag=x.is_etf?'<i class="badge2 o" aria-label="ETF板块" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#e0f2fe;border:1px solid #075985;margin-left:4px;vertical-align:-1px" title="ETF板块"></i>':'';
     var capLbl=x.is_etf?"规模":"市值";
     var capTxt=(x.cap==null)?"-":(x.cap>=10000?(x.cap/10000).toFixed(2)+"万亿":x.cap.toFixed(0)+"亿");
     // 强信号行业: 顶信号>=2 红色左侧条 / 底信号>=2 绿色左侧条
@@ -904,7 +903,7 @@ function renderInds(){
       ?'<span class="mvmini"><span class="up">▲'+(mv.up||0)+'</span> <span class="down">▼'+(mv.down||0)+'</span> ≥5%</span>'
       :((mv.up||mv.down)?'<span class="mvmini">'+(mv.up?'<span class="up">▲'+mv.up+'</span>':'')+(mv.up&&mv.down?' ':'')+(mv.down?'<span class="down">▼'+mv.down+'</span>':'')+' ≥5%</span>':'');
     html+='<div class="ind-row'+hl+strongCls+'" onclick="pickInd(\''+esc(k)+'\')">'+
-      '<div class="nm">'+esc(k)+etfTag+(sg?' <span class="badge2 '+(x.n_sig_top?(x.n_sig_bot?'y':'r'):'g')+'" title="该行业成分股近端背驰信号｜顶='+(x.n_sig_top||0)+'(动能减弱·防回落)｜底='+(x.n_sig_bot||0)+'(动能衰竭·关注企稳)｜≥2只时左侧色条=集中风险/机会">顶 '+(x.n_sig_top||0)+' / 底 '+(x.n_sig_bot||0)+'</span>':'')+
+      '<div class="nm">'+esc(k)+(sg?' <span class="badge2 '+(x.n_sig_top?(x.n_sig_bot?'y':'r'):'g')+'" title="该行业成分股近端背驰信号｜顶='+(x.n_sig_top||0)+'(动能减弱·防回落)｜底='+(x.n_sig_bot||0)+'(动能衰竭·关注企稳)｜≥2只时左侧色条=集中风险/机会">顶 '+(x.n_sig_top||0)+' / 底 '+(x.n_sig_bot||0)+'</span>':'')+
       (x.leader?'<br><a class="indlead" title="'+(x.is_etf?"场内规模最大的基金 · 点击直达":"该行业总市值最大的龙头股 · 点击直达")+'" onclick="event.stopPropagation();prevStkSrc=\'home\';showStk(\''+esc(x.leader.sym)+'\')">👑 '+esc(x.leader.name)+'</a>':'')+'</div>'+
       '<div class="meta ta-r"><span class="cap">'+capTxt+'</span><br><span class="cnt">'+(x.is_etf?(x.n_member||0)+"/"+(x.n_total||0)+"只":(x.n_member||0)+"只")+'</span>'+(mvLine?'<br>'+mvLine:'')+'</div>'+
       '<div><span class="regime '+rCls+'" title="'+regimeTip(x)+'">'+esc(x.regime||"-")+'</span>'+zsPosBadge(x)+'</div>'+
