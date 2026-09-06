@@ -1001,6 +1001,7 @@ function drawChart(){
   try{
     myChart=echarts.init(el,null,{renderer:"svg"});
     myChart.setOption(opt);
+    sliderDateTip(el,myChart,opt);   // R316: slider hover 跟随鼠标显示真实日期
   }catch(err){
     console.error("[radar.drawChart] setOption failed",err);
     el.innerHTML='<div class="err">K线渲染失败: '+(err&&err.message||err)+'<br>请刷新页面重试</div>';
@@ -1028,6 +1029,7 @@ function drawStkInto(el,sym){
     if(myChart){try{myChart.dispose()}catch(e){}}
     myChart=echarts.init(el,null,{renderer:"svg"});
     myChart.setOption(opt);
+    sliderDateTip(el,myChart,opt);   // R316: slider hover 跟随鼠标显示真实日期(drawStkInto 路径)
   }).catch(function(e){
     if(seq!==drawSeq)return;
     el.innerHTML='<div class="err">实时行情拉取失败：'+esc(e.message)+'<br>（腾讯 fqkline 需在浏览器环境访问，file:// 可能被拦；可用 GitHub Pages / 本地 http 服务）</div>'});
@@ -1264,6 +1266,7 @@ function loadStkChart(sym){
     var ch=echarts.init(el,null,{renderer:"svg"});
     poolChart(ch);   // R258: 登记到实例池, backHome/showStk 时统一释放
     ch.setOption(opt);
+    sliderDateTip(el,ch,opt);   // R316: slider hover 跟随鼠标显示真实日期(loadStkChart 路径)
   }).catch(function(e){
     if(seq!==stkSeq)return;
     var el=$("stkChart");if(el)el.innerHTML='<div class="err">实时行情拉取失败：'+esc(e.message)+'<br>（腾讯 fqkline 需在浏览器环境访问，file:// 可能被拦；可用 GitHub Pages / 本地 http 服务）</div>'});
@@ -1408,7 +1411,7 @@ function indKlineOption(kl,kind){   // kind:"ind"=行业合成(量=成交额亿�
     yAxis:[{scale:true,axisLabel:{fontSize:10,color:"#8a94a3"},splitLine:{lineStyle:{color:"#f0f3f8"}}},
            {scale:true,gridIndex:1,axisLabel:{show:false},splitLine:{show:false},axisLine:{show:false},axisTick:{show:false}},
            {scale:false,min:0,max:100,gridIndex:2,axisLabel:{fontSize:9,color:"#8a94a3"},splitLine:{show:false},axisLine:{show:false},axisTick:{show:false}}],
-    dataZoom:[{type:"inside",xAxisIndex:[0,1,2],start:30,end:100},{type:"slider",xAxisIndex:[0,1,2],start:30,end:100,height:16,bottom:4,brushSelect:false}],
+    dataZoom:[{type:"inside",xAxisIndex:[0,1,2],start:30,end:100},{type:"slider",xAxisIndex:[0,1,2],start:30,end:100,height:16,bottom:4,brushSelect:false,showDetail:false}],   // R316: showDetail:false 关掉 thumb 原生"窗口边界日期"浮层(2025-10-09 类, 语义=视图起点非鼠标位置, 与主图十字光标日期打架), 改由 sliderDateTip 自绘"鼠标所在位置真实日期"
     series:[
       {name:"K线",type:"candlestick",data:kdata,itemStyle:{color:UP,color0:DN,borderColor:UP,borderColor0:DN},barWidth:"65%"},
       {name:"量",type:"bar",xAxisIndex:1,yAxisIndex:1,data:vols,barWidth:"65%"},
@@ -1419,6 +1422,42 @@ function indKlineOption(kl,kind){   // kind:"ind"=行业合成(量=成交额亿�
          data:[{yAxis:70,lineStyle:{color:"#e54545",opacity:.55}},{yAxis:30,lineStyle:{color:"#18a058",opacity:.55}}]}}
     ]
   };
+}
+/* R316: dataZoom slider hover 自绘日期气泡 — 鼠标在滑块轨道上移动到哪, 就显示该位置对应的真实日期
+ * (ECharts 原生只对 thumb 显示"窗口边界"日期且不跟随鼠标, 与主图十字光标日期不一致→"乱"; 旭总建议按现实显示)
+ * 轨道 x 范围=grid left~width-right; hover y 命中 slider 区域(bottom:4+height:16)才触发; 全量数据比例映射 dates */
+function sliderDateTip(el,chart,opt){
+  if(!el||!chart||!opt)return;
+  if(el.__sliderTip){try{el.__sliderTip()}catch(e){}el.__sliderTip=null}   // 同容器重复 init 先清旧监听
+  var dz=opt.dataZoom||[],sl=null,i;
+  for(i=0;i<dz.length;i++)if(dz[i].type==="slider"){sl=dz[i];break}
+  if(!sl)return;
+  var dates=(opt.xAxis&&opt.xAxis[0])?opt.xAxis[0].data:null;
+  if(!dates||!dates.length)return;
+  var g=opt.grid&&opt.grid[0]?opt.grid[0]:{left:58,right:56};
+  var gL=g.left!=null?g.left:58,gR=g.right!=null?g.right:56;
+  var dzH=sl.height!=null?sl.height:16,dzB=sl.bottom!=null?sl.bottom:4;
+  var tip=document.createElement("div");
+  tip.style.cssText="position:fixed;z-index:9999;display:none;pointer-events:none;background:rgba(15,23,42,.92);color:#e2e8f0;font-size:11px;line-height:1.5;padding:2px 8px;border-radius:6px;white-space:nowrap;font-variant-numeric:tabular-nums;box-shadow:0 2px 8px rgba(15,23,42,.25)";
+  document.body.appendChild(tip);
+  function onMove(e){
+    var r=el.getBoundingClientRect();
+    var px=e.clientX-r.left,py=e.clientY-r.top,H=r.height,W=r.width;
+    var y0=H-dzB-dzH;                                   // slider 顶(620 容器下=600)
+    if(py<y0-3||py>H-dzB+2){tip.style.display="none";return}   // 仅滑块横条区域触发
+    var x0=gL,x1=W-gR,f=(px-x0)/(x1-x0);
+    if(f<0||f>1){tip.style.display="none";return}
+    var idx=Math.round(f*(dates.length-1));
+    if(idx<0)idx=0;if(idx>dates.length-1)idx=dates.length-1;
+    tip.textContent=dates[idx];
+    tip.style.display="block";
+    tip.style.left=(e.clientX-tip.offsetWidth/2)+"px";
+    tip.style.top=(e.clientY-26)+"px";
+  }
+  function onOut(){tip.style.display="none"}
+  el.addEventListener("mousemove",onMove);
+  el.addEventListener("mouseleave",onOut);
+  el.__sliderTip=function(){el.removeEventListener("mousemove",onMove);el.removeEventListener("mouseleave",onOut);if(tip.parentNode)tip.parentNode.removeChild(tip)};
 }
 function chanMarkOption(mark,dates,kmin,kmax,klForMatch){
   var ser=[];
