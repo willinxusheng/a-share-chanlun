@@ -9,6 +9,9 @@
   K线主源 腾讯 fqkline 纯count qfq (R248 形态, 前复权, ~640根/个股, CI境外最稳)
   K线次源 东财 push2his fqt=1 前复权 (R270: 腾讯不可用时替代裸价; 北交secid未实证跳过)
   K线备源 新浪 CN_MarketDataService 日K (不复权, ~1500根, 本地/境内外双可达)
+ 新鲜度   市场末交易日锚(R272: main 串行段新浪探测沪深龙头末根max) —
+           K线源末根 >= 锚 即"不比市场旧"; 周末/长假/当日行情未出自动正确,
+           无需维护节假日表; 源落后锚 = CDN陈旧缓存拒用切备源; 锚失效回落窗口表
 分析     chanlun.analyze (chanlun.py 生产级, P0 已 200 票抽样验证可信)
 门禁     ST/次新(<120根)/低流动性(近60日均额<3000万)/一字板(>=10日)/低自洽/停牌
 信号     近端场景 classify ∈ {背驰见底机会, 背驰见顶风险} (P0 定论: 近端口径, 非全历史尾笔)
@@ -103,6 +106,11 @@ _tx_down = {"flag": False, "count": 0, "reasons": {}, "n": 0,
             "max": TX_FAIL_MAX, "every": TX_REPROBE_EVERY, "probe": None}
 _em_down = {"flag": False, "count": 0, "reasons": {}, "n": 0,
             "max": EM_FAIL_MAX, "every": EM_REPROBE_EVERY, "probe": None}
+# R272: 市场末交易日锚(probe_mkt_last 在 main 串行段探测后写入)。
+# 用于 _last_fresh/_should_weekend_skip 的新鲜度判定: 数据末根 >= 该锚 即"不比市场旧",
+# 市场无更新的日子(周末/长假/当日行情未出)旧数据即最新 —— 取代硬编码长假窗口的
+# 大部分职责(窗口表只作探测失败时的 fallback), 2027+ 节假日无需维护。
+_mkt_last = None
 
 def _src_down(d, lock):
     """读停用状态并累计调用; 停用中每 every 次调用执行一次轻量复探, 成功则复位切回。
@@ -472,12 +480,43 @@ def _in_long_holiday(today=None):
     return any(a <= t <= b for a, b in _LONG_HOLIDAY_WINDOWS)
 
 
-def _last_fresh(last_date, today=None):
-    """末根K线是否够新鲜(相对北京今天)。R270 分级:
-      gap 0~3          → 新鲜(常规周末/短假/当日, 一律放行)
-      gap 4~12         → 仅"今天处于长假窗口"才放行(真实休市最长≈9自然日+裕量);
-                        窗口外此量级滞后 = CDN 陈旧缓存, 判 False 触发切备用源(东财qfq/新浪)。
-      未来日期(>今天)  → 判 False(数据泄漏防御)。
+# R272: probe 探测的样本(沪深主板流动性龙头, 停牌概率低)。取多只 max 抗单票停牌。
+_MKT_PROBE_SYMS = ("sh600000", "sz000001")
+
+
+def probe_mkt_last():
+    """探测市场最新交易日(轻量: 新浪沪深龙头日K末根取 max, CI 上新浪源极稳
+    —— 09-04~09-06 全 sina 实证 6736/6736)。成功写入模块全局 _mkt_last 供
+    _last_fresh/_should_weekend_skip 作新鲜度锚; 失败返回 None 且保留旧锚(网络
+    闪断不倒退锚值)。仅在 main 串行段调用一次, 不进 worker 并发。"""
+    global _mkt_last
+    dates = []
+    for sym in _MKT_PROBE_SYMS:
+        try:
+            u = ("https://quotes.sina.cn/cn/api/json_v2.php/CN_MarketDataService.getKLineData"
+                 "?symbol=%s&scale=240&ma=no&datalen=5" % sym)
+            raw = _get(u, timeout=8).decode("utf-8", "ignore")
+            arr = json.loads(raw) or []
+            if arr and arr[-1].get("day"):
+                dates.append(arr[-1]["day"])
+        except Exception:
+            continue
+    if dates:
+        _mkt_last = max(dates)
+    return _mkt_last
+
+
+def _last_fresh(last_date, today=None, mkt_last="__auto__"):
+    """末根K线是否够新鲜(相对北京今天)。R270 分级 + R272 市场锚升级:
+      gap 0~3            → 新鲜(常规周末/短假/当日, 一律放行)
+      gap 4+             → 有市场锚(_mkt_last 或显式 mkt_last): 源末根 >= 锚即放行 ——
+                           市场无更新的日子(周末/长假/当日行情未出的首轮 dispatch)里,
+                           源停在市场末交易日是"当前可得的最新", 不算陈旧; 源落后于锚
+                           (市场已交易到锚日而源停更) = 真陈旧(CDN缓存/CDN滞后), 拒。
+                           锚本身停更的极端(>30天)硬拒防御。
+                           —— 取代硬编码长假窗口, 2027+ 节假日无需维护
+      gap 4~12 无锚      → fallback R270: 仅"今天处于长假窗口"放行(窗口表只兜探测失败)
+      未来日期(>今天)    → 判 False(数据泄漏防御)。
     1~3 天内的短滞后无法用自然日区分(真实休市也如此), 由 meta.asof + build_date 的
     次日自动重扫自愈。"""
     try:
@@ -486,20 +525,35 @@ def _last_fresh(last_date, today=None):
         gap = (t - datetime.date(y, m, d)).days
     except Exception:
         return False
-    if not (0 <= gap <= _STALE_GAP_DAYS):
+    if gap < 0:
         return False
     if gap <= 3:
         return True
+    ml = _mkt_last if mkt_last == "__auto__" else mkt_last
+    if ml:
+        if last_date >= ml:
+            return gap <= 30          # 锚本身停更 >30 天的极端场景硬拒
+        return False                  # 源落后于市场末交易日 = 真陈旧
+    # ---- 无锚 fallback (R270 窗口表) ----
+    if gap > _STALE_GAP_DAYS:
+        return False
     return _in_long_holiday(t)
 
 
-def _should_weekend_skip(asof, today):
-    """R270: 周末且现有数据已覆盖最近交易日 → 跳过全量重扫。
+def _should_weekend_skip(asof, today, mkt_last="__auto__"):
+    """R270: 周末/长假且现有数据已覆盖最近交易日 → 跳过全量重扫。
+    R272 升级: 有市场锚时按锚判定(数据 asof 已覆盖市场末交易日即跳过, 周末/长假/
+    当日行情未出的首轮 dispatch 通用); 无锚回退周末 + 窗口表。
     (workflow guard 的 shell 兜底 —— 09-06 曾现周日凌晨仍触发全量 sina 扫描拖 15h 的
-    反例: guard 失效/排队时序时 scan 内自守卫兜底, 避免周末空跑烧源+CI 额度。)"""
-    if today.weekday() < 5:
+    反例: guard 失效/排队时序时 scan 内自守卫兜底, 避免空跑烧源+CI 额度。)"""
+    if not asof:
         return False
-    return bool(asof and _last_fresh(asof, today=today))
+    ml = _mkt_last if mkt_last == "__auto__" else mkt_last
+    if ml:
+        return asof >= ml
+    if today.weekday() >= 5:
+        return bool(_last_fresh(asof, today=today))
+    return False
 
 
 def _bc_tail(bc, bis, btype, n_last=10):
@@ -852,8 +906,10 @@ def main():
         elif a == "--src" and i + 1 < len(argv):
             SRC_ONLY = argv[i + 1]
     t0 = time.time()
-    # R270: 周末自守卫(workflow guard 的 shell 兜底 —— 曾现 guard 失效/排队时序下周末凌晨
-    # 触发全量 sina 扫描拖 15h 的反例): 周末且现有数据已含最近交易日 → 直接跳过。
+    # R270+R272: 全量重扫自守卫(workflow guard 的 shell 兜底 —— 曾现 guard 失效/排队
+    # 时序下周末凌晨触发全量 sina 扫描拖 15h 的反例)。R272 升级为市场末交易日锚:
+    # 先探测市场最新交易日(新浪, 轻量), 现有数据(asof)已覆盖锚 → 周末/长假/当日行情
+    # 未出的首轮 dispatch 一律直接跳过, 不再空跑烧源; 探测失败回落周末+窗口表判定。
     # 人工调试(--only/--limit/--src)不受限, 照常可跑。
     _old = {}
     if not only and not limit and SRC_ONLY == "auto":
@@ -861,9 +917,14 @@ def main():
             _old = json.load(open(OUT, encoding="utf-8")).get("meta") or {}
         except Exception:
             _old = {}
-        if _should_weekend_skip(_old.get("asof", ""), _bj_today()):
-            print("[scan_radar] 周末(%s)且数据已覆盖最近交易日(asof=%s), 跳过全量重扫"
-                  % (_bj_today().isoformat(), _old.get("asof", "")))
+        _ml = probe_mkt_last()
+        if _ml:
+            print("[scan_radar] 市场末交易日锚=%s (无新行情 run 自动跳过)" % _ml)
+        else:
+            print("[scan_radar] 市场锚探测失败(新浪不可达), 回落周末/窗口表守卫")
+        if _should_weekend_skip(_old.get("asof", ""), _bj_today(), mkt_last=_ml):
+            print("[scan_radar] 数据已覆盖市场末交易日(asof=%s), 跳过全量重扫"
+                  % (_old.get("asof", "")))
             return
     print("[scan_radar] 拉取全市场标的池(东财 clist)... src模式=%s" % SRC_ONLY)
     uni, excl, host = fetch_universe()
@@ -1038,6 +1099,7 @@ def main():
         "degraded": deg,                       # R270: 新浪裸价占比>30% 即降级(复权源占比视角)
         "degraded_reason": deg_reason,         # 降级黄条文案(前端优先展示)
         "src_fail": src_fail,                  # 各源失败原因计数(诊断腾讯/东财为何不可用)
+        "mkt_last": _mkt_last or "",           # R272: 市场末交易日锚(新浪探测; 空=探测失败回落窗口表)
         "ind_cnt": ind_cnt,
         "excl_st": excl.get("st", 0),
         "note": ("信号=近端背驰场景(背驰见底/见顶) 距背驰日<=%d天; 门禁剔除项仅展示不进信号; "
