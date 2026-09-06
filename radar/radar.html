@@ -896,7 +896,7 @@ function indKlineOption(kl,kind){   // kind:"ind"=行业合成(量=成交额亿�
           "开 "+k.open+"　收 <b style='color:"+(up?"#ff6b6b":"#4ade80")+"'>"+k.close+"</b>"+(up?" ▲":" ▼")+
           "<br/>高 "+k.high+"　低 "+k.low+(rsiRaw[i]!=null?"<br/>RSI14 <b style='color:#b39ddb'>"+(+rsiRaw[i].toFixed(1))+"</b>":"")+
           "<br/><span style='color:#94a3b8'>"+volTxt+"</span>"+sigLine;}},
-    legend:{data:["K线","MA5","MA10","MA20","MA60","RSI14"],top:6,textStyle:{fontSize:11},itemWidth:14,itemHeight:8},
+    legend:{data:["K线","MA5","MA10","MA20","MA60","RSI14","量"],top:6,textStyle:{fontSize:11},itemWidth:14,itemHeight:8},
     axisPointer:{link:[{xAxisIndex:"all"}]},
     grid:[{left:58,right:16,top:34,height:340},{left:58,right:16,top:395,height:60},{left:58,right:16,top:480,height:110}],
     xAxis:[{type:"category",data:dates,boundaryGap:true,axisLine:{lineStyle:{color:"#d7dee8"}},axisLabel:{fontSize:10,color:"#8a94a3"},axisTick:{show:false}},

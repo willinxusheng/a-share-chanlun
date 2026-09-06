@@ -626,67 +626,83 @@ def analyze_one(sym, ks):
         cls, agree = r["classify"], r["agreement"]
     except (KeyError, TypeError) as e:
         return None, "schema_err:%s" % e, {}
-    closes = [k["close"] for k in ks]
-    highs = [k["high"] for k in ks]
-    lows = [k["low"] for k in ks]
-    n = len(ks)
-    last = ks[-1]
-    d0, d1 = ks[0]["date"], last["date"]
-    span_days = _days_ago(d0) - _days_ago(d1) if _days_ago(d0) < 30000 else -1
-    tail60 = ks[-60:]
-    avg_amt = sum(k["volume"] * 100 * k["close"] for k in tail60) / max(1, len(tail60)) / 1e4
-    amp = [h / l - 1 for h, l in zip(highs, lows) if l > 0]
-    one_word = sum(1 for h, l in zip(highs, lows) if l > 0 and abs(h / l - 1) < 1e-9)
-    med_amp = (sorted(amp)[len(amp) // 2] if amp else 0.0) * 100
-    stop_days = _days_ago(d1)   # 距今天数(停牌判定: 明显大于3)
-    zs_last = ({"zd": round(zss[-1]["zd"], 2), "zg": round(zss[-1]["zg"], 2),
-                "date_end": zss[-1]["date_end"]} if zss else None)
-    scenario = cls.get("scenario", "")
-    bottom = _bc_tail(bc, bis, "bottom")
-    top = _bc_tail(bc, bis, "top")
-    st = {
-        "n_bars": n, "first": d0, "last": d1, "span_days": span_days,
-        "close": round(last["close"], 3), "chg1d": round(last["close"] / closes[-2] - 1, 4) if n >= 2 else 0,
-        "bi_n": len(bis), "zs_n": len(zss), "bc_n": len(bc), "sig_n": len(signals),
-        "agree": round(agree["rate"], 3), "agree_n": agree["total"],
-        "scenario": scenario, "trend": cls.get("trend_type", ""),
-        "last_bi_dir": bis[-1]["dir"] if bis else 0,
-        "avg_amt60": round(avg_amt, 1), "med_amp": round(med_amp, 2),
-        "one_word": one_word, "dd": round(last["close"] / max(highs) - 1, 3) if highs else 0,
-        "zs_last": zs_last, "stop_days": stop_days,
-        "bottom_bc": bottom, "top_bc": top,
-        "seg_bot": bool(cls.get("seg_bc_bottom")), "seg_top": bool(cls.get("seg_bc_top")),
-    }
-    # 轻量绘图标注(详情页叠画用): 近中枢矩形 + 近背驰点 + 近笔折线(限通过票)
-    mark = {"zs": [], "bc": [], "line": [], "sig": []}
-    for z in zss[-3:]:
-        mark["zs"].append([round(z["zg"], 2), round(z["zd"], 2), z["date_start"], z["date_end"]])
-    for b in bc[-6:]:
-        i = b["bi_index"]
-        if 0 <= i < len(bis):
-            mark["bc"].append([b["type"], bis[i]["date_end"], round(bis[i]["end_price"], 2)])
-    for b in bis[-10:]:
-        mark["line"].append([b["date_start"], round(b["start_price"], 2),
-                             b["date_end"], round(b["end_price"], 2), b["dir"]])
-    # R271: 分类买卖点(一/二/三类) — 前端个股/行业K线叠画「一买/二买/三买/一卖/二卖/三卖」。
-    # signals 已由 find_signals 去重(每笔仅一类信号, 优先级 一类>三类>二类), 携带 date/price,
-    # 直接取近端 14 条入库; 一类点与 bc 背驰点同源, 前端有 sig 时不再重复画通用背驰三角。
-    # 格式 [dir(1买/-1卖), kind全名, date_end, price] — 与 zs/bc/line 一致的紧凑数组。
-    mark["sig"] = [[s["dir"], s["kind"], s["date"], round(s["price"], 2)]
-                   for s in signals[-14:]]
-    return st, None, mark
+    try:
+        closes = [k["close"] for k in ks]
+        highs = [k["high"] for k in ks]
+        lows = [k["low"] for k in ks]
+        n = len(ks)
+        last = ks[-1]
+        d0, d1 = ks[0]["date"], last["date"]
+        span_days = _days_ago(d0) - _days_ago(d1) if _days_ago(d0) < 30000 else -1
+        tail60 = ks[-60:]
+        avg_amt = sum(k["volume"] * 100 * k["close"] for k in tail60) / max(1, len(tail60)) / 1e4
+        amp = [h / l - 1 for h, l in zip(highs, lows) if l > 0]
+        one_word = sum(1 for h, l in zip(highs, lows) if l > 0 and abs(h / l - 1) < 1e-9)
+        med_amp = (sorted(amp)[len(amp) // 2] if amp else 0.0) * 100
+        stop_days = _days_ago(d1)   # 距今天数(停牌判定: 明显大于3)
+        zs_last = ({"zd": round(zss[-1]["zd"], 2), "zg": round(zss[-1]["zg"], 2),
+                    "date_end": zss[-1]["date_end"]} if zss else None)
+        scenario = cls.get("scenario", "")
+        bottom = _bc_tail(bc, bis, "bottom")
+        top = _bc_tail(bc, bis, "top")
+        st = {
+            "n_bars": n, "first": d0, "last": d1, "span_days": span_days,
+            "close": round(last["close"], 3), "chg1d": round(last["close"] / closes[-2] - 1, 4) if n >= 2 else 0,
+            "bi_n": len(bis), "zs_n": len(zss), "bc_n": len(bc), "sig_n": len(signals),
+            "agree": round(agree["rate"], 3), "agree_n": agree["total"],
+            "scenario": scenario, "trend": cls.get("trend_type", ""),
+            "last_bi_dir": bis[-1]["dir"] if bis else 0,
+            "avg_amt60": round(avg_amt, 1), "med_amp": round(med_amp, 2),
+            "one_word": one_word, "dd": round(last["close"] / max(highs) - 1, 3) if highs else 0,
+            "zs_last": zs_last, "stop_days": stop_days,
+            "bottom_bc": bottom, "top_bc": top,
+            "seg_bot": bool(cls.get("seg_bc_bottom")), "seg_top": bool(cls.get("seg_bc_top")),
+        }
+        # 轻量绘图标注(详情页叠画用): 近中枢矩形 + 近背驰点 + 近笔折线(限通过票)
+        mark = {"zs": [], "bc": [], "line": [], "sig": []}
+        for z in zss[-3:]:
+            mark["zs"].append([round(z["zg"], 2), round(z["zd"], 2), z["date_start"], z["date_end"]])
+        for b in bc[-6:]:
+            i = b["bi_index"]
+            if 0 <= i < len(bis):
+                mark["bc"].append([b["type"], bis[i]["date_end"], round(bis[i]["end_price"], 2)])
+        for b in bis[-10:]:
+            mark["line"].append([b["date_start"], round(b["start_price"], 2),
+                                 b["date_end"], round(b["end_price"], 2), b["dir"]])
+        # R271: 分类买卖点(一/二/三类) — 前端个股/行业K线叠画「一买/二买/三买/一卖/二卖/三卖」。
+        # signals 已由 find_signals 去重(每笔仅一类信号, 优先级 一类>三类>二类), 携带 date/price,
+        # 直接取近端 14 条入库; 一类点与 bc 背驰点同源, 前端有 sig 时不再重复画通用背驰三角。
+        # 格式 [dir(1买/-1卖), kind全名, date_end, price] — 与 zs/bc/line 一致的紧凑数组。
+        mark["sig"] = [[s["dir"], s["kind"], s["date"], round(s["price"], 2)]
+                       for s in signals[-14:]]
+        return st, None, mark
+    except Exception as e:   # noqa: BLE001
+        # R274: st/mark 构造段异常保护 —— chanlun 输出 schema 基本稳定, 但个别极端数据
+        # (某元素缺键/类型异常)一旦命中会把全量 run 崩掉无产物(单票坏数据杀死全市场)。
+        # 单票降级为 summ_err 进 errs, 其余票照常。
+        return None, "summ_err:%s" % str(e)[:80], {}
 
 
 def _price_limit(sym):
-    """板块单日涨跌幅上限(涨跌停制度, 比例): 主板0.10 / 创业·科创0.20 / 北交0.30;
-    ETF·LOF·指数·基准等无涨跌停返回 None。R273: 用于裸价源(新浪)除权假跳空识别 ——
-    个股真实单日涨跌不可能超上限, 超上限 = 除权除息日(送转/大比例分红)的假跳空。"""
+    """板块单日涨跌幅上限(涨跌停制度, 比例): 主板0.10 / 创业·科创0.20 / 北交0.30 /
+    场内基金0.10。R273: 用于裸价源(新浪)除权假跳空识别 —— 真实单日涨跌不可能超上限,
+    超上限 = 除权除息日(送转/大比例分红/份额折算)的假跳空。
+    R274: 补场内基金段 —— R273 注释"ETF/LOF 无涨跌停跳过"为错误认知: 沪深交易所场内
+    ETF/LOF/REITs 现行制度均有 ±10% 涨跌幅(跨境ETF 2024-02 起统一 10%; REITs 上市首日
+    30%/此后 10%)。腾讯对 ETF 只回 day(不回撤, radar.html L633 注释), 新浪更是裸价,
+    大比例份额折算/极端分红的假跳空此前因 lim=None 完全漏检。1.05 缓冲(_EXDIV_BUF)
+    防真实 10% 涨停误伤; REITs 首日 30% 超阈仅触发展示级免疫, 次新 gate 兜底不进信号。"""
     m, code = (sym or "")[:2], (sym or "")[2:]
     if m == "bj":
         return 0.30
     if code.startswith(("300", "301", "688", "689")):
         return 0.20
     if code.startswith(("600", "601", "603", "605", "000", "001", "002", "003")):
+        return 0.10
+    # 场内基金代码段: 沪 5xx(510/511/512/513/515/516/517/518/560/561/562/563/588/589/508REITs),
+    # 深 1xx(159ETF/16x LOF/180REITs; 11x/12x 可转债不在股票池, 不会进入)。可转债/分级基金已退
+    # 场, 场内品种 2020 后统一 10%(上市首日除外的 REITs 30% 见上)。
+    if m in ("sh", "sz") and code.startswith(("5", "1")):
         return 0.10
     return None
 
@@ -1036,13 +1052,23 @@ def main():
     # --- 分析 ---
     sts, marks, errs = {}, {}, {}
     t_a = time.time()
-    for i, (sym, (ks, src)) in enumerate(got.items()):
-        st, err, mark = analyze_one(sym, ks)
+    for sym in list(got.keys()):
+        ks, src = got[sym]
+        # R274: 净化前置并写回 —— analyze_one 内部净化(幂等)与免疫/行业合成/spark 此前各自
+        # 用不同数据(分析=净化后, 免疫/spark/synth=原始), 坏根在免疫检测与迷你图上会产生
+        # 与缠论分析不一致的判定(如未来日期根/重复根造成假除权或 spark 错画)。统一为净化后
+        # 同一份; 净化失败的票照旧记 errs(不参与免疫/spark, got 保留原始仅影响 synth 存量同旧)。
+        ks2 = _sanitize_ks(ks)
+        if not ks2:
+            errs[sym] = "ks_bad"
+            continue
+        got[sym] = (ks2, src)
+        st, err, mark = analyze_one(sym, ks2)
         if st:
             st["src"] = src
             # R273: 裸价源(新浪)除权假跳空免疫(见 _apply_exdiv_immune) —— 复权源
-            # 不会命中(除权已平滑), ETF/LOF 等无涨跌停段自动跳过。
-            _apply_exdiv_immune(st, ks, sym)
+            # 不会命中(除权已平滑), 无涨跌停段(基准等)自动跳过。
+            _apply_exdiv_immune(st, ks2, sym)
             sts[sym] = st
             if mark:
                 marks[sym] = mark
