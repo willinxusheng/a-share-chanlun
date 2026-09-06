@@ -82,6 +82,7 @@ h1 .dot{color:#ffd43b}
 .rsi-cell.mid{background:#f1f5f9;color:#475569}
 .ind-row .nm{font-weight:700;font-size:14.5px;display:flex;align-items:center;gap:6px;line-height:1.45;letter-spacing:.2px}
 .ind-row .meta{font-size:11px;color:var(--muted);line-height:1.6}
+.ind-row .meta .cap,.ind-row .meta .cnt{display:inline-block;min-width:64px;text-align:right;font-variant-numeric:tabular-nums}   /* R306: cap/cnt 等宽 + 数字等距, 解决「上行短下行长」时两行视觉左起点偏移 */
 /* R269: 数据准确性警示 — 源降级/数据陈旧(全局 sticky 横幅) + 个股行情缓存滞后(图表内黄条) */
 #dataBanner{display:none;position:sticky;top:0;z-index:999;background:#fff7e0;color:#7a5b00;
   border-bottom:1px solid #f0dc9a;font-size:12px;line-height:1.7;padding:6px 16px;
@@ -902,7 +903,7 @@ function renderInds(){
     html+='<div class="ind-row'+hl+strongCls+'" onclick="pickInd(\''+esc(k)+'\')">'+
       '<div class="nm">'+esc(k)+etfTag+(sg?' <span class="badge2 '+(x.n_sig_top?(x.n_sig_bot?'y':'r'):'g')+'" title="该行业成分股近端背驰信号｜顶='+(x.n_sig_top||0)+'(动能减弱·防回落)｜底='+(x.n_sig_bot||0)+'(动能衰竭·关注企稳)｜≥2只时左侧色条=集中风险/机会">顶 '+(x.n_sig_top||0)+' / 底 '+(x.n_sig_bot||0)+'</span>':'')+
       (x.leader?'<br><a class="indlead" title="'+(x.is_etf?"场内规模最大的基金 · 点击直达":"该行业总市值最大的龙头股 · 点击直达")+'" onclick="event.stopPropagation();prevStkSrc=\'home\';showStk(\''+esc(x.leader.sym)+'\')">👑 '+esc(x.leader.name)+'</a>':'')+'</div>'+
-      '<div class="meta ta-r">'+capTxt+'<br><span>'+(x.is_etf?(x.n_member||0)+"/"+(x.n_total||0)+"只":(x.n_member||0)+"只")+'</span>'+(mvLine?'<br>'+mvLine:'')+'</div>'+
+      '<div class="meta ta-r"><span class="cap">'+capTxt+'</span><br><span class="cnt">'+(x.is_etf?(x.n_member||0)+"/"+(x.n_total||0)+"只":(x.n_member||0)+"只")+'</span>'+(mvLine?'<br>'+mvLine:'')+'</div>'+
       '<div><span class="regime '+rCls+'" title="'+regimeTip(x)+'">'+esc(x.regime||"-")+'</span>'+zsPosBadge(x)+'</div>'+
       '<div class="spark">'+sparkSVG(x.spark,160,34)+'</div>'+
       '<div class="ffv '+ffCls(x.netflow)+'" title="当日主力净流入(超大+大单) · '+(x.netflow_n||0)+'只成分加总, 正=流入 负=流出">'+ffTxt(x.netflow)+'</div>'+
