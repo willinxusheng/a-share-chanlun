@@ -85,6 +85,13 @@ EM_KLINE_HOSTS = ["https://push2his.eastmoney.com",
                   "http://92.push2his.eastmoney.com"]
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "radar.json")
 ETF_KEY = "ETF板块"             # 场内基金/ETF 归为独立板块(P3b), 与申万一级并列展示
+# R283: 当日主力资金流(东财 ulist.np 批量, 免key) —— f62=主力净流入(元, 负=净流出,
+# 正=净流入), f184=主力净占比%。与标的池同域(push2), CI 境外/本地同链路可达; 限速复用
+# _em_th(0.25s/请求); 连续 EM_FF_FAIL_MAX 整批失败即放弃(展示级增强, 不拖慢主 scan)。
+EM_FF_HOSTS = ["https://push2.eastmoney.com", "https://push2delay.eastmoney.com",
+               "http://push2.eastmoney.com"]
+EM_FF_BATCH = 60               # 单请求 secid 数(实测 >60 响应可能被截断)
+EM_FF_FAIL_MAX = 5             # 连续整批失败上限(东财不可达快速放弃)
 
 # ---------- 全局限速器 ----------
 class _Throttle:
@@ -376,6 +383,74 @@ def _fetch_sina_checked(sym):
     except Exception as e:   # noqa: BLE001
         return None, "sina_err:%s" % str(e)[:60]
     return None, "empty"
+
+
+# ================= 2b. 当日主力资金流(东财 ulist 批量) =================
+def _ff_parse(diff, secmap):
+    """解析东财 ulist diff 数组 -> {sym: {"net": 元, "pct": %}}。
+    secmap={(f13市场,f12代码): sym}。字段缺失/非数值项跳过(不中断整批)。"""
+    out = {}
+    for x in diff or []:
+        code = str(x.get("f12") or "")
+        sym = secmap.get((x.get("f13"), code))
+        if not sym:
+            continue
+        try:
+            net = float(x.get("f62"))
+        except (TypeError, ValueError):
+            continue
+        if not (abs(net) <= 1e17):           # NaN/inf 防御(round(inf) 会 OverflowError)
+            continue
+        pct = None
+        try:
+            pct = round(float(x.get("f184")), 2)
+        except (TypeError, ValueError):
+            pass
+        out[sym] = {"net": round(net), "pct": pct}
+    return out
+
+
+def fetch_fflow_all(syms):
+    """全市场当日主力资金流(东财批量): 输入 sym 列表(sh/sz 有效, bj 跳过),
+    返回 {sym: {"net": 元, "pct": %}}。东财不可达/停更时缺票直接不返回(前端显示'-')。
+    与 _em_down 停用状态机解耦 —— 资金流是展示级增强, 失败不影响 K 线下行源健康判定。
+    实测: 股与 ETF/LOF 均返回 f62(510300 等场内基金有主力净额), 全市场约 6500 票
+    =110 批 ×0.25s ≈ 30s。"""
+    secs = []
+    for s in syms:
+        sec = _em_secid(s)
+        if sec:
+            pre, code = sec.split(".")
+            secs.append((s, (int(pre), code)))
+    out, fail_run = {}, 0
+    for i in range(0, len(secs), EM_FF_BATCH):
+        chunk = secs[i:i + EM_FF_BATCH]
+        if fail_run >= EM_FF_FAIL_MAX:
+            break
+        ids = ",".join("%d.%s" % (m, c) for _s, (m, c) in chunk)
+        done = False
+        for host in EM_FF_HOSTS:
+            try:
+                _em_th.wait()
+                u = ("%s/api/qt/ulist.np/get?secids=%s&fields=f12,f13,f14,f62,f184"
+                     "&fltt=2&invt=2" % (host, ids))
+                d = (json.loads(_get(u, timeout=EM_TIMEOUT,
+                                     referer="https://quote.eastmoney.com/")
+                                .decode("utf-8", "ignore")).get("data") or {})
+                diff = d.get("diff")
+                if not diff:
+                    continue                  # 空响应 -> 换下一镜像
+                secmap = {(_m, _c): _s for _s, (_m, _c) in chunk}
+                out.update(_ff_parse(diff, secmap))
+                done = True
+                break
+            except Exception:   # noqa: BLE001
+                continue
+        if not done:
+            fail_run += 1
+        elif fail_run > 0:
+            fail_run = 0
+    return out
 
 
 def _try_tx(sym):
@@ -1087,6 +1162,11 @@ def main():
                     n_done, len(syms), len(got), len(fails), time.time() - t0), flush=True)
     print("  拉取完成: 有效 %d / %d, 失败 %d, %.0fs" % (len(got), len(syms), len(fails), time.time() - t_f))
 
+    # --- R283: 当日主力资金流(全市场 sh/sz 批量; 与 K 线/源健康解耦, 失败只缺字段不崩产物) ---
+    t_ff = time.time()
+    ffmap = fetch_fflow_all(syms)
+    print("  资金流 %d 票, %.0fs (东财主力净额口径)" % (len(ffmap), time.time() - t_ff))
+
     # --- 分析 ---
     sts, marks, errs = {}, {}, {}
     t_a = time.time()
@@ -1142,6 +1222,9 @@ def main():
         row["st"] = st
         if sym in marks:
             row["mark"] = marks[sym]
+        ffd = ffmap.get(sym)                 # R283: 当日主力净流入(元/占比%) 展示级
+        if ffd:
+            row["ff"] = ffd
         universe[sym] = row
         if sig:
             # ETF 信号归到 ETF板块 (行业计数/分组用)
@@ -1160,6 +1243,26 @@ def main():
             sig["mark"] = marks[sym]
 
     signals.sort(key=lambda x: (-x[1]["strong"], x[1]["fresh"], -x[1]["area"] if x[1]["area"] > 0 else 0))
+
+    # --- R283: 行业龙头(成分市值最大; ETF板块=场内规模最大) + 行业当日资金流(全成分Σ) ---
+    # 口径: 龙头/资金流用 universe 全成分(含门禁票) —— 市值权重最大者即大众认知的行业龙头,
+    # 资金流全量加总才是"行业当日净流入"; 与行业K线合成(过门禁成分)口径分开说明。
+    ind_lead, ind_ff, ind_ffn = {}, {}, {}
+    for _sym, row in universe.items():
+        if row["type"] == "ETF":
+            key = ETF_KEY
+        else:
+            key = row["ind"]
+            if key in ("", "-"):
+                continue
+        _mc = row.get("mcap") or 0
+        _cur = ind_lead.get(key)
+        if _mc > 0 and (not _cur or _mc > _cur["mcap"]):
+            ind_lead[key] = {"sym": _sym, "name": row["name"], "mcap": _mc}
+        _f = row.get("ff")
+        if _f and _f.get("net") is not None:
+            ind_ff[key] = ind_ff.get(key, 0) + _f["net"]
+            ind_ffn[key] = ind_ffn.get(key, 0) + 1
 
     # --- 行业K线合成 + 行业自身缠论 + 行业聚合 ---
     industries = {}
@@ -1190,10 +1293,18 @@ def main():
             "amp20": _amp20(iks),
             "qual_rate": _qual_rate(ind, ind_total, ind_qual),
             "regime": _regime_of(ist, n_top, n_bot, rsi14),
+            "leader": ind_lead.get(ind),           # R283: 行业龙头 {sym,name,mcap}(市值最大)
+            "netflow": ind_ff.get(ind),            # R283: 当日主力净流入Σ(元, 全成分口径; 负=净流出)
+            "netflow_n": ind_ffn.get(ind, 0),      # 参与加总的成分数(诊断口径完整性)
             "st": ist, "mark": imark,
             "kline": iks[-IND_KLINE_N:],           # 最近 N 根(画行业K线)
             "spark": _spark_of(iks[-SPARK_N:])["data"],
         }
+    # R283: 龙头行回填 lead=1(前端成分列表/个股详情给"行业龙头"徽标)
+    for _ind, _ld in ind_lead.items():
+        _lu = universe.get(_ld["sym"])
+        if _lu:
+            _lu["lead"] = 1
     print("  行业合成/分析 %d 个, %.0fs" % (len(industries), time.time() - t_ind))
 
     # --- meta ---
@@ -1227,7 +1338,7 @@ def main():
         "title": "A股全市场缠论雷达",
         "asof": asof, "build_time": datetime.datetime.now(
             datetime.timezone(datetime.timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S"),
-        "version": "P3b-r2",
+        "version": "P3b-r3",   # R283: 龙头+当日主力资金流
         "n_universe": len(uni), "n_fetch": len(got), "n_fail": len(fails),
         "n_ok": len(sts), "n_gate": sum(gate_cnt.values()) - gate_cnt.get("", 0),
         "n_signal": len(signals), "n_ind": len(industries),
@@ -1240,14 +1351,17 @@ def main():
         "ind_cnt": ind_cnt,
         "excl_st": excl.get("st", 0),
         "note": ("信号=近端背驰场景(背驰见底/见顶) 距背驰日<=%d天; 门禁剔除项仅展示不进信号; "
-                 "K线源 腾讯qfq优先/东财qfq次之/新浪兜底; 行业=申万一级31个, K线=成分股总市值加权合成"
+                 "K线源 腾讯qfq优先/东财qfq次之/新浪兜底; 行业=申万一级31个, K线=成分股总市值加权合成; "
+                 "龙头=行业内总市值最大成分(ETF板块=规模最大场内基金); "
+                 "资金流=东财当日主力净额(超大+大单, 元), 正=净流入红 负=净流出绿"
                  % FRESH_MAX_DAYS),
     }
     out = {"meta": meta,
            "signals": [{"sym": s, **sig} for s, sig in signals],
            "industries": industries,
            "universe": {s: {k: v for k, v in row.items()
-                            if k in ("name", "type", "code", "gate", "gd", "ind", "mcap", "st", "mark")}
+                            if k in ("name", "type", "code", "gate", "gd", "ind", "mcap",
+                                     "st", "mark", "ff", "lead")}
                         for s, row in universe.items()}}
     # R275: 显式 UTF-8 —— 读侧(L1002)已带 encoding, 写侧遗漏; CI runner 若 locale 非 UTF-8
     # (如 C/POSIX), ensure_ascii=False 写中文 meta 文案会 UnicodeEncodeError 崩掉全量 run 无产物。
