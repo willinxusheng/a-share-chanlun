@@ -917,9 +917,9 @@ function renderInds(){
   });
   if(!keys.length){html='<div class="loading">暂无行业数据</div>';}
   $("indList").innerHTML=html;
-  // 折叠/展开按钮
+  // 折叠/展开按钮 — 实际显示行数(折叠时高亮 curInd 若排 8 名后仍恒显示, 文案按真实剩余数)
   if(keys.length>IND_SHOW){
-    var shown=indExpanded?keys.length:Math.max(IND_SHOW,1);
+    var shown=keys.filter(function(k,i){return indExpanded||i<IND_SHOW||(curInd&&k===curInd)}).length;
     var more='<div class="more"><a onclick="toggleInds()">'+(indExpanded?'▲ 收起':'▼ 展开其余 '+(keys.length-shown)+' 个板块')+'</a></div>';
     $("indList").insertAdjacentHTML("beforeend",more);
   }
@@ -1402,7 +1402,7 @@ function indKlineOption(kl,kind){   // kind:"ind"=行业合成(量=成交额亿�
           "<br/><span style='color:#94a3b8'>"+volTxt+"</span>"+sigLine;}},
     legend:{data:["K线","MA5","MA10","MA20","MA60","RSI14","量"],top:6,textStyle:{fontSize:11},itemWidth:14,itemHeight:8},
     axisPointer:{link:[{xAxisIndex:"all"}]},
-    grid:[{left:58,right:56,top:34,height:356},{left:58,right:56,top:411,height:60},{left:58,right:56,top:496,height:106}],
+    grid:[{left:58,right:56,top:34,height:356},{left:58,right:56,top:411,height:60},{left:58,right:56,top:496,height:100}],
     xAxis:[{type:"category",data:dates,boundaryGap:true,axisLine:{lineStyle:{color:"#d7dee8"}},axisLabel:{fontSize:10,color:"#8a94a3"},axisTick:{show:false}},
            {type:"category",gridIndex:1,data:dates,boundaryGap:true,axisLabel:{show:false},axisLine:{lineStyle:{color:"#e8edf4"}},axisTick:{show:false}},
            {type:"category",gridIndex:2,data:dates,boundaryGap:true,axisLabel:{show:false},axisLine:{lineStyle:{color:"#e8edf4"}},axisTick:{show:false}}],
