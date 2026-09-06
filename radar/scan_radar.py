@@ -193,7 +193,11 @@ def _em_clist(fs, host):
         else:
             empty_run = 0
             for x in diff:
-                code, mkt, name = str(x.get("f12", "")), int(x.get("f13", -1)), str(x.get("f14", ""))
+                code, name = str(x.get("f12", "")), str(x.get("f14", ""))
+                try:
+                    mkt = int(x.get("f13", -1))
+                except (TypeError, ValueError):
+                    mkt = -1            # R289: f13 脏值防御 —— 单条字段异常只弃该行, 不崩整个标的池
                 if len(code) == 6 and mkt in (0, 1):
                     sub = str(x.get("f100") or "-").strip()
                     try:

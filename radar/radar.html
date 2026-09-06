@@ -480,6 +480,8 @@ function sigRow(s){
     devTxt=(dev>=0?"▲ +":"▼ ")+a.toFixed(1)+"%";
     devCls=dev>=0?"up":"down";
     if(t){devTip=(dev>=0?"现价仍高于背驰高点 "+a.toFixed(1)+"%，警惕回落":"已从背驰高点回落 "+a.toFixed(1)+"%，观察企稳信号");devSub=(dev>=0?"高于高点·警惕":"已回落"+a.toFixed(1)+"%");}
+    // R289: 底信号 dev<0 = 现价已跌破背驰低点(结构失效) —— 原逻辑落入 dev<=8 分支误标"低吸参考区"(反向误导)
+    else if(dev<0){devTip="已跌破背驰低点 "+a.toFixed(1)+"%，底背驰结构失效 · 暂不低吸，等重新企稳再评估";devSub="破位·结构失效";}
     else{devTip=(dev<=8?"现价贴近背驰低点(+"+a.toFixed(1)+"%)，低吸参考区":"已较背驰低点走高 "+a.toFixed(1)+"%，追高风险");devSub=(dev<=8?"近低点·低吸参考":"已走高"+a.toFixed(1)+"%·慎追");}
   }
   var ff=(u.ff||{}).net;
@@ -516,9 +518,10 @@ function renderSigRadar(){
     var fn=f.net,t=s.dir==="top";
     if(fn!=null){if((!t&&fn>0)||(t&&fn<0))nRes++;else if((!t&&fn<0)||(t&&fn>0))nDiv++;}
     if((s.fresh!=null&&s.fresh<=5))nNear++;
-    // R288b: 兑现速览(横截面口径, 现价相对信号位) — 顶信号已回落>3%=方向兑现; 底信号仍贴近低点(≤8%)=待启动
+    // R288b: 兑现速览(横截面口径, 现价相对信号位) — 顶信号已回落>3%=方向兑现; 底信号仍贴近低点(0~8%)=待启动
+    // R289: 底 dv<0(已跌破背驰低点=结构失效)不计入"待启动"
     var dv=sigDev(s,s.st||{});
-    if(dv!=null){if(t){if(dv<=-3)nTopDn++;}else if(dv<=8)nBotCl++;}
+    if(dv!=null){if(t){if(dv<=-3)nTopDn++;}else if(dv>=0&&dv<=8)nBotCl++;}
     if(s.dir==="top")top.push(s);else if(s.dir==="bottom")bot.push(s);
   });
   var gRes=function(s){var fn=(UNI[s.sym]||{}).ff||{};fn=fn.net;if(fn==null)return false;return (s.dir==="bottom"&&fn>0)||(s.dir==="top"&&fn<0);};
@@ -706,7 +709,7 @@ function renderInds(){
       '<div class="spark">'+sparkSVG(x.spark,160,34)+'</div>'+
       '<div class="ffv '+ffCls(x.netflow)+'" title="当日主力净流入(超大+大单) · '+(x.netflow_n||0)+'只成分加总, 正=流入 负=流出">'+ffTxt(x.netflow)+'</div>'+
       '<div class="chg '+(x.chg1d>0?"up":(x.chg1d<0?"down":""))+'">'+pct(x.chg1d,1)+
-      (IDX?'<div class="vsub '+(x.chg1d>=IDX.chg?"up":"down")+'">'+(x.chg1d>=IDX.chg?"强":"弱")+'于沪 '+Math.abs((x.chg1d-IDX.chg)*100).toFixed(1)+'pp</div>':'')+'</div>'+
+      (IDX&&x.chg1d!=null?'<div class="vsub '+(x.chg1d>=IDX.chg?"up":"down")+'">'+(x.chg1d>=IDX.chg?"强":"弱")+'于沪 '+Math.abs((x.chg1d-IDX.chg)*100).toFixed(1)+'pp</div>':'')+'</div>'+   // R289: chg1d 空值不渲染相对强弱(null-IDX.chg=NaNpp)
       '<div class="ctr">'+ctrBlock(x)+'</div>'+
       '<div class="arrow">›</div></div>';
   });
@@ -729,7 +732,8 @@ function pickInd(k){
   if(!ind){alert("无行业 "+k+" 数据");return}
   curInd=k;
   curStk=null;curTab="ind";   // R258: 切行业必回"行业K线", 防残留上一只个股主图与 tab 状态错乱
-  if(("ind/"+k)!==(location.hash||"").replace(/^#\/?/,""))location.hash="#ind/"+encodeURIComponent(k);
+  var _want="ind/"+encodeURIComponent(k);   // R289: hash 写入即 encode, 比较必须同编码(原比较 k 原始串恒不等 → 每次重复 push 历史)
+  if(_want!==(location.hash||"").replace(/^#\/?/,""))location.hash="#"+_want;
   renderInds();
   // 不切换视图: 留在首页, 在 indDetail 渲染
   $("viewHome").classList.remove("hidden");
@@ -959,7 +963,7 @@ function showStk(sym){
   titleHtml+='<div class="big-title"><h2>'+esc(u.name)+leadTag+'</h2><span class="cd">'+esc(sym)+' · '+esc(u.code)+' · '+esc(u.type)+' · '+esc(grp||"-")+'</span></div>';
   titleHtml+='<div class="metric-strip">'+
     '<span>现价 <b class="'+(s.chg1d>0?"up":(s.chg1d<0?"down":""))+'">'+(s.close!=null?s.close:"-")+'</b>'+pct(s.chg1d,2)+'</span>'+
-    '<span>主力净流入 <b class="'+ffCls(_uff.net)+'">'+ffTxt(_uff.net)+'</b>'+( _uff.pct!=null?'<span class="'+( (_uff.pct||0)>=0?"up":"down")+'">'+(_uff.pct>0?"+":"")+_uff.pct+'%</span>':'')+'</span>'+
+    '<span>主力净流入 <b class="'+ffCls(_uff.net)+'">'+ffTxt(_uff.net)+'</b>'+( _uff.pct!=null?'<span class="'+ffCls(_uff.pct)+'">'+(_uff.pct>0?"+":"")+_uff.pct+'%</span>':'')+'</span>'+
     '<span>场景 <b>'+esc(scen||"-")+'</b></span>'+
     '<span>趋势 <b>'+esc(s.trend||"-")+'</b></span>'+
     '<span>笔/中枢 <b>'+(s.bi_n||0)+'/'+(s.zs_n||0)+'</b></span>'+
