@@ -222,6 +222,17 @@ h1 .dot{color:#ffd43b}
 .tag-fresh.hot{background:#ffe3e3;color:#c92a2a;border:1px solid #f5b6b6}
 .tag-fresh.new{background:#fff7e0;color:#92600a;border:1px solid #f2d48a}
 .sigrad .foot{padding:7px 16px;font-size:10.5px;color:#b0b9c6;text-align:center;border-top:1px solid #f1f5f9;background:#fcfdff;line-height:1.5}
+/* R287: 盘面摘要行 + 共振/背离 chips + 行首色条 */
+.sigrad .chips{display:flex;gap:6px;margin-left:auto}
+.sigrad .chip{font-size:11px;font-weight:600;color:#64748b;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:20px;padding:2px 10px;line-height:1.8;cursor:pointer;white-space:nowrap;transition:all .12s}
+.sigrad .chip:hover{background:#e8eef5}
+.sigrad .chip.on{background:#1c2a3a;color:#fff;border-color:#1c2a3a}
+.sigrad .smark{width:100%;padding:7px 16px 2px;font-size:11px;color:#475569;line-height:1.7;display:flex;flex-wrap:wrap;gap:3px 14px;align-items:center}
+.sigrad .smark b{font-weight:700}
+.sigrad .smark .tt{color:#c92a2a;font-weight:700}.sigrad .smark .bb{color:#087f5b;font-weight:700}
+.sigrad .smark .fn{color:#e54545;font-weight:700}.sigrad .smark .fd{color:#18a058;font-weight:700}
+.sigrad .srow.res{border-left:3px solid #e54545}.sigrad .srow.res.bsig{border-left-color:#18a058}
+.sigrad .srow.div{border-left:3px solid #f59f00}
 @media(max-width:980px){.sigrad .sbody{grid-template-columns:1fr}.sigrad .sgrp+.sgrp{border-left:0;border-top:1px dashed #e8edf4}}
 @media(max-width:980px){.sigrad .srow{grid-template-columns:minmax(100px,1.2fr) .8fr 56px 90px 72px;padding:7px 12px}.sigrad .gtt{padding:6px 12px}.sigrad .shead{padding:12px}}
 .chart-sec{display:grid;grid-template-columns:1fr 1fr;gap:14px}
@@ -482,30 +493,68 @@ function sigRow(s){
     (ff!=null?"\n当日主力净流入: "+ffTxt(ff):"")+
     ((ffNet!=null&&((!t&&ffNet<0)||(t&&ffNet>0)))?"\n⚠️ 资金背离警示: "+(t?"顶信号下主力仍净流入 "+ffTxt(ffNet)+"，警惕假顶/逼空":"底信号下主力却净流出 "+ffTxt(ffNet)+"，警惕假底不跟"):"")+
     "\n\n点击查看个股完整K线与结构";
-  return '<div class="srow" title="'+esc(sigTip)+'" onclick="showStk(\''+s.sym+'\')">'+
+  var resMode=(ffNet!=null)&&((!t&&ffNet>0)||(t&&ffNet<0));   // R287: 资金同向共振(顶+流出/底+流入)
+  var divMode=(ffNet!=null)&&((!t&&ffNet<0)||(t&&ffNet>0));   // 资金背离警示
+  var rowCls='srow'+(resMode?' res'+(t?'':' bsig'):'')+(divMode?' div':'');
+  return '<div class="'+rowCls+'" title="'+esc(sigTip)+'" onclick="showStk(\''+s.sym+'\')">'+
     '<div><div class="nm">'+(t?"⚠️ ":"✅ ")+esc(nm)+lead+ffMini+'</div><div class="sub">'+esc(s.sym)+" · "+esc(indName)+'</div></div>'+
     '<div class="st">'+(t?'<b style="color:#c92a2a">顶背驰</b>':'<b style="color:#087f5b">底背驰</b>')+'<span>强'+(s.strong||0)+'/'+(s.vol?"缩":"")+((s.area!=null&&s.area>0)?" 面"+s.area:"")+'</span></div>'+
     '<div class="st">'+(fr!=null?fr+"天前":"-")+frTag+'</div>'+
     '<div class="dev '+devCls+'" title="'+esc(devTip||sigTip)+'">'+(dev!=null?devTxt:"-")+'<small>'+esc(devSub)+'</small></div>'+
     '<div class="spk">'+(spk&&spk.length>1?sparkSVG(spk.length>90?spk.slice(-90):spk,92,24):'<span style="color:#cbd5e1">-</span>')+'</div></div>';
 }
+var curSigMode="all";   // R287: all=🔥最新 | res=💰资金共振 | div=⚠️背离警示
+function setSigMode(m){curSigMode=m;renderSigRadar();}
 function renderSigRadar(){
   var box=$("sigRadar");
   if(!box)return;
   var top=[],bot=[];
-  SIG.forEach(function(s){if(!s||!s.sym)return;if(s.dir==="top")top.push(s);else if(s.dir==="bottom")bot.push(s);});
-  var pick=function(arr){return arr.slice().sort(function(a,b){
-    var fa=(a.fresh==null?999:a.fresh),fb=(b.fresh==null?999:b.fresh);
-    return fa-fb||(b.strong||0)-(a.strong||0)||(b.area||0)-(a.area||0);}).slice(0,5)};
+  var nRes=0,nDiv=0,nNear=0;
+  SIG.forEach(function(s){
+    if(!s||!s.sym)return;
+    var f=(UNI[s.sym]||{}).ff||{};
+    var fn=f.net,t=s.dir==="top";
+    if(fn!=null){if((!t&&fn>0)||(t&&fn<0))nRes++;else if((!t&&fn<0)||(t&&fn>0))nDiv++;}
+    if((s.fresh!=null&&s.fresh<=5))nNear++;
+    if(s.dir==="top")top.push(s);else if(s.dir==="bottom")bot.push(s);
+  });
+  var gRes=function(s){var fn=(UNI[s.sym]||{}).ff||{};fn=fn.net;if(fn==null)return false;return (s.dir==="bottom"&&fn>0)||(s.dir==="top"&&fn<0);};
+  var gDiv=function(s){var fn=(UNI[s.sym]||{}).ff||{};fn=fn.net;if(fn==null)return false;return (s.dir==="bottom"&&fn<0)||(s.dir==="top"&&fn>0);};
+  var gf=function(s){var fn=(UNI[s.sym]||{}).ff||{};return Math.abs(fn.net||0);};
+  var byFresh=function(a,b){var fa=(a.fresh==null?999:a.fresh),fb=(b.fresh==null?999:b.fresh);return fa-fb||(b.strong||0)-(a.strong||0)||(b.area||0)-(a.area||0);};
+  var pick=function(arr,keep){arr=arr.slice();if(curSigMode==="res")arr=arr.filter(gRes);else if(curSigMode==="div")arr=arr.filter(gDiv);
+    arr.sort(curSigMode==="all"?byFresh:function(a,b){return gf(b)-gf(a)||byFresh(a,b);});return arr.slice(0,5);};
   var pt=pick(top),pb=pick(bot);
-  if(!pt.length&&!pb.length){box.style.display="none";return;}
+  if(!pt.length&&!pb.length&&curSigMode==="all"){box.style.display="none";return;}
   box.style.display="";
+  var emptyTxt=curSigMode==="all"?"当前全市场近端暂无该类信号 · 有信号时自动上榜":(curSigMode==="res"?"当前筛选下无「资金共振」信号(底信号+净流入/顶信号+净流出) · 切回🔥最新查看全部":"当前筛选下无「资金背离」信号(底+流出/顶+流入) · 切回🔥最新查看全部");
+  var sortTxt=curSigMode==="all"?"按最新触发排序":(curSigMode==="res"?"按资金同向金额降序":"按背离资金量降序");
   function grp(ic,title,rows){
-    if(!rows.length)return '<div class="sgrp"><div class="gtt"><span class="ic">'+ic+'</span>'+title+' <span class="n">0</span></div><div style="padding:16px;font-size:11.5px;color:#b0b9c6">当前全市场近端暂无该类信号 · 有信号时自动上榜</div></div>';
-    return '<div class="sgrp"><div class="gtt"><span class="ic">'+ic+'</span>'+title+' <span class="n">'+rows.length+'</span><span style="color:#b0b9c6;font-weight:400;margin-left:auto">按最新触发排序</span></div>'+rows.map(sigRow).join('')+'</div>';
+    if(!rows.length)return '<div class="sgrp"><div class="gtt"><span class="ic">'+ic+'</span>'+title+' <span class="n">0</span></div><div style="padding:14px 16px;font-size:11px;color:#b0b9c6;line-height:1.7">'+esc(emptyTxt)+'</div></div>';
+    return '<div class="sgrp"><div class="gtt"><span class="ic">'+ic+'</span>'+title+' <span class="n">'+rows.length+'</span><span style="color:#b0b9c6;font-weight:400;margin-left:auto">'+sortTxt+'</span></div>'+rows.map(sigRow).join('')+'</div>';
   }
+  // R287: 盘面自动摘要(顶/底近端 + 资金共振/背离 + 板块净流入Top)
+  var smark='';
+  if(SIG.length){
+    var inTop=null,inBot=null;
+    Object.keys(INDS).forEach(function(k){var nf=INDS[k].netflow;if(nf==null)return;
+      if(inTop==null||nf>inTop.nf)inTop={k:k,nf:nf};if(inBot==null||nf<inBot.nf)inBot={k:k,nf:nf};});
+    smark='<div class="smark">'+
+      '<span>📡 全市场信号 <b class="tt">顶'+top.length+'</b>/<b class="bb">底'+bot.length+'</b> · 近端≤5天 <b>'+nNear+'</b></span>'+
+      (nRes?'<span>💰资金共振 <b class="fn" style="color:#c92a2a">'+nRes+'</b></span>':'')+
+      (nDiv?'<span>⚠️背离警示 <b style="color:#f59f00">'+nDiv+'</b></span>':'')+
+      (inTop?'<span>主力净流入 <b class="fn">'+esc(inTop.k)+' '+ffTxt(inTop.nf)+'</b></span>':'')+
+      (inBot?'<span>净流出 <b class="fd">'+esc(inBot.k)+' '+ffTxt(inBot.nf)+'</b></span>':'')+
+      '</div>';
+  }
+  var chipOn=function(m){return curSigMode===m?' on':'';};
   box.innerHTML='<div class="shead"><h2>🔥 实操信号雷达</h2>'+
-    '<span class="shint">全市场最新背驰信号 · <b style="color:#c92a2a">顶=风险</b>(警惕/减仓) <b style="color:#087f5b">底=机会</b>(关注/分批低吸) · 「偏离」=现价较信号位涨跌(<8%贴近=低吸参考区, 大=已走远慎追) · 👑龙头/资金佐证</span></div>'+
+    '<div class="chips">'+
+      '<span class="chip'+chipOn("all")+'" onclick="setSigMode(\'all\')">🔥最新</span>'+
+      '<span class="chip'+chipOn("res")+'" onclick="setSigMode(\'res\')">💰资金共振</span>'+
+      '<span class="chip'+chipOn("div")+'" onclick="setSigMode(\'div\')">⚠️背离警示</span>'+
+    '</div>'+smark+
+    '<span class="shint" style="width:100%">全市场最新背驰信号 · <b style="color:#c92a2a">顶=风险</b>(警惕/减仓) <b style="color:#087f5b">底=机会</b>(关注/分批低吸) · 「偏离」=现价较信号位涨跌(<8%贴近=低吸参考区, 大=已走远慎追) · 👑龙头/资金佐证 · <span style="color:#e54545">左边条=资金共振</span>/<span style="color:#f59f00">黄条=背离警示</span></span></div>'+
     '<div class="sbody">'+grp("⚠️","顶背驰 · 风险",pt)+grp("✅","底背驰 · 机会",pb)+'</div>'+
     '<div class="foot">信号=自研缠论引擎背驰确认 · 数据截至 '+(M.asof||"-")+' · 仅供研究参考，不构成投资建议</div>';
 }
