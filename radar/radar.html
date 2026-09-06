@@ -66,12 +66,21 @@ h1 .dot{color:#ffd43b}
 .ind-row .meta{font-size:11px;color:var(--muted);line-height:1.6}
 .ind-row .spark{width:100%;height:34px;display:block}
 .ind-row .spark svg{width:100%;height:34px;display:block}   /* R258: 小屏列宽不足160时 svg 跟随容器缩放 */
-.ind-row .chg{font-weight:700;font-size:13.5px;text-align:right;line-height:1.3}
-.ind-row .ctr{font-size:11px;color:var(--muted);text-align:right}
-.ctr-top{display:flex;align-items:center;justify-content:flex-end;gap:5px}
-.ctr-sub{font-size:10px;color:var(--muted);margin-top:3px;text-align:right;line-height:1.4}
-.rsi-bar{position:relative;display:inline-block;width:58px;height:4px;border-radius:2px;margin:3px 0 0 auto;flex:none;vertical-align:middle}
+.ind-row .chg{font-weight:700;font-size:13.5px;text-align:center;line-height:1.3}
+.ind-row .ctr{font-size:11px;color:var(--muted);text-align:center}
+.ctr-top{display:flex;align-items:center;justify-content:center;gap:5px}
+.ctr-sub{font-size:10px;color:var(--muted);margin-top:3px;text-align:center;line-height:1.4}
+.rsi-bar{position:relative;display:inline-block;width:58px;height:4px;border-radius:2px;margin:3px 0 0;flex:none;vertical-align:middle}
 .rsi-bar i{position:absolute;top:-2px;width:2px;height:8px;background:#334155;border-radius:1px}
+/* R261: 列内内容按列均匀分布 — 走势状态/涨跌/RSI/箭头 4 列居中, 与表头节奏一致 */
+.ind-row > div:nth-child(3),.ind-grid > div:nth-child(3){text-align:center}
+.ind-row > div:nth-child(5),.ind-grid > div:nth-child(5){text-align:center}
+.ind-row > div:nth-child(6),.ind-grid > div:nth-child(6){text-align:center}
+.ind-row > div:nth-child(7),.ind-grid > div:nth-child(7){text-align:center}
+@media(max-width:980px){.ind-row > div:nth-child(3),.ind-grid > div:nth-child(3),
+  .ind-row > div:nth-child(5),.ind-grid > div:nth-child(5),
+  .ind-row > div:nth-child(6),.ind-grid > div:nth-child(6),
+  .ind-row > div:nth-child(7),.ind-grid > div:nth-child(7){text-align:center}}
 .ctr-top .rsi-bar{margin-top:0}
 .dstrip .rsi-bar{margin:0 2px}
 .ind-row .arrow{color:#cbd5e1;margin-left:2px;text-align:center;font-size:14px}
