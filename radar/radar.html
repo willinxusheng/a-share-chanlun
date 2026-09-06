@@ -29,7 +29,6 @@ h1{font-size:21px;font-weight:700;letter-spacing:.4px;line-height:1.3}
 h1 .dot{color:#ffd43b}
 .sub{color:#c8d3e2;font-size:12px;margin-top:4px;line-height:1.6}
 .sub b{color:#fff;font-weight:600}
-.spacer{display:none}
 .goback{position:absolute;top:14px;right:18px;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.38);color:#fff;padding:7px 15px;border-radius:999px;font-size:13px;cursor:pointer;text-decoration:none;transition:.18s;white-space:nowrap;line-height:1.4;box-shadow:inset 0 0 0 0 rgba(255,255,255,.2)}
 .goback:hover{background:rgba(255,255,255,.26);border-color:rgba(255,255,255,.6)}
 /* ===== 概要条 ===== */
@@ -66,6 +65,7 @@ h1 .dot{color:#ffd43b}
 .ind-row .nm{font-weight:700;font-size:14.5px;display:flex;align-items:center;gap:6px;line-height:1.45;letter-spacing:.2px}
 .ind-row .meta{font-size:11px;color:var(--muted);line-height:1.6}
 .ind-row .spark{width:100%;height:34px;display:block}
+.ind-row .spark svg{width:100%;height:34px;display:block}   /* R258: 小屏列宽不足160时 svg 跟随容器缩放 */
 .ind-row .chg{font-weight:700;font-size:13.5px;text-align:right;line-height:1.3}
 .ind-row .ctr{font-size:11px;color:var(--muted);text-align:right}
 .ctr-top{display:flex;align-items:center;justify-content:flex-end;gap:5px}
@@ -199,7 +199,6 @@ a{color:var(--primary);text-decoration:none}
       <h1>📡 A股全市场缠论雷达<span class="dot"></span></h1>
       <div class="sub" id="topSub">加载中…</div>
     </div>
-    <div class="spacer"></div>
     <a class="goback" href="javascript:toIndex()">← 返回主看板</a>
   </div>
 </header>
@@ -231,8 +230,7 @@ a{color:var(--primary);text-decoration:none}
     <div id="indDetail"></div>
     <div class="foot">数据源：标的池/市值 东财行情 · K线 腾讯前复权(主)/新浪日K(备) · 行业K线=成分股总市值加权合成 · 缠论=自研分笔中枢背驰引擎<br>⚠️ 仅供研究参考，不构成投资建议。页宽与主看板一致(1160px)。</div>
   </div>
-  <!-- 二级: 行业详情 -->
-  <div id="viewInd" class="hidden"></div>
+  <!-- 二级: 行业详情(内嵌于首页 #indDetail, 无独立视图) -->
   <!-- 三级: 个股详情 -->
   <div id="viewStk" class="hidden"></div>
 </div>
@@ -243,19 +241,29 @@ a{color:var(--primary);text-decoration:none}
    全市场缠论雷达 v3 · 行业为根 + 个股K线内嵌切换
    数据: radar/radar.json (scan_radar.py P3b-r1) · 前端 R252+R253 · R253-hotfix: 修 drawChart 不清 loading 残留 + legend 重复声明
    K线: 行业=radar.json 内嵌合成; 个股=腾讯 fqkline (CORS 已开)
+   R258: ①个股volume去/100(腾讯=手) ②行业tooltip量=成交额亿元 ③spark=[o,h,l,c]close索引修复
+        ④pickInd重置curStk/tab ⑤fresh=0排序 ⑥hashchange stk真渲染 ⑦浮层/图实例清理+竞态令牌 ⑧fetch no-cache
    ============================================================ */
 var UP="#e54545", DN="#18a058", ACC="#2b6cb0";
 var M=null, UNI={}, SIG=[], INDS={};
 var curInd=null, curStk=null, curTab="ind", myChart=null;
 var IDX=null, detailOpen=false;   // IDX=上证基准(close/chg) · detailOpen=行业详情是否已展开
 function $(id){return document.getElementById(id)}
-function esc(s){return (s==null?"":String(s)).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]})}
+function esc(s){return (s==null?"":String(s)).replace(/[&<>"']/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]})}
 function pct(v,d){if(v==null||isNaN(v))return "-";return (v>0?"+":"")+(v*100).toFixed(d==null?2:d)+"%"}
 function fmtVol(v){if(v==null||isNaN(v))return "-";if(v>=1e8)return (v/1e8).toFixed(2)+"亿手";if(v>=1e4)return (v/1e4).toFixed(0)+"万手";return v.toFixed(0)+"手"}
 function capStr(y){if(y==null)return "-";if(y>=1e8)return (y/1e8).toFixed(0)+"亿";if(y>=1e4)return (y/1e4).toFixed(1)+"万";return y}
+/* ===== R258: 图表实例池 + K线拉取竞态令牌 ===== */
+var CH_POOL=[];   // 全页图表实例登记(showStk/backHome 整页重建时统一 dispose, 防孤儿实例泄漏)
+function poolChart(ch){if(ch&&CH_POOL.indexOf(ch)<0)CH_POOL.push(ch)}
+function disposePool(){CH_POOL.forEach(function(c){try{if(c&&c.dispose)c.dispose()}catch(e){}});CH_POOL=[]}
+function hideFloatHead(){var f=$("stkFloatHead");if(f)f.classList.remove("show")}
+var drawSeq=0,stkSeq=0;   // 竞态令牌: 快速连续切换股票/页面时只渲染最后一次请求
+/* 行业合成K线量: scan_radar 存 vol=Σ(成分手×价)/1e8, 即 板块成交额(亿元)/100 → ×100 还原为亿元 */
+function amtYi(v){if(v==null||isNaN(v))return "-";var x=v*100;return x>=10000?(x/10000).toFixed(2)+"万亿":x.toFixed(0)+"亿"}
 function regimeCls(r){if(!r)return "flat";if(r.indexOf("顶")>=0)return "top";if(r.indexOf("底")>=0)return "bot";if(r.indexOf("涨")>=0)return "up";if(r.indexOf("跌")>=0)return "dn";return "flat"}
 var qs=(location.hash||"").replace(/^#\/?/,"");
-fetch("radar.json").then(function(r){if(!r.ok)throw new Error("HTTP "+r.status);return r.json()}).then(function(d){
+fetch("radar.json",{cache:"no-cache"}).then(function(r){if(!r.ok)throw new Error("HTTP "+r.status);return r.json()}).then(function(d){
   M=d.meta;UNI=d.universe||{};SIG=d.signals||[];INDS=d.industries||{};
   renderHeader();renderBar();
   if(qs.indexOf("stk/")===0)showStk(decodeURIComponent(qs.slice(4)));
@@ -277,7 +285,7 @@ function kickIndex(){
             "https://ifzq.gtimg.cn/appstock/app/fqkline/get?param=sh000001,day,,,8,"];
   var tryNext=function(list){
     if(!list.length)return;
-    fetch(list[0]).then(function(r){return r.json()}).then(function(j){
+    fetch(list[0],{cache:"no-cache"}).then(function(r){return r.json()}).then(function(j){
       var v=idxParse(j);
       if(!v){tryNext(list.slice(1));return;}
       IDX=v;renderBar();renderInds();
@@ -289,8 +297,11 @@ function kickIndex(){
 
 function renderHeader(){
   var m=M||{};
-  $("topSub").innerHTML="申万一级 <b>"+(m.n_ind||Object.keys(INDS).length)+"</b> 行业 + ETF · 覆盖 <b>"+(m.n_ok||0)+"</b> 只 · 信号 <b>"+(m.n_signal||0)+"</b> · 数据截至 <b>"+(m.asof||"-")+"</b> · "+ (m.build_time||"");
-  $("indCnt").textContent=(m.n_ind||0)+"+1";
+  var nInd=m.n_ind||Object.keys(INDS).length||0;
+  var hasETF=Object.keys(INDS).some(function(k){return !!(INDS[k]&&INDS[k].is_etf)});
+  var nSw=Math.max(0,nInd-(hasETF?1:0));   // meta.n_ind 含 ETF 合成板块
+  $("topSub").innerHTML="申万一级 <b>"+nSw+"</b> 行业"+(hasETF?" + ETF 板块":"")+" · 覆盖 <b>"+(m.n_ok||0)+"</b> 只 · 信号 <b>"+(m.n_signal||0)+"</b> · 数据截至 <b>"+(m.asof||"-")+"</b> · "+(m.build_time||"");
+  $("indCnt").textContent=nInd;
   document.title="A股全市场缠论雷达 · "+(m.asof||"");
 }
 function renderBar(){
@@ -471,12 +482,11 @@ function pickInd(k){
   var ind=INDS[k];
   if(!ind){alert("无行业 "+k+" 数据");return}
   curInd=k;
-  if(!curStk){curTab="ind";}
+  curStk=null;curTab="ind";   // R258: 切行业必回"行业K线", 防残留上一只个股主图与 tab 状态错乱
   if(("ind/"+k)!==(location.hash||"").replace(/^#\/?/,""))location.hash="#ind/"+encodeURIComponent(k);
   renderInds();
   // 不切换视图: 留在首页, 在 indDetail 渲染
   $("viewHome").classList.remove("hidden");
-  $("viewInd").classList.add("hidden");
   $("viewStk").classList.add("hidden");
   var st=ind.st||{};
   var capTxt=(ind.cap==null)?"-":(ind.cap>=10000?(ind.cap/10000).toFixed(2)+"万亿":ind.cap.toFixed(0)+"亿");
@@ -519,6 +529,7 @@ function drawChart(){
     drawStkInto(el,curStk);
     return;
   }
+  if(myChart){try{myChart.dispose()}catch(e){};myChart=null;}   // R258: 内容将整体替换, 先释放旧实例防泄漏
   if(curTab!=="ind"||!curInd){el.innerHTML='<div class="loading" style="padding:60px 0">点击下方股票查看个股K线</div>';return;}
   var ind=INDS[curInd],kl=ind.kline||[];
   if(!kl.length){el.innerHTML='<div class="err">该行业合成K线为空</div>';return;}
@@ -526,14 +537,13 @@ function drawChart(){
   // 上一次残留的 <div class="loading sk">K线渲染中…</div> 会卡死 mainChart.
   // echarts.init(zrender) 不会清空 DOM 子节点,只追加 svg,loading 文字盖在 svg 上.
   el.innerHTML="";
-  var opt=indKlineOption(kl);
+  var opt=indKlineOption(kl,"ind");   // R258: 行业量=板块成交额(亿元), 不走个股"手"格式
   opt.series=opt.series.concat(chanMarkOption(ind.mark,kl.map(function(x){return x.date})));
   // legend 只 push 实际存在的系列,避免 "底背驰" 等 0 信号行业报 warning
   ["笔","顶背驰","底背驰"].forEach(function(n){
     if(opt.series.some(function(s){return s.name===n;}) && opt.legend.data.indexOf(n)<0) opt.legend.data.push(n);
   });
   try{
-    if(myChart)myChart.dispose();
     myChart=echarts.init(el,null,{renderer:"svg"});
     myChart.setOption(opt);
   }catch(err){
@@ -542,20 +552,24 @@ function drawChart(){
   }
 }
 function drawStkInto(el,sym){
+  var seq=++drawSeq;
   el.innerHTML='<div class="loading sk">实时行情拉取中('+esc(sym)+')…</div>';
-  fetch("https://ifzq.gtimg.cn/appstock/app/fqkline/get?param="+sym+",day,,,660,qfq").then(function(r){return r.json()}).then(function(j){
+  fetch("https://ifzq.gtimg.cn/appstock/app/fqkline/get?param="+sym+",day,,,660,qfq",{cache:"no-cache"}).then(function(r){return r.json()}).then(function(j){
+    if(seq!==drawSeq)return;   // R258: 快速连点时丢弃过期响应
     var kl=(j.data[sym]||{}).qfqday||[];
     if(!kl.length)throw new Error("empty");
-    var k2=kl.map(function(r){return {date:r[0],open:+r[1],close:+r[2],high:+r[3],low:+r[4],volume:(+r[5])/100}});
+    var k2=kl.map(function(r){return {date:r[0],open:+r[1],close:+r[2],high:+r[3],low:+r[4],volume:+r[5]}});   // 腾讯 volume 单位=手(实测 333102=33.3万手), 不再 /100
     el.innerHTML="";
-    var opt=indKlineOption(k2);
+    var opt=indKlineOption(k2,"stk");
     var u=UNI[sym];var extra=chanMarkOption(u&&u.mark,k2.map(function(x){return x.date}));
     opt.series=opt.series.concat(extra);
     ["笔","顶背驰","底背驰"].forEach(function(n){if(opt.series.some(function(s){return s.name===n;})&&opt.legend.data.indexOf(n)<0)opt.legend.data.push(n);});
-    if(myChart){myChart.dispose()}
+    if(myChart){try{myChart.dispose()}catch(e){}}
     myChart=echarts.init(el,null,{renderer:"svg"});
     myChart.setOption(opt);
-  }).catch(function(e){el.innerHTML='<div class="err">实时行情拉取失败：'+esc(e.message)+'<br>（腾讯 fqkline 需在浏览器环境访问，file:// 可能被拦；可用 GitHub Pages / 本地 http 服务）</div>'});
+  }).catch(function(e){
+    if(seq!==drawSeq)return;
+    el.innerHTML='<div class="err">实时行情拉取失败：'+esc(e.message)+'<br>（腾讯 fqkline 需在浏览器环境访问，file:// 可能被拦；可用 GitHub Pages / 本地 http 服务）</div>'});
 }
 /* ===== 行业成分股列表(点击切主图) ===== */
 function renderIndStkList(k){
@@ -574,8 +588,10 @@ function renderIndStkList(k){
   var gBot=list.filter(function(x){return x.sg&&x.sg.dir==="bottom"});
   var gRest=list.filter(function(x){return !x.sg});
   // 综合排序: 信号(强>新) > 其余(自洽率降序, 市值降序)
-  gTop.sort(function(a,b){return (b.sg.strong||0)-(a.sg.strong||0)||(a.sg.fresh||9)-(b.sg.fresh||9)});
-  gBot.sort(function(a,b){return (b.sg.strong||0)-(a.sg.strong||0)||(a.sg.fresh||9)-(b.sg.fresh||9)});
+  // R258: fresh 可为 0(当日信号), 原 (x.fresh||9) 会把 0 误当 9, 新鲜信号反而排后 → 改 null 感知
+  function frDays(x){return x.sg.fresh==null?9:x.sg.fresh}
+  gTop.sort(function(a,b){return (b.sg.strong||0)-(a.sg.strong||0)||frDays(a)-frDays(b)});
+  gBot.sort(function(a,b){return (b.sg.strong||0)-(a.sg.strong||0)||frDays(a)-frDays(b)});
   gRest.sort(function(a,b){return (b.st.agree||0)-(a.st.agree||0)||(b.u.mcap||0)-(a.u.mcap||0)});
   function sec(title,cnt,rows,opt){
     if(!rows.length)return'';
@@ -670,8 +686,8 @@ function pickStkInInd(sym){
 function showStk(sym){
   var u=UNI[sym];if(!u){alert("未收录 "+sym);return}
   curStk=sym;curTab="stk";detailOpen=false;
+  disposePool();hideFloatHead();   // R258: 整页重建前释放旧页图表实例 / 隐藏浮层表头
   $("viewHome").classList.add("hidden");
-  $("viewInd").classList.add("hidden");
   $("viewStk").classList.remove("hidden");
   var s=u.st||{};var stk=SIG.filter(function(x){return x.sym===sym})[0]||null;
   location.hash="#stk/"+sym;
@@ -714,30 +730,45 @@ function showStk(sym){
   if(hasMini)drawStkMini(sp);
 }
 function loadStkChart(sym){
-  fetch("https://ifzq.gtimg.cn/appstock/app/fqkline/get?param="+sym+",day,,,660,qfq").then(function(r){return r.json()}).then(function(j){
+  var seq=++stkSeq;
+  fetch("https://ifzq.gtimg.cn/appstock/app/fqkline/get?param="+sym+",day,,,660,qfq",{cache:"no-cache"}).then(function(r){return r.json()}).then(function(j){
+    if(seq!==stkSeq)return;   // R258: 丢弃过期响应
     var kl=(j.data[sym]||{}).qfqday||[];
     if(!kl.length)throw new Error("empty");
-    var k2=kl.map(function(r){return {date:r[0],open:+r[1],close:+r[2],high:+r[3],low:+r[4],volume:(+r[5])/100}});
-    var el=$("stkChart");el.innerHTML="";
-    var opt=indKlineOption(k2);
+    var k2=kl.map(function(r){return {date:r[0],open:+r[1],close:+r[2],high:+r[3],low:+r[4],volume:+r[5]}});   // 腾讯=手, 不再 /100
+    var el=$("stkChart");if(!el)return;el.innerHTML="";
+    var opt=indKlineOption(k2,"stk");
     var u=UNI[sym];var extra=chanMarkOption(u.mark,k2.map(function(x){return x.date}));
     opt.series=opt.series.concat(extra);
     ["笔","顶背驰","底背驰"].forEach(function(n){if(opt.series.some(function(s){return s.name===n;})&&opt.legend.data.indexOf(n)<0)opt.legend.data.push(n);});
     var ch=echarts.init(el,null,{renderer:"svg"});
+    poolChart(ch);   // R258: 登记到实例池, backHome/showStk 时统一释放
     ch.setOption(opt);
-  }).catch(function(e){$("stkChart").innerHTML='<div class="err">实时行情拉取失败：'+esc(e.message)+'<br>（腾讯 fqkline 需在浏览器环境访问，file:// 可能被拦；可用 GitHub Pages / 本地 http 服务）</div>'});
+  }).catch(function(e){
+    if(seq!==stkSeq)return;
+    var el=$("stkChart");if(el)el.innerHTML='<div class="err">实时行情拉取失败：'+esc(e.message)+'<br>（腾讯 fqkline 需在浏览器环境访问，file:// 可能被拦；可用 GitHub Pages / 本地 http 服务）</div>'});
 }
 function drawStkMini(sp){
-  var data=sp.data.map(function(k){return {date:sp.d0,open:k[0],close:k[1],low:k[2],high:k[3]}});
+  // R258 fix: spark 行=[open,high,low,close](close 在索引3, 与 st.close 对齐实测);
+  // 原代码把 high(k[1])当 close 画线、low/high 互换 → 迷你图曲线/涨跌色错
+  var data=sp.data.map(function(k){return {date:sp.d0,open:k[0],high:k[1],low:k[2],close:k[3]}});
   if(!data||data.length<2)return;
   var mini=$("stkMini");if(!mini)return;
   var ch=echarts.init(mini,null,{renderer:"svg"});
+  poolChart(ch);   // R258: 登记实例池
   ch.setOption({animation:false,grid:{left:6,right:6,top:6,bottom:6},
     xAxis:{type:"category",data:data.map(function(x){return x.date}),show:false},
     yAxis:{type:"value",scale:true,show:false},
     series:[{type:"line",data:data.map(function(x){return x.close}),smooth:false,symbol:"none",lineStyle:{width:1.2,color:(data[data.length-1].close>=data[0].close?UP:DN)}}]});
 }
-function backHome(){$("viewStk").classList.add("hidden");$("viewInd").classList.add("hidden");$("viewHome").classList.remove("hidden");location.hash="#/";curStk=null;curTab="ind";curInd=null;detailOpen=false;renderInds()}
+function backHome(){
+  disposePool();hideFloatHead();   // R258: 释放个股页图实例 + 隐藏浮层表头(否则滚动残留 fixed 在顶部)
+  if(myChart){try{myChart.dispose()}catch(e){};myChart=null}
+  $("viewStk").classList.add("hidden");
+  $("viewHome").classList.remove("hidden");
+  location.hash="#/";
+  curStk=null;curTab="ind";curInd=null;detailOpen=false;renderInds();
+}
 function pickIndFromStk(k){backHome();renderInds();pickInd(k)}
 function toIndex(){location.href=location.href.split("/radar/")[0]+"/index.html"}
 /* ===== 通用: K线 option + 缠论标注 ===== */
@@ -759,7 +790,7 @@ function rsiSeries(kl,n){
   }
   return out;
 }
-function indKlineOption(kl){
+function indKlineOption(kl,kind){   // kind:"ind"=行业合成(量=成交额亿元) | "stk"/缺省=个股腾讯(量=手)
   var dates=kl.map(function(k){return k.date});
   var kdata=kl.map(function(k){return [k.open,k.close,k.low,k.high]});
   var vols=kl.map(function(k){var up=k.close>=k.open;return {value:k.volume,itemStyle:{color:up?UP:DN,opacity:.75}}});
@@ -772,10 +803,11 @@ function indKlineOption(kl){
       extraCssText:"border-radius:10px;box-shadow:0 8px 24px rgba(15,23,42,.28);font-variant-numeric:tabular-nums;",
       formatter:function(ps){var p=ps[0];if(!p||!p.axisValue)return"";var i=ps[0].dataIndex;var k=kl[i];if(!k)return p.axisValue;
         var up=k.close>=k.open;
+        var volTxt=kind==="ind"?"板块成交额 "+amtYi(k.volume):"量 "+fmtVol(k.volume);   // R258: 行业合成量=成交额(亿元), 个股=手
         return "<div style='font-size:12px;font-weight:700;margin-bottom:3px'>"+k.date+"</div>"+
           "开 "+k.open+"　收 <b style='color:"+(up?"#ff6b6b":"#4ade80")+"'>"+k.close+"</b>"+(up?" ▲":" ▼")+
           "<br/>高 "+k.high+"　低 "+k.low+(rsiRaw[i]!=null?"<br/>RSI14 <b style='color:#b39ddb'>"+(+rsiRaw[i].toFixed(1))+"</b>":"")+
-          "<br/><span style='color:#94a3b8'>量 "+fmtVol(k.volume)+"</span>";}},
+          "<br/><span style='color:#94a3b8'>"+volTxt+"</span>";}},
     legend:{data:["K线","MA5","MA10","MA20","MA60","RSI14"],top:6,textStyle:{fontSize:11},itemWidth:14,itemHeight:8},
     axisPointer:{link:[{xAxisIndex:"all"}]},
     grid:[{left:58,right:16,top:34,height:340},{left:58,right:16,top:395,height:60},{left:58,right:16,top:480,height:110}],
@@ -822,7 +854,7 @@ function chanMarkOption(mark,dates){
 /* ===== 路由 ===== */
 window.addEventListener("hashchange",function(){
   var h=(location.hash||"").replace(/^#\/?/,"");
-  if(h.indexOf("stk/")===0){var s=decodeURIComponent(h.slice(4));if(curStk!==s||curTab!=="stk"){curStk=s;curTab="stk";}}
+  if(h.indexOf("stk/")===0){var s=decodeURIComponent(h.slice(4));if(curStk!==s||curTab!=="stk"){showStk(s);}}   // R258: 状态不一致时真正渲染个股页(原只改状态不渲染)
   else if(h.indexOf("ind/")===0){var k=decodeURIComponent(h.slice(4));if(curInd!==k)pickInd(k);}
   else if(!h)backHome();
 });
