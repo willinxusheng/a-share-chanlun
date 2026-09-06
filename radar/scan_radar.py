@@ -46,6 +46,11 @@ UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
 MIN_BARS = 120                 # 少于120根日线(约半年) -> 次新/数据不足, 不进信号
 LOW_AMT60 = 3000.0             # 近60日均成交额(万元) 低于 -> 低流动性
 ONE_WORD_MAX = 10              # 一字板天数 >= -> 结构失真, 不进信号
+# R277: 一字板统计窗口(交易日数) —— "结构失真"语义=近期无量封板无法交易, 与 MIN_BARS
+# (120≈半年)门禁同窗口口径。全历史累计会把上市初期连板(次新常态 10~24 个一字)或多年前
+# 重组/题材一字永久计入, 使正常交易多年的票被 gate 永久误杀; 次新(n<120)已由"次新"
+# gate 先行剔除, 本窗口不会额外放过上市不足半年的连板票。
+ONE_WORD_WIN = 120
 AGREE_TOTAL_MIN = 8
 AGREE_RATE_MIN = 0.6
 FRESH_MAX_DAYS = 10            # 最近背驰距今天数 <= -> 才算"近端信号"
@@ -641,6 +646,13 @@ def _sanitize_ks(ks):
     return out if len(out) >= _KS_MIN_BARS else []
 
 
+def _one_word_count(ks, win=ONE_WORD_WIN):
+    """近端 win 根内一字板天数(high==low, 无量封板无法成交)。R277 窗口化 ——
+    全历史累计会把 2021~2023 的上市初期连板/旧一字永久计入, 详见 ONE_WORD_WIN 注释。"""
+    seg = ks[-win:] if len(ks) > win else ks
+    return sum(1 for k in seg if k["low"] > 0 and abs(k["high"] / k["low"] - 1) < 1e-9)
+
+
 def analyze_one(sym, ks):
     """chanlun.analyze -> 精简摘要(雷达schema) + 轻量绘图标注 mark。
     返回 (st, err, mark)。mark 仅供前端详情页叠画, 门禁剔除票也尽量给(可点看结构)。
@@ -669,7 +681,7 @@ def analyze_one(sym, ks):
         tail60 = ks[-60:]
         avg_amt = sum(k["volume"] * 100 * k["close"] for k in tail60) / max(1, len(tail60)) / 1e4
         amp = [h / l - 1 for h, l in zip(highs, lows) if l > 0]
-        one_word = sum(1 for h, l in zip(highs, lows) if l > 0 and abs(h / l - 1) < 1e-9)
+        one_word = _one_word_count(ks)   # R277: 近端120根窗口(原全历史累计误杀上市初期连板的正常票)
         med_amp = (sorted(amp)[len(amp) // 2] if amp else 0.0) * 100
         stop_days = _days_ago(d1)   # 距今天数(停牌判定: 明显大于3)
         zs_last = ({"zd": round(zss[-1]["zd"], 2), "zg": round(zss[-1]["zg"], 2),
