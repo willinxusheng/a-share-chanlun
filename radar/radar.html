@@ -185,6 +185,8 @@ h1 .dot{color:#ffd43b}
 .subcrumb a{color:var(--primary);text-decoration:none;cursor:pointer;font-weight:600}
 .subcrumb a:hover{text-decoration:underline}
 .subcrumb .arr{color:#cbd5e1}
+.subcrumb-back{background:#fff;color:var(--primary);border:1px solid #b9c9e6;padding:3px 11px;border-radius:999px;font-weight:600;display:inline-flex;align-items:center;gap:2px;transition:.15s}
+.subcrumb-back:hover{background:#eff5ff;border-color:var(--primary);text-decoration:none}
 .big-title{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;padding:8px 16px 0}
 .big-title h2{font-size:27px;font-weight:800;letter-spacing:.2px;line-height:1.3}
 .big-title .cd{color:var(--muted);font-size:13px}
@@ -1008,7 +1010,7 @@ function showStk(sym){
   var leadTag=u.lead?' <span class="lead-tag" title="'+(u.type==="ETF"?"场内规模最大的基金":"该行业总市值最大的龙头股")+'">👑 '+(u.type==="ETF"?"板块规模最大":"行业龙头")+'</span>':'';   // R283
   var _uff=u.ff||{};   // R283: 当日主力净流入(元)
   var titleHtml='<div class="subcrumb">'+(prevStkSrc==="sigrad"
-    ?'<a href="javascript:backSigRadar()" title="返回上一页·实操信号雷达" style="background:#fff3cd;border:1px solid #f0d98c;padding:1px 8px;border-radius:7px">🔥 返回信号雷达</a>'
+    ?'<a class="subcrumb-back" href="javascript:backSigRadar()" title="返回上一页·实操信号雷达">← 返回信号雷达</a>'
     :'<a href="javascript:backHome()">📡 雷达首页</a>')+
     ' <span class="arr">›</span> '+(grp?'<a href="javascript:pickIndFromStk(\''+esc(grp)+'\')">'+esc(grp)+'</a> <span class="arr">›</span> ':'')+'<span style="color:var(--ink)">'+esc(u.name)+'</span></div>';
   titleHtml+='<div class="big-title"><h2>'+esc(u.name)+leadTag+'</h2><span class="cd">'+esc(sym)+' · '+esc(u.code)+' · '+esc(u.type)+' · '+esc(grp||"-")+'</span></div>';
