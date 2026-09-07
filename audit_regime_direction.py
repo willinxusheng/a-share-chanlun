@@ -55,7 +55,7 @@ def run():
             # 判定：方向<抛硬币 或 覆盖<85% → 该档预警
             flags = []
             if dm < DIR_WARN:
-                flags.append("方向<50%%(不如抛硬币)")
+                flags.append("方向<50%(不如抛硬币)")  # R356: 纯参数字符串不经 % 格式化, %% 会原样输出(R355 同族坑)
             if cov < COV_WARN:
                 flags.append("覆盖<%d%%" % COV_WARN)
             if n < SMALL_N:
@@ -72,7 +72,7 @@ def run():
         n = s["N"]
         if n:
             dm = s["dir_main"] / n * 100
-            print(f"  {rg:<6} T+30 主路径方向命中 {dm:5.1f}% (N={n})")
+            print("  %s T+30 主路径方向命中 %5.1f%% (N=%d)" % ({"bull": "牛市", "bear": "熊市", "range": "震荡"}[rg], dm, n))  # R356: label 中文与表内一致
     print("=" * 110)
 
     # 门禁汇总判定
@@ -85,12 +85,12 @@ def run():
     print("R81 门禁判定:")
     if weak_dir:
         for rg, H, n, dm in weak_dir:
-            print("  ⚠️ %s T+%d 方向命中 %.1f%% <50%%(N=%d) — 该环境下斐波那契『方向』不可信" % (rg, H, dm, n))
+            print("  ⚠️ %s T+%d 方向命中 %.1f%% <50%%(N=%d) — 该环境下斐波那契『方向』不可信" % ({"bull": "牛市", "bear": "熊市", "range": "震荡"}[rg], H, dm, n))
     else:
-        print("  ✅ 各市场环境主路径方向命中均 ≥50%%(方向技能在分 regime 下未失效)")
+        print("  ✅ 各市场环境主路径方向命中均 ≥50%(方向技能在分 regime 下未失效)")  # R356: 纯字符串无 % 操作, %% 原样输出
     if weak_cov:
         for rg, H, n, cov in weak_cov:
-            print("  ⚠️ %s T+%d 覆盖 %.1f%%<%d%%(N=%d) — 置信带过窄/中心偏移, 区间不可信(方向可能仍准)" % (rg, H, cov, COV_WARN, n))
+            print("  ⚠️ %s T+%d 覆盖 %.1f%%<%d%%(N=%d) — 置信带过窄/中心偏移, 区间不可信(方向可能仍准)" % ({"bull": "牛市", "bear": "熊市", "range": "震荡"}[rg], H, cov, COV_WARN, n))
     else:
         print("  ✅ 各市场环境覆盖均 ≥%d%%" % COV_WARN)
     if small:

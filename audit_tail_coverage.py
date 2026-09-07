@@ -91,6 +91,7 @@ def run(max_anchors=None):
 
     i = ac.MIN_HISTORY
     _anchors_done = 0
+    nfail = 0  # R356: 对齐 ac.run R170 语义——analyze/forecast_svg 抛异常静默丢弃计数(契约脱节时避免 N=0 无痕吞票, R348 教训)
     while i < n_base - 35:
         date_i = base[i]["date"]
         aligned = True
@@ -112,6 +113,7 @@ def run(max_anchors=None):
                 _svg, _note, _probs, _leg, fc = forecast_svg(
                     trunc, r, r["classify"], 50.0, 0.0, sym, horizon)
             except Exception:
+                nfail += 1
                 continue
             proj = fc.get("proj") or []
             rg = ac.classify_regime(trunc)
@@ -139,6 +141,8 @@ def run(max_anchors=None):
         _anchors_done += 1
         if max_anchors is not None and _anchors_done >= max_anchors:
             break
+    if nfail:
+        print("⚠️ 回测引擎: %d 锚点×指数在 analyze/forecast_svg 抛异常被静默丢弃(契约可能脱节, 需排查)" % nfail)
     return data, records, regime_records
 
 
@@ -160,9 +164,9 @@ def _fmt_rate(v):
 def check(max_anchors=None):
     data, records, regime_records = run(max_anchors)
     print("=" * 100)
-    print("R88 极端尾部覆盖检验(关15) — 暴跌时, 95%%带到底兜没兜住?")
+    print("R88 极端尾部覆盖检验(关15) — 暴跌时, 95%带到底兜没兜住?")  # R356: 纯字符串无 % 操作, %% 原样输出(R355 同族坑)
     print("=" * 100)
-    print("① Kupiec POF 无条件覆盖(名义5%%例外) ② 下行尾部(名义2.5%%) ③ 最差十分位条件击穿")
+    print("① Kupiec POF 无条件覆盖(名义5%例外) ② 下行尾部(名义2.5%) ③ 最差十分位条件击穿")  # R356: 同上, %% 原样输出
     print("-" * 100)
     print("%-8s %-6s %-7s %-16s %-14s %-16s %-14s" %
           ("窗口", "N", "双侧例外", "LRuc/判定", "下行例外(2.5%)", "最差十分位击穿", "平均下行深度"))
@@ -181,7 +185,7 @@ def check(max_anchors=None):
         wd = _worst_decile_breach(recs)
         avg_depth = (sum(r["depth"] for r in recs if r["down"]) / dx) if dx else 0.0
         verdict = {"under": "漏覆盖!", "over": "过宽(安全)", "ok": "与名义一致"}[side]
-        print("%-8s %-6d %-16s %-14s %-16s %-14s %-12.1f%%" %
+        print("%-8s %-6d %-16s %-14s %-16s %-14s %13.1f%%" %  # R356: 原 %-12.1f%% 左对齐 12 宽后接 % → 实测 "0.5         %"(数字与 % 裂开); %13.1f 右对齐 + 字面 % = 14 宽对齐表头 "平均下行深度"
               ("T+" + str(H), n, "%.1f%%/%s" % (rate * 100, verdict),
                "%.1f/%s" % (lr, side), "%.1f%%/%s" % (drate * 100, dside),
                _fmt_rate(wd), avg_depth))
@@ -191,7 +195,7 @@ def check(max_anchors=None):
             findings.append(("T+%d 最差十分位击穿率过高" % H, n, wd, None))
     print("-" * 100)
     # 分 regime: 熊市单独切片(逆向投资者最关心)
-    print("分市场环境(牛/熊/震荡) 95%%带双侧例外率(名义5%%):")
+    print("分市场环境(牛/熊/震荡) 95%带双侧例外率(名义5%):")  # R356: 纯字符串无 % 操作, %% 原样输出
     print("-" * 100)
     for rg in REGIMES:
         for H in ac.H_TARGETS:
@@ -215,9 +219,9 @@ def check(max_anchors=None):
             else:
                 parts.append("%s (N=%d, 率=%.1f%%, LRuc=%.1f)" % (f[0], f[1], f[2] * 100, f[3]))
         print("⚠ 尾部覆盖异常: " + "; ".join(parts)
-              + " — 该情形下『95%%带』未能按名义覆盖真实波动, 极端日带过窄(过度自信), 风控需自行加安全垫(关11锐度/关12偏置已另测)。")
+              + " — 该情形下『95%带』未能按名义覆盖真实波动, 极端日带过窄(过度自信), 风控需自行加安全垫(关11锐度/关12偏置已另测)。")  # R356: 拼接串无 % 操作, %% 原样输出
     else:
-        print("✅ 各 horizon / regime 95%%带覆盖均与名义5%%一致(含最差十分位条件击穿未显著升高), 暴跌时带基本兜得住。")
+        print("✅ 各 horizon / regime 95%带覆盖均与名义5%一致(含最差十分位条件击穿未显著升高), 暴跌时带基本兜得住。")  # R356: 纯字符串无 % 操作, %% 原样输出
     print("=" * 100)
     print("注: 透明化『极端尾部是否兜得住』盲区。")
     sys.exit(0)
