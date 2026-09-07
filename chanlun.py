@@ -110,9 +110,9 @@ def build_bi(merged, min_pct=MIN_BI_PCT):
             # 交替：要求间隔至少1根独立K线 + 幅度过滤
             gap = idx - li
             if lt == 1:
-                amp = (merged[li]["high"] - merged[idx]["low"]) / merged[li]["high"]
+                amp = (merged[li]["high"] - merged[idx]["low"]) / (merged[li]["high"] or 1e-9)   # R324: 分母零守卫(fuzz 2万例命中 float division by zero, 与 R278 同族)
             else:
-                amp = (merged[idx]["high"] - merged[li]["low"]) / merged[li]["low"]
+                amp = (merged[idx]["high"] - merged[li]["low"]) / (merged[li]["low"] or 1e-9)   # R324: 同上
             if gap >= 2 and amp >= min_pct:
                 seq.append((idx, t))
             else:
@@ -212,6 +212,9 @@ def classify_beichi_type(beichis, bis, zss):
                 多为中枢震荡的折返，可靠性远低于趋势背驰。
     新生     —— 背驰笔之前无已完成中枢（趋势尚未成型），仅作 nascent 标注。
     该级别直接影响买卖点可信度：趋势背驰的一类买卖点是教科书级高确定性入场/离场点。"""
+    # 首笔方向反查表: 中枢第一笔 dir 判中枢"中继方向"(上涨中继=[上-下-上] 首笔 dir=1, 下跌中继=[下-上-下] 首笔 dir=-1)。
+    # 建表一次供全循环 O(1) 反查。zs["start"] 在 build_zhongshu 扩展时不变(恒为首笔 merged 起点)。
+    _first_dir = {b["start"]: b["dir"] for b in bis}
     for bc in beichis:
         i = bc["bi_index"]
         if i < 0 or i >= len(bis):
@@ -220,9 +223,14 @@ def classify_beichi_type(beichis, bis, zss):
         bi = bis[i]
         # 已完成且结束于本笔之前的中枢数量（合并索引口径，与 find_signals 一致）
         prev_zs = [z for z in zss if z["end"] < bi["start"]]
-        if len(prev_zs) >= 2:
+        # R324: 趋势背驰须 ≥2 个【同向】中枢(docstring 既有契约, 代码此前漏同向过滤)——
+        # 底背驰须前有 ≥2 个下跌中继中枢(dir=-1), 顶背驰须 ≥2 个上涨中继(dir=1);
+        # 跨级震荡(一上一下)后被夸大为"趋势背驰·大级别转折"是误标 → 降级盘整背驰。
+        _want = -1 if bc["type"] == "bottom" else 1
+        _same = sum(1 for z in prev_zs if _first_dir.get(z["start"]) == _want)
+        if _same >= 2:
             bc["bc_type"] = "趋势背驰"
-        elif len(prev_zs) == 1:
+        elif prev_zs:
             bc["bc_type"] = "盘整背驰"
         else:
             bc["bc_type"] = ""
@@ -774,9 +782,12 @@ def build_bi_strict(merged, min_sep=3):
 
 def _date_diff(d1, d2):
     from datetime import datetime
-    a = datetime.strptime(d1, "%Y-%m-%d")
-    b = datetime.strptime(d2, "%Y-%m-%d")
-    return (a - b).days
+    try:
+        a = datetime.strptime(d1, "%Y-%m-%d")
+        b = datetime.strptime(d2, "%Y-%m-%d")
+        return (a - b).days
+    except (ValueError, TypeError):
+        return 99999   # R324: 畸形日期(旁路校验数据脏)不击穿整链, 返回大数使该对不算一致
 
 
 def bi_agreement(bis_a, bis_b):
