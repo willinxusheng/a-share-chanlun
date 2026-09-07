@@ -2169,14 +2169,19 @@ def _sent_thermometer_html(final, zone, zlabel, zcolor, buy_th, sell_th, final_p
     zstat = ""
     zstat_bar = ""
     if scores:
-        mid = (bt + st) / 2.0
+        # R340: 中性档边界不再依赖 mid=(bt+st)/2 —— 阈值网格寻优范围 bt∈[10,30]/st∈[70,90],
+        # bt+st<100 的组合(如 bt=10/st=70→mid=40)会使原中性档 [50,mid) 恒空(确定性缺陷, 非
+        # 当前配置偶然); 当前 25/80→mid=52.5 也仅 2.5 分宽(48/1325=3.6% 天, 视觉塌陷), 且与
+        # 主档位 50 分界口径冲突: 50~52.5 分历史日在 _sent_zone 判"中性·偏贪"却在分布条计"中性"。
+        # 改为固定对称中性带 [45,55)(围绕温度计"中性 50"刻度, 与阈值解耦; bt_max=30<45、
+        # st_min=70>55, 全网格组合分档单调)。R328 曾记录"无法确证作者带宽意图"待议, 本轮定案。
         bins = [0, 0, 0, 0, 0]  # 冰点,偏冷,中性,偏热,狂热
         for s in scores:
             if s < bt:
                 bins[0] += 1
-            elif s < 50:
+            elif s < 45:
                 bins[1] += 1
-            elif s < mid:
+            elif s < 55:
                 bins[2] += 1
             elif s < st:
                 bins[3] += 1
