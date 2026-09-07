@@ -1555,14 +1555,21 @@ def badge(text, color, icon=''):
     return f'<span class="badge" style="background:{color}">{icon}{text}</span>'
 
 
+def _score_color(score):
+    """健康度/置信度数值分级配色(全站统一单一来源): >=66 红(高/强) / 45-66 橙(中) / <45 绿(弱)。
+    R343: 由 score_chip 内联逻辑上提为模块级——此前 L3036 标题徽章恒用 RED 标健康、BLUE 标置信,
+    与 score_chip 分级配色分裂(实证 sh000300 health=30 在卡片/汇总表为绿底「弱」、标题却红底
+    「健康 30」, 同值两种语义误导读者)。"""
+    if score >= 66:
+        return RED
+    if score >= 45:
+        return "#d97706"
+    return GREEN
+
+
 def score_chip(score, label=''):
     """健康度/置信度等数值评分胶囊"""
-    if score >= 66:
-        c = RED
-    elif score >= 45:
-        c = "#d97706"
-    else:
-        c = GREEN
+    c = _score_color(score)
     txt = f'{score}' if not label else f'{score} {label}'
     return badge(txt, c)
 
@@ -3033,7 +3040,7 @@ def main():
                              f'<span style="color:{_col};font-weight:600">{_sig}</span> —— {_txt}</p>')
             sections.append(f"""
     <section class="panel" id="sec-{sym}">
-      <h2>{d["name"]}（{sym}）{badge(f'日线：{cls["scenario"]}', sc_color)}{badge(f'周线：{wcls["scenario"]}', w_color)}{badge(f'月线：{mcls["scenario"]}', m_color)}{badge(f'健康 {health}', RED)}{badge(f'置信 {conf}', BLUE)}{_sent_badge}</h2>
+      <h2>{d["name"]}（{sym}）{badge(f'日线：{cls["scenario"]}', sc_color)}{badge(f'周线：{wcls["scenario"]}', w_color)}{badge(f'月线：{mcls["scenario"]}', m_color)}{badge(f'健康 {health}', _score_color(health))}{badge(f'置信 {conf}', _score_color(conf))}{_sent_badge}</h2>
       <div class="chartbox">
         {echart_main(d["klines"], r, sym, r["captured"])}
       </div>
