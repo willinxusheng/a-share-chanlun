@@ -101,7 +101,9 @@ def spearman(x, y):
 
 
 def path_at(proj, horizon, key="main"):
-    """把 proj(101 dense points) 抽成整数 tplus -> 价格 的字典, 取离 t/horizon 最近者。"""
+    """把 proj(现版: 整数 tplus=1..horizon 的逐日点; 旧版曾是 101 dense 浮点) 抽成
+    tplus -> 价格 的字典, 供按整数 t 精确匹配取路径。保留按离 t/horizon 最近者择优的
+    兜底逻辑以兼容未来 dense 形态(浮点 tplus 恰为整数值时 dict 键可被整数查询命中)。"""
     d = {}
     for p in proj:
         t = p["tplus"]

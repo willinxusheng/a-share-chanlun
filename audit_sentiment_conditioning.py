@@ -308,7 +308,8 @@ def report(data, rec, buy_th, sell_th):
         print("  ⚠️ 检测到样本外稳定增益 -> 建议并入(接入 live 情绪分做极端区方向翻转)")
     else:
         print("  ✅ 未检测到样本外稳定增益 -> 不并入模型，仅透明化")
-        print("     情绪作为独立方向信号样本外失效(wf IC≈-0.028, ridge r2_oos<0)；条件化需极端区近期增益支撑")
+        print("     情绪独立方向信号与条件化翻转在样本外均无稳定优势(历史复核 wf IC 为负 / ridge r2_oos<0);"
+              " 条件化并入需极端区近期增益支撑, 当前不满足 -> 维持纯斐波那契")
     for v in verdict_lines:
         print(v)
     print("=" * 110)

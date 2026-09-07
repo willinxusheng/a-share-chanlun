@@ -109,6 +109,12 @@ jobs:
               exit 1
             fi
           fi
+          # R330: 接线 audit_data_schema(R169, 自述「阻断 CI」却从未被任何 workflow 调用)
+          # —— data.json 由云端 CI 独家写, 一旦写出损坏结构(缺键/类型错/日期乱序/未来泄漏/
+          # OHLC 不合理), report.py 会 KeyError 或渲染错; 结构损坏=报告必然出错, 无论代码
+          # 还是数据刷新触发都应无条件阻断(不随 R238 精度门禁降级), 故放 fetch 成功后、
+          # report.py 之前独立执行。
+          python audit_data_schema.py
           python gen_quality_cert.py
           # R177b: 情绪指数必须在 report.py 之前重算——fetch_data 已刷新 4 个情绪 txt
           # (东财源, 含成交额/换手率, 数据截至当日), 先跑 calc_v2 使情绪板块 asof 与行情同步;
@@ -157,6 +163,11 @@ jobs:
           # P2: 生成 index.html 前注入「缠论雷达入口按钮」到主报告 header 右上角
           # (替代旧版顶部信号横幅; 读 report.html, 恒可注入, 不依赖 radar.json)
           python radar/inject_banner.py report.html
+          # R330: 接线 audit_report_runtime(R169, 自述「阻断 CI」却从未被任何 workflow 调用)
+          # —— 扫描最终 report.html 是否混入 NaN/Infinity/undefined 数据字面量(ECharts 解析
+          # 失败或渲染 "NaN" 文本); 产物已含 inject_banner 注入态, report.html 存在故不触发
+          # 内部重生成。数值泄漏=渲染必然出错, 无条件阻断。
+          python audit_report_runtime.py
 
       - name: 标签重叠诊断（非阻塞护栏，仅告警 + 上传 artifact）
         # 实证守卫：R100 日期轴修复(hideOverlap:false + formatter 控显)后，各图表文字
