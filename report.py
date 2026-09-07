@@ -2633,7 +2633,12 @@ def sentiment_board_html(base, data, results, results_week, scores, last_date,
         ma20s = sent.get("ma20s")
         ma5s = None if ma5s is None else float(ma5s)
         ma20s = None if ma20s is None else float(ma20s)
-        zone, zlabel, zcolor = _sent_zone(score, buy_th, sell_th)
+        # R349: zone 判据必须与板块内显示数字同轨 —— 徽章(L2766)/温度计指针/档位刻度全用
+        # final, 若 zone 按 score 判, 当 adj≠0 使 final 跨过 buy_th(如 09-07 CI: score=19.2
+        # 判 fear, 但 final=clamp(19.2+1.3)=20.5>20)会出现"恐惧 20.5 分"绿底机会区 + 指针越界
+        # 的自相矛盾(数字已出恐惧区标签仍在机会区)。final 恒存在(L2592 兜底=score), 改判 final
+        # 后 zone/数字/指针/刻度四者全一致。main KPI 与 R76 提示保持 score 轨(读数语义, 自洽)。
+        zone, zlabel, zcolor = _sent_zone(final, buy_th, sell_th)
         final_pct = sent.get("final_pct")
         final_pct = None if not isinstance(final_pct, (int, float)) else float(final_pct)
         hist = sent.get("hist") or []
@@ -3988,7 +3993,7 @@ __POLL_JS__
     with open(_tmp, "w", encoding="utf-8") as f:
         f.write(html)
     os.replace(_tmp, _out)
-    print("saved -> chanlun/report.html")
+    print("saved -> report.html")  # R349: 实际路径为仓库根 report.html(_base=report.py 目录), 旧文案 chanlun/ 为旧布局残留
 
 
 if __name__ == "__main__":
