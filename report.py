@@ -1295,13 +1295,17 @@ def forecast_echart(sym, fc_data):
     _em, _ea, _er = proj[-1]["main"], proj[-1]["alt"], proj[-1]["risk"]
     # R162: 端点标注加涨跌幅(%)——此前仅纯数字"主 4212", 用户看不出方向幅度、易被统计中位线(平)带偏。
     # 现主路径标注"主目标 4212 (+6%)", 醒目呈现方向与空间; 次/风险同样加涨跌幅保持一致。
+    # R354: 端点标签加 align:'right' —— 锚点 xcats[-1] 恰在绘图区右缘(grid right:88), 默认 anchor=start
+    # 文本从锚点向右铺 ~100px 侵入右侧情绪轴(0-100, 刻度 x≈1020)刻度带, 被 verify_overlap 门禁报
+    # "主目标/风险 ✕ 0/80" 真重叠(SSR 实测 #3/#5/#7/#11, R210 加右轴后回归、R100 hideOverlap 只修 x 轴
+    # 日期标签覆盖不到)。align:'right' 令 anchor=end 文本左铺 [912,1012] 全部落绘图区内(实验实证)。
     end_points = [
         {"coord": [xcats[-1], round(_em, 2)], "value": f"主目标 {_em:.0f} ({(_em/last-1)*100:+.0f}%)", "itemStyle": {"color": RED}, "symbol": "pin", "symbolSize": 26,
-         "label": {"show": True, "position": "top", "color": RED, "fontSize": 12, "fontWeight": "bold"}},
+         "label": {"show": True, "position": "top", "align": "right", "color": RED, "fontSize": 12, "fontWeight": "bold"}},
         {"coord": [xcats[-1], round(_ea, 2)], "value": f"次 {_ea:.0f} ({(_ea/last-1)*100:+.0f}%)", "itemStyle": {"color": "#94a3b8"}, "symbol": "circle", "symbolSize": 6,
-         "label": {"show": True, "position": "bottom", "color": "#94a3b8", "fontSize": 11, "fontWeight": "bold"}},
+         "label": {"show": True, "position": "bottom", "align": "right", "color": "#94a3b8", "fontSize": 11, "fontWeight": "bold"}},
         {"coord": [xcats[-1], round(_er, 2)], "value": f"风险 {_er:.0f} ({(_er/last-1)*100:+.0f}%)", "itemStyle": {"color": GREEN}, "symbol": "circle", "symbolSize": 6,
-         "label": {"show": True, "position": "bottom", "color": GREEN, "fontSize": 11, "fontWeight": "bold"}},
+         "label": {"show": True, "position": "bottom", "align": "right", "color": GREEN, "fontSize": 11, "fontWeight": "bold"}},
     ]
     _year_label = x_hist[0][:4] if x_hist and len(x_hist[0]) >= 4 else ""
     f_kl = [f"{{year|{_year_label}年}}", f"{{zg|ZG {zg_v}}}", f"{{zd|ZD {zd_v}}}", f"{{last|现价 {last_v}}}"]

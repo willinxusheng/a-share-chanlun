@@ -178,9 +178,22 @@ jobs:
         continue-on-error: true
         run: |
           npm install echarts@^5 --no-save --silent 2>/dev/null || true
+          # R354: 报告/调试 SVG 重定向到 RUNNER_TEMP —— 旧版写 CWD 的 _ov.txt/_c*.svg 被
+          # publish path:. 上传到 Pages 根公开可访问(线上 HTTP 200 污染实证, 多轮互相覆盖)。
+          export OV_OUT="$RUNNER_TEMP/_ov.txt"
+          export OV_SVG_DIR="$RUNNER_TEMP/ov_svg"
           node verify_overlap.js
           echo "—— 标签重叠诊断报告(重叠对数见 total=) ——"
-          cat _ov.txt 2>/dev/null || echo "(_ov.txt 未生成)"
+          cat "$OV_OUT" 2>/dev/null || echo "(_ov.txt 未生成)"
+      # R354: 兑现 R104 注释承诺 —— _ov.txt 真正上传 artifact(旧版只有 step 日志, 重叠
+      # 回归带病多轮无便捷回溯通道); 仅传报告(<1KB), 全量调试 SVG 留在 RUNNER_TEMP 不进 artifact。
+      - name: 上传标签重叠诊断报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: overlap-report
+          path: ${{ runner.temp }}/_ov.txt
+          if-no-files-found: ignore
 
       - name: 提交每日构建时间戳（keep-alive，防定时任务被停用）
         run: |
@@ -214,11 +227,14 @@ jobs:
           path: .
 
       - name: 上传标签重叠诊断产物
+        # R354: path 随 OV_OUT 重定向到 RUNNER_TEMP —— 旧版 _ov.txt 写 CWD 被
+        # upload-pages-artifact(path:.) 一并发布到 Pages 根公开可访问; 且该上传步骤本身
+        # 位置在 upload-pages-artifact 之后, _ov.txt 旧路径已被传上线, 此 artifact 只是回溯副本。
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: overlap-report
-          path: _ov.txt
+          path: ${{ runner.temp }}/_ov.txt
           if-no-files-found: ignore
 
       - name: 部署到 GitHub Pages

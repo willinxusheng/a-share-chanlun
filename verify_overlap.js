@@ -85,7 +85,17 @@ function renderChart(code, idx) {
   if (!chartRef) return { err: 'no chart' };
   try {
     const svg = chartRef.renderToSVGString();
-    if ([0,1,5,6,8].includes(idx)) fs.writeFileSync('_c' + idx + '.svg', svg);
+    // R354: 调试 SVG 改经 env OV_SVG_DIR 重定向(CI 设 $RUNNER_TEMP, publish 目录外零污染)。
+    // 旧版硬编码 [0,1,5,6,8] 写 CWD —— 与 report.html 现 12 块(main/forecast 交替)布局脱节,
+    // 且真正报重叠的 forecast 块(3/5/7/11)反而不写盘, 诊断回溯失效; 现 OV_SVG_DIR 设置时全量写。
+    // 无 env(本地跑)不写盘, 不再往仓库工作树丢 _c*.svg 调试残留。
+    const svgDir = process.env.OV_SVG_DIR;
+    if (svgDir) {
+      try {
+        if (!fs.existsSync(svgDir)) fs.mkdirSync(svgDir, { recursive: true });
+        fs.writeFileSync(path.join(svgDir, '_c' + idx + '.svg'), svg);
+      } catch (e) {}
+    }
     try { chartRef.dispose(); } catch (e) {}
     return { svg };
   } catch (e) { return { err: 'render: ' + e.message }; }
@@ -166,6 +176,11 @@ while ((m = re.exec(html))) {
 console.log(out.join('\n'));
 console.log('\n=== TOTAL OVERLAPPING LABEL PAIRS: ' + totalOverlap + ' ===');
 // 保留中文标签（原 replace(/[^\x00-\x7F]/g,'') 会把重叠的中文标签清空成 ""，无法定位）
-fs.writeFileSync('_ov.txt', 'total=' + totalOverlap + '\n' + out.join('\n') + '\n');
+// R354: 报告路径经 env OV_OUT 重定向 —— 旧版写 CWD/_ov.txt 会被 deploy publish path:. 上传到
+// Pages 根(线上 HTTP 200 实证污染, 多轮互相覆盖); CI 设 OV_OUT=$RUNNER_TEMP/_ov.txt 出发布目录。
+// 无 env(本地跑)回退 CWD 写盘保持向后兼容。
+const ovPath = process.env.OV_OUT || '_ov.txt';
+try { fs.writeFileSync(ovPath, 'total=' + totalOverlap + '\n' + out.join('\n') + '\n'); }
+catch (e) { console.error('[verify_overlap] WARN 写报告失败: ' + e.message); }
 // 兜底退出：即使 echarts 残留句柄也确保进程干净结束（CI 不卡死）。
 process.exit(0);
