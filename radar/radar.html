@@ -692,7 +692,7 @@ function revCand(sym,v){
   var dd=st.dd;
   if(dd==null||dd>-0.30)return null;             // 距历史高回撤≥30%
   var close=st.close;
-  if(close==null||+close<=+bb.end_price)return null;   // 现价>背驰低点(未破位)
+  if(close==null||+close<+bb.end_price)return null;   // R336: 破位=严格跌破(close<endP)才剔除; 原 close<=endP 把恰好贴住背驰低点(dev=0.0%, 理论最优埋伏位)的票也误剔(今日实测 sh688249 close==endP 35.98 被剔)
   var dev=(close/bb.end_price-1)*100;
   return {sym:sym,st:st,bb:bb,fd:fd,dd:dd,dev:dev,close:close};
 }
@@ -738,7 +738,7 @@ function revRow(c){
     +';color:'+(dt.cls==="d1"?"#0e7d4a":dt.cls==="d2"?"#b45309":dt.cls==="d3"?"#c92a2a":dt.cls==="d4"?"#7b2cbf":"#64748b");
   // -- R317: 背驰底线价 + 距止损% (r = 现价→底线的下跌空间, 恒正: 观察池保证 close>endP)
   var endP=bb.end_price;
-  var riskPct=endP&&st.close&&+st.close>+endP?((1-endP/st.close)*100):null;   // R318: 原 (1-close/endP) 恒负再拼"-"→"--4.2%"双负号, 且语义倒置; 现直接=需再跌% 正数
+  var riskPct=endP&&st.close&&+st.close>=+endP?((1-endP/st.close)*100):null;   // R318: 原 (1-close/endP) 恒负再拼"-"→"--4.2%"双负号, 且语义倒置; 现直接=需再跌% 正数 · R336: >= 允许贴线(dev=0)票显示 0.0%(零缓冲, 一破即失效)
   var tip="🧭 逆向观察候选 | "+nm+" "+(c.sym||"")+
     "\n底背驰确认于 "+fdTxt+" · 距今 "+c.fd+" 天(已超实操窗, 结构仍有效)"+
     "\n距历史高回撤 "+Math.abs(c.dd*100).toFixed(1)+"% (深跌)"+
