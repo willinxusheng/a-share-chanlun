@@ -648,7 +648,9 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
     # 主窗口（保持推演图视觉连续）：最近 min(horizon,90) 日
     _tw = closes[-min(horizon, 90):]
     _main_slope, _r2, trend_end = _loglin(_tw)
-    trend_end_price = last * trend_end   # R71 修复：_loglin 第三返回为对数线性外推「比值」，须乘 last 还原为绝对价位；
+    # R347: _loglin 在 n<10 退化时第三返回 None(拟合无意义) —— 此处 None 会被乘成 TypeError 崩整份报告;
+    # 兜底为 1.0(平线: 数据不足不推趋势方向, 青线与现价齐平, 不崩不误导)。
+    trend_end_price = last * (trend_end if trend_end is not None else 1.0)   # R71 修复：_loglin 第三返回为对数线性外推「比值」，须乘 last 还原为绝对价位；
                                            # 此前在 L1585(SVG青线)/L1617(图例)/L1686(fc字段) 直接当价格用 → 青线指向图表底部、图例显示"趋势外推 1"、数值 0.99 错乱
     # 多窗口方向共识：所有可用窗口斜率同号（全上行/全下行）
     _agree_dir = (len(_slopes) >= 2) and (all(s > 0 for s in _slopes) or all(s < 0 for s in _slopes))
@@ -1192,6 +1194,10 @@ def forecast_echart(sym, fc_data):
     if _fut:
         _mi2 = min(_fut, key=lambda t: t[1])[0]
         sent_min = {"date": xcats[_mi2], "val": round(float(sent_med[_mi2]), 1)}
+    # R347: 情绪区阈值透传到 JS tooltip——按 fear(≤buy_th)/greed(≥sell_th) 给语境文案,
+    # 与情绪板块 zone 判定同源(sent_fc 由 main 浅拷贝携带, forecast 子 blob 自身无此键)。
+    _sf_bt = float(_sf.get("buy_th", 20.0)) if isinstance(_sf, dict) else 20.0
+    _sf_st = float(_sf.get("sell_th", 85.0)) if isinstance(_sf, dict) else 85.0
     n_proj = len(proj)
     hist_s = [h[1] for h in hist] + [None] * n_proj
     # R123/R125: 历史线末点(idx=n_hist-1=今日)与未来路径衔接——旭总要求"预测的几条线都要
@@ -1318,6 +1324,7 @@ def forecast_echart(sym, fc_data):
         "p_main": p_main, "p_alt": p_alt, "p_risk": p_risk, "proj_raw": proj,
         # R210: 真联动情绪数据——按 xcats 日期对齐的中位/分位序列 + 最低点(供 JS 叠加第二条 Y 轴)
         "sentMed": sent_med, "sentLo": sent_lo, "sentHi": sent_hi, "sentMin": sent_min,
+        "sent_bt": _sf_bt, "sent_st": _sf_st,
     }
     cid = f"echart-forecast-{sym}"
     return f'''<div class="echart-toolbar">🔍 滚轮/拖拽缩放 · 拖动底部滑块平移 · 悬停看推演路径/置信锥/趋势</div>
@@ -1396,7 +1403,8 @@ def forecast_echart(sym, fc_data):
           + '<span style="color:'+cyan+'">趋势外推 '+p.trend.toFixed(2)+'</span><br>'
           + '<span style="color:#64748b">经验分位 P05~P95 '+s95+'</span><br>'
           + '<span style="color:#64748b">P25~P75 '+s75+'</span>'
-          + (sm != null ? '<br><span style="color:#7c3aed">市场情绪 '+sm.toFixed(1)+' · 通常领先价格见底</span>' : '');
+          + (sm != null ? '<br><span style="color:#7c3aed">市场情绪 '+sm.toFixed(1)
+            + (sm <= D.sent_bt ? ' · 情绪低迷，通常领先价格见底' : (sm >= D.sent_st ? ' · 情绪高涨，警惕过热回落' : ' · 中性区')) + '</span>' : '');
       }}
     }},
     legend: {{ data: ['历史','统计中位路径','结构演绎路径','次路径','风险路径','趋势外推','MA20','MA60','MA120','MA250','置信锥 P05–P95','置信锥 P25–P75','市场情绪中位','情绪P25~P75'], top: 2, itemGap: 8, textStyle: {{ fontSize: 11 }} }},
@@ -3046,7 +3054,12 @@ def main():
             if isinstance(sent_full, dict) and isinstance(sent_full.get("forecast"), dict):
                 _sf = sent_full["forecast"]
                 if _sf.get("dates") and _sf.get("median"):
-                    sent_fc = _sf
+                    # R347: 浅拷贝并携带情绪区阈值(buy_th/sell_th)——推演图 tooltip 需按区给语境文案
+                    # ("情绪低迷·领先见底"仅低位成立)。dict(_sf) 防污染 sent_full["forecast"] 原引用;
+                    # 阈值同源 sentiment_v2.json 顶层键, 与情绪板块 zone 判定(20/85)天然一致不分裂。
+                    sent_fc = dict(_sf)
+                    sent_fc["buy_th"] = float(sent_full.get("buy_th", 20))
+                    sent_fc["sell_th"] = float(sent_full.get("sell_th", 85))
             fs_svg, fs_note, fs_probs, fs_legend, fc_data = forecast_svg(d["klines"], r, wcls, conf, sigma, sym, horizon, backtests[sym], paths_bt[sym], breadth_score=bd["composite"]["score"], sent_fc=sent_fc)
             # R177: 情绪徽章 + 情绪×结构联动行(与情绪板块互联; 数据缺失时为空串, 不影响原布局)
             _sent_badge, _sent_row = "", ""
