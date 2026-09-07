@@ -548,11 +548,11 @@ function renderBar(){
     {l:"站上沿/中枢内/破位",v:ztV,c:zt.dn>=3?"cool":(zt.dn>0?"":"")},   // R304: 板块位置温度计 — 收盘在上沿上方/中枢内/破位(下沿下)板块数
     {l:"覆盖标的",v:(m.n_ok||0),c:""},
     {l:"门禁剔除",v:(m.n_gate||0),c:""},
-    {l:"今日顶背驰(风险)",v:(scen["背驰见顶风险"]||0),c:"hot"},
-    {l:"今日底背驰(机会)",v:(scen["背驰见底机会"]||0),c:"cool"},
+    {l:"顶背驰风险",v:(scen["背驰见顶风险"]||0),c:"hot",tip:"当前处于『背驰见顶风险』场景的成分家数(存量快照, 结构可持续多日, 非当日新触发数)"},
+    {l:"底背驰机会",v:(scen["背驰见底机会"]||0),c:"cool",tip:"当前处于『背驰见底机会』场景的成分家数(存量快照, 结构可持续多日, 非当日新触发数)"},
   ];
   $("barRow").innerHTML=pills.map(function(p){
-    return '<div class="pill '+(p.c||"")+'"><div class="l">'+esc(p.l)+'</div><div class="v">'+p.v+'</div></div>';
+    return '<div class="pill '+(p.c||"")+'"'+(p.tip?' title="'+esc(p.tip)+'"':'')+'><div class="l">'+esc(p.l)+'</div><div class="v">'+p.v+'</div></div>';
   }).join("");
 }
 /* ===== R285: 实操信号雷达(首页顶部) =====
@@ -1431,7 +1431,9 @@ function indKlineOption(kl,kind){   // kind:"ind"=行业合成(量=成交额亿�
         var volTxt=kind==="ind"?"板块成交额 "+amtYi(k.volume):"量 "+fmtVol(k.volume);   // R258: 行业合成量=成交额(亿元), 个股=手
         // R271: 当日命中分类买卖点时追加一行全名(一买/二买/三买/一卖/二卖/三卖+背驰级别)
         var sigLine="";
-        (ps||[]).forEach(function(q){if((q.seriesName==="买点"||q.seriesName==="卖点")&&q.data&&q.data.meta&&q.dataIndex===i){sigLine="<br/>📌 缠论 <b style='color:#f59f00'>"+q.data.meta+"</b>";}});
+        // R336: 命中判定修正 —— scatter(买点/卖点) 的 dataIndex 是系列内序号(0..n-1), 原 q.dataIndex===i
+        // (i=K线类别索引) 恒不等 → "📌 缠论 一买/二买…" 行从未显示过; 改用散点 x 值(日期索引)判定
+        (ps||[]).forEach(function(q){if((q.seriesName==="买点"||q.seriesName==="卖点")&&q.data&&q.data.meta&&q.data.value&&q.data.value[0]===i){sigLine="<br/>📌 缠论 <b style='color:#f59f00'>"+q.data.meta+"</b>";}});
         return "<div style='font-size:12px;font-weight:700;margin-bottom:3px'>"+k.date+"</div>"+
           "开 "+k.open+"　收 <b style='color:"+colChg+"'>"+k.close+"</b>　涨跌 <b style='color:"+colChg+"'>"+chgTxt+"</b>"+
           "<br/>高 "+k.high+"　低 "+k.low+(rsiRaw[i]!=null?"<br/>RSI14 <b style='color:#b39ddb'>"+(+rsiRaw[i].toFixed(1))+"</b>":"")+
@@ -1534,7 +1536,10 @@ function chanMarkOption(mark,dates,kmin,kmax,klForMatch){
         var g = m.sig[si]; if(!g || g.length<4) continue;
         var kg = kMap[g[2]]; if(!kg) continue;
         var buy = (g[0]===1||g[0]==="1");
-        sgOut.push([g[0], g[1], g[2], buy ? kg.high : kg.low]);  // 买点=红(看涨)→high; 卖点=绿(看跌)→low
+        // R336: 锚定方向修正 —— sig 的 dir/price 后端语义: 买点=低位确认(实测一买 price≈当日low),
+        // 卖点=高位确认(≈当日high)。原 buy→high/sell→low 把红"一买"标到当日最高价上方、绿"一卖"
+        // 沉到最低价下方, 与同源底背驰绿▲(low)/顶背驰红▼(high)视觉错位。改为按确认位取极值。
+        sgOut.push([g[0], g[1], g[2], buy ? kg.low : kg.high]);
       }
       m.sig = sgOut;
     }
