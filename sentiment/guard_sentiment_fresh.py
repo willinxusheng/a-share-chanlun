@@ -38,7 +38,14 @@ def main():
     elif new and committed and new == committed:
         print("INFO: 情绪 asof %s 与已提交一致(东财在 CI 未刷新, 沿用已提交快照)" % new)
     else:
-        print("INFO: 情绪 asof 推进至 %s" % new)
+        # R352: 细分 else(原版对 None 一律打印"推进至 %s"误导—— calc_v2 失败无产物时
+        # new=None 会被报成"推进至 None")
+        if not new:
+            print("WARN: 无法读取 calc_v2 产物 asof(文件缺失/损坏), 保持已提交快照不动")
+        elif not committed:
+            print("INFO: 无已提交快照可对照, calc_v2 产物 asof=%s 照常部署" % new)
+        else:
+            print("INFO: 情绪 asof 推进至 %s" % new)
 
 
 if __name__ == "__main__":

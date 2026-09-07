@@ -17,6 +17,7 @@ import re
 import sys
 import json
 import ast
+import datetime
 import urllib.request
 import ssl
 
@@ -98,6 +99,9 @@ def main():
     meta = {
         "source": "A-share-Fibonacci/data/data.js",
         "synced_from": RAW_URL,
+        # R352: 补同步时间戳 —— 快照新旧此前无从判断(内置兜底曾与源分叉而不可见:
+        # 2026-09-01 版 vs 线上 09-07 实测 6 节点 lo/hi 与子浪日期已整体后移)
+        "synced_at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
         "note": ("另一斐波那契项目(艾略特波浪+斐波那契比率)波浪节点静态快照, "
                  "R204 锚点对照用; 由 sentiment/sync_other_fib.py 每次部署前从公开仓库同步; "
                  "该项目为人工维护买/卖点, 非每日变动, 此处内置快照作为 CI 兜底"),

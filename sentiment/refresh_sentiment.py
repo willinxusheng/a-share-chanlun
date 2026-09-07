@@ -122,14 +122,24 @@ def main():
             return 3
 
     _git(["add"] + SENT_TRACKED)
-    if _git(["diff", "--cached", "--quiet", "sentiment/"], check=False).returncode == 0:
+    # R352: diff 只查本次提交的 6 个文件(勿用整个 sentiment/ 目录 —— 若工作树/暂存区
+    # 恰有 other_fib_nodes.json 等其他 sentiment 改动, 目录级 diff 会误判"有差异"而
+    # 把无关文件一并 commit 进情绪快照提交)
+    if _git(["diff", "--cached", "--quiet"] + SENT_TRACKED, check=False).returncode == 0:
         print("INFO: 暂存区无差异, 跳过 commit")
         return 0
-    _git(["commit", "-m", "chore: 本机盘后刷新情绪快照 (asof %s)" % new])
+    # R352: commit 限定 pathspec, 防暂存区其他非本次文件被捎带提交
+    _git(["commit", "-m", "chore: 本机盘后刷新情绪快照 (asof %s)" % new, "--"] + SENT_TRACKED)
     p = _git(["push", "origin", "main"], check=False, capture=True)
     if p.returncode != 0:
-        print("ERROR: 推送失败(云端不会更新最新情绪)! 请检查网络/权限:\n%s" % (p.stdout + p.stderr))
-        _git(["rebase", "--abort"], check=False)
+        # R352: 推送失败必须回滚刚产生的本地 commit —— 否则下次重跑会因 asof 与 HEAD
+        # 持平而走"跳过推送"分支, 滞留 commit 永不推送(线上情绪继续滞后且仅打 INFO 无告警,
+        # 静默吞票)。reset --mixed 撤销 commit(保留 index/工作树)后再还原文件, 工作树
+        # 回到 HEAD 干净态, 下次重跑重新计算并推送。
+        print("ERROR: 推送失败(云端不会更新最新情绪)! 已回滚本地 commit, 下次重跑将重新提交推送:\n%s"
+              % (p.stdout + p.stderr))
+        _git(["reset", "--mixed", "HEAD~1"], check=False)
+        _restore_snapshot()
         return 4
     print("DONE: 已推送情绪快照 asof=%s, 云端 CI 将立即(或下次定时)部署最新面板" % new)
     return 0

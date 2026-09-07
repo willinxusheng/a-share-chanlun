@@ -303,22 +303,36 @@ def update_sentiment_txts():
                 print("WARN 情绪 %s 东财与腾讯均失败, 保留旧txt: %s" % (sym, e))
                 continue
         fetched[sym] = {"rows": rows, "dirty": dirty, "mode": mode}
-    # R350 组级同源: 组内 em/tencent_proxy 混合, 或组内缺员(某指数双源全败留旧值,
-    # 旧值模式未知可能异源) => 把组内成功者降级腾讯重拉(混源比降级更糟)
+    # R350 组级同源: 组内 em/tencent_proxy 混合(全员本次成功但异源) => 把 em 成功者降级
+    # 腾讯重拉, 使两 txt 今日都写且写后组内同源(混源量纲差 1e12 倍, 比降级更糟)。
+    # R352 修正: 组内缺员(某指数东财+腾讯双源全败, 留旧 txt)时**不再降级** —— 缺员者旧 txt
+    # 模式不可知(em 或 tencent_proxy 均可能): 把 present 降级腾讯, 若缺员者旧 txt 为 em,
+    # 反而制造 present(腾讯 1e12 代理) vs 旧 txt(em 换手~0.x) 的同日混源(R352 实测:
+    # 注入"sh 东财成功+sz 双源失败"场景, 修复前 sh txt 被写成 tx 第8列 1.3e12, sz 旧 em 0.41,
+    # calc_v2 L65 to 加权量纲崩); 缺员日本就因四源须同日合并而无法推进 asof, 故 present 亦
+    # 冻结不写盘, 组内保持上一成功日同源旧态(情绪宁晚一天不冒险), 交由 .em_fresh / 
+    # guard_sentiment_fresh 护栏兜底(全体冻结 -> ok=0 -> .em_fresh=0 -> 部署已提交快照)。
+    frozen = False
     for grp in _SRC_GROUPS:
         present = [s for s in grp if s in fetched]
         missing = [s for s in grp if s not in fetched]
         m_in = {fetched[s]["mode"] for s in present}
-        if len(m_in) > 1 or (present and missing and len(m_in) > 0):
+        if len(m_in) > 1:
             for s in present:
                 if fetched[s]["mode"] == "em":
                     try:
                         rows, dirty = fetch_tx_sentiment(s)
                         if len(rows) >= 100:
                             fetched[s] = {"rows": rows, "dirty": dirty, "mode": "tencent_proxy"}
-                            print("INFO 情绪 %s 组内混源/缺员风险 -> 降级腾讯保同源(calc_v2 ratio/to 量纲)" % s)
+                            print("INFO 情绪 %s 组内混源 -> 降级腾讯保同源(calc_v2 ratio/to 量纲)" % s)
                     except Exception:
                         pass
+        elif present and missing:
+            frozen = True
+            print("WARN 情绪组 %s 缺员(%s 东财+腾讯均失败), 组内 %s 冻结不写盘, "
+                  "保持上一成功日同源旧态(防量纲混源)" % (grp, missing, present))
+            for s in present:
+                fetched.pop(s, None)
     for sym, info in fetched.items():
         try:
             mode = info["mode"]
@@ -350,8 +364,19 @@ def update_sentiment_txts():
             print("WARN 情绪txt %s 更新失败(保留旧值): %s" % (sym, e))
     # 模式标记(供 report 诚实标注): 任一指数走腾讯代理则整体标 tencent_proxy
     try:
-        with open(os.path.join(_dir, ".sent_mode"), "w", encoding="utf-8") as f:
-            f.write("tencent_proxy" if "tencent_proxy" in modes else "em")
+        _pm = os.path.join(_dir, ".sent_mode")
+        new_mode = "tencent_proxy" if "tencent_proxy" in modes else "em"
+        if frozen:
+            # R352: 有组冻结(旧 txt 未动), .sent_mode 反映的是旧 txt 实际状态更诚实 -> 保留旧值
+            _old_mode = None
+            try:
+                _old_mode = open(_pm, encoding="utf-8").read().strip()
+            except Exception:
+                pass
+            if _old_mode in ("em", "tencent_proxy"):
+                new_mode = _old_mode
+        with open(_pm, "w", encoding="utf-8") as f:
+            f.write(new_mode)
     except Exception:
         pass
     # sentinel: 1=至少一只要更新/已最新(东财或腾讯可达); 0=全部失败(东财在 CI 被限流)
