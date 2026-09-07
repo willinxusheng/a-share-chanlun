@@ -254,7 +254,14 @@ def echart_main(klines, r, sym, captured=None):
         if xi - last_x_by_dir[d] < 55:
             continue
         last_x_by_dir[d] = xi
-        price = round(klines[xi]["high"], 2) if d == 1 else round(klines[xi]["low"], 2)
+        # R339: 买卖点标到真实确认位 —— 与同函数 bc_points 完全同式取 b["end_price"]
+        # (笔末端合并K区间极值: 买=向下笔低点/卖=向上笔高点), 同一笔的背驰 pin 与
+        # 买卖点三角坐标重叠自洽。原 price=high if d==1 else low 方向写反: 红"买"三角
+        # 浮到当日最高价、绿"卖"倒三角沉最低价, 与同图 bc_points 直接矛盾(实测 3 指数
+        # 30 展示点 100% 错位, 偏移 +15~+153 点; sz399006 顶背驰一类卖确认 4090 却画在
+        # 3937 低 152 点)。R336 已修 radar.html 同型, 此处孪生(R 轮次此前只审本函数
+        # L278-333 段)。
+        price = round(b["end_price"], 2)
         _marker = ""
         if s.get("bc_type") == "趋势背驰":
             _marker += "·趋"
@@ -269,7 +276,8 @@ def echart_main(klines, r, sym, captured=None):
             "itemStyle": {"color": RED if d == 1 else GREEN},
             "symbol": "triangle" if d == 1 else "invertedTriangle",
             "symbolSize": 10,
-            "label": {"show": True, "position": "top" if d == 1 else "bottom", "color": RED if d == 1 else GREEN, "fontSize": 11, "fontWeight": "bold", "distance": 4}
+            # R339: label position 随确认位翻转 —— 买(低点)标签置下/卖(高点)置上, 与 bc_points 同构
+            "label": {"show": True, "position": "bottom" if d == 1 else "top", "color": RED if d == 1 else GREEN, "fontSize": 11, "fontWeight": "bold", "distance": 4}
         })
 
     # 背驰 markPoint
