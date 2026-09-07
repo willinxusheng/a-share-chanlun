@@ -1086,21 +1086,25 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
     # ---- 悬浮交互数据：历史区真实收盘价 + 投影区密集采样（供 JS initForecast）----
     hist = [[_hd[i], round(tail[i], 2)] for i in range(len(tail))]
     proj = []
-    # R122: 采样点数与 horizon 交易日数严格一一对应，避免 101 个 f 映射到 horizon+1 个交易日造成
-    # 推演日期重复、x 轴出现两个相同标签，以及历史线与推演线被重复日期割裂成"缺口"。
-    for fi in range(0, horizon + 1):
+    # R122 + R341: 采样点数与 horizon 交易日数严格一一对应。R341 修正日期 off-by-one——
+    # 原实现 fi=0..horizon 共 horizon+1 个采样点(含 f=0 的"今日价"重复点), 日期取 _fut(fi)=
+    # 第 fi+1 个未来交易日, 使 horizon=60 的置信带末端(f=1 = 第 60 个未来交易日 T+60)被标成
+    # T+61、x 轴右端超前 1 个交易日(实证: T0=2026-09-04 时 _fut(60)=12-08 而真 T+60=12-07)。
+    # 现采样 fi=1..horizon(60 点, 值=第 fi 个交易日进度 fi/horizon), 日期=_fut(fi-1)=第 fi 个
+    # 未来交易日; f=0 的"今日"点由 forecast_echart 的 bridge(各路径 f=0 恒等值 last/0)承担
+    # (与历史末点同 x 位置无缝衔接), 既不产生重复日期、也不向未来多占一天。
+    for fi in range(1, horizon + 1):
         f = fi / horizon if horizon > 0 else 0.0
         med = _interp(main_p, f)
         alt = _interp(alt_p, f)
         risk = _interp(risk_p, f)
-        kk = fi
-        dt = _fut(kk)
+        dt = _fut(fi - 1)
         # 经验分位扇形（围绕实测漂移中位路径 medf）：P05/P95 外层、P25/P75 内层
         mdf = _medf(f)
         u95 = _bandf(f, 1.645); l95 = _bandf(f, -1.645)
         u75 = _bandf(f, 0.674); l75 = _bandf(f, -0.674)
-        trend = round(last * math.exp(_main_slope * kk), 2)
-        proj.append({"f": round(f, 3), "tplus": kk + 1, "date": dt,
+        trend = round(last * math.exp(_main_slope * fi), 2)
+        proj.append({"f": round(f, 3), "tplus": fi, "date": dt,
                      "main": round(med, 2), "alt": round(alt, 2), "risk": round(risk, 2),
                      "trend": trend, "med": round(mdf, 2),
                      "f95l": round(l95, 2), "f95h": round(u95 - l95, 2),
@@ -1187,19 +1191,21 @@ def forecast_echart(sym, fc_data):
         sent_min = {"date": xcats[_mi2], "val": round(float(sent_med[_mi2]), 1)}
     n_proj = len(proj)
     hist_s = [h[1] for h in hist] + [None] * n_proj
-    # R123/R125: 历史线末点(idx=n_hist-1=今日=2026-08-18)与未来路径衔接——旭总要求"预测的几条线都要
+    # R123/R125: 历史线末点(idx=n_hist-1=今日)与未来路径衔接——旭总要求"预测的几条线都要
     # 紧贴今日虚线、不要有空档"：故所有预测线(主路径med + 结构演绎/次/风险/趋势外推 + 置信锥)首点统一前移到
-    # idx=n_hist-1(今日)，与历史末点同 x 位置无缝衔接。bridge 值取各路径 T+1 首值(f95h/f75h 取 0→零宽)。
+    # idx=n_hist-1(今日)，与历史末点同 x 位置无缝衔接。R341: proj 自 T+1 起采样(60 点, 无 f=0 点),
+    # bridge 值取各路径在 f=0 的解析恒等值——主/中位/次/风险/趋势/置信带下沿起点均=现价 last、
+    # 带高 f95h/f75h 取 0(零宽)；(值与原 proj[0] 相同, 仅不再重复占用一个未来日期槽)。
     # "不往左侧冒头"= bridge 点恰落在今日(idx119=历史末点同位置)，不延伸到历史区(idx<119)；红线自今日向右
     # 展开，既紧贴今日虚线、又不会往左越过今日线伸进历史段。
-    main_s = [None] * (n_hist - 1) + [proj[0]["main"]] + [p["main"] for p in proj]
-    med_s = [None] * (n_hist - 1) + [proj[0]["med"]] + [p["med"] for p in proj]
-    alt_s = [None] * (n_hist - 1) + [proj[0]["alt"]] + [p["alt"] for p in proj]
-    risk_s = [None] * (n_hist - 1) + [proj[0]["risk"]] + [p["risk"] for p in proj]
-    trend_s = [None] * (n_hist - 1) + [proj[0]["trend"]] + [p["trend"] for p in proj]
-    f95l = [None] * (n_hist - 1) + [proj[0]["f95l"]] + [p["f95l"] for p in proj]
+    main_s = [None] * (n_hist - 1) + [last] + [p["main"] for p in proj]
+    med_s = [None] * (n_hist - 1) + [last] + [p["med"] for p in proj]
+    alt_s = [None] * (n_hist - 1) + [last] + [p["alt"] for p in proj]
+    risk_s = [None] * (n_hist - 1) + [last] + [p["risk"] for p in proj]
+    trend_s = [None] * (n_hist - 1) + [last] + [p["trend"] for p in proj]
+    f95l = [None] * (n_hist - 1) + [last] + [p["f95l"] for p in proj]
     f95h = [None] * (n_hist - 1) + [0] + [round(p["f95h"], 2) for p in proj]
-    f75l = [None] * (n_hist - 1) + [proj[0]["f75l"]] + [p["f75l"] for p in proj]
+    f75l = [None] * (n_hist - 1) + [last] + [p["f75l"] for p in proj]
     f75h = [None] * (n_hist - 1) + [0] + [round(p["f75h"], 2) for p in proj]
     lo = fc_data["lo"]
     ymax = round(lo + fc_data["span"], 2)
