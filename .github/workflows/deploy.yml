@@ -60,6 +60,13 @@ jobs:
     steps:
       - name: 检出源码
         uses: actions/checkout@v7
+        with:
+          # R329(2026-09-07): 必须 depth=2 —— 默认 fetch-depth=1 浅克隆下 HEAD~1 不存在,
+          # 下方「push 且改动 .py -> 门禁 block」判定(R188)的 git diff HEAD~1 HEAD 恒 fatal
+          # 被 2>/dev/null 吞掉 -> CHANGED_PY 恒空 -> GATE_MODE 恒走 warn —— 代码/模型变更的
+          # 严格精度门禁在 CI 里从未真正生效(浅克隆实测复现: fatal: ambiguous argument 'HEAD~1')。
+          # depth=2 带出父提交即可恢复判定(本仓 push 均为单 commit: R 轮次/radar-scan/keep-alive)。
+          fetch-depth: 2
 
       - name: 配置 Python
         uses: actions/setup-python@v7

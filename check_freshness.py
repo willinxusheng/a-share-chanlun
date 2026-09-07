@@ -35,7 +35,11 @@ SITE_URL = os.environ.get("SITE_URL", "https://willinxusheng.github.io/a-share-c
 
 # 源端探针：腾讯 gtimg 上证日线。只取最后几根即可拿到最新交易日，省流量也更快。
 # 选腾讯的原因：东财在海外 CI 会被限流，腾讯在 CI/沙箱均实测可达（见 R232）。
-SOURCE_URL = ("https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
+# R329(2026-09-07): host 必须不带 web. 前缀 —— R249/R267(09-06) 实证 web.ifzq.gtimg.cn
+# 出口会被腾讯 WAF 501 拦截(跳 waf.tencent.com 验证页), 全仓 fetch 已统一 ifzq.gtimg.cn,
+# 本文件是全仓唯一残留 web. 的腾讯请求(上次改动 R241 早于 WAF 实证)。WAF 拦截属间歇性,
+# 一旦命中 fetch_source_date 抛异常 -> R237b 设计 -> 看门狗红叉误报(比漏报更伤告警可信度)。
+SOURCE_URL = ("https://ifzq.gtimg.cn/appstock/app/fqkline/get"
               "?param=sh000001,day,,,10,qfq")
 
 
