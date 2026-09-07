@@ -446,8 +446,20 @@ def main():
             if not day:
                 print("WARN %s 无日线数据, 跳过该标的" % name)
                 continue
+            # R349: 三周期根数下限守卫(scan_radar._fetch_tx R348 同族对称)。
+            #   fetch_tx 对异常源(CDN 抽风/接口半响应)可能返回空/1根/截断序列, 而 validate
+            #   的"数量异常"对整体截断自洽放行(首末同缩比值不变)、len<2 时跳过连续性检查,
+            #   写盘前又只硬拦未来日期 —— 短序列会静默覆写 data.json 致 report 全链失真。
+            #   正常基线(2021 起): 日1376/周290/月69, 下限留足余量防误伤; day 先查省无效请求。
+            if len(day) < 100:
+                print("WARN %s 日线序列过短(仅%d根<100), 视为抓取异常跳过该标的(保留其余已成功标的)" % (name, len(day)))
+                continue
             week, dirty_week = fetch_tx(sym, "week")
             month, dirty_month = fetch_tx(sym, "month")
+            if len(week) < 40 or len(month) < 12:
+                print("WARN %s 周/月线过短(周%d/月%d, 下限40/12), "
+                      "视为抓取异常跳过该标的(保留其余已成功标的)" % (name, len(week), len(month)))
+                continue
             # R156: 周/月线此前完全未校验——report.py 会 analyze 周/月线(1963-1964)并 feeding market_breadth,
             # 若不校验, 周/月线的未来日期泄漏/OHLC 违规会无声流入看板, 而 R82 硬拦只查日线 issues。
             # 现按 period 校验周/月线, 并将其问题(尤其未来日期)并入 meta.issues, 使硬拦覆盖三线。
@@ -529,7 +541,7 @@ def main():
             except Exception:
                 pass
         raise
-    print("saved -> chanlun/data.json (%d 标的)" % len(result))
+    print("saved -> data.json (%d 标的)" % len(result))  # R349: 实际路径为仓库根 data.json(_BASE=fetch_data.py 目录), 旧文案 chanlun/data.json 为旧布局残留
     # R177b: 情绪引擎数据源随每日行情刷新(东财接口含成交额/换手率; 失败仅跳过, 不阻断主管线)
     try:
         update_sentiment_txts()
