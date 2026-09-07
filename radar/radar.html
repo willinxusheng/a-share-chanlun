@@ -270,14 +270,15 @@ h1 .dot{color:#ffd43b}
 .revpool .phead h2{font-size:16px}
 .revpool .chips{display:flex;gap:6px;margin-left:auto}
 .revpool .phint{font-size:11.5px;color:var(--muted);line-height:1.7;width:100%}
-.revpool .prow{display:grid;grid-template-columns:minmax(140px,1.35fr) minmax(74px,.7fr) minmax(64px,.62fr) minmax(120px,1.05fr) minmax(96px,.92fr);gap:8px;align-items:center;padding:7px 16px;cursor:pointer;border-top:1px solid #f5f8fb;transition:background .12s;font-size:12px}
+.revpool .prow{display:grid;grid-template-columns:minmax(140px,1.35fr) minmax(64px,.65fr) minmax(62px,.62fr) minmax(62px,.6fr) minmax(62px,.6fr) minmax(98px,.95fr) minmax(118px,1.05fr);gap:8px;align-items:center;padding:7px 12px;cursor:pointer;border-top:1px solid #f5f8fb;transition:background .12s;font-size:12px}
 .revpool .prow:hover{background:#f2f9f5}
-.revpool .prow .nm{font-weight:700;color:var(--ink);font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.5}
+.revpool .prow .nm{font-weight:700;color:var(--ink);font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.5;min-width:0}
 .revpool .prow .sub{font-size:10.5px;color:#94a3b8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.45}
 .revpool .prow .big{font-size:13px;font-weight:800;line-height:1.5}
 .revpool .prow .small{font-size:10px;color:#94a3b8;line-height:1.5}
-.revpool .prow .devv{font-weight:800}
-@media(max-width:980px){.revpool .prow{grid-template-columns:minmax(110px,1.2fr) .75fr .6fr 90px 84px;padding:7px 12px;font-size:11px}.revpool .phead{padding:12px}}
+.revpool .prow .devv{font-weight:800;font-size:13px;display:flex;align-items:center;gap:4px;flex-wrap:wrap}
+.revpool .prow .dtlbl{font-size:9.5px;font-weight:700;border:1px solid;padding:1px 5px;border-radius:4px;line-height:1.4;letter-spacing:.2px}
+@media(max-width:980px){.revpool .prow{grid-template-columns:minmax(110px,1.25fr) minmax(56px,.65fr) minmax(56px,.6fr) minmax(56px,.55fr) minmax(58px,.6fr) minmax(90px,.92fr) minmax(110px,.95fr);padding:7px 10px;font-size:11px}.revpool .phead{padding:12px}}
 .gate-tag{font-size:9px;font-weight:700;border-radius:4px;padding:0 4px;margin-left:3px;vertical-align:1px}
 .gate-tag.g1{background:#fff3cd;color:#92400e}.gate-tag.g2{background:#fde2e2;color:#c92a2a}.gate-tag.g3{background:#e0f2fe;color:#075985}
 .chart-sec{display:grid;grid-template-columns:1fr 1fr;gap:14px}
@@ -667,7 +668,7 @@ function renderSigRadar(){
    操作参考: 止损参考=end_price(跌破结构失效) · 埋伏区=现价贴近 end_price 时(dev 小) · 勿追 dev>8% */
 var REV_SHOW=12;            // 折叠态默认展示行数
 var revExpanded=false;
-var curRevMode="dd";        // dd=最深回撤先行 | dev=最贴低点(埋伏参考) | fr=最新触发
+var curRevMode="dd";        // dd=最深回撤先行 | dev=最贴低点(埋伏参考) | fr=最新触发 | fd=底久未破(企稳最久)
 function revCand(sym,v){
   if(v.type==="ETF")return null;                 // R305: ETF 剔除
   var st=v.st||{};
@@ -688,8 +689,18 @@ function revList(){
   Object.keys(UNI).forEach(function(sym){var c=revCand(sym,UNI[sym]);if(c)out.push(c);});
   if(curRevMode==="dev")out.sort(function(a,b){return a.dev-b.dev||a.dd-b.dd});
   else if(curRevMode==="fr")out.sort(function(a,b){return a.fd-b.fd||a.dd-b.dd});
+  else if(curRevMode==="fd")out.sort(function(a,b){return b.fd-a.fd||a.dd-b.dd});   // fd(底久未破): fresh_days 大=企稳久, 降序在前
   else out.sort(function(a,b){return a.dd-b.dd});   // dd: 最深回撤(最负)先行
   return out;
+}
+/* dev 距背驰低点% 四档分级 — 旭总实操口径 */
+function devTag(dev){
+  if(dev==null||isNaN(dev))return {cls:"",lbl:"-",tip:""};
+  if(dev<0)return {cls:"d0",lbl:"跌破",tip:"现价已跌穿背驰低点, 结构失效·本观察池已剔除(理论上不应出现)"};
+  if(dev<=3)return {cls:"d1",lbl:"底部刚启",tip:"距背驰低点≤3%, 刚出现企稳迹象 — 实操最优入场区"};
+  if(dev<=8)return {cls:"d2",lbl:"已起涨",tip:"3~8% 已脱离底部, 入场风险稍高, 可考虑分批"};
+  if(dev<=15)return {cls:"d3",lbl:"追高风险",tip:"8~15% 已远离底部, 仅适合右侧确认后小仓追"};
+  return {cls:"d4",lbl:"已错过",tip:">15% 已大幅反弹, 短期回调风险大, 本观察池不推荐追"};
 }
 function revRow(c){
   var v=UNI[c.sym]||{},u=v||{};
@@ -703,26 +714,36 @@ function revRow(c){
   var indName=(v.ind&&v.ind!=="-"?v.ind:"-");
   var ffNet=(v.ff||{}).net;
   var ffMini=(ffNet!=null)?'<span class="ffmini '+ffCls(ffNet)+'" title="当日主力净流入: '+ffTxt(ffNet)+'">'+ffTxt(ffNet)+'</span>':'';
-  var amtTxt=(st.avg_amt60!=null?(st.avg_amt60>=1e4?(st.avg_amt60/1e4).toFixed(1)+"亿":st.avg_amt60.toFixed(0)+"万"):"-")+"/日";   // avg_amt60=万元
+  var amtTxt=(st.avg_amt60!=null?(st.avg_amt60>=1e4?(st.avg_amt60/1e4).toFixed(1)+"亿":st.avg_amt60.toFixed(0)+"万"):"-");   // avg_amt60=万元
   var ddCls=c.dd<=-0.5?"down":"";
-  var devCls=c.dev<=5?"down":"up";        // ≤5%=还在背驰低点附近=埋伏参考区; >5%=已走高
-  var devLbl=c.dev<=5?"·参考区":"";
   var fdTxt=bb.bi_date_end+" 触发";
   var bcTag=bb.bc_type?('<span style="color:#94a3b8">'+esc(String(bb.bc_type))+'</span>'):'';
+  // -- R317: 距背低点四档分级(旭总要实操准确性)
+  var dt=devTag(c.dev);
+  var devStr=(c.dev>=0?"+":"")+c.dev.toFixed(1)+'%';
+  var dtStyle='background:'+(dt.cls==="d1"?"rgba(24,160,88,.10)":dt.cls==="d2"?"rgba(232,160,16,.10)":dt.cls==="d3"?"rgba(229,69,69,.10)":dt.cls==="d4"?"rgba(120,53,120,.10)":"transparent")
+    +';border-color:'+(dt.cls==="d1"?"rgba(24,160,88,.4)":dt.cls==="d2"?"rgba(232,160,16,.4)":dt.cls==="d3"?"rgba(229,69,69,.4)":dt.cls==="d4"?"rgba(120,53,120,.4)":"#e2e8f0")
+    +';color:'+(dt.cls==="d1"?"#0e7d4a":dt.cls==="d2"?"#b45309":dt.cls==="d3"?"#c92a2a":dt.cls==="d4"?"#7b2cbf":"#64748b");
+  // -- R317: 背驰底线价 + 距止损% (r = 底线价距现价的下跌空间)
+  var endP=bb.end_price;
+  var riskPct=endP&&st.close?((1-st.close/endP)*100):null;
   var tip="🧭 逆向观察候选 | "+nm+" "+(c.sym||"")+
     "\n底背驰确认于 "+fdTxt+" · 距今 "+c.fd+" 天(已超实操窗, 结构仍有效)"+
     "\n距历史高回撤 "+Math.abs(c.dd*100).toFixed(1)+"% (深跌)"+
-    "\n背驰低点参考: "+bb.end_price+" · 现价距低点 "+(c.dev>=0?"+":"")+c.dev.toFixed(1)+"%"+(c.dev<=5?" → 埋伏参考区(贴近)":" → 已走高, 谨慎追")+
-    "\n止损参考: 跌破 "+bb.end_price+" 结构失效"+
+    "\n背驰低点参考: "+bb.end_price+" · 现价距低点 "+(c.dev>=0?"+":"")+c.dev.toFixed(1)+"% · "+dt.tip+
+    (riskPct!=null?"\n跌破底线后理论止损空间: -"+riskPct.toFixed(1)+"% (跌破 "+bb.end_price+" 结构失效)":"")+
+    "\n60日均成交: "+amtTxt+
     (ffNet!=null?"\n当日主力净流入: "+ffTxt(ffNet):"")+
-    (amtTxt!=null?"\n60日均成交: "+amtTxt:"")+
     "\n\n点击查看个股完整 K 线与缠论结构";
+  // -- R317: 行 6 列: 名/距历史高/现价/背驰底线/60日均额/背驰触发/(距背%分级)
   return '<div class="prow" title="'+esc(tip)+'" onclick="pickRev(\''+c.sym+'\')">'+
     '<div><div class="nm">'+esc(nm)+lead+ffMini+gtag+'</div><div class="sub">'+esc(c.sym)+" · "+esc(indName)+' · '+esc(st.one_word||"-")+'</div></div>'+
     '<div><div class="big '+ddCls+'">'+(c.dd*100).toFixed(1)+'%</div><div class="small">距历史高</div></div>'+
     '<div><div class="big">'+esc(st.close!=null?st.close:"-")+'</div><div class="small '+(st.chg1d>0?"up":(st.chg1d<0?"down":""))+'">'+pct(st.chg1d,2)+'</div></div>'+
-    '<div><div class="big" style="font-size:11px;color:#087f5b">'+esc(fdTxt)+'</div><div class="small">'+c.fd+"天前 · "+bcTag+'</div></div>'+
-    '<div><div class="devv '+devCls+'">'+(c.dev>=0?"+":"")+c.dev.toFixed(1)+'%</div><div class="small">距背驰低点'+esc(devLbl)+'</div></div>'+
+    '<div><div class="big" style="font-size:11.5px">'+(endP!=null?endP.toFixed(2):"-")+'</div><div class="small" style="font-size:10px">底线 · 止损参考</div></div>'+
+    '<div><div class="big" style="font-size:12px">'+amtTxt+'</div><div class="small">60日均额</div></div>'+
+    '<div><div class="big" style="font-size:11px;color:#94a3b8">'+esc(fdTxt)+'</div><div class="small">'+c.fd+"天前 · "+bcTag+'</div></div>'+
+    '<div><div class="devv">'+(c.dev>=0?"+":"")+c.dev.toFixed(1)+'% <span class="dtlbl" style="'+dtStyle+'" title="'+esc(dt.tip)+'">'+dt.lbl+'</span></div><div class="small">距背低点</div></div>'+
     '</div>';
 }
 function pickRev(sym){prevStkSrc="rev";showStk(sym)}   // R305: 观察池入口 → 返回键回观察池
@@ -754,14 +775,15 @@ function renderRevPool(){
   box.style.display="";
   var shown=revExpanded?all:all.slice(0,REV_SHOW);
   var chipOn=function(m){return curRevMode===m?' on':'';};
-  var sortTxt=curRevMode==="dd"?"最深回撤先行":(curRevMode==="dev"?"最贴背驰低点(埋伏优先)":"最新触发先行");
+  var sortTxt=curRevMode==="dd"?"最深回撤先行":curRevMode==="dev"?"最贴背驰低点(埋伏优先)":curRevMode==="fr"?"最新触发先行":"底久未破(企稳最久)先行";
   var rowsHtml=shown.map(revRow).join('');
   var moreHtml=(all.length>REV_SHOW)?'<div class="more"><a onclick="toggleRev()">'+(revExpanded?'▲ 收起':'▼ 展开全部 '+all.length+' 只')+'</a></div>':'';
   box.innerHTML='<div class="phead"><h2>🧭 逆向观察池</h2>'+
     '<div class="chips">'+
       '<span class="chip'+chipOn("dd")+'" onclick="setRevMode(\'dd\')" title="距历史高点回撤最深的在前 — 看谁跌得最透">📉 最深回撤</span>'+
-      '<span class="chip'+chipOn("dev")+'" onclick="setRevMode(\'dev\')" title="现价距背驰低点最近的在前 — 还在埋伏参考区(≤5%)的优先">🎯 最贴低点</span>'+
-      '<span class="chip'+chipOn("fr")+'" onclick="setRevMode(\'fr\')" title="底背驰触发时间最近的在前">🕐 最新触发</span>'+
+      '<span class="chip'+chipOn("dev")+'" onclick="setRevMode(\'dev\')" title="现价距背驰低点最近的在前 — 还在底部参考区(≤3%)的优先">🎯 最贴低点</span>'+
+      '<span class="chip'+chipOn("fd")+'" onclick="setRevMode(\'fd\')" title="底背驰触发距今最久未破位在前 — 老结构企稳时间越久越有效, 与"最新触发"互补查新仓">⏳ 底久未破</span>'+
+      '<span class="chip'+chipOn("fr")+'" onclick="setRevMode(\'fr\')" title="底背驰触发时间最近的在前 — 刚出信号, 尚有空间">🕐 最新触发</span>'+
     '</div>'+
     '<span class="phint">已超实操窗的底背驰老结构 · 深跌(距历史高≥30%)+未破背驰低点 · 埋伏候选 <b style="color:#18a058">'+n+' 只</b> · <b style="color:#18a058">绿=贴近低点(参考区)</b>/<b style="color:#c92a2a">红=已走高</b> · 与顶部"实操信号雷达"(近端≤10天)互补 — 这里管提前埋伏/跟踪 · '+sortTxt+'</span></div>'+
     '<div style="padding:6px 0 8px">'+rowsHtml+moreHtml+'</div>'+
