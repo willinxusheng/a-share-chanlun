@@ -944,6 +944,12 @@ def _final_pct(valid, final):
         return None
     return round(sum(1 for x in finals if x <= final) / len(finals) * 100, 1)
 _final_val = round(max(0, min(100, last["score"] + adj_total)), 1)
+# R346: 顶层 score 键与 hist 列同口径 clamp —— R328 只统一了 hist 列/final/_final_pct,
+# 顶层 "score" 键漏网仍是理论域 [-12.5,112.5] 的 raw 值(实测 2022-10 两日 -4.8、
+# 2026-01 五日 103~107 共 10 行超界): 展示层(main KPI/情绪板块徽章/温度计 zone 判定)
+# 读 score 会显示超界数字("104"/"-5"), 与 gauge/final/主图(均 clamp 0-100)数值分裂。
+# clamp 为序保持变换, zone/极端区判定不变(阈值 20/85 远离边界); round 与 hist 列一致。
+_score_disp = round(max(0.0, min(100.0, last["score"])), 1)
 final_pct = _final_pct(valid, _final_val)
 
 result = {
@@ -951,7 +957,7 @@ result = {
     "close": last["close"],
     "ma250": round(last["ma250"], 1),
     "regime": last["regime"],
-    "score": last["score"],
+    "score": _score_disp,
     "ma5s": last["ma5s"], "ma20s": last["ma20s"],
     "adj_items": adj_items, "adj_total": adj_total,
     "final": _final_val,

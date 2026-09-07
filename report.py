@@ -1468,6 +1468,11 @@ def forecast_echart(sym, fc_data):
 def compare_svg(data):
     H = 300
     PAD_T2, PAD_B2 = 20, 30
+    # R346: compare_svg 在 main() 调用点无 try 包裹 —— data 空时下方 next(iter(...)) 会
+    # StopIteration; 交集空时旧 fallback(单 sym 全 klines)会使其它 sym 在 common[0] KeyError;
+    # n=1 时 x() 的 (n-1) 除零。三处均崩整份报告, 统一前置防御降级为空(调用方为 details 折叠区)。
+    if not data:
+        return ""
     # 各指数独立拉取，节假日/停牌可能差一两天；归一化对比需对齐到共同交易日（取交集）
     date_close = {}
     common = None
@@ -1477,7 +1482,9 @@ def compare_svg(data):
             m[k["date"]] = k["close"]
         date_close[sym] = m
         common = set(m.keys()) if common is None else (common & set(m.keys()))
-    common = sorted(common) if common else [k["date"] for k in next(iter(data.values()))["klines"]]
+    common = sorted(common) if common else None
+    if not common or len(common) < 2:
+        return ""
     n = len(common)
     series = {}
     for sym, m in date_close.items():
@@ -1728,7 +1735,7 @@ def card_html(sym, name, klines, r, wcls, health, conf):
       <div class="kv"><span>最大回撤(全样本)</span><b>{_mdd_txt}</b></div>
       <div class="kv"><span>量能趋势(20/60日)</span><b style="color:{_vt_color}">{_vt_txt}</b></div>
       <div class="kv"><span>笔 / 中枢 / 背驰 / 段背驰</span><b>{len(r["bis"])} / {len(r["zhongshu"])} / {len(r["beichi"])} / {len(r["seg_beichi"])}（顶×{sum(1 for _b in r.get("seg_beichi", []) if _b["type"] == "top")}/底×{sum(1 for _b in r.get("seg_beichi", []) if _b["type"] == "bottom")}）</b></div>
-      <div class="kv"><span>最近一笔</span><b>{'↑' if cls.get('last_bi_dir') == 1 else '↓'} {amp:.1f}%</b></div>
+      <div class="kv"><span>最近一笔</span><b>{_dd} {amp:.1f}%</b></div>
       <div class="kv"><span>当前分类</span><b style="color:{sc_color}">{cls["scenario"]}</b></div>
       <div class="kv"><span>走势类型</span><b style="color:{_tt_color}">{_tt}</b></div>
       <div class="kv"><span>最后中枢</span><b>{_zs_txt}</b></div>
@@ -2014,7 +2021,12 @@ def load_live_sentiment():
         if not _os.path.exists(p):
             return None
         d = json.load(open(p, encoding="utf-8"))
-        score = float(d.get("score"))
+        # R346: clamp 兜底(calc_v2 R328 后顶层 score 仍可能为 raw 旧产物) —— 0-100 标尺统一,
+        # 避免超界(raw 域 [-12.5,112.5])时 R76 提示显示 "极端104分/极端-5分" 与温度计分裂。
+        _sv = d.get("score")
+        if _sv is None:
+            return None  # 缺 score 保持原降级语义(None), 不设默认值
+        score = float(max(0.0, min(100.0, _sv)))
         buy_th = float(d.get("buy_th", 20))
         sell_th = float(d.get("sell_th", 85))
         asof = d.get("asof")
@@ -2566,7 +2578,9 @@ def sentiment_board_html(base, data, results, results_week, scores, last_date,
                 '（运行 <code>python sentiment/calc_v2.py</code> 或等待 CI 生成后可见），其余模块不受影响。</p></div>'
                 '</section>')
     try:
-        score = float(sent.get("score", 50))
+        # R346: score 读顶层键并 clamp 兜底(calc_v2 R328 后顶层 score 仍可能 raw 超界旧产物) ——
+        # zone 判定序保持(阈值 20/85 远离 clamp 边界), 且 KPI/徽章数字与 final/gauge 同标尺不分裂
+        score = float(max(0.0, min(100.0, sent.get("score", 50))))
         final = float(sent.get("final", score))
         buy_th = float(sent.get("buy_th", 20))
         sell_th = float(sent.get("sell_th", 85))
@@ -2919,7 +2933,8 @@ def main():
     _s_score = None
     if sent_full:
         try:
-            _s_score = float(sent_full.get("score", 50))
+            # R346: clamp 兜底 —— 与情绪板块/final/gauge 同 0-100 标尺(顶层 score 旧产物可能 raw 超界)
+            _s_score = float(max(0.0, min(100.0, sent_full.get("score", 50))))
             _sz, _szl, _szc = _sent_zone(_s_score,
                                          float(sent_full.get("buy_th", 20)),
                                          float(sent_full.get("sell_th", 85)))
