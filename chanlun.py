@@ -397,22 +397,28 @@ def find_signals(bis, zss, beichis, klines=None, merged=None):
     # 既失真又拖垮回测读数。现改为：每个一类买卖点只取其后的首支有效折返笔作为二类；
     # 每个中枢只取其离开后的首个回抽/反抽（不重新进入中枢区间）作为三类。
     # 二类买点：一类买之后，向下折返笔末端价 > 一类买价（次低，不破前低）。取其后首支。
+    # R338: 首支向下折返笔无论破不破前低都终止该锚点搜索 —— 若首支回抽即破前低(end<=pr0)
+    # = 一类买点失效(底背驰被走势否定, 创新低续跌), 该锚点不再配二类; 原实现破低后继续后扫,
+    # 会把数笔之后(数十日后)的普通折返错配成该失效一类的"二类买点"(时序错位+语义误导)。
     for idx0, pr0 in p1_buys:
         for j in range(idx0 + 1, len(bis)):
             bj = bis[j]
-            if bj["dir"] == -1 and bj["end_price"] > pr0:
-                signals.append({"bi_index": j, "kind": "二类买点(次低不破)", "dir": 1,
-                                "date": bj["date_end"], "price": bj["end_price"],
-                                "vol_confirm": False, "bc_type": ""})
+            if bj["dir"] == -1:  # 一类买后首支向下折返笔(紧接语义)
+                if bj["end_price"] > pr0:
+                    signals.append({"bi_index": j, "kind": "二类买点(次低不破)", "dir": 1,
+                                    "date": bj["date_end"], "price": bj["end_price"],
+                                    "vol_confirm": False, "bc_type": ""})
                 break
     # 二类卖点：一类卖之后，向上折返笔末端价 < 一类卖价（次高，不破前高）。取其后首支。
+    # R338: 对称修复 —— 首支向上反抽若破前高(end>=pr0) = 一类卖点失效, 不再后扫错配二类。
     for idx0, pr0 in p1_sells:
         for j in range(idx0 + 1, len(bis)):
             bj = bis[j]
-            if bj["dir"] == 1 and bj["end_price"] < pr0:
-                signals.append({"bi_index": j, "kind": "二类卖点(次高不破)", "dir": -1,
-                                "date": bj["date_end"], "price": bj["end_price"],
-                                "vol_confirm": False, "bc_type": ""})
+            if bj["dir"] == 1:  # 一类卖后首支向上反抽笔(紧接语义)
+                if bj["end_price"] < pr0:
+                    signals.append({"bi_index": j, "kind": "二类卖点(次高不破)", "dir": -1,
+                                    "date": bj["date_end"], "price": bj["end_price"],
+                                    "vol_confirm": False, "bc_type": ""})
                 break
     # 三类买卖点：每个中枢离开后的首个回抽/反抽（不重新进入中枢区间）。
     # 起点价约束确保笔确已「离开」中枢（回抽起点已破 ZG / 反抽起点已破 ZD），
