@@ -91,8 +91,28 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git pull --rebase --autostash origin "${GITHUB_REF_NAME}" || true
+          # R337 事故(09-07 03a070f): 原 `pull --rebase --autostash || true` 在远端有
+          # 新提交时 rebase 冲突被 || true 吞掉, 未检测冲突标记就 git add+commit,
+          # 把 <<<<<<< 冲突标记提交进 main(radar.json/marks.json 头部带标记 → 线上
+          # JSON.parse 崩、雷达页白屏)。修复 = 三道防线:
+          #   ① 先落本地 commit 再 rebase(无 autostash 场景, 提交内容自包含)
+          #   ② rebase 用 -X theirs 自动解决 json 冲突(取本地产物=当日新扫描数据,
+          #      与 R 系列裁决"更晚 build_time 为准、保留本地产物"一致)
+          #   ③ rebase 失败立即 abort 退出, 绝不在冲突标记残留状态下继续提交
+          # push 被拒(远端前进)时循环 rebase 重试, 不 force。
+          ASOF=$(python3 -c 'import json;print(json.load(open("radar/radar.json",encoding="utf-8"))["meta"]["asof"])')
           git add radar/radar.json radar/marks.json
-          git commit -m "chore: 全市场缠论雷达数据刷新 asof=$(python3 -c 'import json;print(json.load(open("radar/radar.json"))["meta"]["asof"])')"
-          git push
-          echo "已提交并推送雷达数据"
+          git commit -m "chore: 全市场缠论雷达数据刷新 asof=${ASOF}" || { echo "commit 失败(无变更?)"; exit 1; }
+          for i in 1 2 3; do
+            if git push origin "${GITHUB_REF_NAME}" 2>/tmp/radar_push_err; then
+              echo "已提交并推送雷达数据 asof=${ASOF}"
+              exit 0
+            fi
+            echo "push 第 ${i} 次被拒(远端有新提交), rebase 后重试..."
+            git pull --rebase -X theirs origin "${GITHUB_REF_NAME}" || {
+              echo "!! rebase 冲突且自动解决失败, 中止(保留现场, 勿带冲突标记提交)"
+              git rebase --abort 2>/dev/null || true
+              exit 1
+            }
+          done
+          echo "!! 连续 3 次 push 失败:"; tail -3 /tmp/radar_push_err; exit 1

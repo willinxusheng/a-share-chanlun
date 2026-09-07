@@ -477,7 +477,11 @@ def fetch_fflow_all(syms):
 
 
 def _try_tx(sym):
-    """腾讯qfq一次尝试: 成功 (ks,"tx"); 失败(异常/空/陈旧) 计入停用统计后返回 ([],tag)。"""
+    """腾讯qfq一次尝试: 成功 (ks,"tx"); 失败(异常/空/陈旧) 计入停用统计后返回 ([],tag)。
+    R337: 成功即复位连续失败计数 —— 原实现只在停用后 probe 成功才清零, 健康期的
+    `count` 只增不清, "连续失败"退化成"自上次停用以来累计失败": 分散在多轮抖动中的
+    失败会被错误加总(如 5 次历史失败 + 恢复后 1 次偶发失败即达阈值停用主源, 全市场
+    误转东财/新浪降级)。成功请求本身就是源健康的最强证据, 应清零。"""
     try:
         ks, tag = _fetch_tx(sym)
     except Exception:   # noqa: BLE001
@@ -486,11 +490,13 @@ def _try_tx(sym):
     if not ks:
         _src_fail(_tx_down, _tx_lock, tag.split(":")[0])
         return [], tag
+    with _tx_lock:
+        _tx_down["count"] = 0
     return ks, "tx"
 
 
 def _try_em(sym):
-    """东财qfq一次尝试: 成功 (ks,"em"); 失败计入停用统计后返回 ([],tag)。"""
+    """东财qfq一次尝试: 成功 (ks,"em"); 失败计入停用统计后返回 ([],tag)。R337: 成功复位计数(见 _try_tx)。"""
     if _src_down(_em_down, _em_lock):
         return [], "em_down"
     _em_th.wait()
@@ -498,6 +504,8 @@ def _try_em(sym):
     if not ks:
         _src_fail(_em_down, _em_lock, tag.split(":")[0])   # em_err:/em_short: 归一化
         return [], tag
+    with _em_lock:
+        _em_down["count"] = 0
     return ks, "em"
 
 
