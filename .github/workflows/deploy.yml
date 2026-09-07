@@ -197,7 +197,10 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           # 先拉取远端(变基)避免双定时并发/日构建造成的 non-fast-forward 被静默吞掉
-          git pull --rebase --autostash origin "${GITHUB_REF_NAME}" || true
+          # R353: 禁 `|| true` 吞失败(03a070f 事故同族根因) —— rebase 失败若被吞, 冲突
+          # marker 会留在工作树, 随后 git add last_build.txt 把 `<<<<<<<` 垃圾提交进仓库;
+          # keep-alive 非关键(失败不影响站点发布), 失败显式跳过本次提交最安全。
+          git pull --rebase --autostash origin "${GITHUB_REF_NAME}" || { echo "WARN: keep-alive rebase 失败, 跳过本次提交(站点照常发布)"; exit 0; }
           git add last_build.txt
           git commit -m "chore: daily build [skip ci]" || echo "no changes"
           git push || echo "push skipped(keep-alive 推送失败不影响本次站点发布)"

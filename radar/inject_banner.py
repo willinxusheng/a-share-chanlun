@@ -81,6 +81,21 @@ def main():
     with open(src, "r", encoding="utf-8") as f:
         html = f.read()
 
+    # R353: 幂等 guard —— 源已含注入按钮(疑似把上次产物当 src 重跑)时跳过注入直接输出。
+    # 实证: 对已注入产物再跑一次, rbPulse CSS 1->4 份 + 按钮 2 个(双份注入);
+    # report.html 由 report.py 每轮重建故正常链恒单次注入, 此 guard 防 CI 步骤重试/
+    # 手动误用 index.html 当 src 时重复注入。
+    if 'class="radar-btn"' in html:
+        print("WARN 源 %s 已含注入按钮(上次产物?), 跳过注入直接复制(防双份 CSS/按钮)" % src,
+              file=sys.stderr)
+        out = os.path.join(BASE, "index.html")
+        tmp = out + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(html)
+        os.replace(tmp, out)
+        print("index.html 就绪(已注入态原样复制), %d KB" % (os.path.getsize(out) // 1024))
+        return
+
     # 1) 注入 CSS 到 </head> 前
     head_end = html.find("</head>")
     if head_end > 0:

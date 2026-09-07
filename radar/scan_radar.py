@@ -273,6 +273,11 @@ def fetch_universe():
                 continue
             typ = _typename(code, name)
             ind = im.sub_to_sw1(sub) if typ != "ETF" and sub != "-" else "-"
+            # R353: 细分名新增/改名未收录时 sub_to_sw1 返回"其他"——若入库, 行业聚合会出现
+            # "其他"行业组, 污染 32 板块键域契约(industries=31 SW1 + ETF)且前端无对应 tab。
+            # 用 SW1 白名单收敛: 不在 31 一级内一律归 '-' (与 ETF/未分类同处理, 仅进 universe)。
+            if ind not in im.SW1:
+                ind = "-"
             uni[sym] = {"code": code, "name": name, "type": typ,
                         "ind": ind, "mcap": mcap}
         return uni, excl, host
