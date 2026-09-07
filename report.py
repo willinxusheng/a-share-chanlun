@@ -2941,8 +2941,15 @@ def main():
     gen_time = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M") + " (UTC+8)"
 
     # 日周背离检测（用于结论）
+    # R325: 背离按方向拆分——日1/周-1=日强周弱(上涨反弹结构)、日-1/周1=日弱周强(回调次级整理)，
+    # 两类含义相反，文案必须分别描述。此前只判"不等"且 fixed 文案写"日线向上笔、周线向下笔"，
+    # 当日弱周强(如 sh000300 日-1/周1)时方向说反、误导读者（levels_table 早有双向区分，此处修复落后）。
     divergent = [d["name"] for sym, d in data.items()
                  if results[sym]["classify"].get("last_bi_dir") != results_week[sym]["classify"].get("last_bi_dir")]
+    _updn = [d["name"] for sym, d in data.items()
+             if results[sym]["classify"].get("last_bi_dir") == 1 and results_week[sym]["classify"].get("last_bi_dir") == -1]
+    _dnup = [d["name"] for sym, d in data.items()
+             if results[sym]["classify"].get("last_bi_dir") == -1 and results_week[sym]["classify"].get("last_bi_dir") == 1]
 
     # 市场概览 KPI
     n_multi = sum(1 for s in data if results[s]["classify"]["scenario"] in ("多头延续",))
@@ -3045,10 +3052,21 @@ def main():
     fc_blob = {sym: forecast_info[sym]["fc"] for sym in data if sym in forecast_info}
     diverge_note = ""
     if divergent:
-        diverge_note = f"""<p style="margin-top:10px;color:#b45309;font-size:14px;line-height:1.8">
-    ⚠️ <b>级别背离提示</b>：{"、".join(divergent)} 当前<b>日线向上笔、周线向下笔</b>，属日强周弱背离。
-    历史统计上此类组合意味着日线上涨是周线调整中的反弹结构，<b>仓位与预期应低于"日周共振多头"的情形</b>；
-    只有周线笔重新转向上（周线底分型确认），日线多头延续的置信度才会提高。</p>"""
+        # R325: 双向背离分别措辞——日强周弱=周线调整中的反弹(降预期)；日弱周强=周线上行中的次级回调
+        # (观察周线笔企稳的低吸窗口)。此前固定写"日线向上笔、周线向下笔"，日弱周强方向会被说反。
+        _parts = []
+        if _updn:
+            _parts.append(
+                f"<b>{'、'.join(_updn)}</b> 当前<b>日线向上笔、周线向下笔</b>（日强周弱背离）。"
+                f"历史统计上此类组合意味着日线上涨是周线调整中的反弹结构，<b>仓位与预期应低于\"日周共振多头\"的情形</b>；"
+                f"只有周线笔重新转向上（周线底分型确认），日线多头延续的置信度才会提高。")
+        if _dnup:
+            _parts.append(
+                f"<b>{'、'.join(_dnup)}</b> 当前<b>日线向下笔、周线向上笔</b>（日弱周强背离）。"
+                f"日线回调属周线上行中的次级整理而非趋势反转，<b>不宜在恐慌中追空</b>；"
+                f"可等待日线底分型/背驰确认后的次级买点，并防周线笔若转弱则背离升级为共振下跌。")
+        diverge_note = ('<p style="margin-top:10px;color:#b45309;font-size:14px;line-height:1.8">'
+                        '⚠️ <b>级别背离提示</b>：' + "；".join(_parts) + "</p>")
 
     # 预测校准脚注(#预测精度·R74)：把 R72 滚动样本外回测的实证校准结果作为常驻透明提示，
     # 避免用户把"主路径"误当方向信号——看板真正的价值在风险带(置信区间)，不在方向赌注。
@@ -3089,12 +3107,25 @@ def main():
     n_div = len(divergent)
     total = len(data)
     if n_div == total:
-        pat = (f"全部 {total} 个指数日线向上笔、周线向下笔（日强周弱背离），当前上涨在更大级别上属"
-               f"<b>反弹中的强势段</b>，而非主升浪")
+        # R325: 全背离时按方向给准确描述（此前固定"日线向上笔、周线向下笔"，全为日弱周强时会说反）
+        if _dnup and not _updn:
+            pat = (f"全部 {total} 个指数日线向下笔、周线向上笔（日弱周强背离），当前回调在更大级别上属"
+                   f"<b>上行中的次级整理</b>，而非趋势反转")
+        elif _updn and not _dnup:
+            pat = (f"全部 {total} 个指数日线向上笔、周线向下笔（日强周弱背离），当前上涨在更大级别上属"
+                   f"<b>反弹中的强势段</b>，而非主升浪")
+        else:
+            pat = (f"{total} 个指数全部日周背离（日强周弱 {len(_updn)} 个 / 日弱周强 {len(_dnup)} 个），"
+                   f"多空级别方向分裂、无一致主线")
     elif n_div == 0:
         pat = f"{total} 个指数日线与周线同向（日周共振），结构方向一致性较高"
     else:
-        pat = f"{n_div}/{total} 个指数日强周弱背离、{total - n_div} 个日周共振"
+        _parts = []
+        if _updn:
+            _parts.append(f"{len(_updn)} 个日强周弱背离")
+        if _dnup:
+            _parts.append(f"{len(_dnup)} 个日弱周强背离")
+        pat = f"{n_div}/{total} 个指数日周背离（{'、'.join(_parts)}）、{total - n_div} 个日周共振"
     if n_daily_up >= total * 0.6 and n_week_up <= total * 0.4:
         stance = "；仓位与预期应低于\"日周共振多头\"的情形"
     else:
