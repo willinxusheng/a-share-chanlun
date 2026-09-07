@@ -447,6 +447,7 @@ function regimeTip(x){
     "｜顶背驰=板块内成分见顶信号集中(非板块指数自身必跌), 底背驰同理";
 }
 var qs=(location.hash||"").replace(/^#\/?/,"");
+function safeDec(s){try{return decodeURIComponent(s)}catch(e){return s}}   // R321: 畸形 hash(#stk/%zz 类, URL 截断粘贴) 下 decodeURIComponent 抛 URIError 击穿 handler → 安全解码回落原文
 /* R297: mark 拆分加载 — marks.json(缠论标注, 大头)与 radar.json 并行异步预取, 不阻塞首页渲染;
    点个股时若尚未就绪则等其完成后再画(保证缠论标注完整); 旧部署无 marks.json 时回落 u.mark 兼容 */
 var MARKS={},MARKS_READY=false;
@@ -458,8 +459,8 @@ fetch("radar.json",{cache:"no-cache"}).then(function(r){if(!r.ok)throw new Error
   M=d.meta;UNI=d.universe||{};SIG=d.signals||[];INDS=d.industries||{};
   initSearch();   // R298: 数据就绪后激活全局搜索(UNI 已加载)
   renderHeader();renderBar();renderSigRadar();renderRevPool();renderBanner();   // R269: 数据降级/陈旧警示 · R285: 实操信号雷达 · R305: 逆向观察池
-  if(qs.indexOf("stk/")===0)showStk(decodeURIComponent(qs.slice(4)));
-  else if(qs.indexOf("ind/")===0)pickInd(decodeURIComponent(qs.slice(4)));
+  if(qs.indexOf("stk/")===0)showStk(safeDec(qs.slice(4)));
+  else if(qs.indexOf("ind/")===0)pickInd(safeDec(qs.slice(4)));
   else renderInds();
   kickIndex();
 }).catch(function(e){$("topSub").textContent="数据加载失败";$("indList").innerHTML='<div class="err">无法加载 radar.json：'+esc(e.message)+'<br>请确认已与 radar.json 同目录部署（GitHub Pages / 本地静态服务）。</div>'});
@@ -568,7 +569,7 @@ function sigRow(s){
   var ffNet=(u.ff||{}).net;   // R286: 行内资金微标(净流入/流出)
   var ffMini=(ffNet!=null)?'<span class="ffmini '+ffCls(ffNet)+'" title="当日主力净流入: '+ffTxt(ffNet)+'">'+ffTxt(ffNet)+'</span>':'';
   var fr=s.fresh;
-  var frTag=(fr!=null&&fr<=1)?'<span class="tag-fresh hot">🔥当日</span>':((fr!=null&&fr<=3)?'<span class="tag-fresh new">'+fr+'天</span>':"");
+  var frTag=(fr!=null&&fr===0)?'<span class="tag-fresh hot">🔥当日</span>':((fr!=null&&fr<=3)?'<span class="tag-fresh new">'+fr+'天</span>':"");   // R321: fr<=1 原把 fresh=1(昨日) 也标"🔥当日", 与同列"1天前"自相矛盾 → 仅 fresh===0 才"当日", 1~3 天用黄"新"徽章
   var devTxt="-",devTip="",devCls="",devSub=(t?"距顶背驰高点":"距背驰低点");
   if(dev!=null){
     var a=Math.abs(dev);
@@ -1110,7 +1111,7 @@ function renderIndStkList(k){
       else if(s.scenario&&s.scenario.indexOf("见")>=0)tag='<span class="badge2 '+(s.scenario.indexOf("见底")>=0?"g":"r")+'">'+esc(s.scenario)+'</span>';
       else if(s.scenario)tag='<span class="badge2 z">'+esc(s.scenario)+'</span>';
       else tag='<span class="badge2 o">震荡</span>';
-      var tip=esc((u.name||"")+" | "+(x.sg?(x.sg.dir==="top"?"顶背驰":"底背驰")+" "+x.sg.bc_date+" "+x.sg.bc_type+" 强度"+(x.sg.strong||0)+"/2"+(x.sg.vol?" 量缩确认":"")+" 距今"+(x.sg.fresh!=null?x.sg.fresh+"天": "?") :(s.scenario||"震荡"))+(s.trend?" | 趋势"+s.trend:"")+(s.agree!=null?" | 自洽"+(s.agree*100).toFixed(0)+"%":""));
+      var tip=esc((u.name||"")+" | "+(x.sg?(x.sg.dir==="top"?"顶背驰":"底背驰")+" "+x.sg.bc_date+" "+x.sg.bc_type+" 强度"+(x.sg.strong||0)+"/2"+(x.sg.vol?" 量缩确认":"")+" 距今"+(x.sg.fresh!=null?(x.sg.fresh===0?"当日":x.sg.fresh+"天"):" ?") :(s.scenario||"震荡"))+(s.trend?" | 趋势"+s.trend:"")+(s.agree!=null?" | 自洽"+(s.agree*100).toFixed(0)+"%":""));   // R321: fresh=0 → "距今当日"(同 R320 口径, 原"距今0天"误导)
       return '<div class="stk-grid'+hl+'" title="'+tip+'" onclick="pickStkInInd(\''+x.sym+'\')">'+
         '<div><div class="nm">'+esc(u.name)+(u.lead?' <span class="lead-tag" title="'+(u.type==="ETF"?"场内规模最大的基金":"该行业总市值最大的龙头股")+'">👑 '+(u.type==="ETF"?"规模最大":"行业龙头")+'</span>':'')+'</div><div class="cd">'+esc(x.sym)+'</div></div>'+
         '<div class="val">'+tag+fsub+'</div>'+
@@ -1710,8 +1711,8 @@ function addSlTpLine(opt,u){
 /* ===== 路由 ===== */
 window.addEventListener("hashchange",function(){
   var h=(location.hash||"").replace(/^#\/?/,"");
-  if(h.indexOf("stk/")===0){var s=decodeURIComponent(h.slice(4));if(curStk!==s||curTab!=="stk"){showStk(s);}}   // R258: 状态不一致时真正渲染个股页(原只改状态不渲染)
-  else if(h.indexOf("ind/")===0){var k=decodeURIComponent(h.slice(4));if(curInd!==k)pickInd(k);}
+  if(h.indexOf("stk/")===0){var s=safeDec(h.slice(4));if(curStk!==s||curTab!=="stk"){showStk(s);}}   // R258: 状态不一致时真正渲染个股页(原只改状态不渲染) · R321: safeDec 防畸形 hash URIError
+  else if(h.indexOf("ind/")===0){var k=safeDec(h.slice(4));if(curInd!==k)pickInd(k);}   // R321: 同上
   else if(!h)backHome();
 });
 window.addEventListener("resize",function(){   // R276: 个股详情页图实例登记在 CH_POOL 而非 myChart, 原 resize 只缩 myChart → 页面缩放后个股图不自适应
