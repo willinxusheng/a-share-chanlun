@@ -958,8 +958,15 @@ result = {
     "resonance": resonance,
     # R179: hist 改为基于全量 data(与 data.json 的 klines 同起点 2021-01-04), 早期 score/ma5s/ma20s 为 None 占位,
     # 使情绪图 x 轴起点与分指数图解对齐、历史拉满 5 年; scoring/KNN 仍基于 valid(未改动, 含 120 样本 warmup 的滚动分位模型)。
-    "hist": [[d["date"], d["close"], d["score"], d.get("ma5s"), d.get("ma20s"),
-              (1 if d["regime"] == "bull" else 0),
+    # R328: 展示层口径统一 —— ①score 列 clamp 到 [0,100](R245 只统一了回测 actual/预测带,
+    #   历史曲线漏网: 主图/副图 yAxis 固定 min:0/max:100, 而 score 理论域 [-12.5,112.5],
+    #   实测 2022-10 两日 -4.8/-4.3 与 2026-01 五日 103~107 共 10 行会贴底/贴顶平切失真);
+    #   ②regime 列 None 不再伪编码 0(2021-01~2022-01 预热期 249 行 ma250 未满 regime=None
+    #   被编码成"熊市 0", 行[5] 语义与真实熊市混淆, 若未来消费牛熊底色会整年误标; 现显式 None 占位)。
+    "hist": [[d["date"], d["close"],
+              (None if d["score"] is None else round(max(0.0, min(100.0, d["score"])), 1)),
+              d.get("ma5s"), d.get("ma20s"),
+              (None if d["regime"] is None else (1 if d["regime"] == "bull" else 0)),
               d.get("elasticity")] for d in data],
     # R177c: KNN 情绪轨迹预测(未来 horizon 日 median/p25/p75 带 + 反弹峰值)。
     # 样本不足时 calc_v2 返回 None, 此处写为 None, 由 report.py 情绪板块降级(不画预测带)。
