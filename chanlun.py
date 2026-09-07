@@ -992,20 +992,35 @@ def market_breadth(daily_sc, week_sc, month_sc):
                 "conclusion": "数据不足（无情景样本，无法综合研判）。"}
     # 跨级别背离识别（结论比单一分数更诚实）
     # R173(BUG3): 单层 total==0 时 0>=0 恒真会伪造该层偏多/偏空; 空层视为中性(不计入方向主导)。
+    # R344: ①分支1文案"周线 4/5 偏空"硬编码当前指数池, 改动态计数; ②分支3/4 条件只保证
+    # "not m_bull/not w_bear"(层内可为中性), 文案却断言"月线偏空/周月均偏空"——实证历史 43
+    # 快照零触发(5 指数齐备时层方向几乎恒明确)但属代码语义失实, 若指数池扩容或数据缺口致层
+    # 计数变小即可达, 会反向误导结论横幅。现按层实际偏空/偏多细分文案。
     m_bull = (m_cnt["total"] > 0 and m_cnt["bull"] >= m_cnt["total"] * 0.6)
     w_bear = (w_cnt["total"] > 0 and w_cnt["bear"] >= w_cnt["total"] * 0.6)
     d_bull = (d_cnt["total"] > 0 and d_cnt["bull"] >= d_cnt["total"] * 0.6)
+    m_bear = (m_cnt["total"] > 0 and m_cnt["bear"] >= m_cnt["total"] * 0.6)
+    w_bull = (w_cnt["total"] > 0 and w_cnt["bull"] >= w_cnt["total"] * 0.6)
     if m_bull and w_bear and d_bull:
         conclusion = ("月线多头 + 周线偏空 + 日线反弹 → 当前日线上涨在更大级别上属<b>反弹而非主升浪</b>；"
-                      "周线 4/5 偏空显示周线级调整尚未结束，反弹需<b>周线底分型确认</b>才能升级为反转，"
-                      "仓位与预期应低于「日周共振多头」情形。")
+                      "周线 %d/%d 偏空显示周线级调整尚未结束，反弹需<b>周线底分型确认</b>才能升级为反转，"
+                      "仓位与预期应低于「日周共振多头」情形。" % (w_cnt["bear"], w_cnt["total"]))
     elif m_bull and w_bear:
         conclusion = ("月线多头背景下周线偏空，日线反弹更可能是周线调整中的修复段；"
                       "关注周线能否出现底分型，作为反转确认信号。")
     elif w_bear and not m_bull:
-        conclusion = "周线与月线同步偏空，系统性环境压制，反弹持续性弱，防御为主。"
+        if m_bear:
+            conclusion = "周线与月线同步偏空，系统性环境压制，反弹持续性弱，防御为主。"
+        else:
+            conclusion = "周线偏空、月线方向未明（未确认偏多），系统性环境偏压制，反弹持续性弱，防御为主。"
     elif d_bull and not w_bear and not m_bull:
-        conclusion = "日线偏多但周/月均偏空，短线反弹难改更大级别弱势。"
+        if m_bear:
+            conclusion = "日线偏多但月线仍偏空（周线未偏空），大级别弱势未改，短线反弹高度受限、持续性弱。"
+        elif w_bull:
+            conclusion = ("日线与周线偏多但月线未转多——短线反弹属次级修复，升级为主升浪需月线级多头确认，"
+                          "仓位与预期应低于「日周月共振多头」情形。")
+        else:
+            conclusion = "日线偏多但周/月线方向未明，更大级别多头共振尚未建立，短线反弹持续性待确认。"
     else:
         conclusion = ("日/周/月三级别方向大体一致，结构共识度较高，系统性环境对推演方向形成支撑。"
                       if score >= 0 else "日/周/月三级别方向大体一致偏空，系统性环境压制。")
