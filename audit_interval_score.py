@@ -165,6 +165,7 @@ def diagnose(recs):
     print("-" * 92)
     any_warn = False
     any_crit = False
+    warn_tags = set()  # R357: 实际触发告警类型(结论行按此动态拼接, 不再硬编码全类型列表)
     for H in H_TARGETS:
         rs = recs[H]
         n = len(rs)
@@ -205,6 +206,7 @@ def diagnose(recs):
         wide_thr = 18.0 if H == 8 else 30.0
         if mean_w_pct > wide_thr:
             any_warn = True
+            warn_tags.add("锐度过宽")
             flag += " 锐度过宽"
         # 窄半覆盖塌方: 平静期模型低估不确定性(危险)
         if narrow_cov is not None and narrow_cov < 80.0:
@@ -213,11 +215,13 @@ def diagnose(recs):
         # IS 比过高: 模型带显著不如朴素基线锐利
         if is_ratio > 1.3:
             any_warn = True
+            warn_tags.add("IS过宽")
             flag += " IS过宽"
         # 不确定性校准方向: rho 应 > 0 (宽带对应大波动)
         uncal = (rho is not None and rho < 0.10)
         if uncal:
             any_warn = True
+            warn_tags.add("不确定性未校准")
             flag += " 不确定性未校准"
 
         print(f"{'T+'+str(H):>5}{n:>7}{cov:>11.1f}%{mean_w_pct:>9.1f}%{model_is:>11.1f}"
@@ -225,14 +229,15 @@ def diagnose(recs):
               f"{(('%.1f%%' % narrow_cov) if narrow_cov is not None else ' n/a'):>10}{flag}")
     print("-" * 92)
     print("诊断说明:")
-    print("  • 均带宽%%：P5-P95 带宽占价位均值; 过宽(T+8>18%%/T+30>30%%)≈废带, 过窄(<2%%)≈必漏")
+    print("  • 均带宽%：P5-P95 带宽占价位均值; 过宽(T+8>18%/T+30>30%)=覆盖偏高于名义90%(安全侧虚胖、信息量偏低; 是否真浪费以 IS 比为准), 过窄(<2%)≈必漏")
     print("  • IS比：模型区间评分 / 朴素常数带宽基线; ≤1.0=锐利有用, 1.0~1.3=略宽可接受, >1.3=过宽浪费")
     print("  • 宽窄相关：带宽 与 真实|real-med| 的 Spearman; >0=模型懂自己的不确定性(宽带宽=大波动)")
-    print("  • 窄半覆盖：带宽较窄(常平静期)锚点的经验覆盖; <80%%=平静期低估不确定性(危险漏洞)")
+    print("  • 窄半覆盖：带宽较窄(常平静期)锚点的经验覆盖; <80%=平静期低估不确定性(危险漏洞)")
     print("=" * 92)
     verdict = ("❌ CRITICAL — 窄半(平静期)覆盖塌方, 模型在平静期低估不确定性(最有隐蔽性的漏洞)"
                if any_crit else
-               ("⚠ WARN — 存在锐度过宽/IS过宽/不确定性未校准(监控, 不阻断)"
+               ("⚠ WARN — %s(监控, 不阻断; 详见上方明细)"
+                % ("、".join(sorted(warn_tags)) if warn_tags else "存在异常")
                 if any_warn else
                 "✅ 区间锐度合理 + 不确定性已校准(宽带对应大波动, 窄带仍覆盖≈90%)"))
     print("结论:", verdict)

@@ -114,7 +114,7 @@ def run():
     print("=" * 92)
     print("R85 点预测水平偏置监控(关12) — 主路径目标 vs 统计中位期望 相对真实收盘的水平偏置")
     print("=" * 92)
-    print("口径: bias=(real-forecast)/forecast; 中位稳健; 符号检验 p<0.05 即「系统性偏置」")
+    print("口径: bias=(real-forecast)/forecast; 中位稳健; 幅度超阈值(med>3%/main>5%)=系统性偏置, 符号 p<0.05 仅方向偏参考(R357 分级)")
     print("-" * 92)
 
     def fmt(s):
@@ -125,40 +125,53 @@ def run():
                     s["n"], s["median"] * 100, s["mean"] * 100, s["sd"] * 100,
                     s["pos"], s["neg"], s["p"]))
 
-    any_warn = False
-    print("【统计中位期望 med —— 应≈无偏(中位偏置阈值 3%, 符号p<0.05 告警)】")
+    # R357: 告警分级——幅度型(中位|偏置|超阈值, 经济意义明确)与方向型(符号检验显著
+    # 但幅度在阈值内, 如 n=123 下 73/50 分布 p=0.047 而中位仅+0.76%, 属噪声级方向偏)
+    # 必须分开, 否则仅符号显著就喊「系统性水平偏置」会夸大结论(实测震荡 T+8 即此类)。
+    any_mag = False   # 幅度超阈值(med>3% / main>5%)
+    any_dir = False   # 仅符号显著 p<0.05, 中位幅度未超阈值
+    print("【统计中位期望 med —— 应≈无偏(中位偏置阈值 3%, 符号p<0.05 参考)】")
     for sym in symbols:
         nm = data[sym].get("name", sym)
         for H in H_TARGETS:
             s = summarize(agg_med[sym][H])
-            warn = (s is not None and (abs(s["median"]) > 0.03 or s["p"] < 0.05))
-            any_warn = any_warn or warn
-            print("  %-9s T+%-2d %s %s" % (nm, H, fmt(s), "  ⚠偏置" if warn else ""))
+            mag = (s is not None and abs(s["median"]) > 0.03)
+            dironly = (s is not None and not mag and s["p"] < 0.05)
+            any_mag = any_mag or mag
+            any_dir = any_dir or dironly
+            tag = "  ⚠偏置(幅超3%)" if mag else ("  ◐符号偏(p<0.05)" if dironly else "")
+            print("  %-9s T+%-2d %s %s" % (nm, H, fmt(s), tag))
     print("-" * 92)
     print("【缠论主路径目标 main —— 允许偏离(方向性目标), 阈值 5%】")
     for sym in symbols:
         nm = data[sym].get("name", sym)
         for H in H_TARGETS:
             s = summarize(agg_main[sym][H])
-            warn = (s is not None and abs(s["median"]) > 0.05)
-            any_warn = any_warn or warn
-            print("  %-9s T+%-2d %s %s" % (nm, H, fmt(s), "  ⚠偏置" if warn else ""))
+            mag = (s is not None and abs(s["median"]) > 0.05)
+            any_mag = any_mag or mag
+            print("  %-9s T+%-2d %s %s" % (nm, H, fmt(s), "  ⚠偏置(幅超5%)" if mag else ""))
     print("-" * 92)
     print("【分市场环境 med 无偏性(暴露平均掩盖的弱点)】")
     for rg in REGIMES:
         for H in H_TARGETS:
             s = summarize(regime_med[rg][H])
-            warn = (s is not None and (abs(s["median"]) > 0.03 or s["p"] < 0.05))
-            any_warn = any_warn or warn
+            mag = (s is not None and abs(s["median"]) > 0.03)
+            dironly = (s is not None and not mag and s["p"] < 0.05)
+            any_mag = any_mag or mag
+            any_dir = any_dir or dironly
             lab = {"bull": "牛", "bear": "熊", "range": "震荡"}[rg]
-            print("  %-4s T+%-2d %s %s" % (lab, H, fmt(s), "  ⚠偏置" if warn else ""))
+            tag = "  ⚠偏置(幅超3%)" if mag else ("  ◐符号偏(p<0.05)" if dironly else "")
+            print("  %-4s T+%-2d %s %s" % (lab, H, fmt(s), tag))
     print("=" * 92)
     print("结论: %s" % (
-        "⚠ WARN — 存在系统性水平偏置(监控, 不阻断; 如实标注给用户)"
-        if any_warn else
-        "✅ 点预测水平无显著系统性偏置(中位≈0 且符号检验不显著)"))
+        "⚠ WARN — 存在幅度型系统性偏置(中位|偏置|超阈值: med>3%/main>5%; 监控, 不阻断; 如实标注给用户)"
+        if any_mag else
+        ("ℹ 提示 — 仅方向型偏置(符号检验 p<0.05 但中位幅度在 3% 阈值内, 幅度经济影响小, "
+         "非系统性幅度偏置; med 方向略偏可观察)"
+         if any_dir else
+         "✅ 点预测水平无显著系统性偏置(中位≈0 且符号检验不显著)")))
     print("注: med 告警=近窗口均值非好无偏估计(动量/均值回归/漂移)。")
-    return any_warn
+    return any_mag or any_dir  # R357: 与原 any_warn 同语义(任一告警即 True), 内部已分级
 
 
 def selftest():
