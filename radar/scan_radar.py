@@ -1378,9 +1378,12 @@ def main():
     out = {"meta": meta,
            "signals": [{"sym": s, **sig} for s, sig in signals],
            "industries": industries,
+           # R319: 白名单补 "src"(票级K线源 tx/em/sina) —— 此前漏写导致前端 srcTag(u.src)
+           # 恒 undefined, R271 票级源徽标从未生效(R276 注释"已在顶层"系假修复, 后端从未写出)。
+           # src 值域见 _src_degraded: tx/em=复权(绿标), sina=新浪裸价(橙标⚠, 除权日假跳空风险)。
            "universe": {s: {k: v for k, v in row.items()
                             if k in ("name", "type", "code", "gate", "gd", "ind", "mcap",
-                                     "st", "ff", "lead")}
+                                     "st", "ff", "lead", "src")}
                         for s, row in universe.items()}}
     # R275: 显式 UTF-8 —— 读侧(L1002)已带 encoding, 写侧遗漏; CI runner 若 locale 非 UTF-8
     # (如 C/POSIX), ensure_ascii=False 写中文 meta 文案会 UnicodeEncodeError 崩掉全量 run 无产物。

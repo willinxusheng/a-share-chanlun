@@ -889,7 +889,7 @@ function detailStrip(ind,k){
   if(ind.leader)h+='<span title="行业内总市值最大的成分股">'+(ind.is_etf?"规模最大基金":"行业龙头")+' <b class="ld-name">'+esc(ind.leader.name)+'</b></span>';   // R283
   h+='<span>缠论 <b>笔 '+(stx.bi_n||0)+'</b><span class="dsep">·</span><b>中枢 '+(stx.zs_n||0)+'</b><span class="dsep">·</span><b>背驰 '+(stx.bc_n||0)+'</b></span>';
   if(stx.first)h+='<span class="muted">区间 '+esc(stx.first)+'~'+esc(stx.last||"")+'</span>';
-  if(IDX){var rel=(ind.chg1d-IDX.chg)*100;h+='<span class="'+(rel>=0?"up":"down")+'">'+(rel>=0?"▲ 跑赢":"▼ 跑输")+'上证 '+Math.abs(rel).toFixed(1)+'pp</span>';}
+  if(IDX&&ind.chg1d!=null){var rel=(ind.chg1d-IDX.chg)*100;h+='<span class="'+(rel>=0?"up":"down")+'">'+(rel>=0?"▲ 跑赢":"▼ 跑输")+'上证 '+Math.abs(rel).toFixed(1)+'pp</span>';}   // R319: 补 chg1d null 保护(与 renderInds L935 同款口径, 防 NaNpp)
   var mv=k?indMovers(k):null;
   if(mv&&(mv.top||mv.bot)){
     h+='<span class="dld">';
@@ -1026,7 +1026,7 @@ function drawChart(){
     sliderDateTip(el,myChart,opt);   // R316: slider hover 跟随鼠标显示真实日期
   }catch(err){
     console.error("[radar.drawChart] setOption failed",err);
-    el.innerHTML='<div class="err">K线渲染失败: '+(err&&err.message||err)+'<br>请刷新页面重试</div>';
+    el.innerHTML='<div class="err">K线渲染失败: '+esc(err&&err.message||err)+'<br>请刷新页面重试</div>';   // R319: 补 esc(与 drawStkInto/loadStkChart catch 一致, 防异常信息内嵌 HTML)
   }
 }
 function drawStkInto(el,sym){
