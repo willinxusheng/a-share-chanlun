@@ -462,6 +462,23 @@ var marksP=fxT("marks.json").then(function(r){if(!r.ok)throw new Error("HTTP "+r
   .then(function(d){MARKS=d||{};MARKS_READY=true;return d})
   .catch(function(){MARKS={};MARKS_READY=true;return null});   // 404/失败 → 回落 universe.mark(旧结构)
 function markOf(sym){return MARKS[sym]||(UNI[sym]&&UNI[sym].mark)||null}   // R297: 新结构 MARKS 优先, 旧结构兜底
+/* ===== R351: 个股腾讯K线缓存 — stk/ind tab 反复切换 / 返回重进同票时不再重复请求 660 根
+   (原 drawStkInto/loadStkChart 各自裸 fetch, 每次切 tab/重进都重拉+loading 闪烁; 旭总手机流量场景成本高)
+   K线日内低频变动, TTL 5 分钟足够新鲜; 拉取失败不写缓存回落既有错误路径; 容量上限 64 只, 超出淘汰最旧 */
+var STK_CACHE={},STK_CACHE_TTL=300e3;
+function getStkData(sym){
+  var c=STK_CACHE[sym];
+  if(c&&Date.now()-c.ts<STK_CACHE_TTL)return Promise.resolve(c.kl);
+  return fxT("https://ifzq.gtimg.cn/appstock/app/fqkline/get?param="+sym+",day,,,660,qfq")
+    .then(function(r){return r.json()})
+    .then(function(j){
+      var kl=(j.data[sym]||{}).qfqday||(j.data[sym]||{}).day||[];   // 股票返回 qfqday, ETF/LOF 只回 day(不除权)——优先 qfqday 回退 day
+      if(!kl||!kl.length)throw new Error("empty");
+      if(Object.keys(STK_CACHE).length>=64){var old=null;Object.keys(STK_CACHE).forEach(function(k){if(!old||STK_CACHE[k].ts<STK_CACHE[old].ts)old=k});if(old)delete STK_CACHE[old];}
+      STK_CACHE[sym]={ts:Date.now(),kl:kl};
+      return kl;
+    });
+}
 fxT("radar.json").then(function(r){if(!r.ok)throw new Error("HTTP "+r.status);return r.json()}).then(function(d){
   M=d.meta;UNI=d.universe||{};SIG=d.signals||[];INDS=d.industries||{};
   initSearch();   // R298: 数据就绪后激活全局搜索(UNI 已加载)
@@ -580,7 +597,7 @@ function sigRow(s){
   var ffNet=(u.ff||{}).net;   // R286: 行内资金微标(净流入/流出)
   var ffMini=(ffNet!=null)?'<span class="ffmini '+ffCls(ffNet)+'" title="当日主力净流入: '+ffTxt(ffNet)+'">'+ffTxt(ffNet)+'</span>':'';
   var fr=s.fresh;
-  var frTag=(fr!=null&&fr===0)?'<span class="tag-fresh hot">🔥当日</span>':((fr!=null&&fr<=3)?'<span class="tag-fresh new">'+fr+'天</span>':"");   // R321: fr<=1 原把 fresh=1(昨日) 也标"🔥当日", 与同列"1天前"自相矛盾 → 仅 fresh===0 才"当日", 1~3 天用黄"新"徽章
+  var frTag=(fr!=null&&fr===0)?'<span class="tag-fresh hot">🔥</span>':((fr!=null&&fr<=3)?'<span class="tag-fresh new">'+fr+'天</span>':"");   // R321: fr<=1 原把 fresh=1(昨日) 也标"🔥当日", 与同列"1天前"自相矛盾 → 仅 fresh===0 才当日徽章, 1~3 天用黄"新"徽章; R351: 徽章内文'🔥当日'→'🔥'(列文本 R320 已显示"当日", 双"当日"冗余回归)
   var devTxt="-",devTip="",devCls="",devSub=(t?"距顶背驰高点":"距背驰低点");
   if(dev!=null){
     var a=Math.abs(dev);
@@ -1044,11 +1061,9 @@ function drawChart(){
 function drawStkInto(el,sym){
   var seq=++drawSeq;
   el.innerHTML='<div class="loading sk">实时行情拉取中('+esc(sym)+')…</div>';
-  Promise.all([fxT("https://ifzq.gtimg.cn/appstock/app/fqkline/get?param="+sym+",day,,,660,qfq").then(function(r){return r.json()}),marksP]).then(function(rs){var j=rs[0];   // R297: 合流 marks.json 预取, 未就绪时等它再画(保证缠论标注完整)
+  Promise.all([getStkData(sym),marksP]).then(function(rs){var kl=rs[0];   // R351: K线走缓存(TTL 5min), 切tab/重进不重拉; getStkData 已解析 qfqday||day 且保证非空 · R297: 合流 marks.json 预取, 未就绪时等它再画(保证缠论标注完整)
     if(seq!==drawSeq)return;   // R258: 快速连点时丢弃过期响应
-    // 腾讯 fqkline 对股票返回 qfqday、对 ETF/LOF 只返回 day(不除权)——优先 qfqday 回退 day
-    var kl=(j.data[sym]||{}).qfqday||(j.data[sym]||{}).day||[];
-    if(!kl.length)throw new Error("empty");
+    // 腾讯 fqkline 对股票返回 qfqday、对 ETF/LOF 只返回 day(不除权)——已在 getStkData 内优先 qfqday 回退 day
     // R269: 腾讯CDN陈旧缓存校验 — K线末根落后于结构快照日(st.last)时提示, 防缠论标注错位(静默污染)
     var _u=UNI[sym],_sl=_u&&_u.st&&_u.st.last;
     if(_sl&&kl[kl.length-1][0]<_sl)noteStale(el,'<b>⚠ 行情缓存滞后：</b>腾讯K线至 <b>'+kl[kl.length-1][0]+'</b>，快照结构至 '+_sl+' — 缠论标注可能错位（腾讯CDN缓存陈旧，稍后刷新可恢复）');
@@ -1281,11 +1296,9 @@ function showStk(sym){
 }
 function loadStkChart(sym){
   var seq=++stkSeq;
-  Promise.all([fxT("https://ifzq.gtimg.cn/appstock/app/fqkline/get?param="+sym+",day,,,660,qfq").then(function(r){return r.json()}),marksP]).then(function(rs){var j=rs[0];   // R297: 合流 marks.json 预取, 未就绪时等它再画(保证缠论标注完整)
+  Promise.all([getStkData(sym),marksP]).then(function(rs){var kl=rs[0];   // R351: K线走缓存(TTL 5min) · R297: 合流 marks.json 预取, 未就绪时等它再画(保证缠论标注完整)
     if(seq!==stkSeq)return;   // R258: 丢弃过期响应
-    // 腾讯 fqkline 对股票返回 qfqday、对 ETF/LOF 只返回 day(不除权)——优先 qfqday 回退 day
-    var kl=(j.data[sym]||{}).qfqday||(j.data[sym]||{}).day||[];
-    if(!kl.length)throw new Error("empty");
+    // 股票返回 qfqday、ETF/LOF 只回 day —— 已在 getStkData 内优先 qfqday 回退 day
     // R269: 腾讯CDN陈旧缓存校验 — K线末根落后于结构快照日(st.last)时提示(同 drawStkInto)
     var _u=UNI[sym],_sl=_u&&_u.st&&_u.st.last;
     if(_sl&&kl[kl.length-1][0]<_sl)noteStale($("stkChart"),'<b>⚠ 行情缓存滞后：</b>腾讯K线至 <b>'+kl[kl.length-1][0]+'</b>，快照结构至 '+_sl+' — 缠论标注可能错位（腾讯CDN缓存陈旧，稍后刷新可恢复）');
