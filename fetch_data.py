@@ -272,23 +272,57 @@ def update_sentiment_txts():
         os.makedirs(_dir, exist_ok=True)
     except Exception:
         pass
+    # R350: 配对组级同源。calc_v2 消费 txt 第8列作"换手"因子(权重 .20)与"分层投机比"
+    # (权重 .15): em 模式第8列=东财 f61 换手率(~0.x 量级); 腾讯回退(R232)第8列=成交额
+    # 派生代理(~1e12 量级, fetch_tx_sentiment to_proxy=amount_proxy)。
+    # 原实现逐 sym 独立降级 -> "东财个别指数失败"时组内混源: calc_v2 L66
+    # ratio=zz1k.to/sh50.to 直接相除无稀释, 混源量纲差 1e12 倍 => ratio 爆炸/趋零,
+    # 分层因子分位恒 100/0, score 当日失真 ±15 分量级(污染 252 日滚动窗口信号/背离)。
+    # 修: 以 calc_v2 的配对为组 —— {sh,sz}(L65 to×amt 加权须同量纲) 与 {sh50,zz1k}
+    # (L66 ratio 直接相除须同源); 组内模式不一致时整组降级腾讯重拉(保同源, 代价是
+    # 损失换手率精度, 但 scale-invariant 论证下分位形状不变, 远优于量纲崩溃)。
+    _SRC_GROUPS = (("sh000001", "sz399001"), ("sh000016", "sh000852"))
     ok = 0
     modes = set()
+    fetched = {}
     for sym, secid in SENTIMENT_SYMBOLS.items():
+        mode = "em"
         try:
-            mode = "em"
+            rows, dirty = fetch_em(secid)
+            if len(rows) < 100:
+                raise ValueError("东财返回仅%d行" % len(rows))
+        except Exception as e_em:
+            # R232: 东财不可达 -> 腾讯 gtimg 回退(派生成交额/换手率代理), 情绪面板自动刷新
             try:
-                rows, dirty = fetch_em(secid)
-                if len(rows) < 100:
-                    raise ValueError("东财返回仅%d行" % len(rows))
-            except Exception as e_em:
-                # R232: 东财不可达 -> 腾讯 gtimg 回退(派生成交额/换手率代理), 情绪面板自动刷新
                 rows, dirty = fetch_tx_sentiment(sym)
-                mode = "tencent_proxy"
                 if len(rows) < 100:
-                    print("WARN 情绪 %s 东财与腾讯均失败, 保留旧txt" % sym)
-                    continue
+                    raise ValueError("腾讯返回仅%d行" % len(rows))
+                mode = "tencent_proxy"
                 print("INFO 情绪 %s 东财不可达 -> 腾讯 gtimg 回退(派生成交额/换手率代理)" % sym)
+            except Exception as e:
+                print("WARN 情绪 %s 东财与腾讯均失败, 保留旧txt: %s" % (sym, e))
+                continue
+        fetched[sym] = {"rows": rows, "dirty": dirty, "mode": mode}
+    # R350 组级同源: 组内 em/tencent_proxy 混合, 或组内缺员(某指数双源全败留旧值,
+    # 旧值模式未知可能异源) => 把组内成功者降级腾讯重拉(混源比降级更糟)
+    for grp in _SRC_GROUPS:
+        present = [s for s in grp if s in fetched]
+        missing = [s for s in grp if s not in fetched]
+        m_in = {fetched[s]["mode"] for s in present}
+        if len(m_in) > 1 or (present and missing and len(m_in) > 0):
+            for s in present:
+                if fetched[s]["mode"] == "em":
+                    try:
+                        rows, dirty = fetch_tx_sentiment(s)
+                        if len(rows) >= 100:
+                            fetched[s] = {"rows": rows, "dirty": dirty, "mode": "tencent_proxy"}
+                            print("INFO 情绪 %s 组内混源/缺员风险 -> 降级腾讯保同源(calc_v2 ratio/to 量纲)" % s)
+                    except Exception:
+                        pass
+    for sym, info in fetched.items():
+        try:
+            mode = info["mode"]
+            rows, dirty = info["rows"], info["dirty"]
             # R236: 盘中丢弃未收盘的当日 bar(与 main() 口径一致), 防半截数据入库
             rows = _trim_unclosed_bar(rows)
             modes.add(mode)

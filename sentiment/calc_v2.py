@@ -182,6 +182,9 @@ def gen_signals(buy_th, sell_th):
     run_buy, run_sell = 0, 0
     for i, d in enumerate(valid):
         if d["regime"] is None:
+            # R350: regime 未知日(ma250 未就绪/行情缺口)中断"连续3日确认"——
+            # 原 continue 不清零 run, 空洞前后 run 累计可虚报(缺口两侧各 2 日拼出"3日连续")。
+            run_buy, run_sell = 0, 0
             continue
         run_buy = run_buy + 1 if d["score"] <= buy_th else 0
         run_sell = run_sell + 1 if d["score"] >= sell_th else 0
