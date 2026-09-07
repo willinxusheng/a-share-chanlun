@@ -29,9 +29,15 @@ def main():
     if not isinstance(acc, dict) or not fc:
         print("  SKIP: forecast_acc 缺失(样本不足或无预测)")
         return 0
-    cov = float(acc.get("cov", 0))
-    mae = float(acc.get("mae", 0))
-    dacc = float(acc.get("dir_acc", 0))
+    # R327: 键缺失(结构损坏/calc_v2 改版/旧产物)按「数据缺失」SKIP 而非默认 0——
+    # 原 acc.get("cov", 0) 在键缺失时 cov=0 会误判「覆盖率偏离名义50%」exit 1 阻断发布,
+    # 但键缺失是产物结构问题不是模型退化, 阻断会掩盖真因且误杀每日数据刷新(R238 精神)。
+    if acc.get("cov") is None or acc.get("mae") is None or acc.get("dir_acc") is None:
+        print("  SKIP: forecast_acc 键缺失(结构异常, 按数据缺失处理不阻断)")
+        return 0
+    cov = float(acc["cov"])
+    mae = float(acc["mae"])
+    dacc = float(acc["dir_acc"])
     n = int(acc.get("n", 0))
     print("  配置: k=%s ctx=%s weight=%s regime=%s" % (
         fc.get("k"), fc.get("ctx"), fc.get("weight"), fc.get("regime_weight")))
@@ -45,7 +51,12 @@ def main():
     if mae > 35:
         warns.append("平均误差 %.1f 分退化(历史基线≈22)" % mae)
     if not (0 <= dacc <= 100):
-        warns.append("方向命中率 %.1f%% 异常" % dacc)
+        warns.append("方向命中率 %.1f%% 异常(超出 0-100 合理域)" % dacc)
+    # R327: 方向命中率显著低于随机 50% 视为「预测反向/信号失效」——实测正常≈70%
+    # (n=206 锚点, 2026-09 实测 70.4%), 崩到 40% 以下(-9σ 级)原检查完全漏检(越界域几乎恒真),
+    # 反向预测比随机更危险(按错误方向操作), 须显式告警。
+    elif dacc < 40:
+        warns.append("方向命中率 %.1f%% 显著低于随机(正常≈70%%, 疑似方向信号失效/反向)" % dacc)
 
     if warns:
         print("  ⛔ 预测精度退化, 阻断发布 (exit 1):")

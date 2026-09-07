@@ -320,7 +320,12 @@ def main():
     print("离线门禁补充: 关S数据schema=%s  关R报告运行时=%s" % (
         ["FAIL", "OK"][ok_schema], ["FAIL", "OK"][ok_rt]))
     allok = ok_schema and ok_rt and ok1 and ok2 and ok3 and (ok4 if deep else True) and (ok5 if deep else True) and (ok6 if deep else True) and (ok7 if deep else True) and (ok8 if deep else True) and (ok9 if deep else True) and (ok10 if deep else True) and (ok11 if deep else True) and (ok12 if deep else True) and (ok13 if deep else True) and (ok14 if deep else True) and (ok15 if deep else True) and (ok16 if deep else True)
-    print("结论: %s" % ("✅ 全部通过" if allok else "❌ 存在失败项"))
+    # R327: 诚实分层 —— allok 只含阻断项(关1/2/3 + schema/rt); 深层监控门禁(关4-16)
+    # 自 R207 起恒不阻断(子脚本退出码被忽略), 若其子报告打了 CRITICAL/❌, 总结论仍称
+    # 「全部通过」会系统性谎报(监控告警被总结论掩盖)。现明示结论仅指阻断项, 监控告警
+    # 见上方各子报告; 若需监控项也参与判定, 应解析子输出而非依赖退出码(R207 后子码恒0)。
+    print("结论: %s" % ("✅ 阻断项全部通过(关1/2/3/schema/rt; 深层监控关4-16 告警见上方各子报告, 不阻断)"
+                        if allok else "❌ 阻断项存在失败(详见上方对应关)"))
     sys.exit(0 if allok else 1)
 
 
