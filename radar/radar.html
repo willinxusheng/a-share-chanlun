@@ -448,14 +448,26 @@ function regimeTip(x){
 }
 var qs=(location.hash||"").replace(/^#\/?/,"");
 function safeDec(s){try{return decodeURIComponent(s)}catch(e){return s}}   // R321: 畸形 hash(#stk/%zz 类, URL 截断粘贴) 下 decodeURIComponent 抛 URIError 击穿 handler → 安全解码回落原文
+/* R322: fetch+超时 — 腾讯 CDN/东财接口偶发"黑洞"(连接挂起不响应不断开)时, 原生 fetch 无超时
+   → 详情页/首屏 loading 无限转圈. AbortController 兜底 ms 毫秒超时, abort 抛友好文案进既有 catch 降级链. */
+function fxT(url,ms){
+  ms=ms||15000;
+  if(typeof AbortController==="undefined")return fetch(url,{cache:"no-cache"});   // 极老浏览器/测试沙箱无 AC → 原样
+  var ac=new AbortController(),to=setTimeout(function(){ac.abort()},ms);
+  return fetch(url,{cache:"no-cache",signal:ac.signal}).then(function(r){clearTimeout(to);return r},function(e){
+    clearTimeout(to);
+    if(e&&(e.name==="AbortError"||e.code===20||e.code===17))throw new Error("请求超时("+(ms/1000)+"s)，网络不稳定或源站挂起，请重试");
+    throw e;
+  });
+}
 /* R297: mark 拆分加载 — marks.json(缠论标注, 大头)与 radar.json 并行异步预取, 不阻塞首页渲染;
    点个股时若尚未就绪则等其完成后再画(保证缠论标注完整); 旧部署无 marks.json 时回落 u.mark 兼容 */
 var MARKS={},MARKS_READY=false;
-var marksP=fetch("marks.json",{cache:"no-cache"}).then(function(r){if(!r.ok)throw new Error("HTTP "+r.status);return r.json()})
+var marksP=fxT("marks.json").then(function(r){if(!r.ok)throw new Error("HTTP "+r.status);return r.json()})
   .then(function(d){MARKS=d||{};MARKS_READY=true;return d})
   .catch(function(){MARKS={};MARKS_READY=true;return null});   // 404/失败 → 回落 universe.mark(旧结构)
 function markOf(sym){return MARKS[sym]||(UNI[sym]&&UNI[sym].mark)||null}   // R297: 新结构 MARKS 优先, 旧结构兜底
-fetch("radar.json",{cache:"no-cache"}).then(function(r){if(!r.ok)throw new Error("HTTP "+r.status);return r.json()}).then(function(d){
+fxT("radar.json").then(function(r){if(!r.ok)throw new Error("HTTP "+r.status);return r.json()}).then(function(d){
   M=d.meta;UNI=d.universe||{};SIG=d.signals||[];INDS=d.industries||{};
   initSearch();   // R298: 数据就绪后激活全局搜索(UNI 已加载)
   renderHeader();renderBar();renderSigRadar();renderRevPool();renderBanner();   // R269: 数据降级/陈旧警示 · R285: 实操信号雷达 · R305: 逆向观察池
@@ -503,7 +515,7 @@ function kickIndex(){
             "https://ifzq.gtimg.cn/appstock/app/fqkline/get?param=sh000001,day,,,8,"];
   var tryNext=function(list){
     if(!list.length)return;
-    fetch(list[0],{cache:"no-cache"}).then(function(r){return r.json()}).then(function(j){
+    fxT(list[0],10000).then(function(r){return r.json()}).then(function(j){
       var v=idxParse(j);
       if(!v){tryNext(list.slice(1));return;}
       IDX=v;renderBar();renderInds();
@@ -1033,7 +1045,7 @@ function drawChart(){
 function drawStkInto(el,sym){
   var seq=++drawSeq;
   el.innerHTML='<div class="loading sk">实时行情拉取中('+esc(sym)+')…</div>';
-  Promise.all([fetch("https://ifzq.gtimg.cn/appstock/app/fqkline/get?param="+sym+",day,,,660,qfq",{cache:"no-cache"}).then(function(r){return r.json()}),marksP]).then(function(rs){var j=rs[0];   // R297: 合流 marks.json 预取, 未就绪时等它再画(保证缠论标注完整)
+  Promise.all([fxT("https://ifzq.gtimg.cn/appstock/app/fqkline/get?param="+sym+",day,,,660,qfq").then(function(r){return r.json()}),marksP]).then(function(rs){var j=rs[0];   // R297: 合流 marks.json 预取, 未就绪时等它再画(保证缠论标注完整)
     if(seq!==drawSeq)return;   // R258: 快速连点时丢弃过期响应
     // 腾讯 fqkline 对股票返回 qfqday、对 ETF/LOF 只返回 day(不除权)——优先 qfqday 回退 day
     var kl=(j.data[sym]||{}).qfqday||(j.data[sym]||{}).day||[];
@@ -1270,7 +1282,7 @@ function showStk(sym){
 }
 function loadStkChart(sym){
   var seq=++stkSeq;
-  Promise.all([fetch("https://ifzq.gtimg.cn/appstock/app/fqkline/get?param="+sym+",day,,,660,qfq",{cache:"no-cache"}).then(function(r){return r.json()}),marksP]).then(function(rs){var j=rs[0];   // R297: 合流 marks.json 预取, 未就绪时等它再画(保证缠论标注完整)
+  Promise.all([fxT("https://ifzq.gtimg.cn/appstock/app/fqkline/get?param="+sym+",day,,,660,qfq").then(function(r){return r.json()}),marksP]).then(function(rs){var j=rs[0];   // R297: 合流 marks.json 预取, 未就绪时等它再画(保证缠论标注完整)
     if(seq!==stkSeq)return;   // R258: 丢弃过期响应
     // 腾讯 fqkline 对股票返回 qfqday、对 ETF/LOF 只返回 day(不除权)——优先 qfqday 回退 day
     var kl=(j.data[sym]||{}).qfqday||(j.data[sym]||{}).day||[];
@@ -1297,7 +1309,7 @@ function loadStkChart(sym){
 function drawStkMini(sp){
   // R258 fix: spark 行=[open,high,low,close](close 在索引3, 与 st.close 对齐实测);
   // 原代码把 high(k[1])当 close 画线、low/high 互换 → 迷你图曲线/涨跌色错
-  var data=sp.data.map(function(k){return {date:sp.d0,open:k[0],high:k[1],low:k[2],close:k[3]}});
+  var data=sp.data.map(function(k){return {date:sp.d0,open:k[0],high:k[1],low:k[2],close:k[3]}});   // date 取 sp.d0(仅起始日, spark 无逐日序列) — xAxis show:false 仅占位, 勿据此画时间轴
   if(!data||data.length<2)return;
   var mini=$("stkMini");if(!mini)return;
   var ch=echarts.init(mini,null,{renderer:"svg"});
