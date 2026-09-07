@@ -1868,14 +1868,20 @@ def rr_table(data, results, recent_n=8):
 
 
 def robustness_table(robust, data):
-    """样本外稳健性检验表：早年(2021~split前) vs 近两年(split起) 买方信号胜率对比，检测校准过拟合。"""
+    """样本外稳健性检验表：早年(2021~split前) vs 近两年(split起) 买方信号胜率对比，检测校准过拟合。
+
+    R342: 早/近/变化/判定全列统一采用 R326 walk-forward 多切分真均值口径(walk_forward.early_rate /
+    recent_rate / decay)——此前渲染仍用 pooled 跨切分累计样本折算(early/recent 累计结构仅保留作
+    样本量护栏参考), 跨切分重复计数使 diff 失真: 实测 sh000001 pooled=-42.9pt 会误报「显著衰减」
+    (真 wf=-1.7pt 稳定)、sh000300 pooled=+12.1pt 会误报「样本外稳定」(真 wf=-12.9pt 显著衰减),
+    与同行「滚动窗口衰减」列自相矛盾。"""
     rows = []
     for sym, rb in robust.items():
         name = data[sym]["name"]
         early, recent, _split_t = rb["early"], rb["recent"], rb["split"]
         split = "多切分(" + "/".join(str(s[:4]) for s in _split_t) + ")" if isinstance(_split_t, (tuple, list)) else _split_t
-        wf = rb.get("walk_forward", {})
-        wf_decay = "%+.0fpt" % (wf.get("decay", 0) * 100) if wf else "—"
+        wf = rb.get("walk_forward", {}) or {}
+        wf_er, wf_rr, wf_d = wf.get("early_rate"), wf.get("recent_rate"), wf.get("decay")
 
         def _pick(d, h=20):
             st = d.get("一类买", {}).get(h) or d.get("三类买", {}).get(h)
@@ -1883,41 +1889,42 @@ def robustness_table(robust, data):
                 return None
             return st["win_rate"], st["avg_ret"], st["n"]
 
-        em, rm = _pick(early), _pick(recent)
-        if em and rm:
-            diff_pt = (rm[0] - em[0]) * 100
-            # 样本充足性护栏：早年或近两年买方样本任一不足 20，早期胜率(尤极小样本易出 100%)
+        em, rm = _pick(early), _pick(recent)   # 仅作样本量护栏(pooled 累计计数; 极小样本 per-split 均值同样不可信)
+        if wf_er is not None and wf_rr is not None and wf_d is not None:
+            diff_txt = "%+.0fpt" % (wf_d * 100)
+            # 样本充足性护栏：早年或近两年买方累计样本任一不足 20，早期胜率(尤极小样本易出 100%)
             # 不可信，衰减 pt 多为抽样噪声，禁止据此发「过拟合」告警——与 build_quality_cert 的
             # regime 判定 n>=20 可靠性口径一致。仅给中性「样本不足·难判定」，避免误导。
-            if em[2] < 20 or rm[2] < 20:
+            if (em is None or em[2] < 20) or (rm is None or rm[2] < 20):
                 verdict = badge('样本不足 · 难判定', '#64748b')
-            elif diff_pt <= -15:
+            elif wf_d <= -0.15:
                 verdict = badge('近两年显著衰减 · 校准或存过拟合', '#d97706', '⚠ ')
-            elif diff_pt >= -5:
+            elif wf_d >= -0.05:
                 verdict = badge('样本外稳定', GREEN, '✓ ')
             else:
                 verdict = badge('轻微衰减', '#64748b')
-            diff_txt = "%+.0fpt" % diff_pt
+            n_txt = ("n=%d/%d" % (em[2], rm[2])) if (em and rm) else "—"
         else:
-            verdict, diff_txt = "—", "—"
+            verdict, diff_txt, n_txt = "—", "—", "—"
+            wf_er = wf_rr = None
 
-        def _fmt(x):
-            return ("%.0f%% (%+.*f%%) n=%d" % (x[0] * 100, 1, x[1] * 100, x[2])) if x else "—"
+        def _pct(x):
+            return ("%.0f%%" % (x * 100)) if x is not None else "—"
 
         rows.append(f"""<tr data-sym="{sym}" class="linkrow" data-jump>
           <td><b>{name}</b>（{sym}）</td>
-          <td class="tac">{_fmt(em)}</td>
-          <td class="tac">{_fmt(rm)}</td>
+          <td class="tac">{_pct(wf_er)}</td>
+          <td class="tac">{_pct(wf_rr)}</td>
           <td class="tac">{diff_txt}</td>
-          <td class="tac">{wf_decay}</td>
+          <td class="tac">{n_txt}</td>
           <td>{verdict}</td>
         </tr>""")
     _tbl = """<h3 class="fc-title">样本外稳健性检验<span class="fc-sub">早年 vs 近两年 · 检测校准过拟合</span></h3>
       <table class="tbl">
       <colgroup><col style="width:140px"><col style="width:calc((100%% - 140px)/5)"><col style="width:calc((100%% - 140px)/5)"><col style="width:calc((100%% - 140px)/5)"><col style="width:calc((100%% - 140px)/5)"><col style="width:calc((100%% - 140px)/5)"></colgroup>
-      <thead><tr><th>指数</th><th class="tac">早年买方信号胜率(均收益) h=20</th><th class="tac">近两年买方信号胜率(均收益) h=20</th><th class="tac">变化</th><th class="tac">滚动窗口衰减*</th><th>样本外稳健性</th></tr></thead>
+      <thead><tr><th>指数</th><th class="tac">早年买方信号胜率*</th><th class="tac">近两年买方信号胜率*</th><th class="tac">变化</th><th class="tac">买方样本量(早/近)</th><th>样本外稳健性</th></tr></thead>
       <tbody>%s</tbody></table>
-      <p style="font-size:12px;color:#64748b;margin-top:8px">按 {SPLIT} 切分「早年 / 近两年」买方信号（一类买·三类买，持有 20 日）胜率与均收益对比。近两年显著下滑(≥15pt)提示过拟合风险；持平/更高则样本外稳定。<b>早年或近两年买方样本&lt;20 时判定为「样本不足·难判定」，不据此发过拟合告警</b>（极小样本易出 100%% 胜率致衰减 pt 失真）。*「滚动窗口衰减」=多个切分点(2022/2023/2024)聚合的两年 vs 早年胜率差均值，比单一切分更稳，刻画样本外稳健性。不构成投资建议。</p>""".replace("{SPLIT}", split)
+      <p style="font-size:12px;color:#64748b;margin-top:8px">买方信号（一类买·三类买，持有 20 日）按 {SPLIT} 多个切分点分别折算胜率后对切分点取均值（walk-forward，R326）。<b>判定一律用切分均值而非跨切分累计</b>——累计会把早年样本重复计数使胜率差失真（实测：上证累计口径 -43pt 实为 -2pt 稳定；沪深300 累计 +12pt 实为 -13pt 显著衰减）。近两年显著下滑(≥15pt)提示过拟合风险；持平/更高则样本外稳定。<b>早年或近两年买方样本&lt;20 时判定为「样本不足·难判定」，不据此发过拟合告警</b>（极小样本易出 100%% 胜率致衰减失真）。样本量列为早年/近两年买方信号累计计数，仅作可靠性参考。不构成投资建议。</p>""".replace("{SPLIT}", split)
     return _tbl % "".join(rows)
 
 
