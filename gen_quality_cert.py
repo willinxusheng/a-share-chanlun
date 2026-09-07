@@ -136,6 +136,30 @@ def main():
     # R173(F9): 诚实分级——方向逆相关或全 regime 样本不足(N<20)时降级标 warn/review
     _any_insufficient = any(regime_agg[rg][H]["N"] < 20
                             for rg in ("bull", "bear", "range") for H in ac.H_TARGETS)
+    # R173(F9): 诚实分级——方向逆相关(命中<50%, n>=20)比覆盖略窄更严重(作为信号有害), 至少 warn;
+    # 全 regime 样本不足(N<20)无法验证校准, 显式 review; 其余 healthy。
+    # R172: accuracy_status 由实际回测结果派生, 不再写死 "capped"
+    accuracy_status = ("warn" if (not bias_ok or regime_warn or regime_dir_warn)
+                       else ("review" if _any_insufficient else "healthy"))
+    # R355: accuracy_note 改由与 accuracy_status 完全同源的动态条件拼接 —— 原 R173 时代长硬编码
+    # 文案("16道门禁(R70-R89)已全部落地...熊市T+30漏覆盖33%(关15...)" )有两处失实: ①门禁体系
+    # R327 元审后现实=深层监控门禁恒 exit0 不阻断、真 CI 阻断仅 3 道,"全部落地"措辞暗示 CI 级
+    # 保障误导; ②"熊市T+30漏覆盖33%"是 R80 时点实测, 冒充当前(regime_coverage 动态数据才权威,
+    # R330 sentiment_conditioning 硬编码历史统计冒充当前同型教训)。note 与 status 同源拼接,
+    # 永不自相矛盾(旧版 healthy 也可能渲染出"漏覆盖33%"告警句)。
+    _acc_causes = []
+    if not bias_ok:
+        _acc_causes.append("全样本最差中线偏置 %.1f%% 超阈值 ±5%%" % worst_bias)
+    if regime_warn:
+        _acc_causes.append("部分市场环境 P05-P95 覆盖 <85%(见分regime板块)")
+    if regime_dir_warn:
+        _acc_causes.append("部分市场环境短线方向命中 <50%(见分regime板块)")
+    if _any_insufficient:
+        _acc_causes.append("部分市场环境样本不足 N<20(该档结论为系统噪声级, 待样本积累复核)")
+    if not _acc_causes:
+        _acc_causes.append("覆盖/方向/偏置/样本量均在健康区间")
+    accuracy_note = ("当前自检[%s]: %s。决策锚定置信带区间+中位路径价位, 熊市自加安全垫。"
+                     % (accuracy_status, "; ".join(_acc_causes)))
 
     cert = {
         "generated_at": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -157,14 +181,15 @@ def main():
         },
         "sentiment": {
             "status": "monitor_only",
-            "note": "R76 情绪条件化: T+30 样本外 +8.9pp(极端区 31%→69%)但近期极端样本 N=10 不足, 未并入模型, 仅透明化",
+            # R355: 显式标注「R76 历史实测快照」防冒充当前——原 note 的 +8.9pp/31%→69%/N=10 是
+            # R76 时点实测, R150+ 情绪引擎(现 calc_v2)大幅演进后已非现值, 用户每天在报告顶部
+            # 证书区块看到它会被当作当前结论(R330 sentiment_conditioning 硬编码历史统计同型教训)。
+            # 现由 CI 门禁 audit_sentiment_conditioning 实时监测(定性), 此处保留历史结论作透明化。
+            "note": ("情绪条件化(R76 历史实测快照, 非当前值): 当时 T+30 样本外极端区增益 "
+                     "+8.9pp(31%→69%, N=10), 未并入模型; 当前由 CI 门禁实时监测, 仅透明化"),
         },
-        # R173(F9): 诚实分级——方向逆相关(命中<50%, n>=20)比覆盖略窄更严重(作为信号有害), 至少 warn;
-        # 全 regime 样本不足(N<20)无法验证校准, 显式 review; 其余 healthy。
-        # R172: accuracy_status 由实际回测结果派生, 不再写死 "capped"
-        "accuracy_status": ("warn" if (not bias_ok or regime_warn or regime_dir_warn)
-                            else ("review" if _any_insufficient else "healthy")),
-        "accuracy_note": "预测准确性16道监控门禁(R70-R89)已全部落地, 数学层面封顶: 覆盖良好(关11); 方向/概率/路径形态无技能(关8/关10/关14, 不可作信号); 价位无偏(关12); 数值自洽(关13); 极端尾部平静市兜住、熊市T+30漏覆盖33%(关15全历史回测口径; 当前小样本见regime_coverage板块); 波动率√f全样本成立但regime内亚线性致长horizon带虚胖(关16)。决策仍锚置信带区间+中位路径价位, 熊市自加安全垫。",
+        "accuracy_status": accuracy_status,
+        "accuracy_note": accuracy_note,
         "regime_coverage": regime_cov,
         "regime_warn": regime_warn,
         "regime_direction": regime_dir,
