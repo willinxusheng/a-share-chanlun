@@ -693,7 +693,7 @@ function revList(){
   else out.sort(function(a,b){return a.dd-b.dd});   // dd: 最深回撤(最负)先行
   return out;
 }
-/* dev 距背驰低点% 四档分级 — 旭总实操口径 */
+/* dev 距背驰低点% 五档分级 — 旭总实操口径 */
 function devTag(dev){
   if(dev==null||isNaN(dev))return {cls:"",lbl:"-",tip:""};
   if(dev<0)return {cls:"d0",lbl:"跌破",tip:"现价已跌穿背驰低点, 结构失效·本观察池已剔除(理论上不应出现)"};
@@ -724,14 +724,14 @@ function revRow(c){
   var dtStyle='background:'+(dt.cls==="d1"?"rgba(24,160,88,.10)":dt.cls==="d2"?"rgba(232,160,16,.10)":dt.cls==="d3"?"rgba(229,69,69,.10)":dt.cls==="d4"?"rgba(120,53,120,.10)":"transparent")
     +';border-color:'+(dt.cls==="d1"?"rgba(24,160,88,.4)":dt.cls==="d2"?"rgba(232,160,16,.4)":dt.cls==="d3"?"rgba(229,69,69,.4)":dt.cls==="d4"?"rgba(120,53,120,.4)":"#e2e8f0")
     +';color:'+(dt.cls==="d1"?"#0e7d4a":dt.cls==="d2"?"#b45309":dt.cls==="d3"?"#c92a2a":dt.cls==="d4"?"#7b2cbf":"#64748b");
-  // -- R317: 背驰底线价 + 距止损% (r = 底线价距现价的下跌空间)
+  // -- R317: 背驰底线价 + 距止损% (r = 现价→底线的下跌空间, 恒正: 观察池保证 close>endP)
   var endP=bb.end_price;
-  var riskPct=endP&&st.close?((1-st.close/endP)*100):null;
+  var riskPct=endP&&st.close&&+st.close>+endP?((1-endP/st.close)*100):null;   // R318: 原 (1-close/endP) 恒负再拼"-"→"--4.2%"双负号, 且语义倒置; 现直接=需再跌% 正数
   var tip="🧭 逆向观察候选 | "+nm+" "+(c.sym||"")+
     "\n底背驰确认于 "+fdTxt+" · 距今 "+c.fd+" 天(已超实操窗, 结构仍有效)"+
     "\n距历史高回撤 "+Math.abs(c.dd*100).toFixed(1)+"% (深跌)"+
     "\n背驰低点参考: "+bb.end_price+" · 现价距低点 "+(c.dev>=0?"+":"")+c.dev.toFixed(1)+"% · "+dt.tip+
-    (riskPct!=null?"\n跌破底线后理论止损空间: -"+riskPct.toFixed(1)+"% (跌破 "+bb.end_price+" 结构失效)":"")+
+    (riskPct!=null?"\n止损参考: 跌破 "+bb.end_price+" 即结构失效 (较现价再跌约 "+riskPct.toFixed(1)+"%)":"")+
     "\n60日均成交: "+amtTxt+
     (ffNet!=null?"\n当日主力净流入: "+ffTxt(ffNet):"")+
     "\n\n点击查看个股完整 K 线与缠论结构";
@@ -782,10 +782,10 @@ function renderRevPool(){
     '<div class="chips">'+
       '<span class="chip'+chipOn("dd")+'" onclick="setRevMode(\'dd\')" title="距历史高点回撤最深的在前 — 看谁跌得最透">📉 最深回撤</span>'+
       '<span class="chip'+chipOn("dev")+'" onclick="setRevMode(\'dev\')" title="现价距背驰低点最近的在前 — 还在底部参考区(≤3%)的优先">🎯 最贴低点</span>'+
-      '<span class="chip'+chipOn("fd")+'" onclick="setRevMode(\'fd\')" title="底背驰触发距今最久未破位在前 — 老结构企稳时间越久越有效, 与"最新触发"互补查新仓">⏳ 底久未破</span>'+
+      '<span class="chip'+chipOn("fd")+'" onclick="setRevMode(\'fd\')" title="底背驰触发距今最久未破位在前 — 老结构企稳时间越久越有效, 与「最新触发」互补查新仓">⏳ 底久未破</span>'+
       '<span class="chip'+chipOn("fr")+'" onclick="setRevMode(\'fr\')" title="底背驰触发时间最近的在前 — 刚出信号, 尚有空间">🕐 最新触发</span>'+
     '</div>'+
-    '<span class="phint">已超实操窗的底背驰老结构 · 深跌(距历史高≥30%)+未破背驰低点 · 埋伏候选 <b style="color:#18a058">'+n+' 只</b> · <b style="color:#18a058">绿=贴近低点(参考区)</b>/<b style="color:#c92a2a">红=已走高</b> · 与顶部"实操信号雷达"(近端≤10天)互补 — 这里管提前埋伏/跟踪 · '+sortTxt+'</span></div>'+
+    '<span class="phint">已超实操窗的底背驰老结构 · 深跌(距历史高≥30%)+未破背驰低点 · 埋伏候选 <b style="color:#18a058">'+n+' 只</b> · 标签五档：<b style="color:#18a058">绿=底部刚启(≤3%最佳埋伏)</b>/<b style="color:#b45309">橙=已起涨</b>/<b style="color:#c92a2a">红=追高风险</b>/<b style="color:#7b2cbf">紫=已错过</b> · 与顶部「实操信号雷达」(近端≤10天)互补 — 这里管提前埋伏/跟踪 · '+sortTxt+'</span></div>'+
     '<div style="padding:6px 0 8px">'+rowsHtml+moreHtml+'</div>'+
     '<div class="foot">候选=底背驰(fresh&gt;10) + 距历史高≥30% + 现价&gt;背驰低点 · 止损参考=背驰低点(跌破失效) · 数据截至 '+(M.asof||"-")+' · 仅供研究参考，不构成投资建议</div>';
 }
@@ -1245,7 +1245,7 @@ function showStk(sym){
     banner+='<div class="signals-box"><div class="signal-pill '+(t?"t":"b")+'"><b>'+(t?"⚠️ 顶背驰风险":"✅ 底背驰机会")+'</b> · '+(stk.bc_date||"")+'触发('+(stk.fresh!=null?stk.fresh:"?")+'天前) · '+(stk.bc_type||"")+' · 强度'+(stk.strong||0)+'/2'+(stk.vol?" · 量缩确认":"")+
       // R313-fix: 底信号 dv<0(现价已跌破背驰低点=结构失效)不能再当"低吸参考区"引导 — R289 sigRow 已修, showStk banner 漏修同源
       (_dvTxt?' · <b style="'+(t?(_dv<0?"color:#0e7d4a":"color:#c92a2a"):(!t&&_dv<0?"color:#c92a2a":(_dv<=8?"color:#0e7d4a":"color:#c92a2a")))+'">'+_dvTxt+'</b>':'')+
-      '<br><span style="opacity:.85;font-size:12px">'+(t?( _dv!=null&&_dv<0?"已从顶背驰高点回落 "+Math.abs(_dv).toFixed(1)+"%，风险有所释放，仍防反抽遇压":(_dv!=null?"现价仍高于顶背驰高点，回落风险未解除":"上攻动能减弱，注意中枢上沿/前高压力")):( _dv!=null&&_dv<0?"已跌破背驰低点 "+Math.abs(_dv).toFixed(1)+"%，底背驰结构失效 · 暂不低吸，等重新企稳再评估":(_dv!=null&&_dv<=8?"现价仍贴近背驰低点(+"+_dv.toFixed(1)+"%)，属低吸参考区，跌破"+((s.bottom_bc&&s.bottom_bc.end_price)!=null?s.bottom_bc.end_price:"背驰低点")+"则结构失效":"下跌动能衰竭，关注中枢下沿支撑与企稳信号")))+'</span></div></div>';
+      '<br><span style="opacity:.85;font-size:12px">'+(t?( _dv!=null&&_dv<0?"已从顶背驰高点回落 "+Math.abs(_dv).toFixed(1)+"%，风险有所释放，仍防反抽遇压":(_dv!=null?"现价仍高于顶背驰高点，回落风险未解除":"上攻动能减弱，注意中枢上沿/前高压力")):( _dv!=null&&_dv<0?"已跌破背驰低点 "+Math.abs(_dv).toFixed(1)+"%，底背驰结构失效 · 暂不低吸，等重新企稳再评估":(_dv!=null&&_dv<=8?"现价仍贴近背驰低点(+"+_dv.toFixed(1)+"%)，属低吸参考区，跌破"+((s.bottom_bc&&s.bottom_bc.end_price)!=null?s.bottom_bc.end_price:"背驰低点")+"则结构失效":(_dv!=null&&_dv>8?"已较背驰低点走高 "+_dv.toFixed(1)+"%，追高风险 · 勿追高，等回踩企稳再看":"下跌动能衰竭，关注中枢下沿支撑与企稳信号"))))+'</span></div></div>';
   }else if(u.gate){
     banner='<div class="signals-box"><div class="gate-pill"><b>门禁：'+esc(u.gate)+'</b><br>'+esc(u.gd||"")+'　<span style="font-size:12px">(仍展示K线与结构，但不进信号区)</span></div></div>';
   }else if(scen){
