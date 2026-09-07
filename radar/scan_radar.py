@@ -284,11 +284,23 @@ def _fetch_tx(sym):
     """腾讯 qfq(前复权)主源: 纯 count 形态(R248), 2021-01-01 起裁剪。
     R270: 新鲜度判定由 `>=2024-01-01`(过松, R267 注释自我批评却未在 scan 链路落实)
     收紧为 _last_fresh 分级(gap<=3 常规 / 4~12 仅长假窗口内合法) —— 腾讯 CDN 陈旧缓存
-    (R248: 缓存键含日期段曾停 12h+)不再被静默当有效数据吞下。"""
+    (R248: 缓存键含日期段曾停 12h+)不再被静默当有效数据吞下。
+    R348: ①北交 920 段跳过 —— 腾讯 K线接口对 920 段恒回最新 1 根(param=bj920992,day,,,320,qfq
+    实测 2026-09-07 仅 1 根, count 失效), 无历史K线; 请求纯浪费且"新鲜 1 根"假成功会把北交票
+    吞成 ks_bad(见 fetch_kline/main 分析循环, <_KS_MIN_BARS 判死无切源), 腾讯健康时北交全丢。
+    跳过腾讯与东财北交 skip(_EM_MKT_PFX 无 bj)对称, 由新浪兜底; 腾讯日后支持北交历史再移除。
+    ②根数下限 _KS_MIN_BARS —— 与 _fetch_em 的 MIN_BARS 检查(em_short)对称: 非北交票若返回
+    短序列(接口截断/异常)不再当"新鲜成功"吞掉, 显式判失败交切源。"""
+    if sym.startswith("bj"):
+        return [], "tx_skip_bj"
     ks, _dirty = fd.fetch_tx(sym, "day")
-    if ks and _last_fresh(ks[-1]["date"]):
-        return ks, "tx"
-    return [], ("tx_stale" if ks else "tx_empty")
+    if not ks:
+        return [], "tx_empty"
+    if not _last_fresh(ks[-1]["date"]):
+        return [], "tx_stale"              # CDN 陈旧缓存(R248: 停 12h+), 重试无意义
+    if len(ks) < _KS_MIN_BARS:
+        return [], "tx_short:%d" % len(ks) # R348: 短序列(接口截断/异常)显式判失败切源, 不假成功吞票
+    return ks, "tx"
 
 
 _EM_MKT_PFX = {"sh": "1.", "sz": "0."}   # 东财 secid 市场前缀(沪=1 深=0); 北交段归属未实证, 跳过东财
@@ -488,6 +500,8 @@ def _try_tx(sym):
         _src_fail(_tx_down, _tx_lock, "err")     # 归一化(原始消息多变, 不入 reasons)
         return [], ""
     if not ks:
+        if tag and tag.startswith("tx_skip"):
+            return [], tag          # R348: 北交 920 段腾讯接口缺陷(恒1根) —— 结构性跳过, 非源故障, 不计连败
         _src_fail(_tx_down, _tx_lock, tag.split(":")[0])
         return [], tag
     with _tx_lock:
@@ -543,7 +557,8 @@ def fetch_kline(sym):
 # (R270 整段停用后重试只会再打一次空请求); tx_stale/em_stale 为 CDN 陈旧缓存(R248: 缓存
 # 停 12h+), 0.4s 后重试不可能刷新。其余(网络闪断/超时/空响应)才值得重试一次。
 _NO_RETRY_SRCS = frozenset(("tx_down", "em_down", "em_unavail", "em_skip",
-                            "tx_only", "em_only", "tx_stale", "em_stale"))
+                            "tx_only", "em_only", "tx_stale", "em_stale",
+                            "tx_skip_bj"))   # R348: 北交920段腾讯接口缺陷恒1根 —— 重试必同结果
 
 
 def _need_retry(src):
@@ -984,7 +999,8 @@ def synth_industry_kline(members, got):
     # 建日期->各股 map: date -> [(mcap, k), ...]
     days = {}
     for sym, mcap, ks in rows:
-        lim = _price_limit(sym) or 1.0      # 无涨跌停段(ETF成分不免疫): 阈值1.0单日翻倍才剔除
+        lim = _price_limit(sym) or 1.0      # 无涨跌停段(如 4xx/8xx 老三板等池外段, _price_limit=None): 阈值1.0单日翻倍才剔除
+                                            # R274: 场内 ETF/LOF 有 0.10 涨跌停(_price_limit 已含 5xx/1xx 段), 与股票同口径免疫
         th = lim * _EXDIV_BUF
         prev_c = None
         for k in ks:
