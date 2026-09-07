@@ -376,12 +376,20 @@ def _fetch_sina(sym):
     raw = _get(u).decode("utf-8", "ignore")
     arr = json.loads(raw) or []
     out = []
+    # R320: 新浪 volume 单位换算须按证券类型分段 —— 实测(2026-09-04 收盘): 新浪
+    # sh688256 volume=8282775 与腾讯同值(股), 而 sh510300=841465543(股, 腾讯=8414655手)。
+    # 即新浪全市场原生=股; 非科创板 /100 存手 与腾讯/东财一致; 科创板(sh688/sh689) 若也
+    # /100 会存成"假手", 而 _vol_share_per_unit(688)=1(期待存储=股) → avg_amt60/行业合成
+    # 成交额低估 100× → "低流动性"门禁误杀 + 信号静默丢失 + 日间换源 100× 跳变(R300 只修了
+    # 腾讯 688 分支, 新浪兜底路径漏同源). 科创板原生=股, 直接存股对齐腾讯 688 存储口径。
+    _sina_sh_kcb = sym.startswith(("sh688", "sh689"))
     for row in arr:
         try:
             out.append({"date": row["day"],
                         "open": float(row["open"]), "high": float(row["high"]),
                         "low": float(row["low"]), "close": float(row["close"]),
-                        "volume": float(row["volume"]) / 100.0})   # 新浪=股 -> 统一手
+                        "volume": (float(row["volume"]) / 100.0 if not _sina_sh_kcb
+                                   else float(row["volume"]))})   # 新浪=股 -> 非688存手 / 688存股
         except (KeyError, ValueError, TypeError):
             continue
     out = [k for k in out if k["date"] >= fd.MIN_DATE]   # R271: 对齐2021契约起点(腾讯/东财已裁), 保跨源结构起点一致

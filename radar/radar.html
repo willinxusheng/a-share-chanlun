@@ -584,7 +584,7 @@ function sigRow(s){
   var spk=(s.spark&&s.spark.data)?s.spark.data:s.spark;
   var nm=(u.name||s.name||s.sym);
   var sigTip=(t?"顶背驰·风险":"底背驰·机会")+" | "+nm+" "+(s.sym||"")+
-    "\n"+(s.bc_date||"")+"触发 · 距今"+(fr!=null?fr+"天":"?")+"\n类型 "+(s.bc_type||"-")+" · 强度"+(s.strong||0)+"/2"+(s.vol?" · 量缩确认":"")+" · 面积比"+(s.area!=null?s.area:"-")+
+    "\n"+(s.bc_date||"")+"触发 · 距今"+(fr==null?"?":(fr===0?"当日":fr+"天"))+"\n类型 "+(s.bc_type||"-")+" · 强度"+(s.strong||0)+"/2"+(s.vol?" · 量缩确认":"")+" · 面积比"+(s.area!=null?s.area:"-")+   // R320: fresh=0 →"距今当日"(原"距今0天"误导)
     "\n所属 "+(indName||"-")+(u.lead?" · 行业龙头":"")+
     (dev!=null?"\n现价较信号位: "+devTxt+(devTip?" ("+devTip+")":""):"")+
     (ff!=null?"\n当日主力净流入: "+ffTxt(ff):"")+
@@ -596,7 +596,7 @@ function sigRow(s){
   return '<div class="'+rowCls+'" title="'+esc(sigTip)+'" onclick="pickSigRad(\''+s.sym+'\')">'+
     '<div><div class="nm">'+(t?"⚠️ ":"✅ ")+esc(nm)+lead+ffMini+'</div><div class="sub">'+esc(s.sym)+" · "+esc(indName)+'</div></div>'+
     '<div class="st">'+(t?'<b style="color:#c92a2a">顶背驰</b>':'<b style="color:#087f5b">底背驰</b>')+'<span>强'+(s.strong||0)+'/'+(s.vol?"缩":"")+((s.area!=null&&s.area>0)?" 面"+s.area:"")+'</span></div>'+
-    '<div class="st">'+(fr!=null?fr+"天前":"-")+frTag+'</div>'+
+    '<div class="st">'+(fr==null?"-":(fr===0?"当日":fr+"天前"))+frTag+'</div>'+   // R320: fresh=0(当日信号) 显示"当日", 原"0天前"语义误导(0=最新鲜却像过期)
     '<div class="dev '+devCls+'" title="'+esc(devTip||sigTip)+'">'+(dev!=null?devTxt:"-")+'<small>'+esc(devSub)+'</small></div>'+
     '<div class="spk">'+(spk&&spk.length>1?sparkSVG(spk.length>90?spk.slice(-90):spk,92,24):'<span style="color:#cbd5e1">-</span>')+'</div></div>';
 }
@@ -718,7 +718,7 @@ function revRow(c){
   var ddCls=c.dd<=-0.5?"down":"";
   var fdTxt=bb.bi_date_end+" 触发";
   var bcTag=bb.bc_type?('<span style="color:#94a3b8">'+esc(String(bb.bc_type))+'</span>'):'';
-  // -- R317: 距背低点四档分级(旭总要实操准确性)
+  // -- R317: 距背低点五档分级(旭总要实操准确性; devTag 定义见上)
   var dt=devTag(c.dev);
   var devStr=(c.dev>=0?"+":"")+c.dev.toFixed(1)+'%';
   var dtStyle='background:'+(dt.cls==="d1"?"rgba(24,160,88,.10)":dt.cls==="d2"?"rgba(232,160,16,.10)":dt.cls==="d3"?"rgba(229,69,69,.10)":dt.cls==="d4"?"rgba(120,53,120,.10)":"transparent")
@@ -1105,7 +1105,7 @@ function renderIndStkList(k){
         var fd=(x.sg.bc_date||"").slice(5);
         // R285: 副标=触发日·距今·现价距信号位偏离(底信号 +x% 小=贴近低吸区; 顶信号 -x% 大=回落释放)
         var _dv2=sigDev(x.sg,s);
-        fsub='<div class="fsub '+(x.sg.dir==="top"?"up":"down")+(x.sg.fresh!=null&&x.sg.fresh<=3?" urg":"")+'" title="'+esc((x.sg.dir==="top"?"顶背驰高点":"底背驰低点")+( _dv2!=null?' = '+(( _dv2>=0?"+":"")+_dv2.toFixed(1)+"%"):" 无参考位")+'; 现价 '+((s.close!=null?s.close:"-")))+'">'+(fd?fd+' · ':'')+(x.sg.fresh!=null?x.sg.fresh+'天前':'')+(_dv2!=null?' · '+( _dv2>=0?"+":"")+_dv2.toFixed(1)+"%":"")+'</div>';
+        fsub='<div class="fsub '+(x.sg.dir==="top"?"up":"down")+(x.sg.fresh!=null&&x.sg.fresh<=3?" urg":"")+'" title="'+esc((x.sg.dir==="top"?"顶背驰高点":"底背驰低点")+( _dv2!=null?' = '+(( _dv2>=0?"+":"")+_dv2.toFixed(1)+"%"):" 无参考位")+'; 现价 '+((s.close!=null?s.close:"-")))+'">'+(fd?fd+' · ':'')+(x.sg.fresh!=null?(x.sg.fresh===0?"当日":x.sg.fresh+'天前'):'')+(_dv2!=null?' · '+( _dv2>=0?"+":"")+_dv2.toFixed(1)+"%":"")+'</div>';   // R320: fresh=0 显示"当日"(同 sigRow 口径), 原"0天前"误导
       }
       else if(s.scenario&&s.scenario.indexOf("见")>=0)tag='<span class="badge2 '+(s.scenario.indexOf("见底")>=0?"g":"r")+'">'+esc(s.scenario)+'</span>';
       else if(s.scenario)tag='<span class="badge2 z">'+esc(s.scenario)+'</span>';
@@ -1242,7 +1242,7 @@ function showStk(sym){
     // R285: 现价 vs 信号位偏离(用 SIG 条目自带的最近背驰位 end_price 计算) —— 个股实操直读
     var _dv=sigDev(stk,s);
     var _dvTxt=_dv!=null?((_dv>=0?"现价已高于信号位 ":"现价已低于信号位 ")+Math.abs(_dv).toFixed(1)+"%"):"";
-    banner+='<div class="signals-box"><div class="signal-pill '+(t?"t":"b")+'"><b>'+(t?"⚠️ 顶背驰风险":"✅ 底背驰机会")+'</b> · '+(stk.bc_date||"")+'触发('+(stk.fresh!=null?stk.fresh:"?")+'天前) · '+(stk.bc_type||"")+' · 强度'+(stk.strong||0)+'/2'+(stk.vol?" · 量缩确认":"")+
+    banner+='<div class="signals-box"><div class="signal-pill '+(t?"t":"b")+'"><b>'+(t?"⚠️ 顶背驰风险":"✅ 底背驰机会")+'</b> · '+(stk.bc_date||"")+'触发('+(stk.fresh==null?"?":(stk.fresh===0?"当日":stk.fresh+"天前"))+') · '+(stk.bc_type||"")+' · 强度'+(stk.strong||0)+'/2'+(stk.vol?" · 量缩确认":"")+   // R320: fresh=0 →"当日"(原"0天前"误导)
       // R313-fix: 底信号 dv<0(现价已跌破背驰低点=结构失效)不能再当"低吸参考区"引导 — R289 sigRow 已修, showStk banner 漏修同源
       (_dvTxt?' · <b style="'+(t?(_dv<0?"color:#0e7d4a":"color:#c92a2a"):(!t&&_dv<0?"color:#c92a2a":(_dv<=8?"color:#0e7d4a":"color:#c92a2a")))+'">'+_dvTxt+'</b>':'')+
       '<br><span style="opacity:.85;font-size:12px">'+(t?( _dv!=null&&_dv<0?"已从顶背驰高点回落 "+Math.abs(_dv).toFixed(1)+"%，风险有所释放，仍防反抽遇压":(_dv!=null?"现价仍高于顶背驰高点，回落风险未解除":"上攻动能减弱，注意中枢上沿/前高压力")):( _dv!=null&&_dv<0?"已跌破背驰低点 "+Math.abs(_dv).toFixed(1)+"%，底背驰结构失效 · 暂不低吸，等重新企稳再评估":(_dv!=null&&_dv<=8?"现价仍贴近背驰低点(+"+_dv.toFixed(1)+"%)，属低吸参考区，跌破"+((s.bottom_bc&&s.bottom_bc.end_price)!=null?s.bottom_bc.end_price:"背驰低点")+"则结构失效":(_dv!=null&&_dv>8?"已较背驰低点走高 "+_dv.toFixed(1)+"%，追高风险 · 勿追高，等回踩企稳再看":"下跌动能衰竭，关注中枢下沿支撑与企稳信号"))))+'</span></div></div>';
