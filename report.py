@@ -17,8 +17,11 @@ BLUE, GRAY, INK = "#2b6cb0", "#94a3b8", "#1f2937"
 
 # ---------- A 股交易日历（用于推演图投影日期推算）----------
 # 节假日来源：国务院办公厅《关于2026年部分节假日安排的通知》(2025-11-04 发布，已核实)；
-# 2027 仅列入已确认的元旦，春节及后续年度安排未发布暂不列（推演 horizon ≤90 交易日，
-# 从 2026-08 起最多触及 2027-01-02 附近，元旦已覆盖）。
+# R345: 2027 全年条目(春节/清明/劳动/端午/中秋/国庆)为「农历历法公历日期(历法事实) +
+# 惯例连休」的前瞻估算, 非官方安排——国务院 2027 安排约 2026-11 发布, 发布后须核对本表
+# (尤其官方多放/少放的休市日, 周末恒休 R247 天然覆盖调休补班)。
+# 当前数据日期起 horizon≤90 交易日推演触及约 2027-01 中旬, 春节(2/5 起)尚未进入触及范围,
+# 属前瞻预留; sentiment/calc_v2.py 的 _CN_HOLIDAYS 已同步同源估算 2027 工作日休市表。
 # R247: A股周末恒休（含调休补班日）——交易所不随调休补班开市，腾讯 K线实测 2021 至今
 # 无任何周末 K线（2026-01-04/02-14/02-28/05-09/09-20/10-10 等官方补班日均休市）。
 _A_SHARE_HOLIDAYS = {
@@ -2826,8 +2829,8 @@ def build_quality_cert_html(base):
             _v = lambda x: ("%.1f%%" % x) if isinstance(x, (int, float)) else "-"
             _t8_txt = f'覆盖{_v(_c8)}' + (' ⚠️样本不足' if _ins8 else '')
             _t30_txt = f'覆盖{_v(_c30)}' + (' ⚠️样本不足' if _ins30 else '')
-            _t8d_txt = f'方向{_v(_d8)}'
-            _t30d_txt = f'方向{_v(_d30)}'
+            _t8d_txt = f'方向{_v(_d8)}' + (' ⚠️样本不足' if _ins8 else '')
+            _t30d_txt = f'方向{_v(_d30)}' + (' ⚠️样本不足' if _ins30 else '')
             _rg_rows += (f'<div class="qc-regime-row"><span class="qc-regime-lab">{_lab}</span>'
                          f'<span class="qc-regime-cov{_cls8}">T+8 {_t8_txt}</span>'
                          f'<span class="qc-regime-cov{_cls30}">T+30 {_t30_txt}</span>'
@@ -2839,7 +2842,7 @@ def build_quality_cert_html(base):
         f'<div class="qc-head">📊 预测质量自检证书'
         f' <span style="color:{_acc_color};font-weight:700">[{acc_status}]</span>'
         f'{" ⚠️" if regime_warn else ""}'
-        f'<span class="qc-sub">数据截至 {c.get("data_last_date")} · 生成 {c.get("generated_at")}</span></div>'
+        f'<span class="qc-sub">数据截至 {c.get("data_last_date") or "-"} · 生成 {c.get("generated_at") or "-"}</span></div>'
         + '<div class="qc-grid">'
         + cell("P05-P95 覆盖 T+8", t8, "cover95") + cell("P05-P95 覆盖 T+30", t30, "cover95")
         + cell("方向命中 T+8", t8, "dir_main") + cell("方向命中 T+30", t30, "dir_main")
