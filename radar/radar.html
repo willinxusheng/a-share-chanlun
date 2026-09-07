@@ -25,8 +25,7 @@ b,strong{font-weight:700}
 header.top{max-width:1160px;margin:0 auto;padding:14px 18px 0;color:#fff}
 header.top .inner{padding:12px 18px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;position:relative;min-height:52px;background:var(--grad);border-radius:15px;box-shadow:0 4px 16px rgba(15,23,42,.18)}
 .brand{display:flex;flex-direction:column;flex:1 1 auto;min-width:0}
-h1{font-size:21px;font-weight:700;letter-spacing:.4px;line-height:1.3}
-h1 .dot{color:#ffd43b}
+h1{font-size:21px;font-weight:700;letter-spacing:.4px;line-height:1.3}   /* R323: 删 .dot 死装饰(空 span 无伪元素永不显示) */
 .sub{color:#c8d3e2;font-size:12px;margin-top:4px;line-height:1.6}
 .sub b{color:#fff;font-weight:600}
 /* R298: 全局搜索(个股/ETF) — 深蓝 header 上白底胶囊, 与 .goback 视觉统一 */
@@ -54,8 +53,7 @@ h1 .dot{color:#ffd43b}
 .bar .pill{flex:1 1 0;min-width:112px;background:#fff;border:1px solid var(--border);border-radius:11px;padding:9px 13px;box-shadow:var(--shadow);transition:box-shadow .15s}
 .bar .pill:hover{box-shadow:var(--shadow-lg)}
 .bar .pill .l{font-size:11px;color:var(--muted);letter-spacing:.2px}
-.bar .pill .v{font-size:17px;font-weight:700;color:var(--ink);margin-top:3px;line-height:1.35;letter-spacing:-.2px}
-.bar .pill .v .num{font-weight:800}
+.bar .pill .v{font-size:17px;font-weight:700;color:var(--ink);margin-top:3px;line-height:1.35;letter-spacing:-.2px}   /* R323: 删死规则 .pill .v .num(无 .num 节点) */
 .bar .pill.hot .v{color:#c77700}
 .bar .pill.cool .v{color:#087f5b}
 .bar .idx-ld{color:#94a3b8;font-weight:400;font-size:13px}
@@ -69,7 +67,7 @@ h1 .dot{color:#ffd43b}
 .ind-panel .head .tabs a{font-size:12px;padding:4.5px 11px;border-radius:7px;cursor:pointer;color:var(--muted);text-decoration:none;line-height:1.5;transition:background .15s,color .15s;white-space:nowrap}
 .ind-panel .head .tabs a:hover{color:var(--ink)}
 .ind-panel .head .tabs a.on{background:#fff;color:var(--ink);font-weight:700;box-shadow:0 1px 3px rgba(0,0,0,.08)}
-.ind-grid{display:grid;grid-template-columns:1.35fr .72fr .72fr 1.45fr .62fr .58fr 1.05fr 26px;gap:8px;align-items:center;padding:9px 16px;font-size:11px;font-weight:600;letter-spacing:.3px;background:#f8fafc;color:#5b6b81;border-bottom:1px solid #e2e8f0;border-top:1px solid #eef2f7;position:sticky;top:0;z-index:30;box-shadow:0 1px 0 #fff,0 2px 6px rgba(15,23,42,.06)}
+.ind-grid{display:grid;grid-template-columns:1.35fr .72fr .72fr 1.45fr .62fr .58fr 1.05fr 26px;gap:8px;align-items:center;padding:9px 16px;font-size:11px;font-weight:600;letter-spacing:.3px;background:#f8fafc;color:#5b6b81;border-bottom:1px solid #e2e8f0;border-top:1px solid #eef2f7;position:sticky;top:var(--bh,0px);z-index:30;box-shadow:0 1px 0 #fff,0 2px 6px rgba(15,23,42,.06)}   /* R323: top 让位 --bh(降级/陈旧横幅 sticky 高), 防表头被 z999 横幅整条遮住 */
 .ind-row{display:grid;grid-template-columns:1.35fr .72fr .72fr 1.45fr .62fr .58fr 1.05fr 26px;gap:8px;align-items:center;padding:10px 16px;border-top:1px solid #f1f5f9;cursor:pointer;transition:background .12s}
 .ind-row:hover{background:#f4f8fc}
 .ind-row:first-of-type{border-top:0}
@@ -127,7 +125,7 @@ h1 .dot{color:#ffd43b}
 .regime.flat{background:#eef2f8;color:#64748b}
 /* R304: 位置小字(regime 旁) — up=站上上沿(强,红) / dn=破位(弱,绿) / mid=中枢内(中性灰) */
 .zsb{font-size:9.5px;font-weight:700;margin-left:3px;vertical-align:1px;white-space:nowrap}
-.zsb.up{color:#e03131}
+/* R323: .zsb.up 原 #e03131 恒被全局 .up{color:var(--up)!important}(L119) 覆盖为死声明 → 删除, 站上沿红由 --up(#e54545) 统一接管(两色差<1% 肉眼不可辨) */
 .zsb.dn{color:#087f5b}
 .zsb.mid{color:#94a3b8}
 .zsb::before{content:"·";margin-right:1px;color:#cbd5e1}
@@ -182,7 +180,7 @@ h1 .dot{color:#ffd43b}
 .stk-grid:hover .arr{opacity:1;color:#94a3b8}
 .stk-grid.head{background:#f8fafc;color:#5b6b81;font-size:11px;font-weight:600;letter-spacing:.3px;cursor:default;border-top:0;border-bottom:1px solid #e8edf4}
 /* 浮动表头 clone: 仅 JS 在真实表头滚出视口时插入, 避免遮挡首只股票 */
-.stk-head-float{position:fixed;left:50%;transform:translateX(-50%);top:0;width:var(--wrap-w,1160px);max-width:calc(100vw - 36px);background:rgba(248,250,252,.96);backdrop-filter:saturate(160%) blur(8px);-webkit-backdrop-filter:saturate(160%) blur(8px);color:#5b6b81;font-size:11px;font-weight:600;letter-spacing:.3px;border-bottom:1px solid #e8edf4;box-shadow:0 4px 12px rgba(15,23,42,.06);z-index:35;display:none;padding:9.5px 16px}
+.stk-head-float{position:fixed;left:50%;transform:translateX(-50%);top:var(--bh,0px);width:var(--wrap-w,1160px);max-width:calc(100vw - 36px);background:rgba(248,250,252,.96);backdrop-filter:saturate(160%) blur(8px);-webkit-backdrop-filter:saturate(160%) blur(8px);color:#5b6b81;font-size:11px;font-weight:600;letter-spacing:.3px;border-bottom:1px solid #e8edf4;box-shadow:0 4px 12px rgba(15,23,42,.06);z-index:35;display:none;padding:9.5px 16px}   /* R323: top 让位 --bh, 防降级横幅盖浮层表头 */
 .stk-head-float.show{display:grid}
 .stk-head-float .arr{display:none}
 .stk-grid .nm{font-weight:700;color:var(--ink);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px;line-height:1.5}
@@ -190,8 +188,7 @@ h1 .dot{color:#ffd43b}
 .stk-grid .val{text-align:right}
 .stk-grid .vhl{font-weight:700}
 /* R283: 资金流数值(红=净流入 绿=净流出) + 行业龙头徽标 */
-.ffv{font-weight:700;font-size:12.5px;line-height:1.5;white-space:nowrap}
-.ffv small{display:block;font-size:10px;color:#94a3b8;font-weight:400;line-height:1.4}
+.ffv{font-weight:700;font-size:12.5px;line-height:1.5;white-space:nowrap}   /* R323: 删死规则 .ffv small(.ffv 下无 small, .dev small 由 .sigrad .srow .dev small 负责) */
 .lead-tag{display:inline-block;font-size:10.5px;font-weight:700;background:linear-gradient(135deg,#fff7e0,#ffe9b8);color:#92600a;border:1px solid #f2d48a;border-radius:6px;padding:0 6px;line-height:1.7;vertical-align:1px;white-space:nowrap}
 /* R286: 行业行龙头直显(点击直达个股) + 信号行资金微标 */
 .indlead{display:inline-block;font-size:10.5px;font-weight:600;color:#92600a;background:linear-gradient(135deg,#fff7e0,#ffe9b8);border:1px solid #f2d48a;border-radius:5px;padding:0 5px;line-height:1.6;margin-top:2px;cursor:pointer;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis;vertical-align:bottom}   /* R315: max-width:100%+ellipsis 配合 .nm min-width:0 让长龙头名(ETF"沪深300ETF华泰柏瑞"10字 vs 申万"长盈科技"4字)不再撑大 nm cell, title 属性保留全名悬停见 */
@@ -229,9 +226,7 @@ h1 .dot{color:#ffd43b}
 .sigrad{margin-top:16px;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden}
 .sigrad .shead{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid #eef2f7;flex-wrap:wrap}
 .sigrad .shead h2{font-size:16px}
-.sigrad .shead .shint{font-size:11.5px;color:var(--muted);line-height:1.6}
-.sigrad .shead .shint b{color:#e54545}
-.sigrad .shead .shint i{font-style:normal;color:#18a058}
+.sigrad .shead .shint{font-size:11.5px;color:var(--muted);line-height:1.6}   /* R323: 删 .shint b/i 死规则(实色全被 L677 内联架空) */
 .sigrad .sbody{display:grid;grid-template-columns:1fr 1fr;gap:0}
 .sigrad .sgrp{padding:6px 0 8px}
 .sigrad .sgrp+.sgrp{border-left:1px dashed #e8edf4}
@@ -314,7 +309,7 @@ a{color:var(--primary);text-decoration:none}
 <header class="top">
   <div class="inner">
     <div class="brand">
-      <h1>📡 A股全市场缠论雷达<span class="dot"></span></h1>
+      <h1>📡 A股全市场缠论雷达</h1>
       <div class="sub" id="topSub">加载中…</div>
     </div>
     <!-- R298: 全局搜索个股/ETF — 输入代码/名称实时下拉, 任意页面可用 -->
@@ -489,10 +484,14 @@ function renderBanner(){
   if(m.build_time){
     var t=new Date(String(m.build_time).replace(" ","T")+"+08:00").getTime();
     if(isFinite(t)&&Date.now()-t>4*864e5)
-      msgs.push('<b>⚠ 数据已 '+(Date.now()-t<0?0:Math.floor((Date.now()-t)/864e5))+' 天未更新</b>：截至 '+(m.asof||"-")+'（构建于 '+esc(m.build_time)+'），请检查云端流水线');
+      msgs.push('<b>⚠ 数据已 '+(Date.now()-t<0?0:Math.floor((Date.now()-t)/864e5))+' 天未更新</b>：截至 '+esc(m.asof||"-")+'（构建于 '+esc(m.build_time)+'），请检查云端流水线');
   }
   if(msgs.length){b.className="";b.innerHTML=msgs.join('<br>');b.style.display="block";}
   else{b.innerHTML="";b.style.display="none";}
+  // R323: 横幅激活(sticky 钉顶 z999)会盖住同钉顶的行业表头(.ind-grid sticky z30)与个股浮层表头(.stk-head-float fixed z35)
+  // → 同步 --bh 变量让两者 top 偏移到横幅下方; 横幅隐藏时归 0 还原原行为
+  var bh=(b.style.display==="block")?(b.offsetHeight+"px"):"0px";
+  try{document.documentElement.style.setProperty("--bh",bh)}catch(e){}
 }
 /* 个股/行业 K 线拉取后的缓存滞后提示: 在图表容器前插/更新一条黄条(幂等) */
 function noteStale(el,msg){
@@ -530,7 +529,7 @@ function renderHeader(){
   var nInd=m.n_ind||Object.keys(INDS).length||0;
   var hasETF=Object.keys(INDS).some(function(k){return !!(INDS[k]&&INDS[k].is_etf)});
   var nSw=Math.max(0,nInd-(hasETF?1:0));   // meta.n_ind 含 ETF 合成板块
-  $("topSub").innerHTML="申万一级 <b>"+nSw+"</b> 行业"+(hasETF?" + ETF 板块":"")+" · 覆盖 <b>"+(m.n_ok||0)+"</b> 只 · 信号 <b>"+(m.n_signal||0)+"</b> · 数据截至 <b>"+(m.asof||"-")+"</b> · "+(m.build_time||"");
+  $("topSub").innerHTML="申万一级 <b>"+nSw+"</b> 行业"+(hasETF?" + ETF 板块":"")+" · 覆盖 <b>"+(m.n_ok||0)+"</b> 只 · 信号 <b>"+(m.n_signal||0)+"</b> · 数据截至 <b>"+esc(m.asof||"-")+"</b> · "+esc(m.build_time||"");   /* R323: asof/build_time 补 esc(与 banner 同款, 防 meta 异常串破版) */
   $("indCnt").textContent=nInd;
   document.title="A股全市场缠论雷达 · "+(m.asof||"");
 }
@@ -672,7 +671,7 @@ function renderSigRadar(){
     '</div>'+smark+
     '<span class="shint" style="width:100%">全市场最新背驰信号 · <b style="color:#c92a2a">顶=风险</b>(警惕/减仓) <b style="color:#087f5b">底=机会</b>(关注/分批低吸) · 「偏离」=现价较信号位涨跌(<8%贴近=低吸参考区, 大=已走远慎追) · 👑龙头/资金佐证 · <span style="color:#e54545">左边条=资金共振</span>/<span style="color:#f59f00">黄条=背离警示</span></span></div>'+
     '<div class="sbody">'+grp("⚠️","顶背驰 · 风险",pt)+grp("✅","底背驰 · 机会",pb)+'</div>'+
-    '<div class="foot">信号=自研缠论引擎背驰确认 · 数据截至 '+(M.asof||"-")+' · 仅供研究参考，不构成投资建议</div>';
+    '<div class="foot">信号=自研缠论引擎背驰确认 · 数据截至 '+esc(M.asof||"-")+' · 仅供研究参考，不构成投资建议</div>';
 }
 /* ===== R305: 逆向观察池(首页中部) — 老结构埋伏候选 =====
    选样: 全量 UNI 中 scenario=背驰见底机会 + 有 bottom_bc + fresh>10(已超实操窗, 归老结构)
@@ -800,7 +799,7 @@ function renderRevPool(){
     '</div>'+
     '<span class="phint">已超实操窗的底背驰老结构 · 深跌(距历史高≥30%)+未破背驰低点 · 埋伏候选 <b style="color:#18a058">'+n+' 只</b> · 标签五档：<b style="color:#18a058">绿=底部刚启(≤3%最佳埋伏)</b>/<b style="color:#b45309">橙=已起涨</b>/<b style="color:#c92a2a">红=追高风险</b>/<b style="color:#7b2cbf">紫=已错过</b> · 与顶部「实操信号雷达」(近端≤10天)互补 — 这里管提前埋伏/跟踪 · '+sortTxt+'</span></div>'+
     '<div style="padding:6px 0 8px">'+rowsHtml+moreHtml+'</div>'+
-    '<div class="foot">候选=底背驰(fresh&gt;10) + 距历史高≥30% + 现价&gt;背驰低点 · 止损参考=背驰低点(跌破失效) · 数据截至 '+(M.asof||"-")+' · 仅供研究参考，不构成投资建议</div>';
+    '<div class="foot">候选=底背驰(fresh&gt;10) + 距历史高≥30% + 现价&gt;背驰低点 · 止损参考=背驰低点(跌破失效) · 数据截至 '+esc(M.asof||"-")+' · 仅供研究参考，不构成投资建议</div>';
 }
 function sortInds(mode){
   curSortMode=mode;
