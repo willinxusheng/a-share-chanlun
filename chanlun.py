@@ -792,13 +792,17 @@ def _date_diff(d1, d2):
 
 def bi_agreement(bis_a, bis_b):
     """两套笔识别的一致性：按结束日期对齐，误差<=2交易日记为一致。
+    R326: 方向必须一致——同窗内若另一套端点方向相反(顶/底矛盾，如幅度笔
+    end=顶 vs 严格笔同窗 end=底)，说明两套算法对该局部结构方向判断分歧，
+    不应计一致。真实 data.json 5 指数实测每指数 3~5 例方向矛盾被误计，
+    一致率被系统性高估约 2~3 个百分点。
     返回 (一致笔数, 总笔数, 一致率)。一致率越高，划分越稳健。"""
-    dates_b = [b["date_end"] for b in bis_b]
+    anchors_b = [(b["date_end"], b["dir"]) for b in bis_b]
     n = len(bis_a)
     ok = 0
     for b in bis_a:
-        for d in dates_b:
-            if abs(_date_diff(b["date_end"], d)) <= 2:
+        for d, bd in anchors_b:
+            if abs(_date_diff(b["date_end"], d)) <= 2 and bd == b["dir"]:
                 ok += 1
                 break
     return ok, n, (ok / n if n else 0)
@@ -871,8 +875,11 @@ def classification_stability(klines, min_bi_pct=MIN_BI_PCT):
     base_trend = _trend_polarity(base.get("trend_type", ""))
     # 信号成熟度（#39 修复 + 复合化）：此前量 bis[-2]（即确立当前方向前一棒的反向修正笔），
     # 导致所有指数清一色 young、三级稳健度永远显示不出「稳健」。现改为量「确立当前方向的笔」
-    # （方向与 last_bi_dir 一致的最近一支已完成笔）跨度，并叠加「同向连笔总跨度」——真正的趋势
-    # 市里长笔/多连笔会判为成熟，震荡市短单笔仍判年轻，三级稳健度才有真实区分度。
+    # （R326 实测: cur_dir=last_bi_dir 取自 classify 的末笔 bis[-1]，故 reversed 扫描命中的
+    # 「最近同向笔」恒为末笔自身——即当前进行中笔从其 start 分型延伸至今的真实跨度，
+    # 并非注释旧称的「已完成笔」；末笔刚反转起步则跨度短判 young/边缘，长笔或多连笔判成熟）。
+    # 叠加「同向连笔总跨度」——真正的趋势市里长笔/多连笔会判为成熟，震荡市短单笔仍判年轻，
+    # 三级稳健度才有真实区分度。
     cur_dir = base["last_bi_dir"]
     _dir_bi = None
     for _b in reversed(base_res["bis"]):
@@ -1605,9 +1612,12 @@ def backtest_signals(klines, result, horizons=(5, 10, 20, 60), exclude_last=Fals
 def backtest_robustness(klines, result, splits=("2022-01-01", "2023-01-01", "2024-01-01"),
                         horizons=(10, 20, 60), exclude_last=True):
     """样本外稳健性检验（滚动 walk-forward）：用多个切分点分别把买卖点信号分为「早年」与
-    「近两年」两段，各自统计买方信号（一类买/三类买）的胜负率与平均收益，再跨切分点聚合取均值，
-    降低单一切分偶然性导致的方差。若近两年平均胜率显著低于早年，提示校准可能过拟合历史样本；
-    若持平或更高，提示样本外稳定。
+    「近两年」两段，各自统计全部六类买卖点信号（一类买/卖、二类买/卖、三类买/卖，
+    按信号方向判胜负：买点 ret>0 胜 / 卖点 ret<0 胜）的胜负率与平均收益；
+    R326: 每个切分点单独折算胜率后对切分点取均值（真 walk-forward 均值）——
+    此前的 pooled 累计会让早年样本跨切分重复计数 2~3 次，把「近年胜率衰减」信号
+    稀释成≈0（实测 sh000300 单切分 2022 decay=-0.146 vs pooled 3 切分 0.001），
+    使「检测近年是否过拟合衰减」的核心功能失效。early/recent 累计结构保留供渲染。
     返回 {"early": {...}, "recent": {...}, "split": splits, "walk_forward": {splits, early_rate, recent_rate, decay}}。
     early/recent 结构与原单切分兼容（供 robustness_table 直接渲染）。"""
     merged, bis = result["merged"], result["bis"]
@@ -1646,12 +1656,6 @@ def backtest_robustness(klines, result, splits=("2022-01-01", "2023-01-01", "202
                 d = dst.setdefault(k, {}).setdefault(h, {"n": 0, "win": 0, "sum": 0.0})
                 d["n"] += st["n"]; d["win"] += st["win"]; d["sum"] += st["sum"]
 
-    early_acc, recent_acc = {}, {}
-    for split in splits:
-        samples_all = [(k, i, d, dt) for k in by_kind for (i, d, dt) in by_kind[k]]
-        _merge(early_acc, calc([s for s in samples_all if s[3] < split]))
-        _merge(recent_acc, calc([s for s in samples_all if s[3] >= split]))
-
     def _finalize(acc):
         out = {}
         for k, hs in acc.items():
@@ -1660,13 +1664,30 @@ def backtest_robustness(klines, result, splits=("2022-01-01", "2023-01-01", "202
                           "avg_ret": st["sum"] / st["n"] if st["n"] else 0}
                       for h, st in hs.items()}
         return out
-    early = _finalize(early_acc)
-    recent = _finalize(recent_acc)
 
     def _rate(d):
         rs = [st["win_rate"] for k, hs in d.items() for h, st in hs.items() if st["n"] > 0]
         return sum(rs) / len(rs) if rs else 0.0
-    _er, _rr = _rate(early), _rate(recent)
+
+    early_acc, recent_acc = {}, {}
+    early_rates, recent_rates = [], []   # R326: per-split 胜率，跨切分取真均值
+    for split in splits:
+        samples_all = [(k, i, d, dt) for k in by_kind for (i, d, dt) in by_kind[k]]
+        _e_i = calc([s for s in samples_all if s[3] < split])
+        _r_i = calc([s for s in samples_all if s[3] >= split])
+        _merge(early_acc, _e_i)
+        _merge(recent_acc, _r_i)
+        # R326: pooled 累计会把早年样本跨切分重复加权, 稀释「近年衰减」信号; 每切分
+        # 单独折算胜率后收集, 对切分点取均值(与 docstring「聚合取均值」语义一致)。
+        if any(st["n"] > 0 for hs in _e_i.values() for st in hs.values()):
+            early_rates.append(_rate(_finalize(_e_i)))
+        if any(st["n"] > 0 for hs in _r_i.values() for st in hs.values()):
+            recent_rates.append(_rate(_finalize(_r_i)))
+    early = _finalize(early_acc)
+    recent = _finalize(recent_acc)
+
+    _er = sum(early_rates) / len(early_rates) if early_rates else 0.0
+    _rr = sum(recent_rates) / len(recent_rates) if recent_rates else 0.0
     wf = {"splits": list(splits), "early_rate": round(_er, 3),
           "recent_rate": round(_rr, 3), "decay": round(_rr - _er, 3)}
     return {"early": early, "recent": recent, "split": splits, "walk_forward": wf}
