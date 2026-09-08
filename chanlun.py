@@ -1021,6 +1021,10 @@ def market_breadth(daily_sc, week_sc, month_sc):
                           "仓位与预期应低于「日周月共振多头」情形。")
         else:
             conclusion = "日线偏多但周/月线方向未明，更大级别多头共振尚未建立，短线反弹持续性待确认。"
+    elif not (m_bull or m_bear or w_bull or w_bear or d_bull):
+        # R364: 三层无任何方向主导(全部中性/未明)时, 原 else 文案「方向大体一致·共识度高」失实
+        # ——中性≠共识(如指数池扩容/多指数 震荡待方向/数据不足 场景即达)。改显式中性措辞与 label 匹配。
+        conclusion = "日/周/月三级别均无明确方向主导（中性为主），系统性环境方向性弱，宜按震荡对待、等待结构确认。"
     else:
         conclusion = ("日/周/月三级别方向大体一致，结构共识度较高，系统性环境对推演方向形成支撑。"
                       if score >= 0 else "日/周/月三级别方向大体一致偏空，系统性环境压制。")
@@ -1425,12 +1429,16 @@ def health_score(klines, r, wcls):
             s -= 15
     if cls["last_bi_dir"] == 1:
         s += 10
-    else:
+    elif cls["last_bi_dir"] == -1:
         s -= 10
-    if cls.get("last_bi_dir") == wcls.get("last_bi_dir"):
-        s += 15
-    else:
-        s -= 10
+    # R364: last_bi_dir==0(空 bis/退化骨架 classify 早返回, scenario=数据不足)不进任何方向分——
+    # 原 else 分支把 0 当 -1 惩罚(无数据被当作看空), 与 R363 report 侧 levels_table syn 守卫同族。
+    # 对齐判定同理: 仅双方方向均有效(±1)才评对齐; 0==0 原判"对齐"+15、0 vs ±1 原判"背离"-10 均失实。
+    if cls.get("last_bi_dir") in (1, -1) and wcls.get("last_bi_dir") in (1, -1):
+        if cls.get("last_bi_dir") == wcls.get("last_bi_dir"):
+            s += 15
+        else:
+            s -= 10
     recent_bc = [b for b in r["beichi"] if b["bi_index"] >= len(r["bis"]) - 4]  # R173(BUG4)
     if any(b["type"] == "top" for b in recent_bc):
         s -= 10
@@ -1443,8 +1451,11 @@ def health_score(klines, r, wcls):
 def forecast_confidence(r, wcls, bt, breadth_bias=0):
     c = 40
     cls = r["classify"]
-    aligned = cls.get("last_bi_dir") == wcls.get("last_bi_dir")
-    c += 20 if aligned else -10
+    # R364: 方向对齐仅当双方 dir 均有效(±1)才判定——原 0==0(数据不足骨架)判"对齐"+20 虚高置信,
+    # 0 vs ±1 亦非真"背离"。任一层方向未知时对齐无从判定, 不加不减(起点 40 已偏保守)。
+    _d0, _w0 = cls.get("last_bi_dir"), wcls.get("last_bi_dir")
+    if _d0 in (1, -1) and _w0 in (1, -1):
+        c += 20 if _d0 == _w0 else -10
     recent_bc = [b for b in r["beichi"] if b["bi_index"] >= len(r["bis"]) - 4]  # R173(BUG4)
     if any(b["type"] == "top" for b in recent_bc):
         c -= 15
