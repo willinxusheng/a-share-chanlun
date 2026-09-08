@@ -3051,12 +3051,18 @@ def main():
     # R325: 背离按方向拆分——日1/周-1=日强周弱(上涨反弹结构)、日-1/周1=日弱周强(回调次级整理)，
     # 两类含义相反，文案必须分别描述。此前只判"不等"且 fixed 文案写"日线向上笔、周线向下笔"，
     # 当日弱周强(如 sh000300 日-1/周1)时方向说反、误导读者（levels_table 早有双向区分，此处修复落后）。
+    # R365: dir=0(数据不足骨架, R363/R364 同族守卫)不是有效方向——divergent 原用 != 会把
+    # 0 vs ±1 当背离, 而 _updn/_dnup 只认 ±1 对 → 下方 pat 出现「3/5 背离(1 强+1 弱)」计数矛盾、
+    # 空洞括号; 全 dir=0 时还会误报「日周共振」。统一: 背离须双方 dir∈{±1} 且不等。
+    _day_dir = {sym: results[sym]["classify"].get("last_bi_dir") for sym in data}
+    _wk_dir = {sym: results_week[sym]["classify"].get("last_bi_dir") for sym in data}
     divergent = [d["name"] for sym, d in data.items()
-                 if results[sym]["classify"].get("last_bi_dir") != results_week[sym]["classify"].get("last_bi_dir")]
-    _updn = [d["name"] for sym, d in data.items()
-             if results[sym]["classify"].get("last_bi_dir") == 1 and results_week[sym]["classify"].get("last_bi_dir") == -1]
-    _dnup = [d["name"] for sym, d in data.items()
-             if results[sym]["classify"].get("last_bi_dir") == -1 and results_week[sym]["classify"].get("last_bi_dir") == 1]
+                 if _day_dir[sym] in (1, -1) and _wk_dir[sym] in (1, -1)
+                 and _day_dir[sym] != _wk_dir[sym]]
+    _updn = [d["name"] for sym, d in data.items() if _day_dir[sym] == 1 and _wk_dir[sym] == -1]
+    _dnup = [d["name"] for sym, d in data.items() if _day_dir[sym] == -1 and _wk_dir[sym] == 1]
+    # 有效方向对计数: 双方 dir 均 ∈{±1} 的指数(供 pat 全退化前哨与 stance 判定)
+    _n_dir_valid = sum(1 for s in data if _day_dir[s] in (1, -1) and _wk_dir[s] in (1, -1))
 
     # 市场概览 KPI
     n_multi = sum(1 for s in data if results[s]["classify"]["scenario"] in ("多头延续",))
@@ -3214,11 +3220,15 @@ def main():
 
 
     # 数据驱动的市场格局描述（不写死，随每日自动刷新保持准确）
-    n_daily_up = sum(1 for s in data if results[s]["classify"]["last_bi_dir"] == 1)
-    n_week_up = sum(1 for s in data if results_week[s]["classify"]["last_bi_dir"] == 1)
+    n_daily_up = sum(1 for s in data if _day_dir[s] == 1)
+    n_week_up = sum(1 for s in data if _wk_dir[s] == 1)
     n_div = len(divergent)
     total = len(data)
-    if n_div == total:
+    if _n_dir_valid == 0:
+        # R365: 全部指数日/周结构笔方向均不可用(数据退化)时, 原逻辑 n_div==0 会误报
+        # 「日周共振, 结构方向一致性较高」——无方向说共振=失实, 显式数据不足文案。
+        pat = f"{total} 个指数日/周结构笔方向暂不可用（结构数据不足），日周共振/背离待数据恢复后评估"
+    elif n_div == total:
         # R325: 全背离时按方向给准确描述（此前固定"日线向上笔、周线向下笔"，全为日弱周强时会说反）
         if _dnup and not _updn:
             pat = (f"全部 {total} 个指数日线向下笔、周线向上笔（日弱周强背离），当前回调在更大级别上属"
