@@ -428,6 +428,61 @@ def _fetch_sina_checked(sym):
     return None, "empty"
 
 
+# ================= 2a2. 月线 MACD 状态(腾讯 qfq 月K, R383 双周期排序键) =================
+def _ema(vals, n):
+    """标准 EMA(首值=序列首价, 递归平滑) —— MACD 用。"""
+    k = 2.0 / (n + 1)
+    out = [vals[0]]
+    for v in vals[1:]:
+        out.append(v * k + out[-1] * (1 - k))
+    return out
+
+
+def _month_macd(sym):
+    """底背驰个股月线 MACD 状态 —— 逆向观察池/底部信号的双周期排序键数据源(R383)。
+
+    腾讯 qfqmonth(纯 count URL, 自然月对齐, 2021-01 起 ~68 根) → MACD(12,26,9)
+    hist 末两根状态:
+      red          = hist>=0  月线红柱(多头背景 —— 日线底背驰反弹延续概率高, 排序最前)
+      green_shrink = hist<0 且较上月缩短(下跌动能衰减 —— 反转在酝酿, 次前)
+      green_grow   = hist<0 且较上月加长(月线下跌中继 —— 日线级反弹易夭折, 排序沉同档尾)
+    不可得/失败返回 None(前端=中性档, 不升不降)。北交 920 段腾讯恒假回、指数无底背驰语义,
+    由调用方只传个股; 腾讯整段停用(状态机)时不盲打。纯展示级增强: 任一失败静默, 不杀 run。"""
+    if _src_down(_tx_down, _tx_lock):
+        return None
+    _tx_th.wait()
+    try:
+        raw = _get(fd._tx_url(sym, "month"), timeout=15).decode("utf-8", "ignore")
+        node = (json.loads(raw).get("data") or {}).get(sym) or {}
+        kl = node.get("qfqmonth") or node.get("month") or []
+        pairs = []
+        for row in kl:
+            try:
+                d, c = str(row[0]), float(row[2])      # 腾讯 [日期,开,收,高,低,量]
+            except (IndexError, TypeError, ValueError):
+                continue
+            if d >= fd.MIN_DATE and c > 0:             # 对齐 2021 契约起点(与日线同源裁剪)
+                pairs.append((d, c))
+        pairs.sort(key=lambda x: x[0])
+        if len(pairs) < 40:       # MACD 26+9 EMA 收敛需近 35 根月K(约3年); 不足=结构不可靠
+            return None
+    except Exception:   # noqa: BLE001
+        return None
+    closes = [c for _d, c in pairs]
+    e12 = _ema(closes, 12)
+    e26 = _ema(closes, 26)
+    dif = [a - b for a, b in zip(e12, e26)]
+    dea = _ema(dif, 9)
+    h1, h2 = (dif[-2] - dea[-2]) * 2, (dif[-1] - dea[-1]) * 2
+    if h2 >= 0:
+        state = "red"
+    elif h2 > h1:
+        state = "green_shrink"
+    else:
+        state = "green_grow"
+    return {"state": state, "h1": round(h1, 4), "h2": round(h2, 4), "date": pairs[-1][0]}
+
+
 # ================= 2b. 当日主力资金流(东财 ulist 批量) =================
 def _ff_parse(diff, secmap):
     """解析东财 ulist diff 数组 -> {sym: {"net": 元, "pct": %}}。
@@ -1270,6 +1325,23 @@ def main():
     per = (time.time() - t_a) / len(sts)
     print("  分析完成 %d 票, 均耗时 %.2fs/票, 失败 %d" % (len(sts), per, len(errs)))
 
+    # --- R383: 底背驰个股月线 MACD 状态(双周期排序键: 逆向观察池/实操信号雷达共用) ---
+    # 凡有 bottom_bc 的个股补拉腾讯 qfq 月K(自然月) → st.m_macd={state,h1,h2,date}。
+    # 前端 revpool pick 键链按 state 插档(red>green_shrink>无数据>green_grow沉同档尾);
+    # 无 state 的票 st["m_macd"]=null(JSON), 前端读到缺省即中性。ETF bottom_bc 只汇入
+    # ETF板块聚合无个股行、北交腾讯无可用月K(920恒假回), 一并 null 中性(不惩罚)。
+    _mb_syms = [s for s, st in sts.items()
+                if st.get("scenario") == "背驰见底机会" and st.get("bottom_bc")
+                and not s.startswith("bj")
+                and uni.get(s, {}).get("type") not in ("ETF",)]
+    if _mb_syms:
+        _t_mb = time.time()
+        with ThreadPoolExecutor(max_workers=4) as _mb_ex:
+            for s, mm in zip(_mb_syms, _mb_ex.map(_month_macd, _mb_syms)):
+                sts[s]["m_macd"] = mm
+        print("  月线MACD状态 %d 票(底背驰个股) %.0fs; ETF/北交/失败=null 中性"
+              % (len(_mb_syms), time.time() - _t_mb))
+
     # --- 门禁 + 信号 + 行业聚合(同时攒成分) ---
     signals, universe, ind_members, ind_total, ind_qual = [], {}, {}, {}, {}
     for sym, st in sts.items():
@@ -1414,8 +1486,8 @@ def main():
         "title": "A股全市场缠论雷达",
         "asof": asof, "build_time": datetime.datetime.now(
             datetime.timezone(datetime.timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S"),
-        "version": "P3b-r6",   # R300 起数据语义多次修正未 bump: r6 覆盖 R320(新浪科创板volume
-                               # 单位=股)/R348(北交920段tx跳过来新浪兜底)/R352(缺员冻结)/
+        "version": "P3b-r7",   # r7=R383: st 新增 m_macd 月线MACD状态(双周期排序键)
+                               # r6 覆盖 R320(新浪科创板volume 单位=股)/R348(北交920段tx跳过来新浪兜底)/R352(缺员冻结)/
                                # R361(行业映射收敛)等 20+ 轮口径变更, 版本号如实反映当前 schema
         "n_universe": len(uni), "n_fetch": len(got), "n_fail": len(fails),
         "n_ok": len(sts), "n_gate": sum(gate_cnt.values()) - gate_cnt.get("", 0),
