@@ -187,8 +187,13 @@ jobs:
           cat "$OV_OUT" 2>/dev/null || echo "(_ov.txt 未生成)"
       # R354: 兑现 R104 注释承诺 —— _ov.txt 真正上传 artifact(旧版只有 step 日志, 重叠
       # 回归带病多轮无便捷回溯通道); 仅传报告(<1KB), 全量调试 SVG 留在 RUNNER_TEMP 不进 artifact。
+      # R384(09-09): 加 continue-on-error —— 09-09 00:07 实测 GitHub artifact 服务
+      # FinalizeArtifact 403 抖动(上传被中间层拒绝), 无容错时该**非关键诊断附件**上传失败
+      # 直接打死整个 job, 后续配置 Pages/上传产物/部署全被跳过 -> 发"All jobs failed"邮件。
+      # 诊断附件只是回溯备查, 丢了不应阻断发布; 诊断本身的失败仍由上一 step 红叉可见。
       - name: 上传标签重叠诊断报告
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: overlap-report

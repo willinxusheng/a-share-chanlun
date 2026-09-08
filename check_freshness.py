@@ -42,6 +42,12 @@ SITE_URL = os.environ.get("SITE_URL", "https://willinxusheng.github.io/a-share-c
 SOURCE_URL = ("https://ifzq.gtimg.cn/appstock/app/fqkline/get"
               "?param=sh000001,day,,,10,qfq")
 
+# R384: 源端探针重试参数(与 fetch_deployed_date 的 retries=5/retry_sleep=10 对齐)。
+# 判定基准必须比线上页面更稳 —— 它一挂整轮巡检即红叉。
+SRC_RETRIES = 5
+SRC_RETRY_SLEEP = 10
+SRC_TIMEOUT = 60   # 腾讯凌晨偶发慢响应, 30s 偏紧(09-09 04:31 误报实证)
+
 
 def _http_get(url, timeout=30):
     """带 UA 与超时的 GET，返回文本。"""
@@ -98,13 +104,28 @@ def parse_sentiment_asof(html):
 
 
 def fetch_source_date():
-    """取源端最新交易日（腾讯 gtimg 上证日线末根日期）。"""
-    raw = _http_get(SOURCE_URL)
-    node = (json.loads(raw).get("data") or {}).get("sh000001") or {}
-    kl = node.get("day") or node.get("qfqday") or []
-    if not kl:
-        raise RuntimeError("源端未返回任何日线，无法判定最新交易日")
-    return kl[-1][0]
+    """取源端最新交易日（腾讯 gtimg 上证日线末根日期）。
+
+    R384(09-09): 与 fetch_deployed_date 对称的重试。源端探针是判定基准, 而凌晨/海外 CI
+    访问腾讯偶发单次超时(09-09 04:31 实测单次 30s 超时 -> 巡检失效红叉 -> "All jobs failed"
+    误报邮件; 本地 09-08 22:25 亦曾遇 WAF 501 短时限流)。连续 retries 次仍失败才抛异常,
+    R237b「巡检自身失效必须响亮失败」语义不变 —— 真故障照样告警, 偶发抖动不再误报。
+    """
+    last = None
+    for i in range(1, SRC_RETRIES + 1):
+        try:
+            raw = _http_get(SOURCE_URL, timeout=SRC_TIMEOUT)
+            node = (json.loads(raw).get("data") or {}).get("sh000001") or {}
+            kl = node.get("day") or node.get("qfqday") or []
+            if not kl:
+                raise RuntimeError("源端未返回任何日线，无法判定最新交易日")
+            return kl[-1][0]
+        except Exception as e:   # noqa: BLE001
+            last = e
+        if i < SRC_RETRIES:
+            print("   第 %d 次源端探测失败, %d 秒后重试: %r" % (i, SRC_RETRY_SLEEP, last))
+            time.sleep(SRC_RETRY_SLEEP)
+    raise last
 
 
 def trigger_redeploy():
