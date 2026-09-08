@@ -327,6 +327,17 @@ def update_sentiment_txts():
                             print("INFO 情绪 %s 组内混源 -> 降级腾讯保同源(calc_v2 ratio/to 量纲)" % s)
                     except Exception:
                         pass
+            # R367: 降级重拉复查 —— 若仍有 em 成员未被成功降级(腾讯重拉失败/返回不足),
+            # 组内仍混源。此时写盘会让 calc_v2 配对(sh/sz 的 to×amt 加权、sh50/zz1k 的
+            # ratio 相除)量纲差 1e12 倍崩溃(R350/R352 注释描述的同源事故) —— 与缺员
+            # 分支同哲学: 整组冻结不写盘, 保持上一成功日同源旧态(情绪宁晚一天不冒险)。
+            if len({fetched[s]["mode"] for s in present}) > 1:
+                frozen = True
+                print("WARN 情绪组 %s 混源降级重拉失败(%s 仍 em), 整组冻结不写盘, "
+                      "保持上一成功日同源旧态(防量纲混源)" % (
+                          grp, [s for s in present if fetched[s]["mode"] == "em"]))
+                for s in present:
+                    fetched.pop(s, None)
         elif present and missing:
             frozen = True
             print("WARN 情绪组 %s 缺员(%s 东财+腾讯均失败), 组内 %s 冻结不写盘, "
