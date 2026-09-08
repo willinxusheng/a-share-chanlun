@@ -526,6 +526,21 @@ def main():
                 continue
             week, dirty_week = fetch_tx(sym, "week")
             month, dirty_month = fetch_tx(sym, "month")
+            # R372: 周/月线补做与日线同款"盘中剔除进行中根"守卫(R164/R167 只覆盖 day,
+            # 周/月漏网): 交易日 15:00 前腾讯把进行中周/月(把已收盘的周内/月内前几日与
+            # 今日实时价并成一根, date=当日)作为半截根返回——close=实时价随盘中跳变、
+            # volume 不完整, 且 date 超前于被剔除当日后的日线末根, 使:
+            #   ① schema 门禁(week/month 末>day 末)无条件阻断 CI(R330 接线后交易时段
+            #      push 触发 deploy 连续 18 次 "All jobs have failed", 2026-09-08 实证);
+            #   ② analyze(week/month) 把未完成根当完整周期 → 周/月线末笔结构失真。
+            # 剔除后周线回落到最近完整周(上周五), 与"日线盘中回落昨日"同语义——干净优先。
+            # 收盘后(>=15:00)源端给完整当日根(date=当日), 与日线一致保留。
+            if (week and week[-1]["date"] == _today
+                    and datetime.now(timezone(timedelta(hours=8))).hour < 15):
+                week = week[:-1]
+            if (month and month[-1]["date"] == _today
+                    and datetime.now(timezone(timedelta(hours=8))).hour < 15):
+                month = month[:-1]
             if len(week) < 40 or len(month) < 12:
                 print("WARN %s 周/月线过短(周%d/月%d, 下限40/12), "
                       "视为抓取异常跳过该标的(保留其余已成功标的)" % (name, len(week), len(month)))
