@@ -84,6 +84,9 @@ def ma(arr, i, w):
 
 # R173(F5): closes 来自原始行情 txt, 理论上 close>0, 但脏数据可能出现 0 → 除零崩溃。
 # 对 mom20 / vol20 的除数做 0 守卫, 触发时置 None(下游分位/信号已容错 None)。
+# R362(F4): amt_series 预构建一次供循环内 ma() 切片 —— 原每行重建全量 [x["amount"] for x in data]
+# 列表(O(n²) 惰性写法, n≈1400 行时 ~200 万次冗余元素访问), 启动期纯浪费。
+amt_series = [d["amount"] for d in data]
 for i, d in enumerate(data):
     d["mom20"] = (closes[i] / closes[i - 20] - 1) * 100 if (i >= 20 and closes[i - 20] != 0) else None
     if i >= 20 and all(closes[j - 1] != 0 for j in range(i - 19, i + 1)):
@@ -92,8 +95,8 @@ for i, d in enumerate(data):
         d["vol20"] = math.sqrt(sum((x - m) ** 2 for x in rets) / 20) * 100
     else:
         d["vol20"] = None
-    a5 = ma([x["amount"] for x in data], i, 5)
-    a20 = ma([x["amount"] for x in data], i, 20)
+    a5 = ma(amt_series, i, 5)
+    a20 = ma(amt_series, i, 20)
     d["amt_chg"] = (a5 / a20 - 1) * 100 if (a5 is not None and a20 is not None and a20 != 0) else None
     d["ma250"] = ma(closes, i, 250)
     d["regime"] = ("bull" if d["close"] >= d["ma250"] else "bear") if d["ma250"] else None
@@ -307,8 +310,10 @@ else:
 # v4.9: 此引擎(calc_v2)仅基于基准分位(不依赖快照数据), 实现 3+2 项:
 #   恐惧侧: 波动率>=85分位 + 分层换手比<=15分位 + 20日动量<=15分位
 #   贪婪侧: 量能>=80分位 + 换手>=80分位
-# 注: IC贴水/两融连降/炸板率/MA60广度 等快照项由 build_v3 注入阶段基于 daily_snapshot 增强计入,
-#      使"多指标共振"名副其实(详见 build_v3.py resonance 增强段)。
+# 注(R362): 原注释引用的"build_v3 基于 daily_snapshot 增强注入 IC贴水/两融/炸板率/MA60 快照项"
+#   属外部 sentiment-dashboard 工作区(2026-08-01-12-23-48/sentiment, 含 build_v3.py)的架构,
+#   本仓库(chanlun)链路 = fetch_data→calc_v2→sentiment_v2.json 即终态, 无 build_v3 后处理——
+#   sentiment_v2.json 的 resonance 仅含上述 5 个基准分项, 不含任何快照项, 消费端勿期待。
 def count_resonance(d, last_parts):
     fear_count = 0
     greed_count = 0
@@ -335,9 +340,11 @@ def count_resonance(d, last_parts):
 resonance = count_resonance(last, last["p"])
 
 # ---- 当日快照修正(资讯口径, cap ±8) ----
-# v4.9.23: 本引擎内部的 adj 已被 build_v3 的 snapshot_corrections 机制取代(按 asof 自动过期),
-# 原先写死的 7/31/6月 叙事字面量会恒施加 ±1 静默偏移且叙事失真, 且 build_v3 会覆盖本 adj_total/final。
-# 故此处仅保留中性占位; 真实外部事件修正由 build_v3 从 snapshot_corrections.json 动态采纳(见 build_v3.py)。
+# v4.9.27: 清空写死的过期叙事字面量(7/31/6月 等曾恒施加 ±1 静默偏移且叙事失真)。
+# R362: 原注释"adj 已被 build_v3 snapshot_corrections 机制取代/由 build_v3 动态采纳"为
+#   外部工作区残留 —— 本仓库无 build_v3/snapshot_corrections.json, adj_items 恒空、
+#   adj_total 恒 0 即终态事实(不隐式施加任何资讯修正); 如需外部事件修正须在消费端
+#   (report.py 情绪板块)另行引入快照文件, 本引擎不承担。
 adj_items = []
 adj_total = max(-8, min(8, sum(x["adj"] for x in adj_items)))
 
@@ -535,6 +542,7 @@ def sentiment_forecast(valid, horizon=30, k=10, ctx=20, band_days=10,
     cur = scores[n - ctx:]
     cur_norm = [x - cur[0] for x in cur]
     cur_regime = regimes[-1] if regimes else None
+    cur_last = scores[-1]  # R362(F5): 平移锚定末值, 与 i 无关 —— 原在候选循环内每轮重复赋值
     cand = []
     for i in range(ctx - 1, n - horizon - 1):
         c = scores[i - ctx + 1: i + 1]
@@ -545,7 +553,6 @@ def sentiment_forecast(valid, horizon=30, k=10, ctx=20, band_days=10,
         fut = scores[i + 1: i + 1 + horizon]
         if len(fut) < horizon or any(v is None for v in fut):
             continue
-        cur_last = scores[-1]
         c_end = c[-1]
         shifted = [cur_last + (fut[j] - c_end) for j in range(horizon)]
         cand.append((dist, shifted, regimes[i] if i < len(regimes) else None, i))
@@ -993,10 +1000,11 @@ result = {
     # R180: walk-forward 样本外回测精度(诚实披露 + 门禁监控); 预测为路径派生, 此字段量化其可靠性。
     "forecast_acc": forecast_acc,
     # v4.9.27: 清空写死的过期叙事字面量(iv/val_cyb/val_hs300/limit_detail/missing)。
-    # 这些硬编码值(含 7/22、42.2倍、14.5倍、7/31 涨停等过期口径)模板从不渲染(已查证
-    # template-v3.html 对 extra 零引用), 且 build_v3 自行动态注入 breadth_ma20/ic_basis/
-    # etf_flow/limit_detail 等并覆盖 limit_detail —— 纯属死数据且违背"诚实数据"铁律, 易误导维护者。
-    # 保留 extra 为空 dict(非 None), 因 build_v3 依赖 d["extra"] 为 dict 以追加键。
+    # 这些硬编码值(含 7/22、42.2倍、14.5倍、7/31 涨停等过期口径)纯属死数据且违背
+    # "诚实数据"铁律, 易误导维护者 —— 已删除。
+    # R362: 保留 extra 为空 dict(非 None)仅为维持 dict 型契约(消费端可能 .get("extra")/
+    # 追加键); 原注释引用的 "template-v3.html/build_v3 动态注入 breadth_ma20 等" 均属
+    # 外部 sentiment-dashboard 工作区, 本仓库产物 extra 恒空、无任何注入方。
     "extra": {}
 }
 with open(os.path.join(BASE, "sentiment_v2.json"), "w", encoding="utf-8") as f:
