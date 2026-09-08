@@ -86,7 +86,7 @@ def run():
                 continue
             trunc = kl[:i + 1]
             try:
-                r = analyze(trunc)
+                r = analyze(trunc, with_stability=False)
                 horizon = adaptive_horizon(r["bis"], r["merged"])
                 _svg, _note, _probs, _leg, fc = forecast_svg(
                     trunc, r, r["classify"], 50.0, 0.0, sym, horizon)

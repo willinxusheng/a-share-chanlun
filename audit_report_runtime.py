@@ -27,7 +27,12 @@ BASE = os.path.dirname(os.path.abspath(__file__))
 SAFE_INF = re.compile(r"var\s+lo\s*=\s*Infinity\s*,\s*hi\s*=\s*-Infinity\s*;")
 NAN_RE = re.compile(r"\bNaN\b")          # 独立 NaN(不匹配 isNaN 内的 NaN)
 INF_RE = re.compile(r"-?Infinity")
-UNDEF_RE = re.compile(r"[=:]\s*undefined")  # 数据值上下文的 undefined(WARN)
+# 数据值上下文的 undefined(WARN)。R359: 加负向后顾排除比较语义 —— 注释明言
+# "=== undefined 属正常", 原正则 [=:]\s*undefined 实际会命中 "=== undefined"(第三
+# 个 = 前是 = 而非 [=:], 但 "== undefined" 第二 = 与 "!= undefined"... 原正则不含 !/= 排除,
+# 命中 ===/!== 的尾部 = 后跟 undefined → WARN 噪音; 现 (?<![=!]) 排除 ==/===/!== 前缀,
+# 仅赋值 "= undefined" 与 "key: undefined"(真数据值) 命中。
+UNDEF_RE = re.compile(r"(?<![=!])[=:]\s*undefined")
 
 
 def run():

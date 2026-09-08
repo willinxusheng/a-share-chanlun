@@ -61,7 +61,7 @@ def run(quick=None):
     for sym in symbols:
         try:
             _kl = kls[sym]
-            _r = analyze(_kl)
+            _r = analyze(_kl, with_stability=False)
             _hz = adaptive_horizon(_r["bis"], _r["merged"])
             bt_paths_all[sym] = backtest_paths(_kl, horizon=_hz, step=max(15, _hz // 2), with_stability=False)
         except Exception:
@@ -77,7 +77,7 @@ def run(quick=None):
             trunc = kl[:i + 1]
             last_a = trunc[-1]["close"]
             try:
-                r = analyze(trunc)
+                r = analyze(trunc, with_stability=False)
                 horizon = adaptive_horizon(r["bis"], r["merged"])
                 # R173: 传 bt_paths(全量历史口径) → 走 _w_dir>0 经验锚分支, 检验真实 p_main 校准度
                 _svg, _note, _probs, _leg, fc = forecast_svg(

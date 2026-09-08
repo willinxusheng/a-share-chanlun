@@ -69,7 +69,7 @@ def main():
         stale = "OK" if gap_td <= 2 else ("W%d" % gap_td)
 
         # ③ 带宽抗污染: 先看自适应 horizon, 再扫描校准窗口内单根异常收益
-        r = analyze(kl)
+        r = analyze(kl, with_stability=False)
         horizon = adaptive_horizon(r["bis"], r["merged"])
         need = WIN + horizon
         win_closes = closes[-need:] if len(closes) >= need else closes

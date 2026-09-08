@@ -85,7 +85,7 @@ def run():
             last_a = trunc[-1]["close"]
             ntotal += 1
             try:
-                r = analyze(trunc)
+                r = analyze(trunc, with_stability=False)
                 horizon = adaptive_horizon(r["bis"], r["merged"])
                 # wcls 传 r["classify"](不影响几何); conf=50/sigma=0/bt=None/breadth=None
                 # 仅影响 p_main 概率校准，不动带与几何

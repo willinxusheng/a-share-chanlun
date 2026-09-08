@@ -116,7 +116,7 @@ def check():
             print("%-9s %-8s %-12s %-14s %-12s" % (sym, "-", "-", "-", "-", "数据不足跳过"))
             continue
         try:
-            r = analyze(kl)
+            r = analyze(kl, with_stability=False)
             horizon = adaptive_horizon(r["bis"], r["merged"])
             _svg, _note, _probs, _leg, fc = forecast_svg(
                 kl, r, r["classify"], 50.0, 0.0, sym, horizon)
