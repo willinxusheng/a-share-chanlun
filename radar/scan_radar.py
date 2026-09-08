@@ -1246,9 +1246,17 @@ def main():
                 marks[sym] = mark
         else:
             errs[sym] = err
-    if sts:
-        per = (time.time() - t_a) / len(sts)
-        print("  分析完成 %d 票, 均耗时 %.2fs/票, 失败 %d" % (len(sts), per, len(errs)))
+    if not sts:
+        # R373: 全市场分析零成功的显式中止 —— 原实现会继续走到下方
+        # `_Counter(...).most_common(1)[0][0]` 对空 Counter 抛 IndexError 才退出,
+        # 靠"偶然崩溃"阻止空产物写盘(radar.json 被覆盖成空壳; CI 侧自检 n_ok>4000
+        # 兜底但本地跑无自检)。语义应为显式守卫: 全源失败/数据全坏时中止且不写盘,
+        # 保留现有产物(CI runner 上旧 radar.json 由 checkout 提供, 下次 run 自动恢复)。
+        print("!! 全市场有效分析 0 票(抓取有效 %d 失败 %d), 中止且不写盘(保留现有产物)"
+              % (len(got), len(fails)), file=sys.stderr)
+        sys.exit(1)
+    per = (time.time() - t_a) / len(sts)
+    print("  分析完成 %d 票, 均耗时 %.2fs/票, 失败 %d" % (len(sts), per, len(errs)))
 
     # --- 门禁 + 信号 + 行业聚合(同时攒成分) ---
     signals, universe, ind_members, ind_total, ind_qual = [], {}, {}, {}, {}
@@ -1391,7 +1399,9 @@ def main():
         "title": "A股全市场缠论雷达",
         "asof": asof, "build_time": datetime.datetime.now(
             datetime.timezone(datetime.timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S"),
-        "version": "P3b-r5",   # R300: 科创板(sh688/689) volume 单位=股非手, avg_amt60/行业合成成交额修正
+        "version": "P3b-r6",   # R300 起数据语义多次修正未 bump: r6 覆盖 R320(新浪科创板volume
+                               # 单位=股)/R348(北交920段tx跳过来新浪兜底)/R352(缺员冻结)/
+                               # R361(行业映射收敛)等 20+ 轮口径变更, 版本号如实反映当前 schema
         "n_universe": len(uni), "n_fetch": len(got), "n_fail": len(fails),
         "n_ok": len(sts), "n_gate": sum(gate_cnt.values()) - gate_cnt.get("", 0),
         "n_signal": len(signals), "n_ind": len(industries),
