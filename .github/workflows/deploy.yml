@@ -226,17 +226,6 @@ jobs:
         with:
           path: .
 
-      - name: 上传标签重叠诊断产物
-        # R354: path 随 OV_OUT 重定向到 RUNNER_TEMP —— 旧版 _ov.txt 写 CWD 被
-        # upload-pages-artifact(path:.) 一并发布到 Pages 根公开可访问; 且该上传步骤本身
-        # 位置在 upload-pages-artifact 之后, _ov.txt 旧路径已被传上线, 此 artifact 只是回溯副本。
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: overlap-report
-          path: ${{ runner.temp }}/_ov.txt
-          if-no-files-found: ignore
-
       - name: 部署到 GitHub Pages
         uses: actions/deploy-pages@v5
 
