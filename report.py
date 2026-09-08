@@ -3152,15 +3152,24 @@ def main():
                                   "sigma": sigma, "fc": fc_data}
         except Exception as _e:
             # R173: 单指数计算异常(脏数据/边界)不再中断整份报告, 降级为该指数占位卡, 其余照常渲染。
+            # R366: 占位卡文案区分「数据缺失(空序列)」与「渲染异常」——空 klines 是数据源缺数据
+            # (自愈型, 待下轮 fetch 恢复即可, 非代码问题); 原统一正文「渲染异常」+badge「数据缺失」
+            # 自相矛盾, 数据缺失被误报为渲染故障会引导用户误查代码而非等数据恢复。
             import traceback as _tb
             print("WARN 指数 %s 渲染失败, 降级占位: %s" % (sym, _e))
             _tb.print_exc()
+            _no_data = not d.get("klines")
+            _bdg_txt = "数据缺失" if _no_data else "渲染异常"
+            _bdg_col = "#d97706" if _no_data else "#dc2626"
+            _dgd_txt = ("该指数本轮数据缺失（空序列），未纳入分析，不影响其余指数；"
+                        "待行情数据恢复后将自动更新。" if _no_data
+                        else "该指数本轮渲染异常（已降级占位，不影响其余指数）。")
             sections.append(f"""
     <section class="panel" id="sec-{sym}">
-      <h2>{d["name"]}（{sym}）{badge('数据缺失', '#dc2626')}</h2>
-      <div class="verdict"><b>结构解读：</b><p>该指数本轮渲染异常（已降级占位，不影响其余指数）。</p></div>
+      <h2>{d["name"]}（{sym}）{badge(_bdg_txt, _bdg_col)}</h2>
+      <div class="verdict"><b>结构解读：</b><p>{_dgd_txt}</p></div>
     </section>""")
-            conclusions.append(f'<li><b>{d["name"]}</b>（{sym}）：渲染异常，已降级占位。</li>')
+            conclusions.append(f'<li><b>{d["name"]}</b>（{sym}）：{_dgd_txt}</li>')
 
     # R280: 单指数降级防御漏网点 —— 循环 try/except(R173)已对该 sym 降级占位但未写
     # forecast_info, 此处若按 data 全键取 forecast_info[sym]["fc"] 会 KeyError 崩掉整份报告
