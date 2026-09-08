@@ -239,6 +239,9 @@ h1{font-size:21px;font-weight:700;letter-spacing:.4px;line-height:1.3}   /* R323
 .sigrad .srow.ssub{opacity:.5;filter:grayscale(.75)}
 .sigrad .srow.ssub:hover{background:#f6f4ee}
 .sigrad .sdead-sep{margin:6px 16px 2px;padding:3px 9px;font-size:10.5px;font-weight:700;color:#b45309;background:#fef9e7;border:1px dashed #f0e0b0;border-radius:6px;line-height:1.6}
+/* R381: P4 信号区折叠/展开按钮(组内 >5 行时出现, 与 revpool moreHtml 交互一致) */
+.sigrad .sigmore{text-align:center;padding:3px 0 2px}
+.sigrad .sigmore a{font-size:11px;font-weight:700;color:#18a058;cursor:pointer;line-height:1.8}
 .sigrad .srow .nm{font-weight:700;color:var(--ink);font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.5}
 .sigrad .srow .sub{font-size:10.5px;color:#94a3b8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.45}
 .sigrad .srow .st{text-align:center;font-size:11px;color:#64748b;white-space:nowrap}
@@ -628,7 +631,10 @@ function sigRow(s,opt){   // R380: opt.sub=true = 非低吸区灰显行(破位/�
     if(t){devTip=(dev>=0?"现价仍高于背驰高点 "+a.toFixed(1)+"%，警惕回落":"已从背驰高点回落 "+a.toFixed(1)+"%，观察企稳信号");devSub=(dev>=0?"高于高点·警惕":"已回落"+a.toFixed(1)+"%");}
     // R289: 底信号 dev<0 = 现价已跌破背驰低点(结构失效) —— 原逻辑落入 dev<=8 分支误标"低吸参考区"(反向误导)
     else if(dev<0){devTip="已跌破背驰低点 "+a.toFixed(1)+"%，底背驰结构失效 · 暂不低吸，等重新企稳再评估";devSub="破位·结构失效";}
-    else{devTip=(dev<=8?"现价贴近背驰低点(+"+a.toFixed(1)+"%)，低吸参考区":"已较背驰低点走高 "+a.toFixed(1)+"%，追高风险");devSub=(dev<=8?"近低点·低吸参考":"已走高"+a.toFixed(1)+"%·慎追");}
+    // R381: P6 dev 三档分级复用 revpool devTag 口径(0~3 底部刚启绿/3~8 已起涨橙/>8 已走高红) — 原 8% 一刀切
+    else{var dgt=devTag(dev);var dzCol=dgt.cls==="d1"?"#18a058":dgt.cls==="d2"?"#b45309":"#c92a2a";
+      devTip=(dev<=3?"现价贴近背驰低点(+"+a.toFixed(1)+"%)，底部刚启 · 最优低吸参考区":(dev<=8?"已较背驰低点反弹 "+a.toFixed(1)+"%，脱离底部 · 可分批低吸":"已较背驰低点走高 "+a.toFixed(1)+"%，追高风险大"));
+      devSub='<span style="color:'+dzCol+';font-weight:700">'+(dev<=3?"底部刚启·低吸":(dev<=8?"已起涨·分批":"已走高·慎追"))+'</span>';}
   }
   var ff=(u.ff||{}).net;
   var indName=(u.type==="ETF"?"ETF板块":(s.ind&&s.ind!=="-"?s.ind:"-"));
@@ -648,10 +654,13 @@ function sigRow(s,opt){   // R380: opt.sub=true = 非低吸区灰显行(破位/�
     '<div><div class="nm">'+(t?"⚠️ ":((opt.sub)?"🔍 ":"✅ "))+esc(nm)+lead+ffMini+'</div><div class="sub">'+esc(s.sym)+" · "+esc(indName)+'</div></div>'+
     '<div class="st">'+(t?'<b style="color:#c92a2a">顶背驰</b>':'<b style="color:#087f5b">底背驰</b>')+'<span>强'+(s.strong||0)+'/'+(s.vol?"缩":"")+((s.area!=null&&s.area>0)?" 面"+s.area:"")+'</span></div>'+
     '<div class="st">'+(fr==null?"-":(fr===0?"当日":fr+"天前"))+frTag+'</div>'+   // R320: fresh=0(当日信号) 显示"当日", 原"0天前"语义误导(0=最新鲜却像过期)
-    '<div class="dev '+devCls+'" title="'+esc(devTip||sigTip)+'">'+(dev!=null?devTxt:"-")+'<small>'+esc(devSub)+'</small></div>'+
+    '<div class="dev '+devCls+'" title="'+esc(devTip||sigTip)+'">'+(dev!=null?devTxt:"-")+'<small>'+devSub+'</small></div>'+
     '<div class="spk">'+(spk&&spk.length>1?sparkSVG(spk.length>90?spk.slice(-90):spk,92,24):'<span style="color:#cbd5e1">-</span>')+'</div></div>';
 }
 var curSigMode="all";   // R287: all=🔥最新 | res=💰资金共振 | div=⚠️背离警示
+var SIG_MAIN=5;         // R381: P4 折叠态每区(顶/底各自)展示行数 — >5 时出"展开全部"按钮(原硬截断吞票)
+var sigExpanded=false;  // R381: 信号区展开态(与 revpool revExpanded 同理)
+function toggleSig(){sigExpanded=!sigExpanded;renderSigRadar();}
 function setSigMode(m){curSigMode=m;renderSigRadar();}
 function renderSigRadar(){
   var box=$("sigRadar");
@@ -682,8 +691,9 @@ function renderSigRadar(){
     var la=leadOf(a),lb=leadOf(b);if(la!==lb)return lb-la;
     return (a.sym<b.sym?-1:1);
   };
-  var pick=function(arr,keep){arr=arr.slice();if(curSigMode==="res")arr=arr.filter(gRes);else if(curSigMode==="div")arr=arr.filter(gDiv);
-    arr.sort(curSigMode==="all"?byFresh:function(a,b){return gf(b)-gf(a)||byFresh(a,b);});return arr.slice(0,5);};
+  // R381: P4 pick 返回全量(排序+模式过滤, 不再 slice 截断吞票 — 截断移到 grp 折叠态, >5 出展开按钮)
+  var pick=function(arr){arr=arr.slice();if(curSigMode==="res")arr=arr.filter(gRes);else if(curSigMode==="div")arr=arr.filter(gDiv);
+    arr.sort(curSigMode==="all"?byFresh:function(a,b){return gf(b)-gf(a)||byFresh(a,b);});return arr;};
   // R380: 底信号三段制 — dz: 0=活跃(dv∈[0,8] 低吸参考区) 1=已走高>8%(慎追) 2=破位(dv<0 结构失效)
   //  P0: 破位不再混入"机会"主区(默认🔥最新 下沉灰显段, 防误买失效结构 — 东阿阿胶案例)
   //  P1: dev>8% 同沉非低吸区(追高) | 顶组无失效概念不受影响 | res/div 模式保留全量(资金视角, 破位+流入=骗线警示仍有价值)
@@ -702,7 +712,11 @@ function renderSigRadar(){
     if(!rows.length&&(!subRows||!subRows.length))return '<div class="sgrp"><div class="gtt"><span class="ic">'+ic+'</span>'+title+' <span class="n">0</span></div><div style="padding:14px 16px;font-size:11px;color:#b0b9c6;line-height:1.7">'+esc(emptyTxt)+'</div></div>';
     // R380: 非低吸区灰显段(破位/已走高) — 与"机会"主区视觉断开, 仅跟踪不作低吸参考
     var subHtml=(subRows&&subRows.length)?'<div class="sdead-sep" title="已跌破背驰低点(破位·结构失效)或已较背驰低点走高超过8%(追高)—— 已沉出「机会」主区, 仅作失效/追高跟踪, 不属低吸参考">🔍 非低吸区 · 破位/已走高 '+subRows.length+' 只 · 跟踪不参与</div>'+subRows.map(function(s){return sigRow(s,{sub:true});}).join(''):'';
-    return '<div class="sgrp"><div class="gtt"><span class="ic">'+ic+'</span>'+title+' <span class="n">'+rows.length+'</span><span style="color:#b0b9c6;font-weight:400;margin-left:auto">'+sortTxt+'</span></div>'+rows.map(sigRow).join('')+subHtml+'</div>';
+    // R381: P4 折叠态只画前 SIG_MAIN 行, >5 出展开按钮; 标题 n=全量真实数(原 pick 截断导致 >5 时标题 n 虚低)
+    var nAll=rows.length;
+    var main=sigExpanded?rows:rows.slice(0,SIG_MAIN);
+    var moreHtml=(nAll>SIG_MAIN)?'<div class="sigmore"><a onclick="toggleSig()">'+(sigExpanded?'▲ 收起 · 只留前 '+SIG_MAIN+' 只':'▼ 展开全部 '+nAll+' 只')+'</a></div>':'';
+    return '<div class="sgrp"><div class="gtt"><span class="ic">'+ic+'</span>'+title+' <span class="n">'+nAll+'</span><span style="color:#b0b9c6;font-weight:400;margin-left:auto">'+sortTxt+'</span></div>'+main.map(sigRow).join('')+moreHtml+subHtml+'</div>';
   }
   // R287: 盘面自动摘要(顶/底近端 + 资金共振/背离 + 板块净流入Top)
   var smark='';
@@ -710,12 +724,22 @@ function renderSigRadar(){
     var inTop=null,inBot=null;
     Object.keys(INDS).forEach(function(k){var nf=INDS[k].netflow;if(nf==null)return;
       if(inTop==null||nf>inTop.nf)inTop={k:k,nf:nf};if(inBot==null||nf<inBot.nf)inBot={k:k,nf:nf};});
+    // R381: P5 近端行业集中(近5日 fresh<=5 背驰信号最密集行业, 顶+底合计) — 板块效应/资金合力提示; 全量池含历史累积信号, 只用近端避免"两周累积"虚高
+    var indAgg={};
+    SIG.forEach(function(s){if(s.fresh==null||s.fresh>5)return;
+      var u0=UNI[s.sym]||{};var kn=(u0.type==="ETF"?"ETF板块":(s.ind&&s.ind!=="-"?s.ind:(u0.ind||"-")));
+      if(!kn||kn==="-")return;indAgg[kn]=(indAgg[kn]||0)+1;});
+    var indTop=[];
+    Object.keys(indAgg).forEach(function(k){indTop.push({k:k,n:indAgg[k]});});
+    indTop.sort(function(a,b){return b.n-a.n||(a.k<b.k?-1:1);});
+    indTop=indTop.slice(0,2);
     smark='<div class="smark">'+
       '<span>📡 全市场信号 <b class="tt">顶'+top.length+'</b>/<b class="bb">底'+bot.length+'</b> · 近端≤5天 <b>'+nNear+'</b></span>'+
       (nRes?'<span>💰资金共振 <b style="color:#c92a2a">'+nRes+'</b></span>':'')+
       (nDiv?'<span>⚠️背离警示 <b style="color:#f59f00">'+nDiv+'</b></span>':'')+
       (nTopDn?'<span title="顶信号已从背驰高点回落超过3%的数量(横截面口径, 非时间序列回测)">顶信号已回落&gt;3% <b class="fd">'+nTopDn+'/'+top.length+'</b></span>':'')+
       (nBotCl&&nBotLive?'<span title="底信号现价仍贴近背驰低点(+8%以内, 尚未走高=待启动; 分母=未破位底信号数, 横截面口径)">底待启动 <b class="bb">'+nBotCl+'/'+nBotLive+'</b></span>':'')+
+      ((indTop.length&&indTop[0].n>=2)?'<span title="近5日背驰信号最密集的行业(顶+底合计) — 板块效应/资金合力提示">🎯 近端集中 <b>'+indTop.map(function(o){return o.k+' '+o.n;}).join(' · ')+'</b></span>':'')+
       (inTop?'<span>主力净流入 <b class="fn">'+esc(inTop.k)+' '+ffTxt(inTop.nf)+'</b></span>':'')+
       (inBot?'<span>净流出 <b class="fd">'+esc(inBot.k)+' '+ffTxt(inBot.nf)+'</b></span>':'')+
       '</div>';
