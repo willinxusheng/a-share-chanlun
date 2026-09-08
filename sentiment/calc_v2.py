@@ -63,7 +63,23 @@ for r in sh:
     amt = r["amount"] + s["amount"]
     # 防御: 双源都缺成交额(amt==0)时除零崩溃 -> 换手率置 None(后续分位计算已容错 None)
     to = (r["to"] * r["amount"] + s["to"] * s["amount"]) / amt if amt != 0 else None
+    # R368: 消费侧量纲一致性纵深防御。写盘侧(fetch_data.update_sentiment_txts R350/R352/R367)
+    # 已保证同组同源(em 换手~0.x 或腾讯代理~1e12), 但历史残留混源 txt(R367 修复前写入)
+    # 或未来写盘侧任何漏网, 都会让 calc_v2 静默算脏 —— 加权 to 被大者主导 → 252 日
+    # 滚动分位单日跳 100/0 → score 失真 ±15 分量级(污染后续背离/信号)。
+    # 同源时组内 to 恒同量级(sh/sz 实证比 0.23~4), 量级差 >1e4 = 混源铁证(正常 200 倍裕度)。
+    # 检出即置 None(WARN 暴露, 宁缺勿滥), 与下方 ratio 守卫同族。
+    if to is not None and r["to"] > 0 and s["to"] > 0:
+        _mag = r["to"] / s["to"]
+        if _mag > 1e4 or _mag < 1e-4:
+            print("WARN %s sh/sz 换手量纲混源(r.to/s.to=%.2e), to 置 None 防分位污染" % (r["date"], _mag))
+            to = None
     ratio = k["to"] / b["to"] if b["to"] > 0 else None
+    # R368 同族: sh50/zz1k 配对 ratio 直接相除对量纲极敏感 —— 混源时 ratio 变 1e12 或 1e-13
+    # (正常区间 em ~2-10 / tx 代理实证 5~24, 极值不超 1e2), >1e4/<1e-4 即混源铁证。
+    if ratio is not None and (ratio > 1e4 or ratio < 1e-4):
+        print("WARN %s 大小票换手比异常(%.2e, 疑似混源量纲), ratio 置 None 防分位污染" % (r["date"], ratio))
+        ratio = None
     data.append({"date": r["date"], "close": r["close"], "amount": amt,
                  "to": to, "ratio": ratio})
 n = len(data)
