@@ -149,11 +149,17 @@ def main():
     # 永不自相矛盾(旧版 healthy 也可能渲染出"漏覆盖33%"告警句)。
     _acc_causes = []
     if not bias_ok:
-        _acc_causes.append("全样本最差中线偏置 %.1f%% 超阈值 ±5%%" % worst_bias)
+        # R371: 措辞与数值口径对齐——worst_bias 自 R165 起已合并 regime 级偏置(全样本与
+        # 分regime N>=20 取|值|最大), 原固定写"全样本最差"会失实: 当某 regime 超阈而全样本
+        # 未超(如实跑 range T30 bias 1.51 > 全样本 T30 0.85)时, 证书把 regime 偏置说成全样本。
+        # 与 drift.note 同用中性"中线偏置最差", 避免来源误导。
+        _acc_causes.append("中线偏置最差 %.1f%% 超阈值 ±5%%(全样本与分regime取大)" % worst_bias)
     if regime_warn:
         _acc_causes.append("部分市场环境 P05-P95 覆盖 <85%(见分regime板块)")
     if regime_dir_warn:
-        _acc_causes.append("部分市场环境短线方向命中 <50%(见分regime板块)")
+        # R371: 不锁"短线"——regime_dir_warn 由任一 N>=20 且方向<50% 的桶触发,
+        # 实测可含 range T+30(中长线, 如 48%)而不仅是 bull/range T+8 短线桶。
+        _acc_causes.append("部分市场环境主路径方向命中 <50%(短线或中长线桶, 见分regime板块)")
     if _any_insufficient:
         _acc_causes.append("部分市场环境样本不足 N<20(该档结论为系统噪声级, 待样本积累复核)")
     if not _acc_causes:

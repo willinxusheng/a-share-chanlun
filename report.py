@@ -2919,12 +2919,24 @@ def build_quality_cert_html(base):
                          f'<span class="qc-regime-cov{_dcls8}">T+8 {_t8d_txt}</span>'
                          f'<span class="qc-regime-cov{_dcls30}">T+30 {_t30d_txt}</span></div>')
         _rg_rows += '</div>'
+    # R371: generated_at 为 UTC ISO(CI GitHub Actions 环境), 直渲染会让北京用户看到
+    # "2026-09-08T02:45:21Z"——凌晨 0-7 点 CI 生成时 UTC 日期早于北京时间一天, 证书
+    # 会被误读为"昨天生成"的旧证书。消费端转北京时间(UTC+8)再显示, 写盘端保持 UTC 机器可读。
+    _ga_raw = c.get("generated_at") or "-"
+    _ga = _ga_raw
+    if isinstance(_ga_raw, str) and _ga_raw.endswith("Z"):
+        try:
+            _ga = (datetime.fromisoformat(_ga_raw.replace("Z", "+00:00"))
+                   .astimezone(timezone(timedelta(hours=8)))
+                   .strftime("%Y-%m-%d %H:%M")) + "（北京时间）"
+        except ValueError:  # 非标准 ISO(老证书/异常值) 原样显示, 不加时区后缀避免误导
+            _ga = _ga_raw
     html = (
         f'<div class="qc-card{" warn" if regime_warn else ""}">'
         f'<div class="qc-head">📊 预测质量自检证书'
         f' <span style="color:{_acc_color};font-weight:700">[{acc_status}]</span>'
         f'{" ⚠️" if regime_warn else ""}'
-        f'<span class="qc-sub">数据截至 {c.get("data_last_date") or "-"} · 生成 {c.get("generated_at") or "-"}</span></div>'
+        f'<span class="qc-sub">数据截至 {c.get("data_last_date") or "-"} · 生成 {_ga}</span></div>'
         + '<div class="qc-grid">'
         + cell("P05-P95 覆盖 T+8", t8, "cover95") + cell("P05-P95 覆盖 T+30", t30, "cover95")
         + cell("方向命中 T+8", t8, "dir_main") + cell("方向命中 T+30", t30, "dir_main")
