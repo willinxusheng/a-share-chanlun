@@ -1156,8 +1156,20 @@ def forecast_echart(sym, fc_data):
             _sm = _sm[:len(_sd)]
         elif len(_sm) < len(_sd):
             _sm = list(_sm) + [None] * (len(_sd) - len(_sm))
-        _sp25 = _sf.get("p25") or [None] * len(_sd)
-        _sp75 = _sf.get("p75") or [None] * len(_sd)
+        _sp25 = _sf.get("p25") or []
+        _sp75 = _sf.get("p75") or []
+        # R370: R211 只对 median(_sm) 做了 dates 等长截断/补齐, p25/p75 漏网 —— 数据源异常
+        # (p25/p75 短于 dates) 时 _sidx 索引可达 len(dates)-1, 下方 _sp25[_j] 越界 IndexError,
+        # 该指数 forecast_svg 整段崩 → R173 降级占位(整指数段消失, 浪费而非崩报告)。同族补全:
+        # 用不可变重建(切片/list+None), 不 mutate _sf 原列表(浅拷贝只护顶层, 防污染 sent_full)。
+        if len(_sp25) > len(_sd):
+            _sp25 = _sp25[:len(_sd)]
+        elif len(_sp25) < len(_sd):
+            _sp25 = list(_sp25) + [None] * (len(_sd) - len(_sp25))
+        if len(_sp75) > len(_sd):
+            _sp75 = _sp75[:len(_sd)]
+        elif len(_sp75) < len(_sd):
+            _sp75 = list(_sp75) + [None] * (len(_sd) - len(_sp75))
         _sidx = {_sd[i]: i for i in range(len(_sd))}
         for _si, _sx in enumerate(xcats):
             _j = _sidx.get(_sx)
