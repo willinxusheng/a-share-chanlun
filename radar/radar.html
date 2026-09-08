@@ -281,6 +281,11 @@ h1{font-size:21px;font-weight:700;letter-spacing:.4px;line-height:1.3}   /* R323
 .revpool .prow .small{font-size:10px;color:#94a3b8;line-height:1.5}
 .revpool .prow .devv{font-weight:800;font-size:13px;display:flex;align-items:center;gap:4px;flex-wrap:wrap}
 .revpool .prow .dtlbl{font-size:9.5px;font-weight:700;border:1px solid;padding:1px 5px;border-radius:4px;line-height:1.4;letter-spacing:.2px}
+/* R379: 确认度点(榜内名次键可视化) — c0深绿=双确认(放量+末笔向上) c1浅绿=单确认 c2灰=无确认; 仅排序不作门槛 */
+.revpool .prow .confdot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-left:3px;vertical-align:1px;flex:0 0 auto}
+.revpool .prow .confdot.c0{background:#18a058;box-shadow:0 0 0 2px rgba(24,160,88,.20)}
+.revpool .prow .confdot.c1{background:#8ed3ad}
+.revpool .prow .confdot.c2{background:#cbd5e1}
 @media(max-width:980px){.revpool .prow,.revpool .phdr{grid-template-columns:minmax(110px,1.25fr) minmax(56px,.65fr) minmax(56px,.6fr) minmax(56px,.55fr) minmax(58px,.6fr) minmax(90px,.92fr) minmax(110px,.95fr);padding:7px 10px;font-size:11px}.revpool .phdr{padding:5px 10px;font-size:10px}.revpool .phead{padding:12px}}
 .gate-tag{font-size:9px;font-weight:700;border-radius:4px;padding:0 4px;margin-left:3px;vertical-align:1px}
 .gate-tag.g1{background:#fff3cd;color:#92400e}.gate-tag.g2{background:#fde2e2;color:#c92a2a}.gate-tag.g3{background:#e0f2fe;color:#075985}
@@ -734,13 +739,23 @@ function isElite(c){
   if(c.gate==="低自洽")return false;
   return true;
 }
-/* R375: 实操优选比较 — ①结构档(距背低点%): 底部刚启≤3%(d1)最优 → 已起涨(3~8) → 追高(8~15) → 已错过(>15)垫底
-       ②档内流动性: 60日均额≥1亿 优先, ≥5000万 次之, 再按日均额降序
-       ③深度: 距历史高回撤更透的优先(同为稳健标的时, 跌得透=逆向空间足) */
+/* R379: 确认度三档(榜内名次键) — 双确认(vol_confirm=true 且 last_bi_dir=1)=0 > 单确认(其一)=1 > 无确认=2
+   仅作榜内排序键, 不参与进榜门槛(灰点仍上榜, 只沉后段) — 旭总拍板: 确认度在均额前 + 灰点留榜尾 + 外部票不破格 */
+function confTier(c){
+  var vol=(c.bb&&c.bb.vol_confirm===true)?1:0;
+  var up=(c.st&&c.st.last_bi_dir===1)?1:0;
+  return (vol&&up)?0:((vol||up)?1:2);
+}
+/* R375+R379: 实操优选比较 — ①结构档(距背低点%): 底部刚启≤3%(d1)最优 → 已起涨(3~8) → 追高(8~15) → 已错过(>15)垫底
+       ②确认度(名次键): 双确认 > 单确认 > 无确认(R379 插在均额前 — 有企稳证据优先于盘子大)
+       ③档内流动性: 60日均额≥1亿 优先, ≥5000万 次之, 再按日均额降序
+       ④深度: 距历史高回撤更透的优先(同为稳健标的时, 跌得透=逆向空间足) */
 function revPickCmp(a,b){
   function tier(c){var d=+c.dev;if(d<0)return 4;if(d<=3)return 0;if(d<=8)return 1;if(d<=15)return 2;return 3;}
   var ta=tier(a),tb=tier(b);
   if(ta!==tb)return ta-tb;
+  var ca=confTier(a),cb=confTier(b);   // R379: ②确认度(双=0/单=1/无=2), 名次键非门槛
+  if(ca!==cb)return ca-cb;
   var aa=+(a.st.avg_amt60)||0,ab=+(b.st.avg_amt60)||0;
   var la=aa>=1e4?2:(aa>=5000?1:0),lb=ab>=1e4?2:(ab>=5000?1:0);   // 流动性等级 2=优(≥1亿) 1=中(≥5000万) 0=薄
   if(la!==lb)return lb-la;
@@ -784,6 +799,11 @@ function revRow(c){
   var bcTag=bb.bc_type?('<span style="color:#94a3b8">'+esc(String(bb.bc_type))+'</span>'):'';
   // -- R317: 距背低点五档分级(旭总要实操准确性; devTag 定义见上)
   var dt=devTag(c.dev);
+  // -- R379: 确认度点(名次键可视化): c0双确认深绿/c1单确认浅绿/c2无确认灰 — 附 dev 档位标签后, 悬停见明细
+  var ct=confTier(c);
+  var confDot=ct===0?'<span class="confdot c0" title="✅ 双确认 — 放量确认 + 末笔向上, 企稳证据最足"></span>'
+    :ct===1?'<span class="confdot c1" title="◑ 单确认 — '+((c.bb.vol_confirm===true)?'已放量确认, 但末笔仍向下':'末笔已向上, 但尚无放量确认')+'"></span>'
+    :'<span class="confdot c2" title="○ 未确认 — 背驰后尚无放量/向上笔, 纯左侧埋伏(赌不再破位), 名次沉后段"></span>';
   // -- R375: 实操优选命中标(仅 pick 模式): 底部刚启≤3% + 60日均额≥1亿 + 距历史高回撤≥50% 三条件齐
   var pickStar=(curRevMode==="pick"&&dt.cls==="d1"&&((st.avg_amt60||0)>=1e4)&&c.dd<=-0.5)
     ?'<span class="pk" title="🎯实操优选命中: 底部刚启(距底≤3%)+60日均额≥1亿+距历史高回撤≥50% — 最优埋伏标的">🎯</span> ':'';
@@ -810,7 +830,7 @@ function revRow(c){
     '<div><div class="big" style="font-size:11.5px">'+(endP!=null?endP.toFixed(2):"-")+'</div><div class="small" style="font-size:10px">底线 · 止损参考</div></div>'+
     '<div><div class="big" style="font-size:12px">'+amtTxt+'</div><div class="small">60日均额</div></div>'+
     '<div><div class="big" style="font-size:11px;color:#94a3b8">'+esc(fdTxt)+'</div><div class="small">'+c.fd+"天前 · "+bcTag+'</div></div>'+
-    '<div><div class="devv">'+(c.dev>=0?"+":"")+c.dev.toFixed(1)+'% <span class="dtlbl" style="'+dtStyle+'" title="'+esc(dt.tip)+'">'+dt.lbl+'</span></div><div class="small">距背低点</div></div>'+
+    '<div><div class="devv">'+(c.dev>=0?"+":"")+c.dev.toFixed(1)+'% <span class="dtlbl" style="'+dtStyle+'" title="'+esc(dt.tip)+'">'+dt.lbl+'</span>'+confDot+'</div><div class="small">距背低点</div></div>'+
     '</div>';
 }
 function pickRev(sym){prevStkSrc="rev";showStk(sym)}   // R305: 观察池入口 → 返回键回观察池
@@ -835,7 +855,7 @@ function setRevMode(m){curRevMode=m;renderRevPool();}
 function toggleRev(){revExpanded=!revExpanded;renderRevPool();}
 function revRule(){   // R376: 排序标准常驻标注(随 chip 联动, 旭总免反复问)
   var t="";
-  if(curRevMode==="pick")t='<b class="k">🌟实操优选(默认)</b> <b>①结构档</b>: <b style="color:#18a058">底部刚启(距底≤3%)</b> 最前 → <b style="color:#b45309">已起涨(3~8%)</b> → <b style="color:#c92a2a">追高(8~15%)</b> → <b style="color:#7b2cbf">已错过(&gt;15%)</b> 垫底(破位剔除) · <b>②档内流动性</b>: 60日均额 <b>&gt;=1亿</b> &gt; <b>&gt;=5000万</b> &gt; 薄 · <b>③同档同额</b>: 距历史高跌得最透者前 · 行首 <b>🎯</b> = 三条件齐(≤3%+≥1亿+距高≥50%)';
+  if(curRevMode==="pick")t='<b class="k">🌟实操优选(默认)</b> <b>①结构档</b>: <b style="color:#18a058">底部刚启(距底≤3%)</b> 最前 → <b style="color:#b45309">已起涨(3~8%)</b> → <b style="color:#c92a2a">追高(8~15%)</b> → <b style="color:#7b2cbf">已错过(&gt;15%)</b> 垫底(破位剔除) · <b>②确认度(名次键·非门槛)</b>: <b style="color:#18a058">双确认●</b>(放量+末笔向上) &gt; <b style="color:#2f9e44">单确认●</b> &gt; <b style="color:#94a3b8">灰●</b>(未确认沉后, 不踢出) · <b>③档内流动性</b>: 60日均额 <b>&gt;=1亿</b> &gt; <b>&gt;=5000万</b> &gt; 薄 · <b>④同档同额</b>: 距历史高跌得最透者前 · 行首 <b>🎯</b> = 三条件齐(≤3%+≥1亿+距高≥50%)';
   else if(curRevMode==="dd")t='<b class="k">📉最深回撤</b>: 按 <b>距历史高点回撤幅度(dd)</b> 降序 — 负得越多(跌得最透)越靠前';
   else if(curRevMode==="dev")t='<b class="k">🎯最贴低点</b>: 按 <b>现价距背驰低点(dev%)</b> 升序 — 越贴近买点(≤3%底部区)越靠前';
   else if(curRevMode==="fr")t='<b class="k">🕐最新触发</b>: 按 <b>距触发天数(fd)</b> 升序 — 刚超实操窗(10天)的新鲜结构在前';
@@ -860,9 +880,9 @@ function renderRevPool(){
   // R378: 7 列表头, 与 revRow 列定义一致(浅灰底小字标注每列语义)
   var phdrHtml='<div class="phdr"><span>标的</span><span>距历史高</span><span>现价</span><span>底线·止损参考</span><span>60日均额</span><span>底背驰触发</span><span>距背低点</span></div>';
   box.innerHTML='<div class="phead"><h2>🧭 逆向观察池</h2>'+
-    (collapsed?'<span class="elite-badge" title="高胜率精选=底部刚启(距底≤3%)+60日均额≥1亿+结构自洽">🏆 高胜率精选 '+nEli+'</span>':'')+
+    (collapsed?'<span class="elite-badge" title="高胜率精选=底部刚启(距底≤3%)+60日均额≥1亿+结构自洽 · 行尾色点=确认度(深绿双/浅绿单/灰无), 仅名次键不作门槛">🏆 高胜率精选 '+nEli+'</span>':'')+
     '<div class="chips">'+
-      '<span class="chip'+chipOn("pick")+'" onclick="setRevMode(\'pick\')" title="实操纪律复合排序: ①底部刚启(距底≤3%)优先 ②档内 60日均额≥1亿稳健(≥5000万次之) ③跌得最透优先 — 一眼锁定最优埋伏">🌟 实操优选</span>'+
+      '<span class="chip'+chipOn("pick")+'" onclick="setRevMode(\'pick\')" title="实操纪律复合排序: ①底部刚启(距底≤3%)优先 ②确认度(双/单/无, 名次键不作门槛) ③60日均额≥1亿稳健(≥5000万次之) ④跌得最透优先 — 行尾色点=确认度">🌟 实操优选</span>'+
       '<span class="chip'+chipOn("dd")+'" onclick="setRevMode(\'dd\')" title="距历史高点回撤最深的在前 — 看谁跌得最透">📉 最深回撤</span>'+
       '<span class="chip'+chipOn("dev")+'" onclick="setRevMode(\'dev\')" title="现价距背驰低点最近的在前 — 还在底部参考区(≤3%)的优先">🎯 最贴低点</span>'+
       '<span class="chip'+chipOn("fd")+'" onclick="setRevMode(\'fd\')" title="底背驰触发距今最久未破位在前 — 老结构企稳时间越久越有效, 与「最新触发」互补查新仓">⏳ 底久未破</span>'+
