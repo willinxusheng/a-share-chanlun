@@ -702,7 +702,9 @@ function renderSigRadar(){
   if(curSigMode==="all"){
     var pbA=bot.filter(function(s){return botDz(s)===0;});
     pb=pick(pbA);
-    pbSub=bot.filter(function(s){return botDz(s)!==0;}).sort(function(a,b){return botDz(a)-botDz(b)||byFresh(a,b);});
+    // R380→R382 决策收紧: 旭总"只保留 5 只" — 破位/走高完全从 all 模式剔除(不再展示灰显段)
+    //   残余视觉的 6 行干扰且对实操低吸无价值(破位=结构失效:不入仓); res/div 资金视角仍可看 pbSub(目前未传, 留扩展)
+    pbSub=null;
   }else{pb=pick(bot);}
   if(!pt.length&&!pb.length&&curSigMode==="all"){box.style.display="none";return;}
   box.style.display="";
