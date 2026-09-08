@@ -14,7 +14,8 @@
 
 用法:
   from industry_map import SW1, sub_to_sw1
-  ind = sub_to_sw1.get(sub_name, "其他")
+  ind = sub_to_sw1(sub_name)          # 未收录返回 "其他"; 调用方按需收敛(radar R353: 非 SW1 一律 '-')
+  # 注意: sub_to_sw1 是函数不是 dict, 勿写成 sub_to_sw1.get(...)(会 AttributeError) —— 旧版注释示例曾误写
 """
 
 # 申万一级 31 个 (2021版), 展示顺序按市值/惯例粗排(前端可再按信号数重排)

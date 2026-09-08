@@ -803,7 +803,8 @@ def analyze_one(sym, ks):
         n = len(ks)
         last = ks[-1]
         d0, d1 = ks[0]["date"], last["date"]
-        span_days = _days_ago(d0) - _days_ago(d1) if _days_ago(d0) < 30000 else -1
+        _a0 = _days_ago(d0)                       # 首根距今(自然日); 复用避免双算(7000票级)
+        span_days = _a0 - _days_ago(d1) if _a0 < 30000 else -1
         tail60 = ks[-60:]
         avg_amt = sum(k["volume"] * _vol_share_per_unit(sym) * k["close"] for k in tail60) / max(1, len(tail60)) / 1e4  # R300: 科创板 volume 单位=股, 勿再 ×100
         amp = [h / l - 1 for h, l in zip(highs, lows) if l > 0]
@@ -1267,7 +1268,7 @@ def main():
             if not gate:
                 ind_qual[ETF_KEY] = ind_qual.get(ETF_KEY, 0) + 1
                 ind_members.setdefault(ETF_KEY, []).append((sym, uni[sym]["mcap"]))
-        uind = uni[sym].get("ind", "-") if sym in uni else "-"
+        # (uind 已于上方 L1259 计算, 勿重复赋值)
         row = {"name": uni[sym]["name"], "type": uni[sym]["type"],
                "code": uni[sym]["code"], "src": st.pop("src", ""),
                "gate": gate, "gd": gdesc, "ind": uind,
