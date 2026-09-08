@@ -43,7 +43,6 @@ def main():
     any_critical = False
     warn_stale = False
     warn_window = False
-    warn_extreme = False
 
     print("%-9s %-7s %-11s %-7s %-7s %-14s %-10s" %
           ("代码", "名称", "末根日期", "泄漏", "滞后(TD)", "带宽污染", "窗口"))
@@ -87,7 +86,8 @@ def main():
             any_critical = True
         elif worst_lr >= LR_EXTREME:
             poison = "极端%.0f%%" % ((math.exp(worst_lr) - 1) * 100)
-            warn_extreme = True
+            # R358: 极端日=真实行情(如2024-09政策牛), 文档头明言"仅提示不告警"——不置 warn_extreme,
+            #        否则 5 指数常含极端日 → 门禁天天 ⚠ WARN 疲劳, 真滞后/污染时反被淹没
         else:
             poison = "OK"
 
@@ -97,7 +97,6 @@ def main():
         if not full:
             warn_window = True
 
-        flag = "CRIT" if (future_bars or worst_lr >= LR_CORRUPT) else ("WARN" if (gap_td > 2 or not full or worst_lr >= LR_EXTREME) else "OK")
         print("%-9s %-7s %-11s %-7s %-7s %-14s %-10s" %
               (sym, name, last_date, leak, (str(gap_td) if gap_td >= 0 else "未来"),
                poison, wstat))
@@ -110,7 +109,6 @@ def main():
         elif worst_lr >= LR_EXTREME:
             print("      ℹ 带宽窗口含真实极端日: |日收益|≈%.0f%%(<%.0f%% 脏数据阈值), 如2024-09政策牛, 经验分位带已自然吸纳, 仅提示" %
                   ((math.exp(worst_lr) - 1) * 100, LR_CORRUPT * 100))
-            warn_extreme = True
         if gap_td > 2:
             print("      ⚠ 行情滞后 %d 交易日(≥3触发看板预警), 推演基于旧数据" % gap_td)
             warn_stale = True
@@ -118,17 +116,15 @@ def main():
     print("-" * 78)
     if any_critical:
         print("结论: ❌ CRITICAL — 存在未来泄漏或带宽污染(关1已硬阻断; 此处复核)")
-    elif warn_stale or warn_window or warn_extreme:
+    elif warn_stale or warn_window:
         _rs = []
         if warn_stale:
             _rs.append("行情滞后")
         if warn_window:
             _rs.append("带宽窗口不足")
-        if warn_extreme:
-            _rs.append("含真实极端日(提示)")
         print("结论: ⚠ WARN — %s(均为监控项, 不阻断)" % " / ".join(_rs))
     else:
-        print("结论: ✅ 点前完整 / 无未来泄漏 / 带宽未被污染 / 窗口充分")
+        print("结论: ✅ 点前完整 / 无未来泄漏 / 带宽未被污染 / 窗口充分(极端日仅明细提示, 不计结论)")
     print("注: 未来泄漏硬阻断由关1(fd.validate)负责。")
     sys.exit(0)
 

@@ -81,6 +81,8 @@ def run(quick=None):
                 continue
             proj = fc["proj"]
             d = {}
+            # R358: regime 每锚点只判一次供全部 H 复用(原实现位于 H 循环内, 同 trunc 重复 classify 2 次)
+            rg_anchor = classify_regime(trunc)
             for H in H_TARGETS:
                 if H > horizon:
                     continue
@@ -94,8 +96,7 @@ def run(quick=None):
                     med = row["med"]
                     if med:
                         bias = (real - med) / med
-                        rg = classify_regime(trunc)
-                        bias_results[sym][H].append((rg, bias))
+                        bias_results[sym][H].append((rg_anchor, bias))
             seq.append((i, last_a, d))
             _ac += 1
             i += ANCHOR_STEP
@@ -124,6 +125,7 @@ def run(quick=None):
     print(hdr)
     print("-" * 96)
     overall_warn = False
+    n_pairs_total = 0
     for sym in symbols:
         nm = data[sym].get("name", sym)
         for H in H_TARGETS:
@@ -131,6 +133,7 @@ def run(quick=None):
             if not ex:
                 print(f"{nm:<12}{'T+'+str(H):>5}{0:>6}  (样本不足)")
                 continue
+            n_pairs_total += len(ex)
             abs_ex = [abs(x) for x in ex]
             med_e = statistics.median(abs_ex)
             p95_e = sorted(abs_ex)[min(len(abs_ex) - 1, int(0.95 * len(abs_ex)) - 1)]
@@ -143,11 +146,15 @@ def run(quick=None):
                   f"{p95_e*100:>11.1f}%{max_e*100:>11.1f}%{n_anom:>8}"
                   f"{(n_anom/len(ex)*100):>6.1f}%{verdict:>8}")
     print("-" * 96)
-    if overall_warn:
+    if n_pairs_total == 0:
+        # R358: 全桶无样本时严禁宣称"健康"(空真虚报) —— 无证据 ≠ 无漂移
+        print("【突变漂移】⚠️ 全部 (指数,horizon) 桶样本不足 — 无法判定(analyze 异常或数据过短), 不宣称健康。")
+    elif overall_warn:
         print("【突变漂移】⚠️ 检测到预测突变漂移超阈值 — 可能存在过拟合/数据异常/结构频繁切换。")
         print("  建议：核查近期数据管道与 classify 场景切换；此告警不阻断 CI，须人工跟进。")
     else:
-        print("【突变漂移】✅ 各指数各 horizon 预测漂移均在健康区间（P95|超额|≤10%），")
+        print("【突变漂移】✅ 各指数各 horizon 预测漂移均在健康区间（P95|超额|≤10%%，N 桶=%d），"
+              % n_pairs_total)
         print("  预测随行情平滑移动，无突变/过拟合信号。")
 
     # ---- R170: 系统性乘性偏置报告(按 regime 切片, 与证书同口径) ----
@@ -159,6 +166,9 @@ def run(quick=None):
     print("-" * 96)
     bias_warn = False
     worst_bias = 0.0
+    # R358: 样本不足(N<20)但中位偏置已超阈值的桶——不参与判定(防小样本噪声), 但必须在 ✅ 旁透明化,
+    #       否则熊市桶(N恒1~3, 结构性空桶)的 +18% 级偏置会被"无系统性漂移"结论完全掩盖
+    low_n_suspicious = []
     for sym in symbols:
         nm = data[sym].get("name", sym)
         for H in H_TARGETS:
@@ -179,6 +189,8 @@ def run(quick=None):
                     print(f"{nm:<12}{'T+'+str(H):>5}{rg:>9}{nb:>6}{mb:>11.1f}%{verdict:>8}")
                 else:
                     print(f"{nm:<12}{'T+'+str(H):>5}{rg:>9}{nb:>6}{mb:>11.1f}%{'样本不足':>8}")
+                    if abs(mb) > BIAS_WARN * 100:
+                        low_n_suspicious.append((nm, H, rg, nb, mb))
     print("-" * 96)
     if bias_warn:
         print("【系统性偏置】⚠️ 检测到 |中位乘性偏置| > %.0f%%(N>=%d 桶) — 模型存在系统性高估/低估,"
@@ -187,6 +199,12 @@ def run(quick=None):
     else:
         print("【系统性偏置】✅ 各 (指数,horizon,regime) 桶(N>=%d) 中位乘性偏置均在 ±%.0f%% 内, 无系统性漂移。"
               % (MIN_REGIME_N, BIAS_WARN * 100))
+        if low_n_suspicious:
+            _ls = " / ".join("%s T+%d %s 中位%+.1f%%(N=%d)" % (a, b_, c, e, d_)
+                             for (a, b_, c, d_, e) in low_n_suspicious)
+            print("  注: %d 个样本不足桶(N<%d)中位偏置已超 ±%.0f%% 但未纳入判定(防小样本噪声误报): %s"
+                  % (len(low_n_suspicious), MIN_REGIME_N, BIAS_WARN * 100, _ls))
+            print("      —— 无证据宣称其健康; 其中熊市桶 N 恒小(MIN_HISTORY 截断致 2021-23 熊市窗外), 须人工留意。")
 
     return {
         "drift_warn": overall_warn,
