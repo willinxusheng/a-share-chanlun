@@ -265,6 +265,7 @@ h1{font-size:21px;font-weight:700;letter-spacing:.4px;line-height:1.3}   /* R323
 .revpool .phead h2{font-size:16px}
 .revpool .chips{display:flex;gap:6px;margin-left:auto}
 .revpool .phint{font-size:11.5px;color:var(--muted);line-height:1.7;width:100%}
+.revpool .elite-badge{font-size:11px;font-weight:800;color:#fff;background:linear-gradient(135deg,#0f766e,#18a058);border-radius:12px;padding:2px 10px;line-height:1.7;white-space:nowrap}
 .revpool .revrule{width:100%;font-size:11px;line-height:1.8;color:#475569;background:#f8fafc;border:1px dashed #cbd5e1;border-radius:6px;padding:5px 10px;margin-top:2px}
 .revpool .revrule b.k{color:#0f766e;font-weight:800}
 .revpool .revrule .sw{display:inline-block;min-width:58px;margin-right:2px}
@@ -718,7 +719,16 @@ function revCand(sym,v){
   var close=st.close;
   if(close==null||+close<+bb.end_price)return null;   // R336: 破位=严格跌破(close<endP)才剔除; 原 close<=endP 把恰好贴住背驰低点(dev=0.0%, 理论最优埋伏位)的票也误剔(今日实测 sh688249 close==endP 35.98 被剔)
   var dev=(close/bb.end_price-1)*100;
-  return {sym:sym,st:st,bb:bb,fd:fd,dd:dd,dev:dev,close:close};
+  return {sym:sym,st:st,bb:bb,fd:fd,dd:dd,dev:dev,close:close,gate:v.gate||null};
+}
+/* R377: 高胜率精选判定 — 折叠态默认只展示这些(减少无效盯盘):
+   ①结构: 底部刚启(距背驰低点≤3%, 实操最优区) ②流动性: 60日均额≥1亿(万元=1e4) ③质量: 非低自洽(结构可信) */
+function isElite(c){
+  if(c.dev==null||c.dev>3)return false;
+  var amt=+(c.st.avg_amt60)||0;
+  if(amt<1e4)return false;
+  if(c.gate==="低自洽")return false;
+  return true;
 }
 /* R375: 实操优选比较 — ①结构档(距背低点%): 底部刚启≤3%(d1)最优 → 已起涨(3~8) → 追高(8~15) → 已错过(>15)垫底
        ②档内流动性: 60日均额≥1亿 优先, ≥5000万 次之, 再按日均额降序
@@ -835,11 +845,16 @@ function renderRevPool(){
   var n=all.length;
   if(!n){box.style.display="none";return;}
   box.style.display="";
-  var shown=revExpanded?all:all.slice(0,REV_SHOW);
+  var shown=curRevMode==="pick"&&!revExpanded?all.filter(isElite):all;  // R377: pick 折叠态=高胜率精选(底部刚启≤3%+≥1亿+非低自洽); 切他模式/展开=全量档案(研究视角)
+  var nEli=all.filter(isElite).length;              // 精选计数(与当前视图无关, 恒算)
+  var nAll=all.length;                              // 全量档案计数
+  if(!shown.length)shown=all.slice(0,REV_SHOW);     // 精选为空(极端市况)回退前 REV_SHOW
   var chipOn=function(m){return curRevMode===m?' on':'';};
   var rowsHtml=shown.map(revRow).join('');
-  var moreHtml=(all.length>REV_SHOW)?'<div class="more"><a onclick="toggleRev()">'+(revExpanded?'▲ 收起':'▼ 展开全部 '+all.length+' 只')+'</a></div>':'';
+  var collapsed=curRevMode==="pick"&&!revExpanded&&nEli>0&&nEli<nAll;  // 仅 pick+未展开+确有精选 才折叠
+  var moreHtml=collapsed?'<div class="more"><a onclick="toggleRev()" style="color:#18a058;font-weight:700">▼ 查看全量档案 '+nAll+' 只</a></div>':(curRevMode==="pick"&&revExpanded&&nAll>nEli?'<div class="more"><a onclick="toggleRev()">▲ 收起 · 只看高胜率精选 '+nEli+' 只</a></div>':'');
   box.innerHTML='<div class="phead"><h2>🧭 逆向观察池</h2>'+
+    (collapsed?'<span class="elite-badge" title="高胜率精选=底部刚启(距底≤3%)+60日均额≥1亿+结构自洽">🏆 高胜率精选 '+nEli+'</span>':'')+
     '<div class="chips">'+
       '<span class="chip'+chipOn("pick")+'" onclick="setRevMode(\'pick\')" title="实操纪律复合排序: ①底部刚启(距底≤3%)优先 ②档内 60日均额≥1亿稳健(≥5000万次之) ③跌得最透优先 — 一眼锁定最优埋伏">🌟 实操优选</span>'+
       '<span class="chip'+chipOn("dd")+'" onclick="setRevMode(\'dd\')" title="距历史高点回撤最深的在前 — 看谁跌得最透">📉 最深回撤</span>'+
@@ -847,7 +862,7 @@ function renderRevPool(){
       '<span class="chip'+chipOn("fd")+'" onclick="setRevMode(\'fd\')" title="底背驰触发距今最久未破位在前 — 老结构企稳时间越久越有效, 与「最新触发」互补查新仓">⏳ 底久未破</span>'+
       '<span class="chip'+chipOn("fr")+'" onclick="setRevMode(\'fr\')" title="底背驰触发时间最近的在前 — 刚出信号, 尚有空间">🕐 最新触发</span>'+
     '</div>'+
-    '<span class="phint">已超实操窗的底背驰老结构 · 深跌(距历史高≥30%)+未破背驰低点 · 埋伏候选 <b style="color:#18a058">'+n+' 只</b> · 标签五档：<b style="color:#18a058">绿=底部刚启(≤3%最佳埋伏)</b>/<b style="color:#b45309">橙=已起涨</b>/<b style="color:#c92a2a">红=追高风险</b>/<b style="color:#7b2cbf">紫=已错过</b> · 与顶部「实操信号雷达」(近端≤10天)互补 — 这里管提前埋伏/跟踪</span>'+
+    (collapsed?'<span class="phint">🏆 高胜率精选 — 底部刚启(<b style="color:#18a058">距底≤3%</b>)+<b style="color:#18a058">60日均额≥1亿</b>+结构自洽 · 共 <b style="color:#18a058">'+nEli+' 只</b> · 已滤除: 已起涨/追高/已错过档、薄流动(<1亿)、低自洽结构 — <b style="color:#b45309">全量档案 '+nAll+' 只点下方按钮展开</b></span>':(revExpanded?'<span class="phint">📚 全量档案 <b style="color:#18a058">'+nAll+' 只</b> — 含全部五档(含已起涨/追高/已错过跟踪) · 🏆 高胜率精选仅 '+nEli+' 只(底部刚启≤3%+≥1亿+自洽) · 标签五档：<b style="color:#18a058">绿=底部刚启(≤3%最佳埋伏)</b>/<b style="color:#b45309">橙=已起涨</b>/<b style="color:#c92a2a">红=追高风险</b>/<b style="color:#7b2cbf">紫=已错过</b> · 与顶部「实操信号雷达」(近端≤10天)互补</span>':'<span class="phint">已超实操窗的底背驰老结构 · 深跌(距历史高≥30%)+未破背驰低点 · 埋伏候选 <b style="color:#18a058">'+nAll+' 只</b> · 标签五档：<b style="color:#18a058">绿=底部刚启(≤3%最佳埋伏)</b>/<b style="color:#b45309">橙=已起涨</b>/<b style="color:#c92a2a">红=追高风险</b>/<b style="color:#7b2cbf">紫=已错过</b> · 与顶部「实操信号雷达」(近端≤10天)互补</span>'))+
     revRule()+'</div>'+
     '<div style="padding:6px 0 8px">'+rowsHtml+moreHtml+'</div>'+
     '<div class="foot">候选=底背驰(fresh&gt;10) + 距历史高≥30% + 现价&gt;背驰低点 · 止损参考=背驰低点(跌破失效) · 数据截至 '+esc(M.asof||"-")+' · 仅供研究参考，不构成投资建议</div>';
