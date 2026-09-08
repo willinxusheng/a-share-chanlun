@@ -171,6 +171,12 @@ for i, d in enumerate(valid):
     d["ma5s"] = ma(scores, i, 5)
     d["ma20s"] = ma(scores, i, 20)
 
+def _clamp_sc(x):
+    """R369: 展示口径统一 clamp 0-100(R346 只统一了 hist 列/final/_final_pct/顶层 score,
+    信号/背离记录数组的 score 字段漏网仍是 raw 理论域 [-12.5,112.5])。序保持变换,
+    阈值判定不受影响; 仅记录点用, 使同一日期在 hist 列/顶层/信号/背离里数值一致。"""
+    return round(max(0.0, min(100.0, x)), 1)
+
 # ---- 顶底背离(60日) ----
 divs = []
 for i in range(60, len(valid)):
@@ -181,9 +187,9 @@ for i in range(60, len(valid)):
     s_hi = max(x["score"] for x in window)
     s_lo = min(x["score"] for x in window)
     if d["close"] >= hi and d["score"] < s_hi - 8:
-        divs.append({"date": d["date"], "type": "top", "close": d["close"], "score": d["score"]})
+        divs.append({"date": d["date"], "type": "top", "close": d["close"], "score": _clamp_sc(d["score"])})
     if d["close"] <= lo and d["score"] > s_lo + 8:
-        divs.append({"date": d["date"], "type": "bottom", "close": d["close"], "score": d["score"]})
+        divs.append({"date": d["date"], "type": "bottom", "close": d["close"], "score": _clamp_sc(d["score"])})
 # 去重: 同类型20日内只留首个(按索引差)
 thin_divs = []
 last_idx = {"top": -999, "bottom": -999}
@@ -208,11 +214,11 @@ def gen_signals(buy_th, sell_th):
         run_buy = run_buy + 1 if d["score"] <= buy_th else 0
         run_sell = run_sell + 1 if d["score"] >= sell_th else 0
         if run_buy == 3 and i - last_sig["buy"] >= 20:
-            sigs.append({"date": d["date"], "type": "buy", "score": d["score"],
+            sigs.append({"date": d["date"], "type": "buy", "score": _clamp_sc(d["score"]),
                          "regime": d["regime"], "i": i})
             last_sig["buy"] = i
         if run_sell == 3 and i - last_sig["sell"] >= 20:
-            sigs.append({"date": d["date"], "type": "sell", "score": d["score"],
+            sigs.append({"date": d["date"], "type": "sell", "score": _clamp_sc(d["score"]),
                          "regime": d["regime"], "i": i})
             last_sig["sell"] = i
     return sigs
@@ -975,7 +981,7 @@ _final_val = round(max(0, min(100, last["score"] + adj_total)), 1)
 # 2026-01 五日 103~107 共 10 行超界): 展示层(main KPI/情绪板块徽章/温度计 zone 判定)
 # 读 score 会显示超界数字("104"/"-5"), 与 gauge/final/主图(均 clamp 0-100)数值分裂。
 # clamp 为序保持变换, zone/极端区判定不变(阈值 20/85 远离边界); round 与 hist 列一致。
-_score_disp = round(max(0.0, min(100.0, last["score"])), 1)
+_score_disp = _clamp_sc(last["score"])
 final_pct = _final_pct(valid, _final_val)
 
 result = {
