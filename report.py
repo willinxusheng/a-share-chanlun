@@ -1668,7 +1668,10 @@ def card_html(sym, name, klines, r, wcls, health, conf):
     sc_color = SCENARIO_COLOR.get(cls["scenario"], BLUE)
     amp = abs(cls.get("last_bi_pct", 0)) * 100
     spark = sparkline(klines, RED if chg >= 0 else GREEN)
-    agree = r["agreement"]["rate"] * 100
+    # R363: 双法一致率守卫——analyze 骨架(空/退化输入) agreement.total=0 时 rate 恒 0,
+    # 此前渲染「双法一致 0%」失实(无任何可比笔却宣告 0% 一致)。total==0 显示"—"。
+    _ag = r.get("agreement") or {}
+    agree = (_ag.get("rate", 0) * 100) if _ag.get("total", 0) else None
     ma = cls.get("ma_alignment")
     ma_txt = ma["alignment"] if ma else "—"
     ma_color = {"多头排列": RED, "空头排列": GREEN, "纠缠": "#64748b"}.get(ma_txt, "#64748b")
@@ -1693,7 +1696,8 @@ def card_html(sym, name, klines, r, wcls, health, conf):
     _zs = r["zhongshu"][-1] if r["zhongshu"] else None
     _zs_txt = ("%s · %d笔" % ("延伸" if _zs.get("extension") else "标准", _zs["count"])) if _zs else "—"
     _tt = cls.get("trend_type", "—")
-    _tt_color = {"上涨走势(趋势)": RED, "下跌走势(趋势)": GREEN, "盘整/扩张走势": "#64748b", "盘整走势": "#64748b"}.get(_tt, "#0f172a")
+    _tt_color = {"上涨走势(趋势)": RED, "下跌走势(趋势)": GREEN, "盘整/扩张走势": "#64748b",
+                 "盘整走势": "#64748b"}.get(_tt, "#0f172a")  # R363: 补「盘整走势」灰(中枢<3 时 classify 保留初始值, 此前漏配落 INK 墨色, 与盘整/扩张同义异色)
     # 关键缺口（未补，±18%内最近3个）—— 中枢之外最重要的价位锚，A股「逢缺必补」规律下意义显著
     _gaps_unf = [g for g in r.get("gaps", []) if not g["filled"]]
     _gaps_near = [g for g in _gaps_unf
@@ -1725,14 +1729,22 @@ def card_html(sym, name, klines, r, wcls, health, conf):
     _vt = r.get("vol_trend") or {}
     _vt_txt = ("%s %.2fx" % (_vt.get("state", ""), _vt.get("ratio", 1))) if _vt else "—"
     _vt_color = {"放量": "#e54545", "缩量": "#2563eb", "温和": "#64748b"}.get(_vt.get("state"), "#64748b")
-    # 信号成熟度（#29·稳健度三级重构）：最后一支已完成笔跨度，年轻信号属"待确认"而非可靠结论
-    _stab = r.get("stability") or {}
-    _mat = _stab.get("maturity", "established")
-    _lv = _stab.get("level", "稳健")
-    _lbb = _stab.get("last_bi_bars", 0)
-    _mat_txt = ("信号成熟" if _mat == "established" else "信号年轻·待确认")
-    _mat_c = ("#18a058" if _mat == "established" else "#d97706")
-    _mat_chip = badge(f'{_mat_txt} · 末笔{_lbb}日', _mat_c)
+    # 信号成熟度（#29·稳健度三级重构）：最后一支已完成笔跨度，年轻信号属"待确认"而非可靠结论。
+    # R363: stability 缺失防御——analyze 骨架/with_stability=False 输入 stability=None, 此前
+    # 默认 established 渲染「信号成熟·末笔0日」绿徽章(无稳定性数据却宣告成熟, 语义失实)。
+    # 缺失时给中性「稳定性未知」徽章; 有数据才走 established/young 两级(正常路径输出逐字不变)。
+    _stab = r.get("stability") or None
+    _mat = _stab.get("maturity") if _stab else None
+    _lbb = _stab.get("last_bi_bars", 0) if _stab else None
+    if _mat == "established":
+        _mat_txt, _mat_c = "信号成熟", "#18a058"
+        _lbb_txt = (" · 末笔%d日" % _lbb) if _lbb is not None else ""
+    elif _mat == "young":
+        _mat_txt, _mat_c = "信号年轻·待确认", "#d97706"
+        _lbb_txt = (" · 末笔%d日" % _lbb) if _lbb is not None else ""
+    else:
+        _mat_txt, _mat_c, _lbb_txt = "稳定性未知", "#94a3b8", ""
+    _mat_chip = badge(_mat_txt + _lbb_txt, _mat_c)
     return f"""
     <div class="card" id="card-{sym}" data-sym="{sym}" data-jump style="border-left:4px solid {sc_color};cursor:pointer">
       <div class="card-head"><span class="idx-name">{name}</span><span class="sym">{sym}</span></div>
@@ -1759,15 +1771,20 @@ def card_html(sym, name, klines, r, wcls, health, conf):
         <span style="color:{m_color2}">月 {_md}</span>
         <span style="color:#94a3b8">（{cls['scenario']}/{_wsc}/{_msc}）</span><br>
         <span style="color:{_res_color};font-weight:700">{_res}</span></b></div>
-      <div class="chips">{score_chip(health, "结构健康")}{score_chip(conf, "推演置信")}{badge(f'双法一致 {agree:.0f}%', '#64748b')}{_mat_chip}</div>
+      <div class="chips">{score_chip(health, "结构健康")}{score_chip(conf, "推演置信")}{badge(f'双法一致 {agree:.0f}%' if agree is not None else '双法一致 —', '#64748b')}{_mat_chip}</div>
     </div>"""
 
 
 # ================= 关键位表 =================
 def strategy_text(cls, zs):
-    if zs is None:
-        return "结构数据不足，观望"
     sc = cls["scenario"]
+    if zs is None:
+        # R363: 区分「真数据不足」(classify 空输入骨架 scenario=数据不足)与「有笔无中枢」
+        # (zss 空但 bis 有——无中枢·向上/向下笔, 数据正常仅结构未成型)——此前一律渲染
+        # 「结构数据不足」, 令无中枢指数被误称数据不足、与「暂按笔级别对待」的 classify 语义冲突。
+        if sc in ("数据不足", "震荡待方向"):
+            return "结构数据不足，观望"
+        return "暂无已完成中枢，按笔级别方向观望；中枢成型后再定买卖点"
     if sc == "多头延续":
         return f"持股为主；回踩 ZG {zs['zg']:.0f} 不破=三买可加；跌破 ZD {zs['zd']:.0f} 转空"
     if sc in ("中枢震荡偏多", "高位整理未破前高"):
@@ -1776,11 +1793,21 @@ def strategy_text(cls, zs):
         return f"反抽不过 ZD {zs['zd']:.0f} 减仓；回到中枢内部再观察"
     if sc == "反弹未回中枢":
         return f"反弹未回中枢 ZD {zs['zd']:.0f}，观望；收复 ZD 转震荡，再上破 ZG {zs['zg']:.0f} 转多"
+    if sc == "空头延续":
+        # R363: 此前无显式分支落入 default 被标「结构中性(空头延续)」——与情景语义自相矛盾
+        # (空头延续 ∈ SC_BEAR, 2021-24 熊市常见情景, 当前窗口未触发但历史上必现)。补显式空头措辞。
+        return f"空头延续中，反抽不过 ZD {zs['zd']:.0f} 减仓防守；重回中枢内部才转震荡"
     if sc == "背驰见顶风险":
         return f"顶背驰确认中，减仓防守；支撑看 ZG {zs['zg']:.0f}"
     if sc == "背驰见底机会":
         return f"底背驰确认中，分批布局；压力看 ZD {zs['zd']:.0f}"
-    # 其余(无中枢·向上/向下笔等中性/未知情景)给中性观望建议, 不再误标「空头格局减仓」(R164)
+    # R363: 集合护栏(结构性防漏)——SC_BULL/SC_BEAR 全集成员但未配显式分支(未来新增情景)时
+    # 仍按方向给措辞, 杜绝再出现「空头情景被标结构中性」式自相矛盾(根因=分支表与集合靠手写维护)。
+    if sc in SC_BEAR:
+        return f"偏空结构（{sc}），反抽不过 ZD {zs['zd']:.0f} 减仓防守；重回中枢内部再观察"
+    if sc in SC_BULL:
+        return f"偏多结构（{sc}），回踩不破 ZG {zs['zg']:.0f} 持股；跌破 ZD {zs['zd']:.0f} 转弱"
+    # 其余(震荡待方向等真中性情景)给中性观望建议, 不再误标「空头格局减仓」(R164)
     return f"结构中性（{sc}），观望为主；突破 ZG {zs['zg']:.0f} 转多，跌破 ZD {zs['zd']:.0f} 转空"
 
 
@@ -1797,10 +1824,17 @@ def levels_table(data, results, results_week, results_month, scores):
         close = d["klines"][-1]["close"]
         sc_color = SCENARIO_COLOR.get(cls["scenario"], BLUE)
         w_color = SCENARIO_COLOR.get(wcls["scenario"], BLUE)
-        if cls.get("last_bi_dir") == wcls.get("last_bi_dir"):
-            syn = badge(f'共振{"多" if cls["last_bi_dir"] == 1 else "空"}', RED if cls["last_bi_dir"] == 1 else GREEN, '✓ ')
+        # R363: 方向有效性守卫——classify 空/退化输入早返回 last_bi_dir=0(analyze([]) 骨架 scenario=数据不足),
+        # 此前 0==0 落入相等分支、再因 !=1 误标「共振空」绿勾(数据不足被宣告为看空共振, 语义失实)。
+        # 任一层方向无效(0/None)时给中性「数据不足」徽章, 不进共振/背离判定。
+        _dd0, _wd0 = cls.get("last_bi_dir"), wcls.get("last_bi_dir")
+        if _dd0 in (1, -1) and _wd0 in (1, -1):
+            if _dd0 == _wd0:
+                syn = badge(f'共振{"多" if _dd0 == 1 else "空"}', RED if _dd0 == 1 else GREEN, '✓ ')
+            else:
+                syn = badge('日强周弱背离' if _dd0 == 1 else '日弱周强背离', '#d97706', '⚠ ')
         else:
-            syn = badge('日强周弱背离' if cls["last_bi_dir"] == 1 else '日弱周强背离', '#d97706', '⚠ ')
+            syn = badge('数据不足', '#94a3b8')
         if zs:
             d_zg = (close / zs["zg"] - 1) * 100
             d_zd = (close / zs["zd"] - 1) * 100
@@ -1975,10 +2009,15 @@ def forecast_summary_table(data, results, results_week, results_month, forecast_
             continue
         cls = r["classify"]
         sc_color = SCENARIO_COLOR.get(cls["scenario"], BLUE)
-        if cls.get("last_bi_dir") == wcls.get("last_bi_dir"):
-            syn = badge(f'共振{"多" if cls["last_bi_dir"] == 1 else "空"}', RED if cls["last_bi_dir"] == 1 else GREEN, '✓ ')
+        # R363: 同 levels_table —— 日/周任一层方向无效(0/None)时给中性徽章, 勿把「数据不足」误标「共振空」。
+        _dd0, _wd0 = cls.get("last_bi_dir"), wcls.get("last_bi_dir")
+        if _dd0 in (1, -1) and _wd0 in (1, -1):
+            if _dd0 == _wd0:
+                syn = badge(f'共振{"多" if _dd0 == 1 else "空"}', RED if _dd0 == 1 else GREEN, '✓ ')
+            else:
+                syn = badge('日强周弱背离' if _dd0 == 1 else '日弱周强背离', '#d97706', '⚠ ')
         else:
-            syn = badge('日强周弱背离' if cls["last_bi_dir"] == 1 else '日弱周强背离', '#d97706', '⚠ ')
+            syn = badge('数据不足', '#94a3b8')
         _lv = fi.get("level", "稳健")
         _dev = (fi.get("fc", {}) or {}).get("path_dev", 0) or 0
         _lv_disp = (_lv + "·结构/统计偏离") if abs(_dev) > 0.08 else _lv
