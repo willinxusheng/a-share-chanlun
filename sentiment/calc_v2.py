@@ -281,6 +281,18 @@ for s in sigs:
     s.pop("i")
 
 def regime_stats(sigs):
+    # R374: avg(均值)右偏失真披露 —— r20 样本右偏(少数大赢家拉高均值), 如 2026-09-08 实证
+    # bear-buy n=11 avg +1.77 而中位 -1.29(半数买入点 20 日后仍亏), 纯均值会高估信号价值。
+    # 新增 med(中位 r20)与 hit%(方向命中: buy=r20>0 / sell=r20<0), 保留 avg 兼容旧消费端。
+    def _stat(vs, is_buy):
+        if not vs:
+            return {"n": 0}
+        s = sorted(vs)
+        mid = len(s) // 2
+        med = s[mid] if len(s) % 2 else (s[mid - 1] + s[mid]) / 2.0
+        hit = sum(1 for v in vs if (v > 0 if is_buy else v < 0))
+        return {"n": len(vs), "avg": round(sum(vs) / len(vs), 2),
+                "med": round(med, 2), "hit": round(hit * 100.0 / len(vs), 1)}
     out = {}
     for rg in ["bull", "bear"]:
         bs = [s for s in sigs if s["regime"] == rg and s["r20"] is not None]
@@ -291,8 +303,8 @@ def regime_stats(sigs):
         s20 = [s["r20"] for s in bs if s["type"] == "sell"]
         out[rg] = {
             "n": len(bs),
-            "buy": ({"n": len(b20), "avg": round(sum(b20) / len(b20), 2)} if b20 else {"n": 0}),
-            "sell": ({"n": len(s20), "avg": round(sum(s20) / len(s20), 2)} if s20 else {"n": 0}),
+            "buy": _stat(b20, True),
+            "sell": _stat(s20, False),
         }
     return out
 

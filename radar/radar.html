@@ -503,7 +503,11 @@ function renderBanner(){
     if(isFinite(t)&&Date.now()-t>4*864e5)
       msgs.push('<b>⚠ 数据已 '+(Date.now()-t<0?0:Math.floor((Date.now()-t)/864e5))+' 天未更新</b>：截至 '+esc(m.asof||"-")+'（构建于 '+esc(m.build_time)+'），请检查云端流水线');
   }
-  if(msgs.length){b.className="";b.innerHTML=msgs.join('<br>');b.style.display="block";}
+  if(msgs.length){
+    // R374: 新浪裸价占比>=50%(超半数无复权保护)升级红条醒目警示 —— 09-07/09-08 实证 77~82%
+    // 裸价降级期间黄条(普通横幅)不醒目易被忽略; .err 红底样式已存在(#dataBanner.err)。
+    b.className=(m.degraded&&(m.degraded_pct||0)>=50)?"err":"";
+    b.innerHTML=msgs.join('<br>');b.style.display="block";}
   else{b.innerHTML="";b.style.display="none";}
   // R323: 横幅激活(sticky 钉顶 z999)会盖住同钉顶的行业表头(.ind-grid sticky z30)与个股浮层表头(.stk-head-float fixed z35)
   // → 同步 --bh 变量让两者 top 偏移到横幅下方; 横幅隐藏时归 0 还原原行为

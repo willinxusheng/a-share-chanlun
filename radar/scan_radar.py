@@ -76,8 +76,11 @@ SRC_ONLY = "auto"              # auto=腾讯qfq→东财qfq→新浪 | tx=仅腾
 # R270: 源停用/复探参数 —— 腾讯(CI境外被风控整段失败)与东财(境外可能不可达)各自独立:
 # 连续失败 TX_FAIL_MAX 次 → 整段停用该源(避免逐票空耗 timeout); 停用中每 REPROBE_EVERY 票
 # 轻量复探一次, 源恢复即自动切回(一次抖动不再废掉整 run 主源)。
-TX_FAIL_MAX = 6
-EM_FAIL_MAX = 6
+# R374: 阈值 6→15 —— 09-07/09-08 实证 77~82% 裸价降级中, 真实网络/风控失败(err/empty/stale)
+# 与票面短历史(tx_short/em_short, 次新股无足够根数)混在 6 连败窗口内即冤停复权主源, 致
+# 全市场误转新浪裸价。放宽阈值给偶发抖动容错; 成段故障 15 连败也只空耗 ~5s(0.35s/票), 无损。
+TX_FAIL_MAX = 15
+EM_FAIL_MAX = 15
 TX_REPROBE_EVERY = 300
 EM_REPROBE_EVERY = 300
 EM_TIMEOUT = 10                # 东财单请求超时(不可达时快速失败, 不拖全量)
@@ -507,6 +510,11 @@ def _try_tx(sym):
     if not ks:
         if tag and tag.startswith("tx_skip"):
             return [], tag          # R348: 北交 920 段腾讯接口缺陷(恒1根) —— 结构性跳过, 非源故障, 不计连败
+        if tag and tag.startswith("tx_short"):
+            # R374: 短序列(<30根)多为次新股上市不足(票面数据面), 非腾讯源故障 ——
+            # 计连败会与真实网络失败(err/empty/stale)加总后冤停主源(09-07/09-08 82%裸价
+            # 降级中 tx_short 21 票混入 6 连败窗口即触发整段停用); 切下级源但不动状态机。
+            return [], tag
         _src_fail(_tx_down, _tx_lock, tag.split(":")[0])
         return [], tag
     with _tx_lock:
@@ -521,7 +529,11 @@ def _try_em(sym):
     _em_th.wait()
     ks, tag = _fetch_em(sym)
     if not ks:
-        _src_fail(_em_down, _em_lock, tag.split(":")[0])   # em_err:/em_short: 归一化
+        if tag and tag.startswith("em_short"):
+            # R374: 东财短序列(<120根)多为次新股/上市不足(票面), 非东财源故障 —— 不计连败
+            # (与 tx_short 对称, 防票面失败混入连败窗口冤停次源致全市场转裸价)。
+            return [], tag
+        _src_fail(_em_down, _em_lock, tag.split(":")[0])   # em_err:/em_stale 归一化计连败
         return [], tag
     with _em_lock:
         _em_down["count"] = 0
@@ -1387,6 +1399,9 @@ def main():
         ind_cnt[i] = ind_cnt.get(i, 0) + 1
     deg = _src_degraded(src_cnt)
     deg_reason = _degraded_reason(src_cnt) if deg else ""
+    # R374: 降级严重度百分比(新浪裸价占比, 前端按阈值分级渲染: <50% 普通黄条 / >=50% 红条)
+    _src_tot = sum(src_cnt.values()) or 1
+    deg_pct = round(src_cnt.get("sina", 0) * 100.0 / _src_tot)
     # R270: 各源失败原因统计(停用状态机 reasons) -> meta.src_fail, 前端/人工可查腾讯为何不可用
     _tx_r = dict(_tx_down.get("reasons") or {})
     _em_r = dict(_em_down.get("reasons") or {})
@@ -1407,6 +1422,7 @@ def main():
         "n_signal": len(signals), "n_ind": len(industries),
         "scen_cnt": scen_cnt, "gate_cnt": gate_cnt, "src_cnt": src_cnt,
         "degraded": deg,                       # R270: 新浪裸价占比>30% 即降级(复权源占比视角)
+        "degraded_pct": deg_pct,               # R374: 新浪占比%(前端严重度分级渲染)
         "degraded_reason": deg_reason,         # 降级黄条文案(前端优先展示)
         "src_fail": src_fail,                  # 各源失败原因计数(诊断腾讯/东财为何不可用)
         "mkt_last": _mkt_last or "",           # R272: 市场末交易日锚(新浪探测; 空=探测失败回落窗口表)

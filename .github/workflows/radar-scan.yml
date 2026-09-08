@@ -58,6 +58,18 @@ jobs:
           else
             echo "radar/radar.json 不存在, 执行全量扫描"
           fi
+          # R374 竞态补查(09-08 实证双扫): concurrency 排队让次发在首发 commit 后启动,
+          # 但 actions/checkout 若早于首发 push 完成则拿到旧 main(build_date=昨) → 守卫
+          # 误放行致同链路双全量扫描(两发各跑 ~60min, 第二版覆盖第一版)。守卫内主动
+          # fetch 远端 main 再查一次: 远端已含今日产物即跳过(消除 checkout 时间差)。
+          git fetch origin main -q 2>/dev/null || true
+          RBD=$(git show FETCH_HEAD:radar/radar.json 2>/dev/null | python3 -c "import json,sys;print(json.load(sys.stdin)['meta'].get('build_time','')[:10])" 2>/dev/null || echo "")
+          echo "远端 main radar build_date=$RBD"
+          if [ "$RBD" = "$TODAY" ]; then
+            echo "远端 main 已有今日产物(首发已提交), 本次 dispatch 跳过(防竞态双扫)"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
 
       - name: 配置 Python
         if: steps.guard.outputs.skip != 'true'
