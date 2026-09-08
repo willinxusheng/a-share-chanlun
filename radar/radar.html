@@ -271,13 +271,17 @@ h1{font-size:21px;font-weight:700;letter-spacing:.4px;line-height:1.3}   /* R323
 .revpool .revrule .sw{display:inline-block;min-width:58px;margin-right:2px}
 .revpool .prow{display:grid;grid-template-columns:minmax(140px,1.35fr) minmax(64px,.65fr) minmax(62px,.62fr) minmax(62px,.6fr) minmax(62px,.6fr) minmax(98px,.95fr) minmax(118px,1.05fr);gap:8px;align-items:center;padding:7px 12px;cursor:pointer;border-top:1px solid #f5f8fb;transition:background .12s;font-size:12px}
 .revpool .prow:hover{background:#f2f9f5}
+/* 表头: 与 prow 同 grid 列定义对齐, 浅灰底小字标注每列语义(对应 .small 行) */
+.revpool .phdr{display:grid;grid-template-columns:minmax(140px,1.35fr) minmax(64px,.65fr) minmax(62px,.62fr) minmax(62px,.6fr) minmax(62px,.6fr) minmax(98px,.95fr) minmax(118px,1.05fr);gap:8px;align-items:center;padding:6px 12px;background:#f8fafc;font-size:10.5px;color:#64748b;font-weight:600;letter-spacing:.2px;border-top:1px solid #eef2f7;line-height:1.4}
+.revpool .phdr span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.revpool .phdr span.ta-r{text-align:right}
 .revpool .prow .nm{font-weight:700;color:var(--ink);font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.5;min-width:0}
 .revpool .prow .sub{font-size:10.5px;color:#94a3b8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.45}
 .revpool .prow .big{font-size:13px;font-weight:800;line-height:1.5}
 .revpool .prow .small{font-size:10px;color:#94a3b8;line-height:1.5}
 .revpool .prow .devv{font-weight:800;font-size:13px;display:flex;align-items:center;gap:4px;flex-wrap:wrap}
 .revpool .prow .dtlbl{font-size:9.5px;font-weight:700;border:1px solid;padding:1px 5px;border-radius:4px;line-height:1.4;letter-spacing:.2px}
-@media(max-width:980px){.revpool .prow{grid-template-columns:minmax(110px,1.25fr) minmax(56px,.65fr) minmax(56px,.6fr) minmax(56px,.55fr) minmax(58px,.6fr) minmax(90px,.92fr) minmax(110px,.95fr);padding:7px 10px;font-size:11px}.revpool .phead{padding:12px}}
+@media(max-width:980px){.revpool .prow,.revpool .phdr{grid-template-columns:minmax(110px,1.25fr) minmax(56px,.65fr) minmax(56px,.6fr) minmax(56px,.55fr) minmax(58px,.6fr) minmax(90px,.92fr) minmax(110px,.95fr);padding:7px 10px;font-size:11px}.revpool .phdr{padding:5px 10px;font-size:10px}.revpool .phead{padding:12px}}
 .gate-tag{font-size:9px;font-weight:700;border-radius:4px;padding:0 4px;margin-left:3px;vertical-align:1px}
 .gate-tag.g1{background:#fff3cd;color:#92400e}.gate-tag.g2{background:#fde2e2;color:#c92a2a}.gate-tag.g3{background:#e0f2fe;color:#075985}
 .chart-sec{display:grid;grid-template-columns:1fr 1fr;gap:14px}
@@ -853,6 +857,8 @@ function renderRevPool(){
   var rowsHtml=shown.map(revRow).join('');
   var collapsed=curRevMode==="pick"&&!revExpanded&&nEli>0&&nEli<nAll;  // 仅 pick+未展开+确有精选 才折叠
   var moreHtml=collapsed?'<div class="more"><a onclick="toggleRev()" style="color:#18a058;font-weight:700">▼ 查看全量档案 '+nAll+' 只</a></div>':(curRevMode==="pick"&&revExpanded&&nAll>nEli?'<div class="more"><a onclick="toggleRev()">▲ 收起 · 只看高胜率精选 '+nEli+' 只</a></div>':'');
+  // R378: 7 列表头, 与 revRow 列定义一致(浅灰底小字标注每列语义)
+  var phdrHtml='<div class="phdr"><span>标的</span><span>距历史高</span><span>现价</span><span>底线·止损参考</span><span>60日均额</span><span>底背驰触发</span><span>距背低点</span></div>';
   box.innerHTML='<div class="phead"><h2>🧭 逆向观察池</h2>'+
     (collapsed?'<span class="elite-badge" title="高胜率精选=底部刚启(距底≤3%)+60日均额≥1亿+结构自洽">🏆 高胜率精选 '+nEli+'</span>':'')+
     '<div class="chips">'+
@@ -864,7 +870,7 @@ function renderRevPool(){
     '</div>'+
     (collapsed?'<span class="phint">🏆 高胜率精选 — 底部刚启(<b style="color:#18a058">距底≤3%</b>)+<b style="color:#18a058">60日均额≥1亿</b>+结构自洽 · 共 <b style="color:#18a058">'+nEli+' 只</b> · 已滤除: 已起涨/追高/已错过档、薄流动(<1亿)、低自洽结构 — <b style="color:#b45309">全量档案 '+nAll+' 只点下方按钮展开</b></span>':(revExpanded?'<span class="phint">📚 全量档案 <b style="color:#18a058">'+nAll+' 只</b> — 含全部五档(含已起涨/追高/已错过跟踪) · 🏆 高胜率精选仅 '+nEli+' 只(底部刚启≤3%+≥1亿+自洽) · 标签五档：<b style="color:#18a058">绿=底部刚启(≤3%最佳埋伏)</b>/<b style="color:#b45309">橙=已起涨</b>/<b style="color:#c92a2a">红=追高风险</b>/<b style="color:#7b2cbf">紫=已错过</b> · 与顶部「实操信号雷达」(近端≤10天)互补</span>':'<span class="phint">已超实操窗的底背驰老结构 · 深跌(距历史高≥30%)+未破背驰低点 · 埋伏候选 <b style="color:#18a058">'+nAll+' 只</b> · 标签五档：<b style="color:#18a058">绿=底部刚启(≤3%最佳埋伏)</b>/<b style="color:#b45309">橙=已起涨</b>/<b style="color:#c92a2a">红=追高风险</b>/<b style="color:#7b2cbf">紫=已错过</b> · 与顶部「实操信号雷达」(近端≤10天)互补</span>'))+
     revRule()+'</div>'+
-    '<div style="padding:6px 0 8px">'+rowsHtml+moreHtml+'</div>'+
+    '<div style="padding:6px 0 8px">'+phdrHtml+rowsHtml+moreHtml+'</div>'+
     '<div class="foot">候选=底背驰(fresh&gt;10) + 距历史高≥30% + 现价&gt;背驰低点 · 止损参考=背驰低点(跌破失效) · 数据截至 '+esc(M.asof||"-")+' · 仅供研究参考，不构成投资建议</div>';
 }
 function sortInds(mode){
