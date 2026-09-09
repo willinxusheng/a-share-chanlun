@@ -612,16 +612,19 @@ def classify(bis, zss, beichis, close, wcls=None, segments=None, seg_beichi=None
     mdesc = ""
     month_dir = 0  # 月线大级别方向：1=多头背景 / -1=空头背景 / 0=待明；供 forecast 三重共振使用
     if mcls is not None:
-        mdir = mcls.get("last_bi_dir")
         m_scen = mcls.get("scenario", "")
         # 月线背景方向以「月线自身情景分类」判定（比单看 last_bi_dir 更稳健，能区分震荡与趋势）
         if m_scen in SC_BULL:
             month_dir = 1
         elif m_scen in SC_BEAR:
             month_dir = -1
-        if mdir == 1:
+        # R394: mdesc 方向与 month_dir 同源——旧实现 mdesc 按月线 last_bi_dir 描述方向，而
+        # month_dir/resonance 按 scenario 极性判定，口径分裂致「高位整理未破前高」(SC_BULL 强势
+        # 整理、月线回调笔 dir=-1) 时 mdesc 渲染「月线处空头背景」与 month_dir=+1 自相矛盾，
+        # 且同步污染 detail 的【区间套】文本与卡片 month_context 两处展示。统一 scenario 极性。
+        if month_dir == 1:
             mdesc = "月线处多头背景(%s)" % m_scen
-        elif mdir == -1:
+        elif month_dir == -1:
             mdesc = "月线处空头背景(%s)" % m_scen
         else:
             mdesc = "月线方向待明(%s)" % m_scen
