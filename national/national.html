@@ -128,6 +128,27 @@ tbody tr:last-child td{border-bottom:0}
 .ebadge.up{background:var(--up-soft);color:#c53030;border:1px solid #f3c6c6}
 .ebadge.dn{background:var(--down-soft);color:#0f7a52;border:1px solid #bce3d2}
 .ebadge.flat{background:#eef1f5;color:#64748b;border:1px solid #dde4ec}
+/* ===== 表格增强: 排序/序号/迷你条/斑马/计数 ===== */
+.tsc th.sortable{cursor:pointer;user-select:none;transition:background .15s}
+.tsc th.sortable:hover{background:#e7eef7;color:#1d4f8f}
+.tsc th.sortable::after{content:'';display:inline-block;width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;margin-left:6px;opacity:.32;vertical-align:2px}
+.tsc th.sortable.srt{background:#e5edf8;color:#1d4f8f}
+.tsc th.sortable.srt.asc::after{border-bottom:5px solid #2b6cb0;border-top:0;vertical-align:1px;opacity:1}
+.tsc th.sortable.srt.desc::after{border-top:5px solid #2b6cb0;border-bottom:0;opacity:1}
+.tsc th.rn,.tsc td.rn{width:32px;text-align:center;padding-left:4px;padding-right:4px;color:#9aa7b8;font-size:11px;font-variant-numeric:tabular-nums}
+.tsc .l{text-align:left}
+.tsc td.num{font-variant-numeric:tabular-nums}
+.tsc tbody tr:nth-child(even) td{background:rgba(246,249,253,.6)}
+.tsc tbody tr:hover td{background:#f0f6fc}
+.zero{color:#9aa7b8!important}
+.mbar{display:inline-block;width:52px;height:5px;background:#e7edf5;border-radius:3px;overflow:hidden;vertical-align:1.5px;margin-right:6px;flex:none}
+.mbar i{display:block;height:100%;border-radius:3px;background:linear-gradient(90deg,#6aa4d8,#2b6cb0)}
+.cnt{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-top:8px;font-size:11.5px;color:#8a97aa}
+.cnt b{color:#33475f;font-variant-numeric:tabular-nums;font-weight:700}
+.cnt .n{color:#a4b0bf}
+.tsc .empty td{text-align:center;color:#94a3b8;padding:24px 12px;font-size:12.5px}
+.nm{font-weight:600;color:var(--ink);line-height:1.4}
+.sub{font-size:11px;color:#8a97aa;margin-top:2px;line-height:1.4;font-variant-numeric:tabular-nums;white-space:nowrap}
 /* ========== 时间轴 ========== */
 .ev{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .ev .it{display:flex;gap:12px;align-items:flex-start;background:linear-gradient(180deg,#fbfdff,#f6f9fc);
@@ -217,20 +238,36 @@ footer{color:var(--muted);font-size:11.5px;line-height:1.8;padding:2px 2px 0}
   <div class="toolrow"><span class="n">主体筛选</span>
     <select id="filt"><option value="all">全部主体</option></select>
   </div>
-  <div class="tsc"><table>
-    <thead><tr><th>代码 / 名称</th><th>主体</th><th>持股（亿股）</th><th>占流通股本</th><th>较上季末</th></tr></thead>
+  <div class="tsc" id="tscTop"><table>
+    <thead><tr>
+      <th class="rn">#</th>
+      <th class="l">代码 / 名称</th>
+      <th class="l">主体</th>
+      <th class="sortable num" data-k="hold">持股（亿股）</th>
+      <th class="sortable num" data-k="ratio">占流通股本</th>
+      <th class="sortable num" data-k="chg">较上季末</th>
+    </tr></thead>
     <tbody id="tbody"></tbody>
   </table></div>
+  <div class="cnt"><span>共 <b id="topN">–</b> 只（最新报告期口径 · 最多展示 60）</span><span class="n">点击列头排序</span></div>
 </div>
 
 <div class="card" id="sec-etf">
   <div class="mt"><h2>日度代理 · 宽基 ETF 资金流（疑似国家队）</h2>
     <div class="ft">ETF 总份额<b>每交易日披露</b> · 日度份额×净值=当日净申赎资金</div></div>
   <div class="hint">口径：份额为全体持有人合计，汇金 2024 起为宽基 ETF 最大买家之一，大额净申购窗口与国家队增持实证相关——<b style="color:#b45309">方向参考，非精确真身</b>。每日盘后自动打点，多日后自动累积曲线</div>
-  <div class="tsc" style="max-height:300px"><table>
-    <thead><tr><th>宽基 ETF</th><th>份额（亿份）</th><th>较上快照日</th><th>池内占比</th><th>资金方向</th></tr></thead>
+  <div class="tsc" id="tscEtf" style="max-height:300px"><table>
+    <thead><tr>
+      <th class="rn">#</th>
+      <th class="l">宽基 ETF</th>
+      <th class="sortable num" data-k="shr">份额（亿份）</th>
+      <th class="sortable num" data-k="dshr">较上快照日</th>
+      <th class="num">池内占比</th>
+      <th class="l">资金方向</th>
+    </tr></thead>
     <tbody id="etfTb"></tbody>
   </table></div>
+  <div class="cnt"><span>合计 <b id="etfTot">–</b> 亿份 · <b id="etfN">–</b> 只</span><span class="n">份额×净值口径 · 大额净申购为疑似国家队窗口</span></div>
   <div class="chart" id="chE" style="height:230px;margin-top:12px"></div>
   <div class="fnote" id="etfHint"></div>
 </div>
@@ -354,19 +391,64 @@ function render(data){
   drawTop(top,stocks,'all');
 }
 
+/* ===== 表 1: 持仓明细 (排序/序号/迷你条/计数) ===== */
+var TOPCTX={top:[],stocks:{},f:'all'},S1={k:null,d:-1};
+function markTh(ths,s){
+  for(var i=0;i<ths.length;i++)ths[i].classList.remove('srt','asc','desc');
+  for(var j=0;j<ths.length;j++){var t=ths[j];
+    if(t.getAttribute('data-k')===s.k){t.classList.add('srt');t.classList.add(s.d>0?'asc':'desc');}}
+}
+function v1(r,k,stocks){
+  if(k==='hold')return r.hold;
+  if(k==='ratio')return r.free_ratio==null?null:r.free_ratio;
+  if(k==='chg'){var st=stocks[r.code]||{},sb=st.b?st.b[r.bucket]:null;
+    if(sb&&sb.length>1)return sb[sb.length-1][1]-sb[sb.length-2][1];return null;}
+  return null;
+}
 function drawTop(top,stocks,f){
-  var rows=top.filter(function(r){return f==='all'||r.bucket===f;}).slice(0,60);
-  var tb=document.getElementById('tbody');
-  if(!rows.length){tb.innerHTML='<tr><td colspan="5" style="text-align:center;color:#94a3b8">无命中</td></tr>';return;}
-  tb.innerHTML=rows.map(function(r){
-    var st=stocks[r.code]||{},sb=st.b?st.b[r.bucket]:null,chg='-';
-    if(sb&&sb.length>1){var d=sb[sb.length-1][1]-sb[sb.length-2][1];chg=d===0?'<span class="chg-dn">0</span>':(d>0?'<span class="chg-up">+'+fmtB(d)+'</span>':'<span class="chg-dn">'+fmtB(d)+'</span>');}
-    return '<tr><td><span class="stock">'+esc(r.name)+'</span> <span class="code">'+esc(r.code)+'</span></td>'+
-      '<td style="text-align:left">'+mtag(r.bucket)+'</td>'+
-      '<td>'+fmtB(r.hold)+'</td>'+
-      '<td>'+(r.free_ratio?r.free_ratio.toFixed(1)+'%':'-')+'</td>'+
-      '<td>'+chg+'</td></tr>';
+  TOPCTX={top:top,stocks:stocks,f:f};
+  var thd=document.getElementById('tscTop');
+  if(thd){var ths=thd.querySelectorAll('th.sortable');markTh(ths,S1);
+    for(var i=0;i<ths.length;i++){if(ths[i].onclick)continue;ths[i].onclick=function(){
+      var k=this.getAttribute('data-k');
+      if(S1.k===k)S1.d=-S1.d;else{S1.k=k;S1.d=-1;}
+      markTh(document.getElementById('tscTop').querySelectorAll('th.sortable'),S1);
+      drawTopRows();
+    };}
+  }
+  drawTopRows();
+}
+function drawTopRows(){
+  var top=TOPCTX.top,stocks=TOPCTX.stocks,f=TOPCTX.f,tb=document.getElementById('tbody');
+  var rows=top.filter(function(r){return f==='all'||r.bucket===f;});
+  if(!rows.length){
+    tb.innerHTML='<tr class="empty"><td colspan="6">无命中（该主体本期未出现在池内前十大流通股东）</td></tr>';
+    document.getElementById('topN').textContent='0';return;
+  }
+  if(S1.k){var dir=S1.d;
+    rows.sort(function(a,b){
+      var va=v1(a,S1.k,stocks),vb=v1(b,S1.k,stocks);
+      if(va==null&&vb==null)return 0;if(va==null)return 1;if(vb==null)return -1;
+      return (va-vb)*dir;
+    });
+  }
+  var vis=rows.slice(0,60),maxR=0;
+  vis.forEach(function(r){if(r.free_ratio&&r.free_ratio>maxR)maxR=r.free_ratio;});
+  tb.innerHTML=vis.map(function(r,i){
+    var st=stocks[r.code]||{},sb=st.b?st.b[r.bucket]:null,delta=null,chg='-';
+    if(sb&&sb.length>1){delta=sb[sb.length-1][1]-sb[sb.length-2][1];
+      chg=delta===0?'<span class="zero">0</span>':(delta>0?'<span class="chg-up">+'+fmtB(delta)+'</span>':'<span class="chg-dn">'+fmtB(delta)+'</span>');}
+    var ratioTxt=r.free_ratio==null?'-':
+      '<span class="mbar"><i style="width:'+Math.max(4,Math.round(r.free_ratio/maxR*100))+'%"></i></span>'+r.free_ratio.toFixed(1)+'%';
+    return '<tr>'+
+      '<td class="rn">'+(i+1)+'</td>'+
+      '<td class="l"><span class="stock">'+esc(r.name)+'</span> <span class="code">'+esc(r.code)+'</span></td>'+
+      '<td class="l">'+mtag(r.bucket)+'</td>'+
+      '<td class="num">'+fmtB(r.hold)+'</td>'+
+      '<td class="num">'+ratioTxt+'</td>'+
+      '<td class="num">'+chg+'</td></tr>';
   }).join('');
+  document.getElementById('topN').textContent=rows.length;
 }
 
 var EV=[
@@ -385,25 +467,74 @@ document.getElementById('events').innerHTML=EV.map(function(e){return '<div clas
 
 /* ===== 日度代理 · 宽基 ETF 资金流 (etf_share.json) ===== */
 function fmtE(x){return x>=100?(Math.round(x*10)/10).toLocaleString():x.toFixed(2);}
+/* ===== 表 2: ETF 日度代理 (排序/序号/迷你条/计数) ===== */
+var ETFT={e:null},S2={k:null,d:-1};
+function v2(p,k,e){
+  var a=(e.series[p.code])||[];if(!a.length)return null;
+  if(k==='shr')return a[a.length-1][1];
+  if(k==='dshr'){if(a.length<2)return null;return a[a.length-1][1]-a[a.length-2][1];}
+  return null;
+}
+function dayDiff(d1,d2){return Math.round((new Date(d2)-new Date(d1))/864e5);}
 function renderEtf(e){
-  var meta=e.meta||{},S=e.series||{};
-  var pool=meta.pool||[],tb=document.getElementById('etfTb'),hint=document.getElementById('etfHint');
-  if(!pool.length){tb.innerHTML='<tr><td colspan="5" style="text-align:center;color:#94a3b8">暂无 ETF 数据</td></tr>';return;}
+  ETFT.e=e;
+  var thd=document.getElementById('tscEtf');
+  if(thd){var ths=thd.querySelectorAll('th.sortable');markTh(ths,S2);
+    for(var i=0;i<ths.length;i++){if(ths[i].onclick)continue;ths[i].onclick=function(){
+      var k=this.getAttribute('data-k');
+      if(S2.k===k)S2.d=-S2.d;else{S2.k=k;S2.d=-1;}
+      markTh(document.getElementById('tscEtf').querySelectorAll('th.sortable'),S2);
+      drawEtfRows();
+    };}
+  }
+  drawEtfRows();
+  drawEtfChart(e);
+}
+function drawEtfRows(){
+  var e=ETFT.e;if(!e)return;
+  var meta=e.meta||{},S=e.series||{},pool=meta.pool||[];
+  var tb=document.getElementById('etfTb');
+  var rows=pool.filter(function(p){return (S[p.code]||[]).length;});
+  if(!rows.length){
+    tb.innerHTML='<tr class="empty"><td colspan="6">暂无快照 · 每交易日 16:00 盘后自动打点累积</td></tr>';
+    document.getElementById('etfTot').textContent='–';document.getElementById('etfN').textContent='0';return;
+  }
+  if(S2.k){var dir=S2.d;
+    rows.sort(function(a,b){
+      var va=v2(a,S2.k,e),vb=v2(b,S2.k,e);
+      if(va==null&&vb==null)return 0;if(va==null)return 1;if(vb==null)return -1;
+      return (va-vb)*dir;
+    });
+  }
+  var tot=0;
+  rows.forEach(function(p){var a=S[p.code]||[];if(a.length)tot+=a[a.length-1][1];});
+  var maxPct=0;
+  rows.forEach(function(p){var a=S[p.code],l=a[a.length-1],pct=tot?l[1]/tot*100:0;if(pct>maxPct)maxPct=pct;});
+  tb.innerHTML=rows.map(function(p,idx){
+    var a=S[p.code],last=a[a.length-1],prev=a.length>1?a[a.length-2]:null;
+    var dshr=prev?((last[1]-prev[1])/1e8):null;
+    var nd=prev?dayDiff(prev[0],last[0]):null;
+    var chg=dshr==null?'<span class="zero">-</span>':(dshr===0?'<span class="zero">0</span>':(dshr>0?'<span class="chg-up">+'+dshr.toFixed(2)+'</span>':'<span class="chg-dn">'+dshr.toFixed(2)+'</span>'));
+    var badge=dshr==null?'<span class="ebadge flat">首日快照</span>':(dshr>0?'<span class="ebadge up">↑ 增持</span>':(dshr<0?'<span class="ebadge dn">↓ 减持</span>':'<span class="ebadge flat">持平</span>'));
+    var pct=tot?(last[1]/tot*100):0;
+    var pctTxt='<span class="mbar"><i style="width:'+Math.max(3,Math.round(pct/maxPct*100))+'%"></i></span>'+pct.toFixed(1)+'%';
+    return '<tr>'+
+      '<td class="rn">'+(idx+1)+'</td>'+
+      '<td class="l"><div class="nm">'+esc(p.name)+'</div><div class="sub">'+esc(p.code)+' · 快照 '+esc(last[0])+(nd!=null&&nd>1?'（距上快照 '+nd+' 个自然日）':'')+'</div></td>'+
+      '<td class="num">'+fmtE(last[1]/1e8)+'</td>'+
+      '<td class="num">'+chg+'</td>'+
+      '<td class="num">'+pctTxt+'</td>'+
+      '<td class="l">'+badge+'</td></tr>';
+  }).join('');
+  document.getElementById('etfTot').textContent=fmtE(tot/1e8);
+  document.getElementById('etfN').textContent=rows.length;
+}
+function drawEtfChart(e){
+  var meta=e.meta||{},S=e.series||{},pool=meta.pool||[];
+  var hint=document.getElementById('etfHint');
   var ds={};
   pool.forEach(function(p){(S[p.code]||[]).forEach(function(r){ds[r[0]]=1;});});
   var dates=Object.keys(ds).sort();
-  var tot=0;
-  pool.forEach(function(p){var a=S[p.code]||[];if(a.length)tot+=a[a.length-1][1];});
-  tb.innerHTML=pool.map(function(p){
-    var a=S[p.code]||[];if(!a.length)return '';
-    var last=a[a.length-1],prev=a.length>1?a[a.length-2]:null;
-    var dshr=prev?((last[1]-prev[1])/1e8):null;
-    var chg=dshr===null?'<span class="chg-dn">-</span>':(dshr>0?'<span class="chg-up">+'+dshr.toFixed(2)+'</span>':(dshr<0?'<span class="chg-dn">'+dshr.toFixed(2)+'</span>':'<span class="chg-dn">0</span>'));
-    var badge=dshr===null?'<span class="ebadge flat">首日</span>':(dshr>0?'<span class="ebadge up">↑ 增持</span>':(dshr<0?'<span class="ebadge dn">↓ 减持</span>':'<span class="ebadge flat">持平</span>'));
-    var pct=(tot?(last[1]/tot*100):0).toFixed(1);
-    return '<tr><td><span class="stock">'+esc(p.name)+'</span> <span class="code">'+esc(p.code)+'</span></td>'+
-      '<td>'+fmtE(last[1]/1e8)+'</td><td>'+chg+'</td><td>'+pct+'%</td><td>'+badge+'</td></tr>';
-  }).join('');
   function at(p,dt){var a=S[p.code]||[];for(var i=a.length-1;i>=0;i--){if(a[i][0]===dt)return a[i];}return null;}
   var totS=dates.map(function(dt){var s=0;pool.forEach(function(p){var v=at(p,dt);if(v)s+=v[1];});return +(s/1e8).toFixed(1);});
   var flow=dates.map(function(dt,i){if(!i)return 0;var f=0;pool.forEach(function(p){var c=at(p,dt),p2=at(p,dates[i-1]);if(c&&p2)f+=(c[1]-p2[1])*(c[2]||0);});return +(f/1e8).toFixed(2);});
@@ -517,7 +648,7 @@ fetch('etf_share.json',{cache:'no-cache'}).then(function(r){if(!r.ok)throw new E
 .then(function(e){renderEtf(e);renderEtfQ(e);})
 .catch(function(err){
   var tb=document.getElementById('etfTb');
-  if(tb)tb.innerHTML='<tr><td colspan="5" style="text-align:center;color:#94a3b8">ETF 日度数据暂不可用（'+err.message+'）· CI 每日盘后自动累积</td></tr>';
+  if(tb)tb.innerHTML='<tr class="empty"><td colspan="6">ETF 日度数据暂不可用（'+err.message+'）· CI 每日盘后自动累积</td></tr>';
 });
 </script>
 </body>
