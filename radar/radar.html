@@ -297,6 +297,12 @@ h1{font-size:21px;font-weight:700;letter-spacing:.4px;line-height:1.3}   /* R323
 .revpool .prow .mtag{font-size:9px;font-weight:700;border:1px solid;padding:0 4px;border-radius:3px;line-height:1.5;white-space:nowrap;letter-spacing:.2px;flex:0 0 auto}
 .revpool .prow .mtag.mw{color:#c92a2a;background:rgba(229,69,69,.08);border-color:rgba(229,69,69,.45)}
 .revpool .prow .mtag.ms{color:#b45309;background:rgba(232,160,16,.08);border-color:rgba(232,160,16,.45)}
+/* R387: 背离强度(area_ratio MACD面积背离比, 越小越极端可靠 — 绿<0.5强/橙0.5-0.8中/红≥0.8弱) + 走势状态(右侧涨势回调/左侧盘整磨底, 仅标签不入排序键) */
+.revpool .prow .artag{font-weight:700;font-size:9.5px;white-space:nowrap}
+.revpool .prow .artag.a1{color:#0e7d4a}.revpool .prow .artag.a2{color:#b45309}.revpool .prow .artag.a3{color:#c92a2a}
+.revpool .prow .trtag{display:inline-block;font-size:9.5px;font-weight:700;border-radius:3px;padding:0 4px;margin-right:4px;line-height:1.6;white-space:nowrap;vertical-align:1px;letter-spacing:.2px}
+.revpool .prow .trtag.rt{color:#0e7d4a;background:rgba(24,160,88,.10)}
+.revpool .prow .trtag.lt{color:#b45309;background:rgba(232,160,16,.10)}
 @media(max-width:980px){.revpool .prow,.revpool .phdr{grid-template-columns:minmax(110px,1.25fr) minmax(56px,.65fr) minmax(56px,.6fr) minmax(56px,.55fr) minmax(58px,.6fr) minmax(90px,.92fr) minmax(110px,.95fr);padding:7px 10px;font-size:11px}.revpool .phdr{padding:5px 10px;font-size:10px}.revpool .phead{padding:12px}}
 .gate-tag{font-size:9px;font-weight:700;border-radius:4px;padding:0 4px;margin-left:3px;vertical-align:1px}
 .gate-tag.g1{background:#fff3cd;color:#92400e}.gate-tag.g2{background:#fde2e2;color:#c92a2a}.gate-tag.g3{background:#e0f2fe;color:#075985}
@@ -871,6 +877,17 @@ function revRow(c){
   var mm=c.st&&c.st.m_macd, mTag="";
   if(mm&&mm.state==="green_grow")mTag='<span class="mtag mw" title="月线MACD绿柱加长(h1='+mm.h1+'→h2='+mm.h2+', '+esc(mm.date||"")+') — 月线下跌中继, 日线级底背驰仅撑反弹易夭折 · 双周期键已沉同档尾(不剔除)">月弱</span>';
   else if(mm&&mm.state==="green_shrink")mTag='<span class="mtag ms" title="月线MACD绿柱缩短(h1='+mm.h1+'→h2='+mm.h2+', '+esc(mm.date||"")+') — 月线下跌动能衰减, 反转在酝酿">月缩</span>';
+  // -- R387: 背离强度(area_ratio MACD面积背离比: 越小=下跌动能衰竭越彻底, 底越可靠) + 走势状态(trend: 右/左侧标签, 不入排序键)
+  var arv=+(bb.area_ratio), arTag="", arWord="", arTip="", arTipL="";
+  if(bb.area_ratio!=null&&bb.area_ratio!==""&&!isNaN(arv)){
+    arWord=arv<0.5?"强背离":arv<0.8?"中背离":"弱背离";
+    arTip=arv<0.5?"力度极端, 反弹可靠性高":arv<0.8?"力度中等":"力度不足, 反弹易失败";
+    arTag=' <span class="artag '+(arv<0.5?"a1":arv<0.8?"a2":"a3")+'" title="底背驰MACD面积背离比 '+arv.toFixed(2)+' ('+arWord+', '+arTip+') — 越小=下杀动能衰竭越彻底">背离'+arv.toFixed(2)+'</span>';
+    arTipL="\n背驰力度: MACD面积背离比 "+arv.toFixed(2)+" ("+arWord+" — "+arTip+")";
+  }
+  var tr=st.trend||"", trTag="", trTipL="";
+  if(tr.indexOf("上涨")>=0){trTag='<span class="trtag rt" title="走势状态: '+esc(tr)+' — 涨势中回调形成的底背驰 = 右侧买点(顺势, 可靠性高)">右侧·涨势</span>';trTipL="\n走势状态: "+esc(tr)+" — 涨势回调背驰(右侧买点)";}
+  else if(tr.indexOf("盘整")>=0){trTag='<span class="trtag lt" title="走势状态: '+esc(tr)+' — 盘整磨底中的底背驰 = 左侧埋伏(逆势抄底, 需等企稳确认)">左侧·盘整</span>';trTipL="\n走势状态: "+esc(tr)+" — 盘整磨底背驰(左侧埋伏)";}
   // -- R375: 实操优选命中标(仅 pick 模式): 底部刚启≤3% + 60日均额≥1亿 + 距历史高回撤≥50% 三条件齐
   var pickStar=(curRevMode==="pick"&&dt.cls==="d1"&&((st.avg_amt60||0)>=1e4)&&c.dd<=-0.5)
     ?'<span class="pk" title="🎯实操优选命中: 底部刚启(距底≤3%)+60日均额≥1亿+距历史高回撤≥50% — 最优埋伏标的">🎯</span> ':'';
@@ -884,7 +901,7 @@ function revRow(c){
   var tip="🧭 逆向观察候选 | "+nm+" "+(c.sym||"")+
     "\n底背驰确认于 "+fdTxt+" · 距今 "+c.fd+" 天(已超实操窗, 结构仍有效)"+
     "\n距历史高回撤 "+Math.abs(c.dd*100).toFixed(1)+"% (深跌)"+
-    "\n背驰低点参考: "+bb.end_price+" · 现价距低点 "+(c.dev>=0?"+":"")+c.dev.toFixed(1)+"% · "+dt.tip+
+    "\n背驰低点参考: "+bb.end_price+" · 现价距低点 "+(c.dev>=0?"+":"")+c.dev.toFixed(1)+"% · "+dt.tip+arTipL+trTipL+
     (riskPct!=null?"\n止损参考: 跌破 "+bb.end_price+" 即结构失效 (较现价再跌约 "+riskPct.toFixed(1)+"%)":"")+
     (mm&&mm.state?"\n月线MACD("+(mm.date||"-")+", 双周期键): "+(mm.state==="red"?"红柱 "+mm.h2+" — 月线多头, 反弹延续概率高":mm.state==="green_shrink"?"绿柱缩短 "+mm.h1+"→"+mm.h2+" — 下跌动能衰减":"绿柱加长 "+mm.h1+"→"+mm.h2+" — 月线下跌中继, 反弹易夭折")+
     (mm&&mm.state==="green_grow"?" · 名次已沉同档尾":""):(mm?"\n月线MACD: 无数据(次新/月K不可得) — 中性档":""))+
@@ -893,7 +910,7 @@ function revRow(c){
     "\n\n点击查看个股完整 K 线与缠论结构";
   // -- R317: 行 6 列: 名/距历史高/现价/背驰底线/60日均额/背驰触发/(距背%分级)
   return '<div class="prow" title="'+esc(tip)+'" onclick="pickRev(\''+c.sym+'\')">'+
-    '<div><div class="nm">'+esc(nm)+pickStar+lead+ffMini+gtag+'</div><div class="sub">'+esc(c.sym)+" · "+esc(indName)+' · '+esc(st.one_word||"-")+'</div></div>'+
+    '<div><div class="nm">'+esc(nm)+pickStar+lead+ffMini+gtag+'</div><div class="sub">'+trTag+esc(c.sym)+" · "+esc(indName)+' · '+esc(st.one_word||"-")+arTag+'</div></div>'+
     '<div><div class="big '+ddCls+'">'+(c.dd*100).toFixed(1)+'%</div><div class="small">距历史高</div></div>'+
     '<div><div class="big">'+esc(st.close!=null?st.close:"-")+'</div><div class="small '+(st.chg1d>0?"up":(st.chg1d<0?"down":""))+'">'+pct(st.chg1d,2)+'</div></div>'+
     '<div><div class="big" style="font-size:11.5px">'+(endP!=null?endP.toFixed(2):"-")+'</div><div class="small" style="font-size:10px">底线 · 止损参考</div></div>'+
@@ -924,7 +941,7 @@ function setRevMode(m){curRevMode=m;renderRevPool();}
 function toggleRev(){revExpanded=!revExpanded;renderRevPool();}
 function revRule(){   // R376: 排序标准常驻标注(随 chip 联动, 旭总免反复问)
   var t="";
-  if(curRevMode==="pick")t='<b class="k">🌟实操优选(默认)</b> <b>①结构档</b>: <b style="color:#18a058">底部刚启(距底≤3%)</b> 最前 → <b style="color:#b45309">已起涨(3~8%)</b> → <b style="color:#c92a2a">追高(8~15%)</b> → <b style="color:#7b2cbf">已错过(&gt;15%)</b> 垫底(破位剔除) · <b>②月线MACD(名次键·双周期, 大方向先于细节)</b>: 月红柱=多头背景 / <span style="color:#b45309">月缩</span>=下跌动能衰减 在前, <span style="color:#c92a2a">月弱</span>(绿柱加长=月线下跌中继, 反弹易夭折)沉同档尾 · <b>③确认度(名次键·非门槛)</b>: <b style="color:#18a058">双确认●</b>(放量+末笔向上) &gt; <b style="color:#2f9e44">单确认●</b> &gt; <b style="color:#94a3b8">灰●</b>(未确认沉后, 不踢出) · <b>④档内流动性</b>: 60日均额 <b>&gt;=1亿</b> &gt; <b>&gt;=5000万</b> &gt; 薄 · <b>⑤同档同额</b>: 距历史高跌得最透者前 · 行首 <b>🎯</b> = 三条件齐(≤3%+≥1亿+距高≥50%)';
+  if(curRevMode==="pick")t='<b class="k">🌟实操优选(默认)</b> <b>①结构档</b>: <b style="color:#18a058">底部刚启(距底≤3%)</b> 最前 → <b style="color:#b45309">已起涨(3~8%)</b> → <b style="color:#c92a2a">追高(8~15%)</b> → <b style="color:#7b2cbf">已错过(&gt;15%)</b> 垫底(破位剔除) · <b>②月线MACD(名次键·双周期, 大方向先于细节)</b>: 月红柱=多头背景 / <span style="color:#b45309">月缩</span>=下跌动能衰减 在前, <span style="color:#c92a2a">月弱</span>(绿柱加长=月线下跌中继, 反弹易夭折)沉同档尾 · <b>③确认度(名次键·非门槛)</b>: <b style="color:#18a058">双确认●</b>(放量+末笔向上) &gt; <b style="color:#2f9e44">单确认●</b> &gt; <b style="color:#94a3b8">灰●</b>(未确认沉后, 不踢出) · <b>④档内流动性</b>: 60日均额 <b>&gt;=1亿</b> &gt; <b>&gt;=5000万</b> &gt; 薄 · <b>⑤同档同额</b>: 距历史高跌得最透者前 · 行首 <b>🎯</b> = 三条件齐(≤3%+≥1亿+距高≥50%) · 行内 <b style="color:#0e7d4a">右侧·涨势</b>/<b style="color:#b45309">左侧·盘整</b>=走势状态(仅标签) · <b style="color:#0e7d4a">背离&lt;0.5</b>=背驰力度强(仅标签, 越小越可靠)';
   else if(curRevMode==="dd")t='<b class="k">📉最深回撤</b>: 按 <b>距历史高点回撤幅度(dd)</b> 降序 — 负得越多(跌得最透)越靠前';
   else if(curRevMode==="dev")t='<b class="k">🎯最贴低点</b>: 按 <b>现价距背驰低点(dev%)</b> 升序 — 越贴近买点(≤3%底部区)越靠前';
   else if(curRevMode==="fr")t='<b class="k">🕐最新触发</b>: 按 <b>距触发天数(fd)</b> 升序 — 刚超实操窗(10天)的新鲜结构在前';
