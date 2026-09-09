@@ -1793,7 +1793,13 @@ function chanMarkOption(mark,dates,kmin,kmax,klForMatch){
     if(!cls)return;
     var buy=(g[0]===1||g[0]==="1");
     var tag=cls+(buy?"买":"卖");
-    if(k.indexOf("趋势背驰")>=0)tag+="·趋";else if(k.indexOf("盘整背驰")>=0)tag+="·盘";
+    // R399: 级别后缀匹配词对齐生产端 kind —— chanlun.find_signals 的 kind 实为
+    // "一类买点(底背驰)·趋势/·盘整"(缩写后缀, marks.json 全量 10 种实证 0 次含
+    // "趋势背驰/盘整背驰"全词), 原 indexOf("趋势背驰") 恒 -1 → 图上标签的 ·趋/·盘
+    // 后缀从未显示(级别信息只剩悬停 tooltip, R271/R293 意图未达)。修: 匹配 "·趋势"
+    // "·盘整" 缩写, 兼容老快照全词。
+    if(k.indexOf("·趋势")>=0||k.indexOf("趋势背驰")>=0)tag+="·趋";
+    else if(k.indexOf("·盘整")>=0||k.indexOf("盘整背驰")>=0)tag+="·盘";
     (buy?bu:sl).push({value:[x,p],meta:k+" "+g[2],label:{formatter:tag}});
   });
   if(bu.length||sl.length){
