@@ -457,7 +457,15 @@ def _month_macd(sym):
     R389 实测(09-09): 短时高频连打 ~200 次后腾讯 WAF 对 ifzq.gtimg.cn 回 501(与主链 day 同款
     风控; 主链 day 有 3 次指数退避, 本函数裸 _get 原零重试, 偶发 501 即整批静默降级)。
     修: 网络层失败轻量重试 1 次(节流时隙自然间隔), 仍失败计 _mb_net_fail 供补拉块汇总 WARN;
-    数据不足(<40 根月K, 次新等)不算网络失败, 静默 None 中性。纯展示级增强: 不杀 run。"""
+    数据不足(<40 根月K, 次新等)不算网络失败, 静默 None 中性。纯展示级增强: 不杀 run。
+
+    R390 对称守卫补漏: 本函数独立解析 qfqmonth, 未继承 fetch_data 主链的"盘中剔除进行中
+    月根"(R164/R167 只护日线, R372 补周/月主链时未覆盖此自解析路径) —— 交易日北京 <15:00
+    腾讯把进行中月(月初至今已收盘几日+今日实时价并一根, date=当日)半截返回, close 随盘中
+    跳变 → 末根 hist h2 失真(state 判定仅依赖最后两柱, 半截月才过几日即被当成完整月)。
+    现加同款守卫: 末根 date==今日 且北京 <15:00 时剔除末根(回落最近完整月)。CI radar-scan
+    16:00 起(收盘后源给完整当月根, 保留)本无窗口, 但本地盘中调试/提前调度会踩 —— 与
+    R372 教训"日线有守卫周月常漏"对称, 独立自解析路径同样要补。"""
     if _src_down(_tx_down, _tx_lock):
         return None
     _tx_th.wait()
@@ -476,6 +484,11 @@ def _month_macd(sym):
                 if d >= fd.MIN_DATE and c > 0:             # 对齐 2021 契约起点(与日线同源裁剪)
                     pairs.append((d, c))
             pairs.sort(key=lambda x: x[0])
+            # R390: 盘中剔除进行中月根(见 docstring R390 段)。_bj 显式 UTC+8,
+            # 避免 UTC runner 跨日窗口误判(与 fetch_data R167/R170 同款口径)。
+            _bj = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8)))
+            if pairs and pairs[-1][0] == _bj.date().isoformat() and _bj.hour < 15:
+                pairs = pairs[:-1]
             break                  # 拉取+解析成功; 数据不足(<40)在下方统一返 None, 不属网络失败不重试
         except Exception:   # noqa: BLE001
             if _attempt == 1:      # 末次仍失败 → 计数 + 降级中性(补拉块汇总 WARN)
@@ -1510,7 +1523,7 @@ def main():
         "title": "A股全市场缠论雷达",
         "asof": asof, "build_time": datetime.datetime.now(
             datetime.timezone(datetime.timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S"),
-        "version": "P3b-r8",   # r8=R389: _month_macd 网络失败轻量重试+失败计数WARN(腾讯高频501实测)
+        "version": "P3b-r9",   # r9=R390: _month_macd 补 R372 对称守卫(盘中剔除进行中半截月根)
                                # r6 覆盖 R320(新浪科创板volume 单位=股)/R348(北交920段tx跳过来新浪兜底)/R352(缺员冻结)/
                                # R361(行业映射收敛)等 20+ 轮口径变更, 版本号如实反映当前 schema
         "n_universe": len(uni), "n_fetch": len(got), "n_fail": len(fails),
