@@ -309,6 +309,18 @@ h1{font-size:21px;font-weight:700;letter-spacing:.4px;line-height:1.3}   /* R323
 .chart-sec{display:grid;grid-template-columns:1fr 1fr;gap:14px}
 @media(max-width:980px){.chart-sec{grid-template-columns:1fr}}
 @media(max-width:980px){.ind-grid,.ind-row{grid-template-columns:1fr .7fr .7fr 1.2fr .6fr .6fr .9fr 22px}}
+/* R393: .stk-grid(行业成分信号列表 名称/信号/趋势/末中枢/笔/中枢/自洽/涨跌/净流入/回撤/›) 窄屏适配
+   —— 全文件唯一无 980 变体的 grid 列表: 11列 min 宽约 650px(150+9×40+20+gap), 手机容器(约340px)
+      overflow:hidden 直裁右侧 4-5 列(净流入/回撤等关键列不可见且无横滚)。760 以下保留 5 个实操关键列
+      (名称/信号/涨跌/净流入/距高回撤), 隐藏 趋势/末中枢/笔/中枢/自洽/箭头(个股页有完整展示)。
+      行/表头/浮层共用 .stk-grid class 与列定义, 一处生效三处对齐; 桌面(>760px)零影响。 */
+@media(max-width:760px){
+  .stk-grid{grid-template-columns:minmax(92px,1.3fr) minmax(56px,.75fr) minmax(50px,.7fr) minmax(54px,.75fr) minmax(50px,.68fr);gap:4px;padding:8px 10px;font-size:11px}
+  .stk-grid>*:nth-child(3),.stk-grid>*:nth-child(4),.stk-grid>*:nth-child(5),
+  .stk-grid>*:nth-child(6),.stk-grid>*:nth-child(7),.stk-grid>*:nth-child(11){display:none}
+  .stk-grid .nm{font-size:12px;max-width:92px}
+  .stk-head-float{padding:8px 10px;font-size:11px}
+}
 /* 折叠展开按钮 + 空态 */
 .more{text-align:center;padding:2px 16px 12px;background:linear-gradient(180deg,transparent,rgba(248,250,252,.9) 30%,#fff)}
 .more a{display:inline-flex;align-items:center;gap:4px;cursor:pointer;color:var(--primary);font-size:13px;font-weight:600;padding:6px 14px;border-radius:8px;background:#fff;border:1px solid #dbe3ee;box-shadow:var(--shadow);transition:.15s}

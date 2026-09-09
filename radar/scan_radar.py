@@ -1526,7 +1526,8 @@ def main():
         "title": "A股全市场缠论雷达",
         "asof": asof, "build_time": datetime.datetime.now(
             datetime.timezone(datetime.timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S"),
-        "version": "P3b-r10",   # r10=R392: signals area 键反转(强背离优先, 原降序把弱背离顶前; R283 引入方向未审)
+        "version": "P3b-r11",   # r11=R393: radar.html .stk-grid 加 760px 窄屏适配(5 关键列, 桌面 11 列零影响) — 全文件唯一无 980 变体的 grid 列表, 11列min宽~650px 在手机容器被 overflow:hidden 直裁右侧 4-5 列
+                               # r10=R392: signals area 键反转(强背离优先, 原降序把弱背离顶前; R283 引入方向未审)
                                # r6 覆盖 R320(新浪科创板volume 单位=股)/R348(北交920段tx跳过来新浪兜底)/R352(缺员冻结)/
                                # R361(行业映射收敛)等 20+ 轮口径变更, 版本号如实反映当前 schema
         "n_universe": len(uni), "n_fetch": len(got), "n_fail": len(fails),
