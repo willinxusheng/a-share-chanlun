@@ -33,10 +33,13 @@
   G0 季度: 仅当产物缺 quarter 或 meta.quarter_through 落后于 510300 probe 到的最新报告期
      才全池重拉(日常 probe 510300 一次即 [skip], 不写盘 → git 干净 → 无循环);
   G1 当日(北京)该 code 最后一条已记录 → 跳过(不 append 不 commit);
-  G2 份额与最新记录完全一致且非当日 → 非交易日/无申赎 → 跳过 append,
-     防止"无变化也写盘 → commit → push → 再触发 deploy"死循环;
+  G2 份额与最新记录一致(相对差 <0.01% 容差, 消除双源同值微差噪音)且非当日 →
+     非交易日/无申赎 → 跳过 append, 防止"无变化也写盘 → commit → push → 再触发 deploy"死循环;
   G3 单只份额环比变动 >30% → WARN 照记(拆份额/数据异常可识别);
-  G4 全池拉取失败 → exit 0 不阻断 deploy(留给下个时点补), 不写盘。
+  G4 全池拉取失败 → exit 0 不阻断 deploy(留给下个时点补), 不写盘;
+  G5 时段守卫: 北京时间 15:00 前(00:xx-14:59)一律 no-op 不写盘 — 该时段东财仍返回
+     上一交易日份额, 若照常 append 会生成"伪当日"快照(如 00:xx 的伪 09-10),
+     既污染 series 又把 16:00 真快照挡在 G1 外; 覆盖 watchdog 02:00/深夜人为 deploy。
 
 用法: python3 calc_etf.py            # 读/写 national/etf_share.json
 """
@@ -221,6 +224,15 @@ def _save(data):
 
 def main():
     today = bj_today()
+    hhmm = (datetime.utcnow() + timedelta(hours=8)).strftime("%H%M")
+
+    # ---- G5 时段守卫 (R414b: 防预开盘 append 伪当日快照) ----
+    #   北京 00:xx-14:59 东财 f84 仍是上一交易日份额, 照常 append 会生成伪当日行,
+    #   既污染 series 又把 16:00 真快照挡在 G1 外(见 c86b203 事故: 510300 两条伪 09-10)。
+    #   日度/季度写入仅允许北京时间 15:00-23:59 (调度: 16:00 起 30min×12 + watchdog 23:35)。
+    if hhmm < "1500":
+        print("[skip] 当前北京时间 %s 非盘后时段 (<15:00), 本轮不写盘 (G5)" % hhmm)
+        return 0
 
     # ---- 读旧产物 ----
     if os.path.exists(OUT):
@@ -236,9 +248,10 @@ def main():
         data.setdefault("meta", {})["updated_at"] = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
         _save(data)
 
-    # ---- G1 当日已记? ----
+    # ---- G1 当日已记? (R414b: 修复 POOL 二元组 secid 当 code 用导致永不命中) ----
     any_today = False
-    for code, _ in POOL:
+    for sid, _ in POOL:
+        code = sid.split(".")[1]
         arr = series.get(code) or []
         if arr and arr[-1][0] == today:
             any_today = True
@@ -266,17 +279,22 @@ def main():
         return 0
 
     # ---- G2 无变化守卫(防 commit→push→deploy 死循环) ----
+    #   R414b: 相对容差 1e-4 (0.01%) — 双源同值微差(如 510300 腾讯首快照 23468887700
+    #    vs 东财 23468887808, 差 108 份=0.0000005%)若按原"!= 即变"会把无变化误判为
+    #   有变化而 append 噪音行; 真实申赎变动量级 ≥0.05%, 容差远低于信号。
+    G2_TOL = 1e-4
     no_change_all = True
     for code, x in got.items():
         arr = series.get(code) or []
-        if arr:  # 与最新记录比较
-            if arr[-1][1] != x["shr"]:
+        if arr:  # 与最新记录比较(相对差 <0.01% 视为无变化)
+            last = arr[-1][1]
+            if last and abs(x["shr"] - last) / last >= G2_TOL:
                 no_change_all = False
                 break
         else:
             no_change_all = False  # 新 code 首次记录
     if no_change_all:
-        print("[skip] 全池份额与最新记录一致(非交易日/无申赎), 不 append (G2)")
+        print("[skip] 全池份额与最新记录一致(非交易日/无申赎/同值微差), 不 append (G2)")
         return 0
 
     # ---- append 当日快照 ----
