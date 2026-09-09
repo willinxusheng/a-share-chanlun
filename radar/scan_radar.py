@@ -438,6 +438,12 @@ def _ema(vals, n):
     return out
 
 
+# R389: 月线补拉网络失败计数。模块级可变容器 —— _month_macd 重试仍失败 +1;
+# main 补拉块用前后快照差统计"本次"失败量(免 main 内 global 归零缠绕)。GIL 下 4 线程
+# 竞争极小, 即便偶丢一计数仅影响 WARN 阈值精度, 不影响数据正确性。
+_mb_net_fail = {"n": 0}
+
+
 def _month_macd(sym):
     """底背驰个股月线 MACD 状态 —— 逆向观察池/底部信号的双周期排序键数据源(R383)。
 
@@ -447,26 +453,36 @@ def _month_macd(sym):
       green_shrink = hist<0 且较上月缩短(下跌动能衰减 —— 反转在酝酿, 次前)
       green_grow   = hist<0 且较上月加长(月线下跌中继 —— 日线级反弹易夭折, 排序沉同档尾)
     不可得/失败返回 None(前端=中性档, 不升不降)。北交 920 段腾讯恒假回、指数无底背驰语义,
-    由调用方只传个股; 腾讯整段停用(状态机)时不盲打。纯展示级增强: 任一失败静默, 不杀 run。"""
+    由调用方只传个股; 腾讯整段停用(状态机)时不盲打。
+    R389 实测(09-09): 短时高频连打 ~200 次后腾讯 WAF 对 ifzq.gtimg.cn 回 501(与主链 day 同款
+    风控; 主链 day 有 3 次指数退避, 本函数裸 _get 原零重试, 偶发 501 即整批静默降级)。
+    修: 网络层失败轻量重试 1 次(节流时隙自然间隔), 仍失败计 _mb_net_fail 供补拉块汇总 WARN;
+    数据不足(<40 根月K, 次新等)不算网络失败, 静默 None 中性。纯展示级增强: 不杀 run。"""
     if _src_down(_tx_down, _tx_lock):
         return None
     _tx_th.wait()
-    try:
-        raw = _get(fd._tx_url(sym, "month"), timeout=15).decode("utf-8", "ignore")
-        node = (json.loads(raw).get("data") or {}).get(sym) or {}
-        kl = node.get("qfqmonth") or node.get("month") or []
-        pairs = []
-        for row in kl:
-            try:
-                d, c = str(row[0]), float(row[2])      # 腾讯 [日期,开,收,高,低,量]
-            except (IndexError, TypeError, ValueError):
-                continue
-            if d >= fd.MIN_DATE and c > 0:             # 对齐 2021 契约起点(与日线同源裁剪)
-                pairs.append((d, c))
-        pairs.sort(key=lambda x: x[0])
-        if len(pairs) < 40:       # MACD 26+9 EMA 收敛需近 35 根月K(约3年); 不足=结构不可靠
-            return None
-    except Exception:   # noqa: BLE001
+    pairs = None
+    for _attempt in range(2):      # 初试 + 1 次轻量重试(吸收腾讯偶发 501/超时)
+        try:
+            raw = _get(fd._tx_url(sym, "month"), timeout=15).decode("utf-8", "ignore")
+            node = (json.loads(raw).get("data") or {}).get(sym) or {}
+            kl = node.get("qfqmonth") or node.get("month") or []
+            pairs = []
+            for row in kl:
+                try:
+                    d, c = str(row[0]), float(row[2])      # 腾讯 [日期,开,收,高,低,量]
+                except (IndexError, TypeError, ValueError):
+                    continue
+                if d >= fd.MIN_DATE and c > 0:             # 对齐 2021 契约起点(与日线同源裁剪)
+                    pairs.append((d, c))
+            pairs.sort(key=lambda x: x[0])
+            break                  # 拉取+解析成功; 数据不足(<40)在下方统一返 None, 不属网络失败不重试
+        except Exception:   # noqa: BLE001
+            if _attempt == 1:      # 末次仍失败 → 计数 + 降级中性(补拉块汇总 WARN)
+                _mb_net_fail["n"] += 1
+                return None
+            _tx_th.wait()          # 重试前让出节流时隙(0.35s 自然间隔吸收瞬时 501)
+    if len(pairs) < 40:       # MACD 26+9 EMA 收敛需近 35 根月K(约3年); 不足=结构不可靠
         return None
     closes = [c for _d, c in pairs]
     e12 = _ema(closes, 12)
@@ -1336,11 +1352,19 @@ def main():
                 and uni.get(s, {}).get("type") not in ("ETF",)]
     if _mb_syms:
         _t_mb = time.time()
+        _mb_f0 = _mb_net_fail["n"]
         with ThreadPoolExecutor(max_workers=4) as _mb_ex:
-            for s, mm in zip(_mb_syms, _mb_ex.map(_month_macd, _mb_syms)):
-                sts[s]["m_macd"] = mm
-        print("  月线MACD状态 %d 票(底背驰个股) %.0fs; ETF/北交/失败=null 中性"
-              % (len(_mb_syms), time.time() - _t_mb))
+            _mb_res = list(_mb_ex.map(_month_macd, _mb_syms))
+        for s, mm in zip(_mb_syms, _mb_res):
+            sts[s]["m_macd"] = mm
+        _mb_net = _mb_net_fail["n"] - _mb_f0
+        _mb_none = sum(1 for mm in _mb_res if mm is None)
+        _mb_line = ("  月线MACD状态 %d 票(成功 %d / 数据不足 %d / 网络失败 %d) %.0fs; null=中性"
+                    % (len(_mb_syms), len(_mb_syms) - _mb_none, _mb_none - _mb_net, _mb_net,
+                       time.time() - _t_mb))
+        if _mb_net and (_mb_none == len(_mb_syms) or _mb_net >= max(3, len(_mb_syms) // 5)):
+            _mb_line += "  ⚠ 腾讯月K大量网络失败, 月线排序键整键失效风险(前端全员中性)!"
+        print(_mb_line)
 
     # --- 门禁 + 信号 + 行业聚合(同时攒成分) ---
     signals, universe, ind_members, ind_total, ind_qual = [], {}, {}, {}, {}
@@ -1486,7 +1510,7 @@ def main():
         "title": "A股全市场缠论雷达",
         "asof": asof, "build_time": datetime.datetime.now(
             datetime.timezone(datetime.timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S"),
-        "version": "P3b-r7",   # r7=R383: st 新增 m_macd 月线MACD状态(双周期排序键)
+        "version": "P3b-r8",   # r8=R389: _month_macd 网络失败轻量重试+失败计数WARN(腾讯高频501实测)
                                # r6 覆盖 R320(新浪科创板volume 单位=股)/R348(北交920段tx跳过来新浪兜底)/R352(缺员冻结)/
                                # R361(行业映射收敛)等 20+ 轮口径变更, 版本号如实反映当前 schema
         "n_universe": len(uni), "n_fetch": len(got), "n_fail": len(fails),
