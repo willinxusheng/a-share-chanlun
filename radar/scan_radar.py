@@ -1424,7 +1424,10 @@ def main():
         sig["levels"] = {"zd": zs["zd"], "zg": zs["zg"]} if zs else {}
         # R297: sig 不再内嵌 mark(与 universe.mark 重复, 前端统一从 MARKS[sym] 取)
 
-    signals.sort(key=lambda x: (-x[1]["strong"], x[1]["fresh"], -x[1]["area"] if x[1]["area"] > 0 else 0))
+    # R392: area 键反转 —— 原 -area(降序) 把弱背离(面积比趋近 0.85 门槛)顶前, 与全局口径
+    # (chanlun.py a_cur/a_prev 越小=动能衰竭越狠=背离越强; report.py 注释同) 相悖;
+    # 升序小=强背离优先, area<=0(无值) 用 999 沉底(与前端 fresh null->999 兜底同款)。
+    signals.sort(key=lambda x: (-x[1]["strong"], x[1]["fresh"], x[1]["area"] if x[1]["area"] > 0 else 999))
 
     # --- R283: 行业龙头(成分市值最大; ETF板块=场内规模最大) + 行业当日资金流(全成分Σ) ---
     # 口径: 龙头/资金流用 universe 全成分(含门禁票) —— 市值权重最大者即大众认知的行业龙头,
@@ -1523,7 +1526,7 @@ def main():
         "title": "A股全市场缠论雷达",
         "asof": asof, "build_time": datetime.datetime.now(
             datetime.timezone(datetime.timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S"),
-        "version": "P3b-r9",   # r9=R390: _month_macd 补 R372 对称守卫(盘中剔除进行中半截月根)
+        "version": "P3b-r10",   # r10=R392: signals area 键反转(强背离优先, 原降序把弱背离顶前; R283 引入方向未审)
                                # r6 覆盖 R320(新浪科创板volume 单位=股)/R348(北交920段tx跳过来新浪兜底)/R352(缺员冻结)/
                                # R361(行业映射收敛)等 20+ 轮口径变更, 版本号如实反映当前 schema
         "n_universe": len(uni), "n_fetch": len(got), "n_fail": len(fails),

@@ -693,11 +693,11 @@ function renderSigRadar(){
   var gDiv=function(s){var fn=(UNI[s.sym]||{}).ff||{};fn=fn.net;if(fn==null)return false;return (s.dir==="bottom"&&fn<0)||(s.dir==="top"&&fn>0);};
   var gf=function(s){var fn=(UNI[s.sym]||{}).ff||{};return Math.abs(fn.net||0);};
   var leadOf=function(s){return (UNI[s.sym]||{}).lead?1:0;};   // R380: P3 龙头加权
-  var byFresh=function(a,b){  // R380: fresh→资金同向(res)→强度→面积→龙头 → sym 兜底(P2/P3 加权, 同级"刚触发+资金佐证"先行)
+  var byFresh=function(a,b){  // R380+R392: fresh→资金同向(res)→级别(strong 大=趋势/段级)→背离强度(area 小=强背离优先, R392 修正原降序)→龙头 → sym 兜底(P2/P3 加权, 同级"刚触发+资金佐证"先行)
     var fa=(a.fresh==null?999:a.fresh),fb=(b.fresh==null?999:b.fresh);if(fa!==fb)return fa-fb;
     var ra=gRes(a)?1:0,rb=gRes(b)?1:0;if(ra!==rb)return rb-ra;
     var sa=(a.strong||0),sb=(b.strong||0);if(sa!==sb)return sb-sa;
-    var aa=(a.area||0),ab=(b.area||0);if(aa!==ab)return ab-aa;
+    var aa=(a.area||0),ab=(b.area||0);if(aa!==ab)return aa-ab;
     var la=leadOf(a),lb=leadOf(b);if(la!==lb)return lb-la;
     return (a.sym<b.sym?-1:1);
   };
