@@ -2650,10 +2650,16 @@ def sentiment_board_html(base, data, results, results_week, scores, last_date,
         asof = str(sent.get("asof", "—"))
         # R230: 情绪数据滞后诚实标注——对比主行情末日(last_date)与情绪 asof,
         # 滞后≥1日即红标提示(根因: 东财情绪源在云端 CI 被限流, calc_v2 静默回退到已提交旧快照)。
+        # R395: 滞后口径由「自然日」改为「交易日」——A股周末/法定假日休市无新数据, 自然日差
+        # 会把跨周末场景放大误报(实证: 情绪 asof 周五 + 行情 last 周一 = 自然日 3 却只滞后
+        # 1 个交易日, 每周一首次报告必误弹「滞后 3 日」红标)。与 main() 新鲜度护栏(R55/R247
+        # _is_trading_day 口径)对齐; asof 晚于 last_date(情绪比行情新)时计数为 0 不提示。
         _lag = None
         try:
-            _lag = (datetime.strptime(last_date, "%Y-%m-%d").date()
-                    - datetime.strptime(asof, "%Y-%m-%d").date()).days
+            _d0 = datetime.strptime(asof, "%Y-%m-%d").date()
+            _d1 = datetime.strptime(last_date, "%Y-%m-%d").date()
+            _lag = sum(1 for _i in range(1, (_d1 - _d0).days + 1)
+                       if _is_trading_day(_d0 + timedelta(days=_i)))
         except Exception:
             _lag = None
         _stale_badge = ('<span class="badge" style="background:#dc2626;color:#fff">'
@@ -2857,6 +2863,31 @@ def build_quality_cert_html(base):
         c = json.load(open(p, encoding="utf-8"))
     except Exception:
         return ""
+    if not isinstance(c, dict):
+        return ""
+    # R395: 渲染段防崩 —— 证书是顶部辅助区块(R79), 任何结构异常都应降级而非阻断整份报告
+    # (R173/R366 单模块降级纪律)。旧代码只 try 了 json.load, 渲染段裸跑: calibration/
+    # regime_coverage 等键值为 None/非 dict 时 cal.get/regime_cov.get 链 AttributeError 崩
+    # 整报告。逐层消毒: 非 dict 桶置空 dict -> 下方 _dc.get/_t8c.get/cell() 天然跳过,
+    # 非法文本键置空串 -> 不渲染 "None" 字样。
+    for _k in ("calibration", "regime_coverage", "regime_direction", "drift", "sentiment"):
+        if not isinstance(c.get(_k), dict):
+            c[_k] = {}
+    for _k in ("regime_coverage", "regime_direction"):
+        for _b in ("bull", "bear", "range"):
+            _bb = c[_k].get(_b)
+            if not isinstance(_bb, dict):
+                c[_k][_b] = {}
+            else:
+                for _h in ("T8", "T30"):
+                    if not isinstance(_bb.get(_h), dict):
+                        _bb[_h] = {}
+    for _k in ("bias_ok", "regime_warn", "regime_dir_warn"):
+        if not isinstance(c.get(_k), bool):
+            c[_k] = {"bias_ok": True}.get(_k, False)  # bias_ok 缺省 True(L2867 原语义); warn 类缺省 False 不误弹告警
+    for _k in ("accuracy_note", "regime_note", "generated_at", "data_last_date"):
+        if not isinstance(c.get(_k), str):
+            c[_k] = ""
     cal = c.get("calibration", {})
     t8, t30 = cal.get("T8", {}), cal.get("T30", {})
 
@@ -3273,7 +3304,18 @@ def main():
             pat = (f"{total} 个指数全部日周背离（日强周弱 {len(_updn)} 个 / 日弱周强 {len(_dnup)} 个），"
                    f"多空级别方向分裂、无一致主线")
     elif n_div == 0:
-        pat = f"{total} 个指数日线与周线同向（日周共振），结构方向一致性较高"
+        # R395: R365 只防了「全部方向不可用」(n_dir_valid==0) —— 当部分指数方向不可用
+        # (数据缺失→骨架 classify last_bi_dir=0, R173/R366 降级占位) 而其余可用且同向时,
+        # 旧文案仍称「{total} 个指数日周共振」, 把未参与分析的指数也算进共振计数(失实)。
+        # 按方向有效子集(_n_dir_valid)如实描述; 有效 <2 个时"共振"名不副实, 降级为观察提示。
+        if _n_dir_valid >= 2:
+            pat = (f"{total} 个指数中 {_n_dir_valid} 个日/周方向可用且同向（日周共振），"
+                   f"{total - _n_dir_valid} 个方向暂不可用（数据不足）"
+                   if _n_dir_valid < total
+                   else f"{total} 个指数日线与周线同向（日周共振），结构方向一致性较高")
+        else:
+            pat = (f"{total} 个指数中方向可用者不足 2 个（{_n_dir_valid} 个可用 / "
+                   f"{total - _n_dir_valid} 个数据不足），日周共振/背离待数据恢复后评估")
     else:
         _parts = []
         if _updn:
