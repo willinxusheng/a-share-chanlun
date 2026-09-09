@@ -790,13 +790,13 @@ function revCand(sym,v){
   var dev=(close/bb.end_price-1)*100;
   return {sym:sym,st:st,bb:bb,fd:fd,dd:dd,dev:dev,close:close,gate:v.gate||null};
 }
-/* R377: 高胜率精选判定 — 折叠态默认只展示这些(减少无效盯盘):
-   ①结构: 底部刚启(距背驰低点≤3%, 实操最优区) ②流动性: 60日均额≥1亿(万元=1e4) ③质量: 非低自洽(结构可信) */
+/* R377+R388: 高胜率精选判定 — 折叠态默认只展示这些(减少无效盯盘):
+   ①结构: 底部刚启(距背驰低点≤3%, 实操最优区) ②流动性: 60日均额≥1亿(万元=1e4) ③质量: 无结构门禁(非低自洽, 且非次新样本<120根 — R388: 天海电子 81根/agree=1.0 曾以精选#1 现身, 缠论样本不足的次新不配"高胜率"; 展开全量档案仍保留跟踪) */
 function isElite(c){
   if(c.dev==null||c.dev>3)return false;
   var amt=+(c.st.avg_amt60)||0;
   if(amt<1e4)return false;
-  if(c.gate==="低自洽")return false;
+  if(c.gate==="低自洽"||c.gate==="次新")return false;
   return true;
 }
 /* R379: 确认度三档(榜内名次键) — 双确认(vol_confirm=true 且 last_bi_dir=1)=0 > 单确认(其一)=1 > 无确认=2
@@ -969,7 +969,7 @@ function renderRevPool(){
   // R378: 7 列表头, 与 revRow 列定义一致(浅灰底小字标注每列语义)
   var phdrHtml='<div class="phdr"><span>标的</span><span>距历史高</span><span>现价</span><span>底线·止损参考</span><span>60日均额</span><span>底背驰触发</span><span>距背低点</span></div>';
   box.innerHTML='<div class="phead"><h2>🧭 逆向观察池</h2>'+
-    (collapsed&&nEli>0?'<span class="elite-badge" title="高胜率精选=底部刚启(距底≤3%)+60日均额≥1亿+结构自洽 · 行内红字「月弱」标=月线MACD绿柱加长(下跌中继, 双周期键沉同档尾) · 行尾色点=确认度(深绿双/浅绿单/灰无) — 均只作名次键不作门槛">🏆 高胜率精选 '+nEli+'</span>':'')+
+    (collapsed&&nEli>0?'<span class="elite-badge" title="高胜率精选=底部刚启(距底≤3%)+60日均额≥1亿+结构自洽(非低自洽/次新, 缠论样本足) · 行内红字「月弱」标=月线MACD绿柱加长(下跌中继, 双周期键沉同档尾) · 行尾色点=确认度(深绿双/浅绿单/灰无) — 均只作名次键不作门槛">🏆 高胜率精选 '+nEli+'</span>':'')+
     '<div class="chips">'+
       '<span class="chip'+chipOn("pick")+'" onclick="setRevMode(\'pick\')" title="实操纪律复合排序: ①底部刚启(距底≤3%)优先 ②月线MACD双周期(红柱/绿缩在前, 绿加长「月弱」沉同档尾 — 大方向先于细节) ③确认度(双/单/无, 名次键不作门槛) ④60日均额≥1亿稳健(≥5000万次之) ⑤跌得最透优先 — 月弱标=月线下跌中继, 行尾色点=确认度">🌟 实操优选</span>'+
       '<span class="chip'+chipOn("dd")+'" onclick="setRevMode(\'dd\')" title="距历史高点回撤最深的在前 — 看谁跌得最透">📉 最深回撤</span>'+
@@ -977,7 +977,7 @@ function renderRevPool(){
       '<span class="chip'+chipOn("fd")+'" onclick="setRevMode(\'fd\')" title="底背驰触发距今最久未破位在前 — 老结构企稳时间越久越有效, 与「最新触发」互补查新仓">⏳ 底久未破</span>'+
       '<span class="chip'+chipOn("fr")+'" onclick="setRevMode(\'fr\')" title="底背驰触发时间最近的在前 — 刚出信号, 尚有空间">🕐 最新触发</span>'+
     '</div>'+
-    (collapsed?'<span class="phint">🏆 高胜率精选 — 底部刚启(<b style="color:#18a058">距底≤3%</b>)+<b style="color:#18a058">60日均额≥1亿</b>+结构自洽 · 共 <b style="color:#18a058">'+nEli+' 只</b> · 已滤除: 已起涨/追高/已错过档、薄流动(<1亿)、低自洽结构 — <b style="color:#b45309">全量档案 '+nAll+' 只点下方按钮展开</b></span>':(revExpanded?'<span class="phint">📚 全量档案 <b style="color:#18a058">'+nAll+' 只</b> — 含全部五档(含已起涨/追高/已错过跟踪) · 🏆 高胜率精选仅 '+nEli+' 只(底部刚启≤3%+≥1亿+自洽) · 标签五档：<b style="color:#18a058">绿=底部刚启(≤3%最佳埋伏)</b>/<b style="color:#b45309">橙=已起涨</b>/<b style="color:#c92a2a">红=追高风险</b>/<b style="color:#7b2cbf">紫=已错过</b> · 与顶部「实操信号雷达」(近端≤10天)互补</span>':'<span class="phint">已超实操窗的底背驰老结构 · 深跌(距历史高≥30%)+未破背驰低点 · 埋伏候选 <b style="color:#18a058">'+nAll+' 只</b> · 标签五档：<b style="color:#18a058">绿=底部刚启(≤3%最佳埋伏)</b>/<b style="color:#b45309">橙=已起涨</b>/<b style="color:#c92a2a">红=追高风险</b>/<b style="color:#7b2cbf">紫=已错过</b> · 与顶部「实操信号雷达」(近端≤10天)互补</span>'))+
+    (collapsed?'<span class="phint">🏆 高胜率精选 — 底部刚启(<b style="color:#18a058">距底≤3%</b>)+<b style="color:#18a058">60日均额≥1亿</b>+结构自洽(非低自洽/次新) · 共 <b style="color:#18a058">'+nEli+' 只</b> · 已滤除: 已起涨/追高/已错过档、薄流动(<1亿)、低自洽/次新结构 — <b style="color:#b45309">全量档案 '+nAll+' 只点下方按钮展开</b></span>':(revExpanded?'<span class="phint">📚 全量档案 <b style="color:#18a058">'+nAll+' 只</b> — 含全部五档(含已起涨/追高/已错过跟踪) · 🏆 高胜率精选仅 '+nEli+' 只(底部刚启≤3%+≥1亿+自洽样本足) · 标签五档：<b style="color:#18a058">绿=底部刚启(≤3%最佳埋伏)</b>/<b style="color:#b45309">橙=已起涨</b>/<b style="color:#c92a2a">红=追高风险</b>/<b style="color:#7b2cbf">紫=已错过</b> · 与顶部「实操信号雷达」(近端≤10天)互补</span>':'<span class="phint">已超实操窗的底背驰老结构 · 深跌(距历史高≥30%)+未破背驰低点 · 埋伏候选 <b style="color:#18a058">'+nAll+' 只</b> · 标签五档：<b style="color:#18a058">绿=底部刚启(≤3%最佳埋伏)</b>/<b style="color:#b45309">橙=已起涨</b>/<b style="color:#c92a2a">红=追高风险</b>/<b style="color:#7b2cbf">紫=已错过</b> · 与顶部「实操信号雷达」(近端≤10天)互补</span>'))+
     revRule()+'</div>'+
     '<div style="padding:6px 0 8px">'+phdrHtml+rowsHtml+moreHtml+'</div>'+
     '<div class="foot">候选=底背驰(fresh&gt;10) + 距历史高≥30% + 现价&gt;背驰低点 · 止损参考=背驰低点(跌破失效) · 数据截至 '+esc(M.asof||"-")+' · 仅供研究参考，不构成投资建议</div>';
