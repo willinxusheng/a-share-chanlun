@@ -233,7 +233,7 @@ h1{font-size:21px;font-weight:700;letter-spacing:.4px;line-height:1.3}   /* R323
 .sigrad .gtt{display:flex;align-items:center;gap:7px;padding:6px 16px;font-size:12px;font-weight:700;letter-spacing:.3px;color:#94a3b8}
 .sigrad .gtt .ic{font-size:15px}
 .sigrad .gtt .n{color:var(--ink);background:#eef2f7;border-radius:8px;padding:0 7px;line-height:1.7}
-.sigrad .srow{display:grid;grid-template-columns:minmax(118px,1.25fr) 1fr minmax(64px,.8fr) minmax(108px,1.15fr) 132px;gap:6px;align-items:center;padding:7px 16px;cursor:pointer;border-top:1px solid #f5f8fb;transition:background .12s;font-size:12px}   /* R407: 6列(mcol 56 + spk 96)→ 5列, spk 132px = mTag(38+gap4)+sparkSVG(64) 舒适共处; 用户截图实证 R406 加 mcol 后 spark 被挡半截, 改回合并列补救 */
+.sigrad .srow{display:grid;grid-template-columns:minmax(108px,1.1fr) 1fr minmax(60px,.7fr) 88px 116px;gap:6px;align-items:center;padding:7px 16px;cursor:pointer;border-top:1px solid #f5f8fb;transition:background .12s;font-size:12px}   /* R408: 列总宽 108+60+88+116=372+24gap=396 → fr 余量 1.1+1+.7=2.8 平分给 1/2/3 列, 收紧 dev 列 1.15fr→0(图)→1fr 总配 + 88px 硬宽装「▼ 6.5% 已回落 6.5%」, spk 列 116px=mTag(38)+gap(6)+sparkSVG(72)=116 紧凑分布. 用户截图红框「留太宽」实证: 原 1.15fr 在 1100px 容器撑到 ~290px 大量空白, R407 132px 加 spk 进一步放大. 同步缩 spark 64→72 微放大提升辨识 */
 .sigrad .srow:hover{background:#f4f8fc}
 /* R380: 非低吸区(破位/已走高)灰显段 — 与"机会"主区视觉断开 */
 .sigrad .srow.ssub{opacity:.5;filter:grayscale(.75)}
@@ -269,7 +269,7 @@ h1{font-size:21px;font-weight:700;letter-spacing:.4px;line-height:1.3}   /* R323
 .sigrad .srow .spk .mtag{flex:0 0 auto}
 .sigrad .srow .spk svg{flex:0 0 auto}
 @media(max-width:980px){.sigrad .sbody{grid-template-columns:1fr}.sigrad .sgrp+.sgrp{border-left:0;border-top:1px dashed #e8edf4}}
-@media(max-width:980px){.sigrad .srow{grid-template-columns:minmax(100px,1.2fr) .8fr 56px 90px 104px;padding:7px 12px}.sigrad .gtt{padding:6px 12px}.sigrad .shead{padding:12px}}
+@media(max-width:980px){.sigrad .srow{grid-template-columns:minmax(94px,1.1fr) .7fr 52px 82px 96px;padding:7px 12px}.sigrad .gtt{padding:6px 12px}.sigrad .shead{padding:12px}}
 /* ===== R305: 逆向观察池(首页中部, 超窗底背驰埋伏候选) ===== */
 .revpool{margin-top:16px;background:var(--card);border:1px solid #d9e2ef;border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden;border-left:3px solid #18a058}
 .revpool .phead{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid #eef2f7;flex-wrap:wrap}
@@ -703,7 +703,7 @@ function sigRow(s,opt){   // R380: opt.sub=true = 非低吸区灰显行(破位/�
     '<div class="st">'+(t?'<b style="color:#c92a2a">顶背驰</b>':'<b style="color:#087f5b">底背驰</b>')+'<span>强'+(s.strong||0)+'/'+(s.vol?"缩":"")+((s.area!=null&&s.area>0)?" 面"+s.area:"")+'</span></div>'+
     '<div class="st">'+(fr==null?"-":(fr===0?"当日":fr+"天前"))+frTag+'</div>'+
     '<div class="dev '+devCls+'" title="'+esc(devTip||sigTip)+'">'+(dev!=null?devTxt:"-")+'<small>'+devSub+'</small></div>'+
-    '<div class="spk">'+(mTag?mTag+" ":"")+(spk&&spk.length>1?sparkSVG(spk.length>90?spk.slice(-90):spk,64,24):'<span style="color:#cbd5e1">-</span>')+'</div></div>';
+    '<div class="spk">'+(mTag?mTag+" ":"")+(spk&&spk.length>1?sparkSVG(spk.length>90?spk.slice(-90):spk,72,24):'<span style="color:#cbd5e1">-</span>')+'</div></div>';
 }
 var curSigMode="all";   // R287: all=🔥最新 | res=💰资金共振 | div=⚠️背离警示
 var SIG_MAIN=5;         // R381: P4 折叠态每区(顶/底各自)展示行数 — >5 时出"展开全部"按钮(原硬截断吞票)
