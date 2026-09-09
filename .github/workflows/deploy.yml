@@ -203,6 +203,30 @@ jobs:
           path: ${{ runner.temp }}/_ov.txt
           if-no-files-found: ignore
 
+      - name: ETF 份额日度快照（疑似国家队资金流代理, 幂等）
+        # R413: 宽基 ETF 总份额每交易日披露(东财 push2 f84, 与腾讯 total_shares 双源互证),
+        # 日度份额×净值=净申赎 → 国家队(汇金 2024 起宽基主战场)疑似方向参考。
+        # calc_etf.py 内部守卫: G1 当日已记跳过 / G2 份额无变化不写盘(防死循环) /
+        # G4 全池拉取失败 exit 0 不阻断本站发布(留给下个 cron-job 时点补)。
+        run: python national/calc_etf.py
+
+      - name: 提交 ETF 份额快照（当日有变化才提交, 防重复触发循环）
+        # etf_share.json 为 tracked 累积产物; 仅当 calc_etf 真正 append(份额变化)时才
+        # commit+push → push 触发下次 deploy → calc_etf 见当日已记(G1)无变化 → 不提交,
+        # 循环自然终止(radar-scan 同款"当日守卫"模式)。[skip ci] 防 push 触发冗余 run。
+        run: |
+          set -euo pipefail
+          if git status --porcelain national/etf_share.json | grep -q .; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add national/etf_share.json
+            git commit -m "chore: etf share snapshot $(date -u +%F) [skip ci]" || echo "no changes"
+            git pull --rebase --autostash origin "${GITHUB_REF_NAME}" || { echo "WARN: rebase 失败跳过推送(下一时点会补)"; exit 0; }
+            git push || echo "WARN: push 失败(下一时点会补)"
+          else
+            echo "etf_share.json 无变化(当日已记/非交易日), 跳过提交"
+          fi
+
       - name: 提交每日构建时间戳（keep-alive，防定时任务被停用）
         run: |
           set -euo pipefail

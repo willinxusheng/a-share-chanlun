@@ -52,6 +52,10 @@ tr:hover td{background:#f8fafc}
 .stock{color:var(--ink);font-weight:600}
 .code{color:var(--muted);font-size:12px}
 .chg-up{color:#e54545}.chg-dn{color:#18a058}
+.ebadge{display:inline-block;font-size:11px;font-weight:700;padding:1px 8px;border-radius:999px;line-height:1.7}
+.ebadge.up{background:#fdeaea;color:#e54545;border:1px solid #f5c6c6}
+.ebadge.dn{background:#e8f6ef;color:#18a058;border:1px solid #bfe6d2}
+.ebadge.flat{background:#f1f5f9;color:#64748b;border:1px solid #e2e8f0}
 .ev{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .ev .it{display:flex;gap:10px;align-items:flex-start;background:#f8fafc;border:1px solid #eef2f7;border-radius:10px;padding:8px 10px}
 .ev .dt{font-weight:700;color:var(--primary);font-size:13px;white-space:nowrap;min-width:58px}
@@ -102,6 +106,17 @@ footer{color:var(--muted);font-size:11.5px;line-height:1.7;padding:4px 2px 0}
       <thead><tr><th>代码 / 名称</th><th>主体</th><th>持股（亿股）</th><th>占流通股本</th><th>较上季末</th></tr></thead>
       <tbody id="tbody"></tbody>
     </table></div>
+  </div>
+
+  <div class="card" id="etfCard">
+    <div class="mt"><h2>日度代理 · 宽基 ETF 资金流（疑似国家队）</h2>
+      <div class="ft">ETF 总份额<b>每交易日披露</b> · 日度份额×净值=当日净申赎资金。口径：份额为全体持有人合计，汇金 2024 起为宽基 ETF 最大买家之一，大额净申购窗口与国家队增持实证相关——<b style="color:#b45309">方向参考，非精确真身</b>。每日盘后自动打点，多日后自动累积曲线</div></div>
+    <div style="max-height:300px;overflow:auto"><table>
+      <thead><tr><th>宽基 ETF</th><th>份额（亿份）</th><th>较上快照日</th><th>池内占比</th><th>资金方向</th></tr></thead>
+      <tbody id="etfTb"></tbody>
+    </table></div>
+    <div class="chart" id="chE" style="height:230px;margin-top:6px"></div>
+    <div class="hint" id="etfHint"></div>
   </div>
 
   <div class="card">
@@ -225,10 +240,58 @@ var EV=[
 ];
 document.getElementById('events').innerHTML=EV.map(function(e){return '<div class="it"><div class="dt">'+e[0]+'</div><div class="tx">'+e[1]+'</div></div>';}).join('');
 
+/* ===== 日度代理 · 宽基 ETF 资金流 (etf_share.json) ===== */
+function fmtE(x){return x>=100?(Math.round(x*10)/10).toLocaleString():x.toFixed(2);}
+function renderEtf(e){
+  var meta=e.meta||{},S=e.series||{};
+  var pool=meta.pool||[],tb=document.getElementById('etfTb'),hint=document.getElementById('etfHint');
+  if(!pool.length){tb.innerHTML='<tr><td colspan="5" style="text-align:center;color:#94a3b8">暂无 ETF 数据</td></tr>';return;}
+  var ds={};
+  pool.forEach(function(p){(S[p.code]||[]).forEach(function(r){ds[r[0]]=1;});});
+  var dates=Object.keys(ds).sort();
+  var tot=0;
+  pool.forEach(function(p){var a=S[p.code]||[];if(a.length)tot+=a[a.length-1][1];});
+  tb.innerHTML=pool.map(function(p){
+    var a=S[p.code]||[];if(!a.length)return '';
+    var last=a[a.length-1],prev=a.length>1?a[a.length-2]:null;
+    var dshr=prev?((last[1]-prev[1])/1e8):null;
+    var chg=dshr===null?'<span class="chg-dn">-</span>':(dshr>0?'<span class="chg-up">+'+dshr.toFixed(2)+'</span>':(dshr<0?'<span class="chg-dn">'+dshr.toFixed(2)+'</span>':'<span class="chg-dn">0</span>'));
+    var badge=dshr===null?'<span class="ebadge flat">首日</span>':(dshr>0?'<span class="ebadge up">↑ 增持</span>':(dshr<0?'<span class="ebadge dn">↓ 减持</span>':'<span class="ebadge flat">持平</span>'));
+    var pct=(tot?(last[1]/tot*100):0).toFixed(1);
+    return '<tr><td><span class="stock">'+esc(p.name)+'</span> <span class="code">'+esc(p.code)+'</span></td>'+
+      '<td>'+fmtE(last[1]/1e8)+'</td><td>'+chg+'</td><td>'+pct+'%</td><td>'+badge+'</td></tr>';
+  }).join('');
+  function at(p,dt){var a=S[p.code]||[];for(var i=a.length-1;i>=0;i--){if(a[i][0]===dt)return a[i];}return null;}
+  var totS=dates.map(function(dt){var s=0;pool.forEach(function(p){var v=at(p,dt);if(v)s+=v[1];});return +(s/1e8).toFixed(1);});
+  var flow=dates.map(function(dt,i){if(!i)return 0;var f=0;pool.forEach(function(p){var c=at(p,dt),p2=at(p,dates[i-1]);if(c&&p2)f+=(c[1]-p2[1])*(c[2]||0);});return +(f/1e8).toFixed(2);});
+  var ech=window.echarts,chE=document.getElementById('chE');
+  var oE={
+    grid:{left:60,right:60,top:26,bottom:24},
+    tooltip:{trigger:'axis',valueFormatter:function(v,i){return (i===1?v+' 亿份':(v==null?v:v+' 亿元'));}},
+    legend:{data:['全池份额','每日净申赎'],top:0,textStyle:{color:'#64748b',fontSize:11},itemWidth:14},
+    xAxis:{type:'category',data:dates.map(function(d){return d.slice(5);}),axisLine:{lineStyle:{color:'#cbd5e1'}},axisLabel:{color:'#64748b',fontSize:11}},
+    yAxis:[
+      {type:'value',name:'亿份',nameTextStyle:{color:'#94a3b8',fontSize:11},splitLine:{lineStyle:{color:'#eef2f7'}},axisLabel:{color:'#64748b',fontSize:11}},
+      {type:'value',name:'亿元',nameTextStyle:{color:'#94a3b8',fontSize:11},splitLine:{show:false},axisLabel:{color:'#64748b',fontSize:11}}
+    ],
+    series:[
+      {name:'全池份额',type:'line',data:totS,smooth:true,symbol:'circle',symbolSize:5,lineStyle:{width:2,color:'#185FA5'},itemStyle:{color:'#185FA5'},yAxisIndex:0},
+      {name:'每日净申赎',type:'bar',data:flow,barWidth:'42%',yAxisIndex:1,itemStyle:{color:function(p){return p.value>=0?'#e54545':'#18a058';},borderRadius:2}}
+    ]};
+  chE.setOption(oE);
+  window.addEventListener('resize',function(){chE.resize();});
+  hint.innerHTML=(dates.length<=1?'当前仅 '+dates.length+' 个快照日（'+esc(meta.latest||'-')+'）· 曲线随每个交易日盘后自动打点累积':('已积累 '+dates.length+' 个交易日快照 · 最新 '+esc(meta.latest||'-')))+'；全池份额=10 只宽基 ETF 合计，红柱=当日净申购（疑似国家队/大资金增持窗口），绿柱=净赎回。';
+}
 fetch('national.json',{cache:'no-cache'}).then(function(r){if(!r.ok)throw new Error(r.status);return r.json();})
 .then(function(d){FETCH_OK=true;render(d);})
 .catch(function(e){
   document.getElementById('mcards').innerHTML='<div class="err">数据加载失败（'+e.message+'）<br>线上请访问 https://willinxusheng.github.io/a-share-chanlun/national/national.html<br>本地查看需在仓库目录起 http 服务后访问本页。</div>';
+});
+fetch('etf_share.json',{cache:'no-cache'}).then(function(r){if(!r.ok)throw new Error(r.status);return r.json();})
+.then(function(e){renderEtf(e);})
+.catch(function(err){
+  var tb=document.getElementById('etfTb');
+  if(tb)tb.innerHTML='<tr><td colspan="5" style="text-align:center;color:#94a3b8">ETF 日度数据暂不可用（'+err.message+'）· CI 每日盘后自动累积</td></tr>';
 });
 </script>
 </body>
