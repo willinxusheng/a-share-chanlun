@@ -540,6 +540,12 @@ function renderBanner(){
   if(!b){b=document.createElement("div");b.id="dataBanner";document.body.insertBefore(b,document.body.firstChild);}
   var m=M||{},msgs=[];
   if(m.degraded)msgs.push('<b>⚠ 数据源降级</b>：'+(m.degraded_reason||'前复权源本次不可用，全市场转新浪裸价(不复权)兜底 — 除权日K线可能有假跳空，结构标注精度下降'));
+  /* R403: 消费 R400 后端 meta.m_macd 落痕 —— 月线MACD排序键整键失效时前端显式警示。
+     背景(09-09 r11): 腾讯月K源停用短路 → 全宇宙 m_macd=null → 前端 mTier(null)=中性,
+     逆向观察池 92 只 62 只(67%)名次位移≥3(绿柱加长票未沉尾), 页面却无任何提示(用户靠盘面才发现)。
+     R400 只做了后端落痕(tried/ok/short/net/down/warn), 此处合上消费闭环。旧数据无该键=不提示(兼容)。 */
+  var _mm=m.m_macd;
+  if(_mm&&_mm.warn)msgs.push('<b>⚠ 月线MACD排序键本次失效</b>：'+(_mm.tried||0)+' 只底背驰票月线状态不可得(成功 '+(_mm.ok||0)+'/数据不足 '+(_mm.short||0)+'/源停用 '+(_mm.down||0)+'/网络失败 '+(_mm.net||0)+') — 逆向观察池与底部信号的名次未按月线校正，「月弱(绿柱加长)」票不会沉尾，名次仅供参考');
   if(m.build_time){
     var t=new Date(String(m.build_time).replace(" ","T")+"+08:00").getTime();
     if(isFinite(t)&&Date.now()-t>4*864e5)
@@ -548,7 +554,8 @@ function renderBanner(){
   if(msgs.length){
     // R374: 新浪裸价占比>=50%(超半数无复权保护)升级红条醒目警示 —— 09-07/09-08 实证 77~82%
     // 裸价降级期间黄条(普通横幅)不醒目易被忽略; .err 红底样式已存在(#dataBanner.err)。
-    b.className=(m.degraded&&(m.degraded_pct||0)>=50)?"err":"";
+    // R403: 月线排序键整键失效(warn)同样升级红条 —— 名次层失真(67%位移)比裸价假跳空更直接误导埋伏排序。
+    b.className=((m.degraded&&(m.degraded_pct||0)>=50)||(_mm&&_mm.warn))?"err":"";
     b.innerHTML=msgs.join('<br>');b.style.display="block";}
   else{b.innerHTML="";b.style.display="none";}
   // R323: 横幅激活(sticky 钉顶 z999)会盖住同钉顶的行业表头(.ind-grid sticky z30)与个股浮层表头(.stk-head-float fixed z35)
