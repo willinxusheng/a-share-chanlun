@@ -750,14 +750,22 @@ function renderSigRadar(){
   //  P0: 破位不再混入"机会"主区(默认🔥最新 下沉灰显段, 防误买失效结构 — 东阿阿胶案例)
   //  P1: dev>8% 同沉非低吸区(追高) | 顶组无失效概念不受影响 | res/div 模式保留全量(资金视角, 破位+流入=骗线警示仍有价值)
   var botDz=function(s){var d=sigDev(s,s.st||{});if(d==null||s.dir!=="bottom")return 0;return d<0?2:(d>8?1:0);};
-  var pt=pick(top),pb=null,pbSub=null;
+  // R410: 顶组三段(与底组 botDz 对称的失效守卫) — 0=风险未释放(现价仍≥背驰高点 dv>=0) 1=释放中(已回落0~3%)
+  //   2=已兑现(回落>3% = 方向已应验; 口径同 R288b 摘要 nTopDn)。深度回测实证: r11 283 只顶信号 172 只(61%)
+  //   已从背驰高点回落>3% 却仍以"风险"姿态列前=马后炮(信号兑现后重复播报, r6→r11 交集 219/223 连续两天同批);
+  //   底组早于 R380-R382 有破位失效守卫(破位沉灰显→all剔除), 顶组长缺对称物 — 本守卫合上。
+  var ptDz=function(s){var d=sigDev(s,s.st||{});if(d==null||s.dir!=="top")return 0;return d<=-3?2:(d<0?1:0);};
+  var pt=null,pb=null,pbSub=null;
   if(curSigMode==="all"){
     var pbA=bot.filter(function(s){return botDz(s)===0;});
     pb=pick(pbA);
     // R380→R382 决策收紧: 旭总"只保留 5 只" — 破位/走高完全从 all 模式剔除(不再展示灰显段)
     //   残余视觉的 6 行干扰且对实操低吸无价值(破位=结构失效:不入仓); res/div 资金视角仍可看 pbSub(目前未传, 留扩展)
     pbSub=null;
-  }else{pb=pick(bot);}
+    // R410: 已兑现顶信号从 all 主区剔除(与 R382 底组同款决策 — 只保留未释放+释放中, 有操作价值的风险警示);
+    //   摘要行"顶信号已回落>3% 172/283"保留透明账; res/div 资金视角全量保留(已兑现+资金背离=警示仍有价值)。
+    pt=pick(top.filter(function(s){return ptDz(s)!==2;}));
+  }else{pt=pick(top);pb=pick(bot);}
   if(!pt.length&&!pb.length&&curSigMode==="all"){box.style.display="none";return;}
   box.style.display="";
   var emptyTxt=curSigMode==="all"?"当前全市场近端暂无该类信号 · 有信号时自动上榜":(curSigMode==="res"?"当前筛选下无「资金共振」信号(底信号+净流入/顶信号+净流出) · 切回🔥最新查看全部":"当前筛选下无「资金背离」信号(底+流出/顶+流入) · 切回🔥最新查看全部");
@@ -805,7 +813,7 @@ function renderSigRadar(){
       '<span class="chip'+chipOn("res")+'" onclick="setSigMode(\'res\')">💰资金共振</span>'+
       '<span class="chip'+chipOn("div")+'" onclick="setSigMode(\'div\')">⚠️背离警示</span>'+
     '</div>'+smark+
-    '<span class="shint" style="width:100%">全市场最新背驰信号 · <b style="color:#c92a2a">顶=风险</b>(警惕/减仓) <b style="color:#087f5b">底=机会</b>(关注/分批低吸) · 「偏离」=现价较信号位涨跌(<8%贴近=低吸参考区, 大=已走远慎追) · 👑龙头/资金佐证 · <span style="color:#e54545">左边条=资金共振</span>/<span style="color:#f59f00">黄条=背离警示</span></span></div>'+
+    '<span class="shint" style="width:100%">全市场最新背驰信号 · <b style="color:#c92a2a">顶=风险</b>(警惕/减仓) <b style="color:#087f5b">底=机会</b>(关注/分批低吸) · 「偏离」=现价较信号位涨跌(<8%贴近=低吸参考区, 大=已走远慎追) · 👑龙头/资金佐证 · <span style="color:#e54545">左边条=资金共振</span>/<span style="color:#f59f00">黄条=背离警示</span> · <b>顶组仅列未兑现</b>(已回落&gt;3%=方向应验, 从🔥最新剔除, 摘要可见已兑现数; 💰⚠️模式可查全量)</span></div>'+
     '<div class="sbody">'+grp("⚠️","顶背驰 · 风险",pt)+grp("✅","底背驰 · 机会",pb,pbSub)+'</div>'+
     '<div class="foot">信号=自研缠论引擎背驰确认 · 数据截至 '+esc(M.asof||"-")+' · 仅供研究参考，不构成投资建议</div>';
 }
