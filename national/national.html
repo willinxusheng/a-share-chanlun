@@ -23,6 +23,9 @@ header.top .inner{padding:12px 18px;display:flex;align-items:center;gap:12px;fle
 h1{font-size:21px;font-weight:700;letter-spacing:.4px;line-height:1.3}
 .sub{color:#c8d3e2;font-size:12px;margin-top:4px;line-height:1.6}
 .sub b{color:#fff;font-weight:600}
+/* 返回主看板胶囊 (与 radar 页同款, brand flex:1 自动将其推至 header 右侧) */
+.goback{background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.38);color:#fff;padding:7px 15px;border-radius:999px;font-size:13px;cursor:pointer;text-decoration:none;transition:.18s;white-space:nowrap;line-height:1.4;flex-shrink:0}
+.goback:hover{background:rgba(255,255,255,.26);border-color:rgba(255,255,255,.6)}
 .wrap{max-width:1160px;margin:0 auto;padding:14px 18px 44px}
 .card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);padding:14px 16px;margin-bottom:14px}
 .card h2{font-size:15px;font-weight:700;margin-bottom:2px}
@@ -58,6 +61,7 @@ tr:hover td{background:#f8fafc}
 select{font-size:12.5px;padding:3px 6px;border:1px solid var(--border);border-radius:8px;background:#fff;color:var(--ink)}
 footer{color:var(--muted);font-size:11.5px;line-height:1.7;padding:4px 2px 0}
 .err{padding:26px;text-align:center;color:#b45309;background:#fffbeb;border:1px solid #fde68a;border-radius:12px;margin:14px 0}
+@media(max-width:760px){.brand{flex:1 1 100%}.goback{margin-left:auto;flex-shrink:0}}
 @media(max-width:900px){.mcards{grid-template-columns:repeat(2,1fr)}.ev{grid-template-columns:1fr}}
 @media(max-width:600px){.mcards{grid-template-columns:1fr 1fr}.mc .vl{font-size:19px}}
 </style>
@@ -68,6 +72,7 @@ footer{color:var(--muted);font-size:11.5px;line-height:1.7;padding:4px 2px 0}
     <h1>国家队持仓走势 · 核心重仓池</h1>
     <div class="sub">中央汇金 / 证金 / 社保 等 · 定期报告前十大流通股东口径 &nbsp;|&nbsp; 最新报告期 <b id="metaRp">-</b> &nbsp;|&nbsp; 数据版本 <b id="metaVer">-</b></div>
   </div>
+  <a class="goback" href="javascript:toIndex()">← 返回主看板</a>
 </div></header>
 <div class="wrap">
 
@@ -114,6 +119,7 @@ footer{color:var(--muted);font-size:11.5px;line-height:1.7;padding:4px 2px 0}
 
 <script src="../radar/vendor/echarts.min.js"></script>
 <script>
+function toIndex(){location.href=location.href.split("/national/")[0]+"/index.html";}
 var FETCH_OK=false;
 function fmtB(x){x=x/1e8;return (x>=100)?(Math.round(x*10)/10).toLocaleString():(Math.round(x*100)/100).toLocaleString();}
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
