@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>国家队持仓走势 · 核心重仓池</title>
+<style>
+:root{
+  --primary:#2b6cb0; --primary2:#60a5fa; --ink:#1f2937; --muted:#64748b;
+  --border:#e2e8f0; --bg:#f2f5f9; --card:#fff;
+  --grad:linear-gradient(120deg,#0f172a 0%,#1e3a5f 52%,#2b6cb0 100%);
+  --radius:14px;
+  --shadow:0 1px 3px rgba(15,23,42,.05);
+  --shadow-lg:0 4px 16px rgba(15,23,42,.08);
+  --font-ui:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Helvetica Neue",Arial,sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+body{font-family:var(--font-ui);background:var(--bg);color:var(--ink);font-size:14px;line-height:1.55;-webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums}
+b,strong{font-weight:700}
+header.top{max-width:1160px;margin:0 auto;padding:14px 18px 0;color:#fff}
+header.top .inner{padding:12px 18px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;position:relative;min-height:52px;background:var(--grad);border-radius:15px;box-shadow:0 4px 16px rgba(15,23,42,.18)}
+.brand{display:flex;flex-direction:column;flex:1 1 auto;min-width:0}
+h1{font-size:21px;font-weight:700;letter-spacing:.4px;line-height:1.3}
+.sub{color:#c8d3e2;font-size:12px;margin-top:4px;line-height:1.6}
+.sub b{color:#fff;font-weight:600}
+.wrap{max-width:1160px;margin:0 auto;padding:14px 18px 44px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);padding:14px 16px;margin-bottom:14px}
+.card h2{font-size:15px;font-weight:700;margin-bottom:2px}
+.card .hint{font-size:12px;color:var(--muted);margin-bottom:10px}
+.mcards{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:14px}
+.mc{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:12px 14px;box-shadow:var(--shadow)}
+.mc .lb{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px}
+.mc .vl{font-size:23px;font-weight:700;margin-top:4px;letter-spacing:.2px}
+.mc .ch{font-size:12px;margin-top:3px;color:var(--muted)}
+.mc .ch b.up{color:#e54545}.mc .ch b.dn{color:#18a058}.mc .ch b.fl{color:var(--muted)}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+.legend{display:flex;flex-wrap:wrap;gap:14px;font-size:12px;color:var(--muted);margin:2px 0 8px}
+.legend span{display:flex;align-items:center;gap:5px}
+.chart{width:100%;height:280px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{padding:7px 8px;text-align:right;border-bottom:1px solid #eef2f7;white-space:nowrap}
+th{color:var(--muted);font-weight:600;background:#f8fafc;font-size:12px;position:sticky;top:0}
+th:first-child,td:first-child{text-align:left}
+tr:hover td{background:#f8fafc}
+.tag{display:inline-block;padding:1px 8px;border-radius:999px;font-size:11.5px;font-weight:600}
+.t-hj_tz{background:#e6f1fb;color:#185fa5}.t-hj_zg{background:#edf3fd;color:#4a76b8}
+.t-zj{background:#fdeee8;color:#c2410c}.t-sb{background:#e6f6ee;color:#0f766e}
+.t-wt{background:#f1efe8;color:#6b645a}.t-gx{background:#fbeaf0;color:#a21c55}.t-ct{background:#faf0da;color:#92600a}
+.stock{color:var(--ink);font-weight:600}
+.code{color:var(--muted);font-size:12px}
+.chg-up{color:#e54545}.chg-dn{color:#18a058}
+.ev{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.ev .it{display:flex;gap:10px;align-items:flex-start;background:#f8fafc;border:1px solid #eef2f7;border-radius:10px;padding:8px 10px}
+.ev .dt{font-weight:700;color:var(--primary);font-size:13px;white-space:nowrap;min-width:58px}
+.ev .tx{font-size:12.5px;color:#374151;line-height:1.5}
+.mt{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.mt .ft{font-size:12px;color:var(--muted)}
+select{font-size:12.5px;padding:3px 6px;border:1px solid var(--border);border-radius:8px;background:#fff;color:var(--ink)}
+footer{color:var(--muted);font-size:11.5px;line-height:1.7;padding:4px 2px 0}
+.err{padding:26px;text-align:center;color:#b45309;background:#fffbeb;border:1px solid #fde68a;border-radius:12px;margin:14px 0}
+@media(max-width:900px){.mcards{grid-template-columns:repeat(2,1fr)}.ev{grid-template-columns:1fr}}
+@media(max-width:600px){.mcards{grid-template-columns:1fr 1fr}.mc .vl{font-size:19px}}
+</style>
+</head>
+<body>
+<header class="top"><div class="inner">
+  <div class="brand">
+    <h1>国家队持仓走势 · 核心重仓池</h1>
+    <div class="sub">中央汇金 / 证金 / 社保 等 · 定期报告前十大流通股东口径 &nbsp;|&nbsp; 最新报告期 <b id="metaRp">-</b> &nbsp;|&nbsp; 数据版本 <b id="metaVer">-</b></div>
+  </div>
+</div></header>
+<div class="wrap">
+
+  <div class="mcards" id="mcards"></div>
+
+  <div class="card">
+    <div class="mt"><h2>主体持仓走势（季末，亿股）</h2>
+      <div class="ft">汇金投资为长期压舱石（左轴）；证金 / 社保 / 梧桐树操作更灵活（右轴）</div></div>
+    <div class="legend" id="lgA"></div>
+    <div class="chart" id="chA"></div>
+  </div>
+
+  <div class="card">
+    <div class="mt"><h2>国家队持仓合计与覆盖票数</h2>
+      <div class="ft">ncov = 本期在池内前十大股东中出现国家队主体的股票数</div></div>
+    <div class="legend" id="lgB"></div>
+    <div class="chart" id="chB" style="height:230px"></div>
+  </div>
+
+  <div class="card">
+    <div class="mt"><h2>最新报告期 · 国家队持仓明细 TOP</h2>
+      <div class="ft"><span id="topHint"></span></div></div>
+    <div style="margin-bottom:8px">
+      <select id="filt"><option value="all">全部主体</option></select>
+    </div>
+    <div style="max-height:520px;overflow:auto"><table>
+      <thead><tr><th>代码 / 名称</th><th>主体</th><th>持股（亿股）</th><th>占流通股本</th><th>较上季末</th></tr></thead>
+      <tbody id="tbody"></tbody>
+    </table></div>
+  </div>
+
+  <div class="card">
+    <h2>国家队关键动作时间轴</h2>
+    <div class="hint">公开事件整理（非股东数据源），供对照上图持仓跳变时点</div>
+    <div class="ev" id="events"></div>
+  </div>
+
+  <footer>
+    数据来源：东方财富 datacenter（RPT_F10_EH_FREEHOLDERS 上市公司定期报告·前十大流通股东），季度披露天然滞后 1~2 个月，最新数据为最近已披露报告期快照。
+    口径：本页仅覆盖核心重仓池（金融 / 中字头 / 大市值蓝筹，非全市场），国家 ETF 通道持仓另计、未含在此。个股持股为前十大流通股东口径，非十大股东者可未显示。
+    “社保/养老”含全国社会保障基金理事会与社保基金/基本养老保险组合。本页为数据展示，不构成投资建议。
+  </footer>
+</div>
+
+<script src="../radar/vendor/echarts.min.js"></script>
+<script>
+var FETCH_OK=false;
+function fmtB(x){x=x/1e8;return (x>=100)?(Math.round(x*10)/10).toLocaleString():(Math.round(x*100)/100).toLocaleString();}
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
+function mtag(b){var m={'hj_tz':'汇金投资','hj_zg':'汇金资管','zj':'证金','sb':'社保/养老','wt':'梧桐树','gx':'国新','ct':'诚通'};return '<span class="tag t-'+b+'">'+esc(m[b]||b)+'</span>';}
+var COL={'hj_tz':'#185FA5','hj_zg':'#85B7EB','zj':'#D85A30','sb':'#1D9E75','wt':'#888780','gx':'#D4537E','ct':'#BA7517'};
+var CN={'hj_tz':'中央汇金投资','hj_zg':'汇金资管','zj':'证金','sb':'社保/养老','wt':'梧桐树','gx':'国新','ct':'诚通'};
+var LAST=[];
+
+function render(data){
+  var meta=data.meta||{},series=data.series||[],top=data.top||[],stocks=data.stocks||{};
+  document.getElementById('metaRp').textContent=meta.latest_report||'-';
+  document.getElementById('metaVer').textContent=(meta.version||'-')+(meta.failed&&meta.failed.length?(' ('+meta.failed.length+' 票拉取失败)'):'');
+  var ga=new Date(meta.generated_at);ga.setHours(ga.getHours()+8);
+  document.getElementById('metaVer').textContent+=' · 生成 '+ga.toISOString().slice(0,16).replace('T',' ')+' 北京';
+  var cur=series[series.length-1],prev=series.length>1?series[series.length-2]:null;
+  if(!cur){document.getElementById('mcards').innerHTML='<div class="err">暂无数据</div>';return;}
+  function diff(k){if(!prev)return '<b class="fl">-</b>';var d=cur[k]-prev[k];if(d===0)return '<b class="fl">0</b>';return '<b class="'+(d>0?'up':'dn')+'">'+(d>0?'+':'')+fmtB(d)+' 亿</b>';}
+  var cards=[
+    ['中央汇金系 合计（投资+资管）',fmtB(cur.hj_tz+cur.hj_zg)+' 亿股',diff('hj_tz'),'#185FA5'],
+    ['中国证金',fmtB(cur.zj)+' 亿股',diff('zj'),'#D85A30'],
+    ['社保 / 养老',fmtB(cur.sb)+' 亿股',diff('sb'),'#1D9E75'],
+    ['覆盖票数（前十大命中）',cur.ncov+' / '+meta.pool_size,diff('ncov').replace(' 亿',' 只'),'#6b7280']
+  ];
+  document.getElementById('mcards').innerHTML=cards.map(function(c){return '<div class="mc"><div class="lb"><span class="dot" style="background:'+c[3]+'"></span>'+c[0]+'</div><div class="vl">'+c[1]+'</div><div class="ch">较上季末 '+c[2]+'</div></div>';}).join('');
+  document.getElementById('topHint').textContent='最新报告期 '+meta.latest_report+' · 覆盖池 '+meta.pool_size+' 只 · 持股为前十大流通股东口径';
+
+  var dates=series.map(function(s){return s.d.slice(2,7);});
+  function arr(k){return series.map(function(s){return +(s[k]/1e8).toFixed(2);});}
+  var lgA=document.getElementById('lgA'),lgB=document.getElementById('lgB');
+  ['hj_tz','hj_zg','zj','sb','wt'].forEach(function(k){lgA.innerHTML+='<span><span style="width:10px;height:10px;border-radius:2px;background:'+COL[k]+'"></span>'+CN[k]+'</span>';});
+  ['zj','sb','wt'].forEach(function(k){lgB.innerHTML+='<span><span style="width:10px;height:10px;border-radius:2px;background:'+COL[k]+'"></span>'+CN[k]+'</span>';});
+  lgB.innerHTML+='<span><span style="width:10px;height:3px;background:#6b7280;border-radius:2px"></span>覆盖票数(只,右轴)</span>';
+
+  var ech=window.echarts;
+  var oA={
+    grid:{left:52,right:58,top:14,bottom:26},
+    tooltip:{trigger:'axis',valueFormatter:function(v){return v+' 亿股';}},
+    xAxis:{type:'category',data:dates,boundaryGap:false,axisLine:{lineStyle:{color:'#cbd5e1'}},axisLabel:{color:'#64748b',fontSize:11,interval:function(i){return i%6===0;}}},
+    yAxis:[
+      {type:'value',name:'汇金系(亿股)',nameTextStyle:{color:'#94a3b8',fontSize:11},splitLine:{lineStyle:{color:'#eef2f7'}},axisLabel:{color:'#64748b',fontSize:11}},
+      {type:'value',name:'证金/社保(亿股)',nameTextStyle:{color:'#94a3b8',fontSize:11},splitLine:{show:false},axisLabel:{color:'#64748b',fontSize:11}}
+    ],
+    series:[
+      {name:CN.hj_tz,type:'line',data:arr('hj_tz'),smooth:true,symbol:'none',lineStyle:{width:2.5,color:'#185FA5'},areaStyle:{color:'rgba(24,95,165,.08)'},yAxisIndex:0},
+      {name:CN.hj_zg,type:'line',data:arr('hj_zg'),smooth:true,symbol:'none',lineStyle:{width:1.5,color:'#85B7EB',type:'dashed'},yAxisIndex:1},
+      {name:CN.zj,type:'line',data:arr('zj'),smooth:true,symbol:'none',lineStyle:{width:2,color:'#D85A30'},yAxisIndex:1},
+      {name:CN.sb,type:'line',data:arr('sb'),smooth:true,symbol:'none',lineStyle:{width:1.8,color:'#1D9E75'},yAxisIndex:1},
+      {name:CN.wt,type:'line',data:arr('wt'),smooth:true,symbol:'none',lineStyle:{width:1.5,color:'#888780',type:'dotted'},yAxisIndex:1}
+    ]
+  };
+  var chA=ech.init(document.getElementById('chA'));chA.setOption(oA);
+  var oB={
+    grid:{left:52,right:58,top:14,bottom:26},
+    tooltip:{trigger:'axis'},
+    xAxis:{type:'category',data:dates,boundaryGap:false,axisLine:{lineStyle:{color:'#cbd5e1'}},axisLabel:{color:'#64748b',fontSize:11,interval:function(i){return i%6===0;}}},
+    yAxis:[
+      {type:'value',name:'亿股',nameTextStyle:{color:'#94a3b8',fontSize:11},splitLine:{lineStyle:{color:'#eef2f7'}},axisLabel:{color:'#64748b',fontSize:11}},
+      {type:'value',name:'只',nameTextStyle:{color:'#94a3b8',fontSize:11},min:0,max:function(v){return Math.max(2,Math.ceil((v.max+4)/10)*10);},splitLine:{show:false},axisLabel:{color:'#64748b',fontSize:11}}
+    ],
+    series:[
+      {name:'证金',type:'line',data:arr('zj'),smooth:true,symbol:'none',lineStyle:{width:2,color:'#D85A30'}},
+      {name:'社保/养老',type:'line',data:arr('sb'),smooth:true,symbol:'none',lineStyle:{width:2,color:'#1D9E75'}},
+      {name:'梧桐树',type:'line',data:arr('wt'),smooth:true,symbol:'none',lineStyle:{width:1.5,color:'#888780',type:'dotted'}},
+      {name:'覆盖票数',type:'bar',data:series.map(function(s){return s.ncov;}),barWidth:'46%',itemStyle:{color:'rgba(107,114,128,.28)'},yAxisIndex:1,barGap:0}
+    ]
+  };
+  var chB=ech.init(document.getElementById('chB'));chB.setOption(oB);
+  window.addEventListener('resize',function(){chA.resize();chB.resize();});
+
+  LAST=top;
+  var ops=document.getElementById('filt');
+  ops.innerHTML='<option value="all">全部主体</option>'+Object.keys(CN).filter(function(k){return top.some(function(r){return r.bucket===k;});}).map(function(k){return '<option value="'+k+'">'+CN[k]+'</option>';}).join('');
+  ops.onchange=function(){drawTop(top,stocks,ops.value);};
+  drawTop(top,stocks,'all');
+}
+
+function drawTop(top,stocks,f){
+  var rows=top.filter(function(r){return f==='all'||r.bucket===f;}).slice(0,60);
+  var tb=document.getElementById('tbody');
+  if(!rows.length){tb.innerHTML='<tr><td colspan="5" style="text-align:center;color:#94a3b8">无命中</td></tr>';return;}
+  tb.innerHTML=rows.map(function(r){
+    var st=stocks[r.code]||{},sb=st.b?st.b[r.bucket]:null,chg='-';
+    if(sb&&sb.length>1){var d=sb[sb.length-1][1]-sb[sb.length-2][1];chg=d===0?'<span class="chg-dn">0</span>':(d>0?'<span class="chg-up">+'+fmtB(d)+'</span>':'<span class="chg-dn">'+fmtB(d)+'</span>');}
+    return '<tr><td><span class="stock">'+esc(r.name)+'</span> <span class="code">'+esc(r.code)+'</span></td>'+
+      '<td style="text-align:left">'+mtag(r.bucket)+'</td>'+
+      '<td>'+fmtB(r.hold)+'</td>'+
+      '<td>'+(r.free_ratio?r.free_ratio.toFixed(1)+'%':'-')+'</td>'+
+      '<td>'+chg+'</td></tr>';
+  }).join('');
+}
+
+var EV=[
+  ['2008-09','金融危机后中央汇金宣布增持工中建三大行'],
+  ['2011-10','汇金增持四大行, 开启长期锁仓'],
+  ['2013-06','"钱荒"后汇金再度增持, 三季度持仓跳升'],
+  ['2015-07','股灾救市: 汇金入场 + 证金公司获央行再贷款大举买入'],
+  ['2015-09','三季度国家队持仓峰值(汇金+证金+梧桐树同现), 池内覆盖票数 14→16'],
+  ['2016-03','汇金/证金转入长期持有, 证金资管平台承接'],
+  ['2018-12','汇金长期持股不变, 证金小幅减持周期开启'],
+  ['2023-10','汇金增持四大行, 并宣布未来 6 个月继续增持'],
+  ['2024-02','汇金扩大 ETF 增持范围(宽基 ETF 通道, 本页个股口径外)'],
+  ['2026-07','国新(超500亿)+诚通(近百亿)增持央企与科技, 险资跟进']
+];
+document.getElementById('events').innerHTML=EV.map(function(e){return '<div class="it"><div class="dt">'+e[0]+'</div><div class="tx">'+e[1]+'</div></div>';}).join('');
+
+fetch('national.json',{cache:'no-cache'}).then(function(r){if(!r.ok)throw new Error(r.status);return r.json();})
+.then(function(d){FETCH_OK=true;render(d);})
+.catch(function(e){
+  document.getElementById('mcards').innerHTML='<div class="err">数据加载失败（'+e.message+'）<br>线上请访问 https://willinxusheng.github.io/a-share-chanlun/national/national.html<br>本地查看需在仓库目录起 http 服务后访问本页。</div>';
+});
+</script>
+</body>
+</html>
