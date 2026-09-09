@@ -944,12 +944,15 @@ function renderRevPool(){
   if(!shown.length)shown=all.slice(0,REV_SHOW);     // 精选为空(极端市况)回退前 REV_SHOW
   var chipOn=function(m){return curRevMode===m?' on':'';};
   var rowsHtml=shown.map(revRow).join('');
-  var collapsed=curRevMode==="pick"&&!revExpanded&&nEli>0&&nEli<nAll;  // 仅 pick+未展开+确有精选 才折叠
+  // R386: collapsed 条件放宽为 nEli<nAll(原 nEli>0&& 在无精选市况下: shown 回退 REV_SHOW
+  // 前12行但 moreHtml 两分支都不命中 → 后段票被吞且无展开入口, 只能靠切 chip 才可见)。
+  // nEli=0 时同样折叠出「查看全量档案」展开按钮(12行预览+按钮), phint 已诚实显示"共0只"。
+  var collapsed=curRevMode==="pick"&&!revExpanded&&nEli<nAll;  // 仅 pick+未展开+确有隐藏票才折叠
   var moreHtml=collapsed?'<div class="more"><a onclick="toggleRev()" style="color:#18a058;font-weight:700">▼ 查看全量档案 '+nAll+' 只</a></div>':(curRevMode==="pick"&&revExpanded&&nAll>nEli?'<div class="more"><a onclick="toggleRev()">▲ 收起 · 只看高胜率精选 '+nEli+' 只</a></div>':'');
   // R378: 7 列表头, 与 revRow 列定义一致(浅灰底小字标注每列语义)
   var phdrHtml='<div class="phdr"><span>标的</span><span>距历史高</span><span>现价</span><span>底线·止损参考</span><span>60日均额</span><span>底背驰触发</span><span>距背低点</span></div>';
   box.innerHTML='<div class="phead"><h2>🧭 逆向观察池</h2>'+
-    (collapsed?'<span class="elite-badge" title="高胜率精选=底部刚启(距底≤3%)+60日均额≥1亿+结构自洽 · 行内红字「月弱」标=月线MACD绿柱加长(下跌中继, 双周期键沉同档尾) · 行尾色点=确认度(深绿双/浅绿单/灰无) — 均只作名次键不作门槛">🏆 高胜率精选 '+nEli+'</span>':'')+
+    (collapsed&&nEli>0?'<span class="elite-badge" title="高胜率精选=底部刚启(距底≤3%)+60日均额≥1亿+结构自洽 · 行内红字「月弱」标=月线MACD绿柱加长(下跌中继, 双周期键沉同档尾) · 行尾色点=确认度(深绿双/浅绿单/灰无) — 均只作名次键不作门槛">🏆 高胜率精选 '+nEli+'</span>':'')+
     '<div class="chips">'+
       '<span class="chip'+chipOn("pick")+'" onclick="setRevMode(\'pick\')" title="实操纪律复合排序: ①底部刚启(距底≤3%)优先 ②月线MACD双周期(红柱/绿缩在前, 绿加长「月弱」沉同档尾 — 大方向先于细节) ③确认度(双/单/无, 名次键不作门槛) ④60日均额≥1亿稳健(≥5000万次之) ⑤跌得最透优先 — 月弱标=月线下跌中继, 行尾色点=确认度">🌟 实操优选</span>'+
       '<span class="chip'+chipOn("dd")+'" onclick="setRevMode(\'dd\')" title="距历史高点回撤最深的在前 — 看谁跌得最透">📉 最深回撤</span>'+
