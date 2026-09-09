@@ -47,7 +47,13 @@ jobs:
             exit 0
           fi
           if [ -f radar/radar.json ]; then
-            BD=$(python3 -c "import json;print(json.load(open('radar/radar.json'))['meta'].get('build_time','')[:10])")
+            # R397: 本地 radar.json 解析加容错(R337 冲突 marker 事故同款损坏态) —— 原裸
+            # python 解析在文件损坏时 rc!=0, 被 set -euo pipefail 终止 guard step, 后续
+            # scan/自检/提交全被跳过 -> 损坏的 radar.json 无法经正常重扫自愈(唯一修复通道
+            # 被自身阻断, job 只红叉不产新数据)。与下方 L66 远端解析(R374 已带 2>/dev/null
+            # || echo "")不对称, 现对齐: 解析失败 BD="" != TODAY -> 自然放行全量重扫,
+            # scan_radar 新产物覆盖损坏文件完成自愈。
+            BD=$(python3 -c "import json;print(json.load(open('radar/radar.json'))['meta'].get('build_time','')[:10])" 2>/dev/null || echo "")
             echo "radar build_date=$BD  北京今天=$TODAY"
             if [ "$BD" = "$TODAY" ]; then
               echo "今日(北京 $TODAY)已完成扫描并入库, 本次 dispatch 跳过(数据已当日)"
