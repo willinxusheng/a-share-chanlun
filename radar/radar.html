@@ -705,11 +705,11 @@ function renderSigRadar(){
   var gDiv=function(s){var fn=(UNI[s.sym]||{}).ff||{};fn=fn.net;if(fn==null)return false;return (s.dir==="bottom"&&fn<0)||(s.dir==="top"&&fn>0);};
   var gf=function(s){var fn=(UNI[s.sym]||{}).ff||{};return Math.abs(fn.net||0);};
   var leadOf=function(s){return (UNI[s.sym]||{}).lead?1:0;};   // R380: P3 龙头加权
-  var byFresh=function(a,b){  // R380+R392: fresh→资金同向(res)→级别(strong 大=趋势/段级)→背离强度(area 小=强背离优先, R392 修正原降序)→龙头 → sym 兜底(P2/P3 加权, 同级"刚触发+资金佐证"先行)
+  var byFresh=function(a,b){  // R380+R392+R398: fresh→资金同向(res)→级别(strong 大=趋势/段级)→背离强度(area 小=强背离优先; area≤0=无有效面积, 与 scan_radar.py L1430 `area if area>0 else 999` 同源沉底 — R392 只翻方向漏同步 0/负守卫, 4 只 area==0 顶信号曾被升序置顶当"最强背离")→龙头 → sym 兜底(P2/P3 加权, 同级"刚触发+资金佐证"先行)
     var fa=(a.fresh==null?999:a.fresh),fb=(b.fresh==null?999:b.fresh);if(fa!==fb)return fa-fb;
     var ra=gRes(a)?1:0,rb=gRes(b)?1:0;if(ra!==rb)return rb-ra;
     var sa=(a.strong||0),sb=(b.strong||0);if(sa!==sb)return sb-sa;
-    var aa=(a.area||0),ab=(b.area||0);if(aa!==ab)return aa-ab;
+    var aa=(a.area>0?a.area:999),ab=(b.area>0?b.area:999);if(aa!==ab)return aa-ab;
     var la=leadOf(a),lb=leadOf(b);if(la!==lb)return lb-la;
     return (a.sym<b.sym?-1:1);
   };
@@ -1203,6 +1203,7 @@ function switchTab(tab){
 /* 行业 K 线 vs 个股 K 线(同一 mainChart, 切换数据源) */
 function drawChart(){
   var el=$("mainChart");if(!el)return;
+  ++drawSeq;   // R398: 行业图重画使 in-flight drawStkInto 作废 — 原只 drawStkInto 内部递增, 用户个股K线拉取中切回行业tab时迟返响应会 dispose 刚画的行业图并覆盖成个股图(tab=行业却显个股)
   if(curTab==="stk"&&curStk){
     drawStkInto(el,curStk);
     return;
@@ -1417,6 +1418,7 @@ function showStk(sym){
   var u=UNI[sym];if(!u){alert("未收录 "+sym);return}
   curStk=sym;curTab="stk";detailOpen=false;
   disposePool();hideFloatHead();   // R258: 整页重建前释放旧页图表实例 / 隐藏浮层表头
+  if(myChart){try{myChart.dispose()}catch(e){};myChart=null}   // R398: 行业详情主图占用 myChart 全局(未入池), 直达个股页必须同 backHome 显式释放 — 原漏 dispose, 旧行业图残留至下次返回才释放(resize 反复操作隐藏图)
   window.scrollTo(0,0);            // R302: 先回顶再切视图 — viewHome 隐藏瞬间文档高度收缩, 深滚动位置会被浏览器 clamp 造成视口跳闪("点进去闪一下")
   $("viewHome").classList.add("hidden");
   $("viewStk").classList.remove("hidden");
