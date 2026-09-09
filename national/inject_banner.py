@@ -7,11 +7,14 @@ P1(2026-09-09): 用户在主报告顶部要求「与缠论雷达一样」放一�
 设计原则 (深度美化优先, 不破坏 radar 契约):
   - 共用 a.radar-btn 同款胶囊样式 + pulse 动效 (R398/409 已验证审美达预期);
   - 但用冷蓝脉冲(雷达=暖黄) 颜色区分, 视觉层次清晰;
-  - 位置: 雷达按钮挪到 right:140px, 国家队按钮贴右 right:24px,
-    两按钮间隙 ≈ 116px, h1 padding-right 同步从 158 拓到 296 防遮挡;
-  - 窄屏(<=720px): 标题下移, 两按钮同行右上, 小尺寸, 不挤文字;
-  - 矮横屏(max-height:560px): 两按钮都改 static flex 子项, margin-left:auto,
-    雷达居中/国家队贴右, header 同一行紧凑展示。
+  - 竖排堆叠 (2026-09-09 用户审美反馈, 否定初版横向并排): 两按钮 absolute top:50%
+    right:24px, 以 header 垂直中线为对称轴, 雷达钮 translateY(-100%-5px) 居上、
+    国家队钮 translateY(5px) 居下, 间隙 10px → 右侧纵向均匀分布、整体垂直居中;
+  - 标题右距: 竖排只占单钮宽, h1 padding-right 176px(较 radar 单钮 158 略留呼吸),
+    p 说明文字 156px 避让按钮组;
+  - 窄屏(<=720px): 按钮组缩小, 右上角竖排, p 右距 128px;
+  - 矮横屏(max-height:560px): 高度不足竖排, 两按钮退化为 static flex 子项横向一行
+    (雷达 margin-left:auto 贴右 / 国家队 margin-left:8px 次右), 保持紧凑不遮字。
 
 用法(挂在 deploy.yml radar/inject_banner.py 之后, audit_report_runtime.py 之后):
   python3 national/inject_banner.py index.html
@@ -27,9 +30,12 @@ BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # 雷达按钮位置: right 24px → 140px 让位;  h1 标题右距 158px → 296px 给两按钮让位。
 NATIONAL_BTN_CSS = """
 <style>
-/* ===== P1 国家队持仓入口按钮 (与雷达按钮同位同款, 冷蓝脉冲区分) ===== */
-a.national-btn {
-  position: absolute; top: 50%; right: 24px; transform: translateY(-50%);
+/* ===== P1 国家队持仓入口按钮 — 竖排堆叠方案 (2026-09-09 用户审美反馈) =====
+   两按钮不再横向并排, 改为 header 右上角纵向均匀分布:
+   以 header 垂直中线为对称轴 — 上: 雷达钮(暖黄), 下: 国家队钮(冷蓝),
+   各自 translateY 相对中线偏移, 两钮间隙恒 10px, 视觉整体垂直居中。 */
+a.radar-btn, a.national-btn {
+  position: absolute; top: 50%; right: 24px; transform: translateY(0);
   z-index: 3; display: inline-flex; align-items: center; gap: 5px;
   background: rgba(255,255,255,.13); border: 1px solid rgba(255,255,255,.30);
   color: #fff; font-size: 13px; font-weight: 600; line-height: 1;
@@ -38,7 +44,10 @@ a.national-btn {
   box-shadow: 0 2px 8px rgba(0,0,0,.16); transition: background .2s, transform .2s;
   font-family: inherit;
 }
-a.national-btn:hover { background: rgba(255,255,255,.24); }
+/* 竖排锚点: 雷达钮底缘距中线 5px / 国家队钮顶缘距中线 5px → 间隙 10px */
+a.radar-btn { transform: translateY(calc(-100% - 5px)); }
+a.national-btn { transform: translateY(5px); }
+a.radar-btn:hover, a.national-btn:hover { background: rgba(255,255,255,.24); }
 a.national-btn .nb-dot {
   width: 7px; height: 7px; border-radius: 50%; background: #74c0fc;
   box-shadow: 0 0 0 0 rgba(116,192,252,.55); animation: nbPulse 2.4s infinite;
@@ -48,22 +57,25 @@ a.national-btn .nb-dot {
   70%  { box-shadow: 0 0 0 6px rgba(116,192,252,0); }
   100% { box-shadow: 0 0 0 0 rgba(116,192,252,0); }
 }
-/* 让位: h1 右距拓到 296 防两按钮遮挡, 雷达按钮挪到 right:140px */
-.wrap > header > h1 { padding-right: 296px !important; box-sizing: border-box; }
-a.radar-btn { right: 140px !important; }
+/* 标题/说明右距: 竖排只占单钮宽(约150px), h1 176px 留呼吸; p 156px 避让按钮组 */
+.wrap > header > h1 { padding-right: 176px !important; box-sizing: border-box; }
+.wrap > header > p { padding-right: 156px; }
 
-/* 窄屏手机竖屏 (R398 验证 radar 已用 padding-right:158px; 现拓到 296 同覆盖) */
+/* 窄屏手机竖屏: 按钮组缩小, 右上角竖排 */
 @media (max-width: 720px) {
-  a.national-btn { right: 12px; font-size: 12px; padding: 6px 11px; }
-  a.radar-btn { right: 124px !important; font-size: 12px; padding: 6px 11px; }
+  a.radar-btn, a.national-btn { right: 10px; font-size: 11.5px; padding: 6px 10px; }
+  a.radar-btn { transform: translateY(calc(-100% - 4px)); }
+  a.national-btn { transform: translateY(4px); }
   .wrap > header > h1 { padding-right: 0 !important; }
-  .wrap > header > p { padding-right: 240px; }   /* 说明文字右端避让两按钮 */
+  .wrap > header > p { padding-right: 128px; }   /* 说明文字右端避让竖排按钮组 */
 }
-/* 矮横屏 (R398 验证: radar 此时已 static flex, margin-left:auto 贴右) */
+/* 矮横屏 (R398 验证: header 此时 flex 紧凑版) — 高度不足竖排两钮,
+   退化为横向一行(雷达贴右/国家队次右), 保持不遮字 */
 @media (max-height: 560px) {
   .wrap > header { justify-content: flex-start; flex-wrap: nowrap; }
-  a.national-btn { position: static; transform: none; margin-left: 8px; flex: 0 0 auto; padding: 5px 10px; font-size: 12px; }
-  a.radar-btn { right: auto !important; position: static; transform: none; margin-left: auto; flex: 0 0 auto; padding: 5px 10px; font-size: 12px; }
+  a.radar-btn, a.national-btn { position: static; transform: none !important; flex: 0 0 auto; padding: 5px 10px; font-size: 12px; }
+  a.radar-btn { right: auto !important; margin-left: auto; }
+  a.national-btn { margin-left: 8px; }
   .wrap > header > h1 { padding-right: 0 !important; flex: 0 1 auto; }
   .wrap > header > p { padding-right: 0 !important; flex: 0 1 auto; }
 }
