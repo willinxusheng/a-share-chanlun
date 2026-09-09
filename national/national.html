@@ -6,140 +6,256 @@
 <title>国家队持仓走势 · 核心重仓池</title>
 <style>
 :root{
-  --primary:#2b6cb0; --primary2:#60a5fa; --ink:#1f2937; --muted:#64748b;
-  --border:#e2e8f0; --bg:#f2f5f9; --card:#fff;
-  --grad:linear-gradient(120deg,#0f172a 0%,#1e3a5f 52%,#2b6cb0 100%);
-  --radius:14px;
-  --shadow:0 1px 3px rgba(15,23,42,.05);
-  --shadow-lg:0 4px 16px rgba(15,23,42,.08);
+  --primary:#2b6cb0; --primary2:#60a5fa; --ink:#1f2937; --muted:#64748b; --muted2:#94a3b8;
+  --border:#e2e8f0; --border2:#eef2f7; --bg:#eef2f7; --card:#fff;
+  --up:#e54545; --down:#18a058;          /* A股约定: 涨红 跌绿 */
+  --up-soft:#fdecec; --down-soft:#e6f9f0;
+  --gold:#b7791f; --gold-soft:#fff7e0;
+  --grad:linear-gradient(120deg,#0b1220 0%,#152c47 45%,#1d4b7d 78%,#2b6cb0 100%);
+  --radius:16px; --radius-sm:11px;
+  --shadow:0 1px 2px rgba(15,23,42,.05);
+  --shadow-lg:0 8px 24px rgba(15,23,42,.09);
+  --shadow-hero:0 12px 34px rgba(15,23,42,.22);
   --font-ui:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Helvetica Neue",Arial,sans-serif;
 }
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
-body{font-family:var(--font-ui);background:var(--bg);color:var(--ink);font-size:14px;line-height:1.55;-webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums}
+html{-webkit-text-size-adjust:100%;scroll-behavior:smooth}
+body{font-family:var(--font-ui);background:
+    radial-gradient(1200px 320px at 50% -120px, rgba(43,108,176,.10), transparent 60%), var(--bg);
+  color:var(--ink);font-size:14px;line-height:1.55;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;font-variant-numeric:tabular-nums;letter-spacing:.1px}
 b,strong{font-weight:700}
-header.top{max-width:1160px;margin:0 auto;padding:14px 18px 0;color:#fff}
-header.top .inner{padding:12px 18px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;position:relative;min-height:52px;background:var(--grad);border-radius:15px;box-shadow:0 4px 16px rgba(15,23,42,.18)}
-.brand{display:flex;flex-direction:column;flex:1 1 auto;min-width:0}
-h1{font-size:21px;font-weight:700;letter-spacing:.4px;line-height:1.3}
-.sub{color:#c8d3e2;font-size:12px;margin-top:4px;line-height:1.6}
+.wrap{max-width:1160px;margin:0 auto;padding:0 18px 48px}
+/* ========== 顶部 Hero (限宽圆角渐变卡, 与正文同列) ========== */
+header.top{max-width:1160px;margin:0 auto;padding:16px 18px 0;color:#fff}
+header.top .inner{position:relative;overflow:hidden;padding:20px 22px 16px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+  background:var(--grad);border-radius:18px;box-shadow:var(--shadow-hero)}
+header.top .inner::before{content:"";position:absolute;top:-60%;right:-8%;width:46%;height:220%;pointer-events:none;
+  background:radial-gradient(closest-side, rgba(255,255,255,.13), transparent 70%);transform:rotate(-12deg)}
+header.top .inner::after{content:"";position:absolute;left:-6%;bottom:-110%;width:34%;height:200%;pointer-events:none;
+  background:radial-gradient(closest-side, rgba(96,165,250,.16), transparent 72%)}
+.brand{display:flex;flex-direction:column;flex:1 1 auto;min-width:0;position:relative;z-index:1}
+.bt{display:flex;align-items:center;gap:12px;min-width:0}
+.emblem{flex:0 0 auto;width:38px;height:38px;border-radius:11px;display:flex;align-items:center;justify-content:center;
+  background:linear-gradient(135deg,#4f9ef0,#1e4f8f);color:#fff;font-size:17px;font-weight:800;letter-spacing:0;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.35), 0 3px 8px rgba(0,0,0,.25)}
+h1{font-size:22px;font-weight:800;letter-spacing:.5px;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sub{color:#c6d4e4;font-size:12.5px;margin-top:6px;line-height:1.6}
 .sub b{color:#fff;font-weight:600}
-/* 返回主看板胶囊 (与 radar 页同款, brand flex:1 自动将其推至 header 右侧) */
-.goback{background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.38);color:#fff;padding:7px 15px;border-radius:999px;font-size:13px;cursor:pointer;text-decoration:none;transition:.18s;white-space:nowrap;line-height:1.4;flex-shrink:0}
-.goback:hover{background:rgba(255,255,255,.26);border-color:rgba(255,255,255,.6)}
-.wrap{max-width:1160px;margin:0 auto;padding:14px 18px 44px}
-.card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);padding:14px 16px;margin-bottom:14px}
-.card h2{font-size:15px;font-weight:700;margin-bottom:2px}
-.card .hint{font-size:12px;color:var(--muted);margin-bottom:10px}
-.mcards{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:14px}
-.mc{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:12px 14px;box-shadow:var(--shadow)}
-.mc .lb{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px}
-.mc .vl{font-size:23px;font-weight:700;margin-top:4px;letter-spacing:.2px}
-.mc .ch{font-size:12px;margin-top:3px;color:var(--muted)}
-.mc .ch b.up{color:#e54545}.mc .ch b.dn{color:#18a058}.mc .ch b.fl{color:var(--muted)}
-.dot{width:8px;height:8px;border-radius:50%;display:inline-block}
-.legend{display:flex;flex-wrap:wrap;gap:14px;font-size:12px;color:var(--muted);margin:2px 0 8px}
-.legend span{display:flex;align-items:center;gap:5px}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.chip{background:rgba(255,255,255,.09);border:1px solid rgba(255,255,255,.22);border-radius:999px;padding:3px 11px;
+  font-size:11.5px;color:#dbe6f2;display:inline-flex;align-items:center;gap:6px;backdrop-filter:blur(3px);line-height:1.7}
+.chip i{font-style:normal;color:#93a7c0}
+.chip b{color:#fff;font-weight:700}
+.goback{position:relative;z-index:1;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.38);color:#fff;
+  padding:8px 16px;border-radius:999px;font-size:13px;cursor:pointer;text-decoration:none;transition:.18s;white-space:nowrap;line-height:1.4;flex-shrink:0;box-shadow:0 2px 8px rgba(0,0,0,.12)}
+.goback:hover{background:rgba(255,255,255,.26);border-color:rgba(255,255,255,.62);transform:translateY(-1px)}
+/* ========== 章节药丸导航 (与主看板 toc 同款) ========== */
+nav.pnav{position:sticky;top:10px;z-index:120;display:flex;justify-content:center;gap:4px;flex-wrap:nowrap;
+  margin:16px 0 14px;padding:5px 8px;background:rgba(255,255,255,.92);backdrop-filter:blur(10px);
+  border:1px solid #dfe6ef;border-radius:999px;box-shadow:0 4px 16px rgba(15,23,42,.07);overflow-x:auto;scrollbar-width:none}
+nav.pnav::-webkit-scrollbar{display:none}
+nav.pnav a{flex:1 0 auto;text-align:center;color:#55627a;text-decoration:none;padding:6px 13px;border-radius:999px;
+  font-size:12.5px;font-weight:600;white-space:nowrap;transition:all .16s ease}
+nav.pnav a:hover{background:#eef3f9;color:#1e293b}
+nav.pnav a.on{background:linear-gradient(120deg,var(--primary),#3b82c4);color:#fff;box-shadow:0 3px 10px rgba(43,108,176,.30)}
+/* ========== 通用卡片 ========== */
+.card{position:relative;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);
+  padding:16px 18px;margin-bottom:14px;box-shadow:var(--shadow);overflow:hidden;
+  transition:box-shadow .2s ease,transform .2s ease,border-color .2s ease;
+  animation:rise .5s ease both}
+.card:nth-of-type(2){animation-delay:.04s}.card:nth-of-type(3){animation-delay:.08s}
+.card:nth-of-type(4){animation-delay:.12s}.card:nth-of-type(5){animation-delay:.16s}
+.card:hover{box-shadow:var(--shadow-lg);border-color:#ccd8e6;transform:translateY(-2px)}
+.card::before{content:"";position:absolute;top:0;left:0;right:0;height:3px;pointer-events:none;
+  background:linear-gradient(90deg,var(--primary),var(--primary2));opacity:.85}
+@keyframes rise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+@media(prefers-reduced-motion:reduce){.card{animation:none}}
+.sec,.card,[id^="sec-"]{scroll-margin-top:86px}
+.mt{display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.card h2{font-size:16px;font-weight:800;letter-spacing:.2px;display:flex;align-items:center;gap:9px;color:#16233a}
+.card h2::before{content:"";width:4px;height:15px;border-radius:2px;flex:none;
+  background:linear-gradient(180deg,var(--primary),var(--primary2))}
+.card .ft{font-size:12px;color:var(--muted)}
+.card .hint{font-size:12px;color:var(--muted);margin:8px 0 4px;line-height:1.7}
+.fnote{margin-top:12px;padding:9px 13px;font-size:12px;color:#4b5b6f;line-height:1.75;
+  background:linear-gradient(180deg,#f7fafd,#f1f6fb);border:1px solid #e2eaf3;border-left:3px solid var(--primary2);
+  border-radius:0 10px 10px 0}
+.fnote b{color:#7a4d0d}
+/* ========== 概览 KPI ========== */
+.sec-over{display:block}
+.mcards{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:18px 0 16px}
+.mc{position:relative;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px 12px;
+  box-shadow:var(--shadow);overflow:hidden;transition:box-shadow .2s ease,transform .2s ease,border-color .2s ease;
+  animation:rise .45s ease both}
+.mc:nth-child(1){animation-delay:.02s}.mc:nth-child(2){animation-delay:.06s}
+.mc:nth-child(3){animation-delay:.10s}.mc:nth-child(4){animation-delay:.14s}
+.mc:hover{box-shadow:var(--shadow-lg);transform:translateY(-2px)}
+.mc .lb{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:7px;font-weight:600;letter-spacing:.2px}
+.mc .dot{width:9px;height:9px;border-radius:3px;flex:none;box-shadow:0 0 0 3px rgba(255,255,255,.5) inset}
+.mc .vl{font-size:27px;font-weight:800;margin:8px 0 6px;letter-spacing:-.6px;line-height:1.1;color:#0f172a}
+.mc .ch{font-size:11.5px;color:var(--muted);display:flex;align-items:center;gap:5px;flex-wrap:wrap}
+.mc .ch b{font-weight:700;padding:1.5px 8px;border-radius:999px;font-size:11px;display:inline-block;line-height:1.7}
+.mc .ch b.up{background:var(--up-soft);color:#c53030}
+.mc .ch b.dn{background:var(--down-soft);color:#0f7a52}
+.mc .ch b.fl{background:#eef1f5;color:var(--muted)}
+/* ========== 图例 ========== */
+.legend{display:flex;flex-wrap:wrap;gap:14px;font-size:12px;color:#55627a;margin:10px 0 8px}
+.legend span{display:flex;align-items:center;gap:6px}
+.legend i{width:11px;height:3px;border-radius:2px;display:inline-block;flex:none}
+.legend b{width:10px;height:10px;border-radius:3px;display:inline-block;flex:none}
+/* ========== 图表 ========== */
 .chart{width:100%;height:280px}
-table{width:100%;border-collapse:collapse;font-size:13px}
-th,td{padding:7px 8px;text-align:right;border-bottom:1px solid #eef2f7;white-space:nowrap}
-th{color:var(--muted);font-weight:600;background:#f8fafc;font-size:12px;position:sticky;top:0}
+/* ========== 表格 ========== */
+.tsc{max-height:520px;overflow:auto;border:1px solid var(--border2);border-radius:12px;
+  -webkit-overflow-scrolling:touch;scrollbar-width:thin}
+.tsc::-webkit-scrollbar{width:8px;height:8px}.tsc::-webkit-scrollbar-thumb{background:#cfd9e6;border-radius:4px}
+table{width:100%;border-collapse:separate;border-spacing:0;font-size:13px}
+.tsc table{min-width:640px}
+th,td{padding:8px 11px;text-align:right;white-space:nowrap;border-bottom:1px solid #eef2f7}
+th{color:#51617a;font-weight:600;background:#f2f6fa;font-size:12px;position:sticky;top:0;z-index:5;
+  border-bottom:1px solid #e0e8f1;text-align:right}
 th:first-child,td:first-child{text-align:left}
-tr:hover td{background:#f8fafc}
-.tag{display:inline-block;padding:1px 8px;border-radius:999px;font-size:11.5px;font-weight:600}
-.t-hj_tz{background:#e6f1fb;color:#185fa5}.t-hj_zg{background:#edf3fd;color:#4a76b8}
-.t-zj{background:#fdeee8;color:#c2410c}.t-sb{background:#e6f6ee;color:#0f766e}
-.t-wt{background:#f1efe8;color:#6b645a}.t-gx{background:#fbeaf0;color:#a21c55}.t-ct{background:#faf0da;color:#92600a}
+tr:hover td{background:#f7fafd}
+tbody tr:last-child td{border-bottom:0}
 .stock{color:var(--ink);font-weight:600}
-.code{color:var(--muted);font-size:12px}
-.chg-up{color:#e54545}.chg-dn{color:#18a058}
-.ebadge{display:inline-block;font-size:11px;font-weight:700;padding:1px 8px;border-radius:999px;line-height:1.7}
-.ebadge.up{background:#fdeaea;color:#e54545;border:1px solid #f5c6c6}
-.ebadge.dn{background:#e8f6ef;color:#18a058;border:1px solid #bfe6d2}
-.ebadge.flat{background:#f1f5f9;color:#64748b;border:1px solid #e2e8f0}
+.code{color:var(--muted);font-size:11.5px;background:#f1f4f8;border-radius:5px;padding:.5px 5px;margin-left:4px;font-variant-numeric:tabular-nums}
+.tag{display:inline-block;padding:1.5px 9px;border-radius:999px;font-size:11.5px;font-weight:700;line-height:1.6;white-space:nowrap}
+.t-hj_tz{background:#e3effa;color:#155a9c;border:1px solid #c9e0f4}.t-hj_zg{background:#eaf1fb;color:#3f6eb5;border:1px solid #d3e0f2}
+.t-zj{background:#fdeee6;color:#c2410c;border:1px solid #f7d5c2}.t-sb{background:#e2f4ec;color:#0b735f;border:1px solid #c2e7d9}
+.t-wt{background:#f2f0ea;color:#6b645a;border:1px solid #e2ddd0}.t-gx{background:#fbe7f0;color:#9e1a52;border:1px solid #f3c9dc}.t-ct{background:#faf0da;color:#8c5d08;border:1px solid #efdda9}
+.chg-up{color:#d63b3b;font-weight:700}.chg-dn{color:#0f8a5e;font-weight:700}
+.ebadge{display:inline-block;font-size:11px;font-weight:700;padding:2px 10px;border-radius:999px;line-height:1.7;white-space:nowrap}
+.ebadge.up{background:var(--up-soft);color:#c53030;border:1px solid #f3c6c6}
+.ebadge.dn{background:var(--down-soft);color:#0f7a52;border:1px solid #bce3d2}
+.ebadge.flat{background:#eef1f5;color:#64748b;border:1px solid #dde4ec}
+/* ========== 时间轴 ========== */
 .ev{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-.ev .it{display:flex;gap:10px;align-items:flex-start;background:#f8fafc;border:1px solid #eef2f7;border-radius:10px;padding:8px 10px}
-.ev .dt{font-weight:700;color:var(--primary);font-size:13px;white-space:nowrap;min-width:58px}
-.ev .tx{font-size:12.5px;color:#374151;line-height:1.5}
-.mt{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
-.mt .ft{font-size:12px;color:var(--muted)}
-select{font-size:12.5px;padding:3px 6px;border:1px solid var(--border);border-radius:8px;background:#fff;color:var(--ink)}
-footer{color:var(--muted);font-size:11.5px;line-height:1.7;padding:4px 2px 0}
-.err{padding:26px;text-align:center;color:#b45309;background:#fffbeb;border:1px solid #fde68a;border-radius:12px;margin:14px 0}
-@media(max-width:760px){.brand{flex:1 1 100%}.goback{margin-left:auto;flex-shrink:0}}
+.ev .it{display:flex;gap:12px;align-items:flex-start;background:linear-gradient(180deg,#fbfdff,#f6f9fc);
+  border:1px solid #eef2f7;border-left:3px solid var(--primary);border-radius:10px;padding:9px 12px;
+  transition:box-shadow .16s ease,transform .16s ease,background .16s ease}
+.ev .it:hover{background:#fff;box-shadow:var(--shadow-lg);transform:translateY(-1px)}
+.ev .dt{flex:0 0 auto;font-weight:800;color:#1e4d86;background:#e8f0fb;border-radius:8px;padding:4px 9px;
+  font-size:12.5px;letter-spacing:.2px;line-height:1.5;text-align:center;min-width:66px}
+.ev .tx{font-size:12.5px;color:#3c4a5e;line-height:1.55}
+/* ========== 控件 ========== */
+select{font-size:12.5px;padding:5px 10px;border:1px solid #d6dfe9;border-radius:9px;background:#fff;color:var(--ink);
+  outline:none;transition:border-color .15s,box-shadow .15s;cursor:pointer}
+select:hover{border-color:#b9c9dc}
+select:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(43,108,176,.14)}
+.toolrow{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:10px 0 8px}
+.toolrow .n{font-size:12px;color:var(--muted)}
+/* ========== 脚注/声明 ========== */
+.disc{margin:16px 0 12px;background:var(--gold-soft);border:1px solid #eedda6;color:#7a5b10;border-radius:12px;
+  padding:12px 16px;font-size:12.5px;line-height:1.8}
+.disc b{color:#6b4c06}
+footer{color:var(--muted);font-size:11.5px;line-height:1.8;padding:2px 2px 0}
+.err{padding:30px 20px;text-align:center;color:#b45309;background:#fffbeb;border:1px solid #fde68a;border-radius:12px;margin:14px 0;font-size:13px}
+/* ========== 响应式 ========== */
 @media(max-width:900px){.mcards{grid-template-columns:repeat(2,1fr)}.ev{grid-template-columns:1fr}}
-@media(max-width:600px){.mcards{grid-template-columns:1fr 1fr}.mc .vl{font-size:19px}}
+@media(max-width:640px){
+  header.top{padding:12px 10px 0}
+  header.top .inner{padding:15px 15px 13px;border-radius:15px}
+  h1{font-size:18px;white-space:normal;word-break:keep-all}
+  .wrap{padding:0 10px 36px}
+  .card{padding:13px 14px;border-radius:14px}
+  .mcards{grid-template-columns:1fr 1fr;gap:9px}
+  .mc .vl{font-size:22px}
+  nav.pnav{justify-content:flex-start;border-radius:16px;margin:12px 0 12px;top:8px}
+  .bt{flex-wrap:wrap}
+  .emblem{width:32px;height:32px;border-radius:9px;font-size:15px}
+  .goback{margin-left:auto}
+}
 </style>
 </head>
 <body>
 <header class="top"><div class="inner">
   <div class="brand">
-    <h1>国家队持仓走势 · 核心重仓池</h1>
-    <div class="sub">中央汇金 / 证金 / 社保 等 · 定期报告前十大流通股东口径 &nbsp;|&nbsp; 最新报告期 <b id="metaRp">-</b> &nbsp;|&nbsp; 数据版本 <b id="metaVer">-</b></div>
+    <div class="bt">
+      <span class="emblem">国</span>
+      <h1>国家队持仓走势 · 核心重仓池</h1>
+    </div>
+    <div class="sub">中央汇金 / 证金 / 社保 等 &nbsp;·&nbsp; 定期报告前十大流通股东口径</div>
+    <div class="chips">
+      <span class="chip"><i>最新报告期</i><b id="metaRp">-</b></span>
+      <span class="chip"><i>数据版本</i><b id="metaVer">-</b></span>
+    </div>
   </div>
   <a class="goback" href="javascript:toIndex()">← 返回主看板</a>
 </div></header>
+
 <div class="wrap">
+<nav class="pnav" id="pnav">
+  <a href="#sec-over" class="on">总览</a>
+  <a href="#sec-trend">主体持仓走势</a>
+  <a href="#sec-top">持仓明细</a>
+  <a href="#sec-etf">ETF 日度代理</a>
+  <a href="#sec-quar">季度真身</a>
+  <a href="#sec-events">时间轴</a>
+</nav>
 
+<section class="sec sec-over" id="sec-over">
   <div class="mcards" id="mcards"></div>
+</section>
 
-  <div class="card">
-    <div class="mt"><h2>主体持仓走势（季末，亿股）</h2>
-      <div class="ft">汇金投资为长期压舱石（左轴）；证金 / 社保 / 梧桐树操作更灵活（右轴）</div></div>
-    <div class="legend" id="lgA"></div>
-    <div class="chart" id="chA"></div>
+<div class="card" id="sec-trend">
+  <div class="mt"><h2>主体持仓走势（季末，亿股）</h2>
+    <div class="ft">汇金投资为长期压舱石（左轴）；证金 / 社保 / 梧桐树操作更灵活（右轴）</div></div>
+  <div class="legend" id="lgA"></div>
+  <div class="chart" id="chA"></div>
+</div>
+
+<div class="card" id="sec-total">
+  <div class="mt"><h2>国家队持仓合计与覆盖票数</h2>
+    <div class="ft">ncov = 本期在池内前十大股东中出现国家队主体的股票数</div></div>
+  <div class="legend" id="lgB"></div>
+  <div class="chart" id="chB" style="height:230px"></div>
+</div>
+
+<div class="card" id="sec-top">
+  <div class="mt"><h2>最新报告期 · 国家队持仓明细 TOP</h2>
+    <div class="ft"><span id="topHint"></span></div></div>
+  <div class="toolrow"><span class="n">主体筛选</span>
+    <select id="filt"><option value="all">全部主体</option></select>
   </div>
+  <div class="tsc"><table>
+    <thead><tr><th>代码 / 名称</th><th>主体</th><th>持股（亿股）</th><th>占流通股本</th><th>较上季末</th></tr></thead>
+    <tbody id="tbody"></tbody>
+  </table></div>
+</div>
 
-  <div class="card">
-    <div class="mt"><h2>国家队持仓合计与覆盖票数</h2>
-      <div class="ft">ncov = 本期在池内前十大股东中出现国家队主体的股票数</div></div>
-    <div class="legend" id="lgB"></div>
-    <div class="chart" id="chB" style="height:230px"></div>
+<div class="card" id="sec-etf">
+  <div class="mt"><h2>日度代理 · 宽基 ETF 资金流（疑似国家队）</h2>
+    <div class="ft">ETF 总份额<b>每交易日披露</b> · 日度份额×净值=当日净申赎资金</div></div>
+  <div class="hint">口径：份额为全体持有人合计，汇金 2024 起为宽基 ETF 最大买家之一，大额净申购窗口与国家队增持实证相关——<b style="color:#b45309">方向参考，非精确真身</b>。每日盘后自动打点，多日后自动累积曲线</div>
+  <div class="tsc" style="max-height:300px"><table>
+    <thead><tr><th>宽基 ETF</th><th>份额（亿份）</th><th>较上快照日</th><th>池内占比</th><th>资金方向</th></tr></thead>
+    <tbody id="etfTb"></tbody>
+  </table></div>
+  <div class="chart" id="chE" style="height:230px;margin-top:12px"></div>
+  <div class="fnote" id="etfHint"></div>
+</div>
+
+<div class="card" id="sec-quar">
+  <div class="mt"><h2>季度真身 · 宽基 ETF 份额长史（定期报告）</h2>
+    <div class="ft">基金季报披露口径（期末份额 / 当季申购赎回，<b>权威但滞后 1~2 月</b>）——复盘 2024Q3 汇金进场、2026 撤离等大资金动作；与上方<b>日度代理</b>互补：季度线看历史结构，日度线看当下动作</div></div>
+  <div class="toolrow"><span class="n">查看标的</span>
+    <select id="qSel"></select>
   </div>
+  <div class="chart" id="chQ" style="height:280px"></div>
+  <div class="fnote" id="qHint"></div>
+</div>
 
-  <div class="card">
-    <div class="mt"><h2>最新报告期 · 国家队持仓明细 TOP</h2>
-      <div class="ft"><span id="topHint"></span></div></div>
-    <div style="margin-bottom:8px">
-      <select id="filt"><option value="all">全部主体</option></select>
-    </div>
-    <div style="max-height:520px;overflow:auto"><table>
-      <thead><tr><th>代码 / 名称</th><th>主体</th><th>持股（亿股）</th><th>占流通股本</th><th>较上季末</th></tr></thead>
-      <tbody id="tbody"></tbody>
-    </table></div>
-  </div>
+<div class="card" id="sec-events">
+  <h2>国家队关键动作时间轴</h2>
+  <div class="hint">公开事件整理（非股东数据源），供对照上图持仓跳变时点</div>
+  <div class="ev" id="events"></div>
+</div>
 
-  <div class="card" id="etfCard">
-    <div class="mt"><h2>日度代理 · 宽基 ETF 资金流（疑似国家队）</h2>
-      <div class="ft">ETF 总份额<b>每交易日披露</b> · 日度份额×净值=当日净申赎资金。口径：份额为全体持有人合计，汇金 2024 起为宽基 ETF 最大买家之一，大额净申购窗口与国家队增持实证相关——<b style="color:#b45309">方向参考，非精确真身</b>。每日盘后自动打点，多日后自动累积曲线</div></div>
-    <div style="max-height:300px;overflow:auto"><table>
-      <thead><tr><th>宽基 ETF</th><th>份额（亿份）</th><th>较上快照日</th><th>池内占比</th><th>资金方向</th></tr></thead>
-      <tbody id="etfTb"></tbody>
-    </table></div>
-    <div class="chart" id="chE" style="height:230px;margin-top:6px"></div>
-    <div class="hint" id="etfHint"></div>
-  </div>
-
-  <div class="card" id="qCard">
-    <div class="mt"><h2>季度真身 · 宽基 ETF 份额长史（定期报告）</h2>
-      <div class="ft">基金季报披露口径（期末份额 / 当季申购赎回，<b>权威但滞后 1~2 月</b>）——复盘 2024Q3 汇金进场、2026 撤离等大资金动作；与上方<b>日度代理</b>互补：季度线看历史结构，日度线看当下动作</div></div>
-    <div style="margin-bottom:8px">
-      <select id="qSel"></select>
-    </div>
-    <div class="chart" id="chQ" style="height:270px"></div>
-    <div class="hint" id="qHint"></div>
-  </div>
-
-  <div class="card">
-    <h2>国家队关键动作时间轴</h2>
-    <div class="hint">公开事件整理（非股东数据源），供对照上图持仓跳变时点</div>
-    <div class="ev" id="events"></div>
-  </div>
-
-  <footer>
-    数据来源：东方财富 datacenter（RPT_F10_EH_FREEHOLDERS 上市公司定期报告·前十大流通股东），季度披露天然滞后 1~2 个月，最新数据为最近已披露报告期快照。
-    口径：本页仅覆盖核心重仓池（金融 / 中字头 / 大市值蓝筹，非全市场），国家 ETF 通道持仓另计、未含在此。个股持股为前十大流通股东口径，非十大股东者可未显示。
-    “社保/养老”含全国社会保障基金理事会与社保基金/基本养老保险组合。本页为数据展示，不构成投资建议。
-  </footer>
+<div class="disc"><b>口径提示：</b>本页仅覆盖核心重仓池（金融 / 中字头 / 大市值蓝筹，非全市场），个股持股为定期报告前十大流通股东口径，非十大股东者可未显示；国家 ETF 通道持仓另计、未含在此。"社保/养老"含全国社会保障基金理事会与社保基金/基本养老保险组合。</div>
+<footer>
+  数据来源：东方财富 datacenter（RPT_F10_EH_FREEHOLDERS 上市公司定期报告·前十大流通股东），季度披露天然滞后 1~2 个月，最新数据为最近已披露报告期快照；ETF 通道数据源为东财 push2 / 天天基金定期报告。
+  本页为数据展示，不构成投资建议。
+</footer>
 </div>
 
 <script src="../radar/vendor/echarts.min.js"></script>
@@ -152,6 +268,20 @@ function mtag(b){var m={'hj_tz':'汇金投资','hj_zg':'汇金资管','zj':'证�
 var COL={'hj_tz':'#185FA5','hj_zg':'#85B7EB','zj':'#D85A30','sb':'#1D9E75','wt':'#888780','gx':'#D4537E','ct':'#BA7517'};
 var CN={'hj_tz':'中央汇金投资','hj_zg':'汇金资管','zj':'证金','sb':'社保/养老','wt':'梧桐树','gx':'国新','ct':'诚通'};
 var LAST=[];
+
+/* ===== 图表主题常量 (与主看板视觉一致) ===== */
+var TT=function(fmt){
+  return {trigger:'axis',backgroundColor:'rgba(255,255,255,.98)',borderColor:'#dfe7f0',borderWidth:1,
+    padding:[8,12],textStyle:{color:'#334155',fontSize:12},
+    extraCssText:'box-shadow:0 8px 22px rgba(15,23,42,.13);border-radius:10px;',
+    valueFormatter:fmt||null};
+};
+function zslider(){
+  return [{type:'inside',zoomOnMouseWheel:true,zoomOnPinch:true},
+    {type:'slider',height:13,bottom:3,borderColor:'transparent',backgroundColor:'rgba(148,163,184,.14)',
+     fillerColor:'rgba(43,108,176,.16)',handleStyle:{color:'#2b6cb0',borderColor:'#2b6cb0'},
+     moveHandleSize:0,showDetail:false,textStyle:{color:'#94a3b8'}}];
+}
 
 function render(data){
   var meta=data.meta||{},series=data.series||[],top=data.top||[],stocks=data.stocks||{};
@@ -174,41 +304,44 @@ function render(data){
   var dates=series.map(function(s){return s.d.slice(2,7);});
   function arr(k){return series.map(function(s){return +(s[k]/1e8).toFixed(2);});}
   var lgA=document.getElementById('lgA'),lgB=document.getElementById('lgB');
-  ['hj_tz','hj_zg','zj','sb','wt'].forEach(function(k){lgA.innerHTML+='<span><span style="width:10px;height:10px;border-radius:2px;background:'+COL[k]+'"></span>'+CN[k]+'</span>';});
-  ['zj','sb','wt'].forEach(function(k){lgB.innerHTML+='<span><span style="width:10px;height:10px;border-radius:2px;background:'+COL[k]+'"></span>'+CN[k]+'</span>';});
-  lgB.innerHTML+='<span><span style="width:10px;height:3px;background:#6b7280;border-radius:2px"></span>覆盖票数(只,右轴)</span>';
+  ['hj_tz','hj_zg','zj','sb','wt'].forEach(function(k){lgA.innerHTML+='<span><i style="background:'+COL[k]+'"></i>'+CN[k]+'</span>';});
+  ['zj','sb','wt'].forEach(function(k){lgB.innerHTML+='<span><i style="background:'+COL[k]+'"></i>'+CN[k]+'</span>';});
+  lgB.innerHTML+='<span><b style="background:#6b7280"></b>覆盖票数(只,右轴)</span>';
 
   var ech=window.echarts;
+  var dzA=dates.length>14?zslider():[{type:'inside'}];
   var oA={
-    grid:{left:52,right:58,top:14,bottom:26},
-    tooltip:{trigger:'axis',valueFormatter:function(v){return v+' 亿股';}},
-    xAxis:{type:'category',data:dates,boundaryGap:false,axisLine:{lineStyle:{color:'#cbd5e1'}},axisLabel:{color:'#64748b',fontSize:11,interval:function(i){return i%6===0;}}},
+    grid:{left:52,right:64,top:24,bottom:dates.length>14?42:26},
+    tooltip:TT(function(v){return v+' 亿股';}),
+    dataZoom:dzA,
+    xAxis:{type:'category',data:dates,boundaryGap:false,axisLine:{lineStyle:{color:'#cbd5e1'}},axisLabel:{color:'#64748b',fontSize:11,interval:function(i){return i%6===0;}},axisTick:{show:false}},
     yAxis:[
       {type:'value',name:'汇金系(亿股)',nameTextStyle:{color:'#94a3b8',fontSize:11},splitLine:{lineStyle:{color:'#eef2f7'}},axisLabel:{color:'#64748b',fontSize:11}},
       {type:'value',name:'证金/社保(亿股)',nameTextStyle:{color:'#94a3b8',fontSize:11},splitLine:{show:false},axisLabel:{color:'#64748b',fontSize:11}}
     ],
     series:[
-      {name:CN.hj_tz,type:'line',data:arr('hj_tz'),smooth:true,symbol:'none',lineStyle:{width:2.5,color:'#185FA5'},areaStyle:{color:'rgba(24,95,165,.08)'},yAxisIndex:0},
-      {name:CN.hj_zg,type:'line',data:arr('hj_zg'),smooth:true,symbol:'none',lineStyle:{width:1.5,color:'#85B7EB',type:'dashed'},yAxisIndex:1},
-      {name:CN.zj,type:'line',data:arr('zj'),smooth:true,symbol:'none',lineStyle:{width:2,color:'#D85A30'},yAxisIndex:1},
-      {name:CN.sb,type:'line',data:arr('sb'),smooth:true,symbol:'none',lineStyle:{width:1.8,color:'#1D9E75'},yAxisIndex:1},
-      {name:CN.wt,type:'line',data:arr('wt'),smooth:true,symbol:'none',lineStyle:{width:1.5,color:'#888780',type:'dotted'},yAxisIndex:1}
+      {name:CN.hj_tz,type:'line',data:arr('hj_tz'),smooth:true,symbol:'none',lineStyle:{width:3,color:'#185FA5'},areaStyle:{color:'rgba(24,95,165,.10)'},yAxisIndex:0},
+      {name:CN.hj_zg,type:'line',data:arr('hj_zg'),smooth:true,symbol:'none',lineStyle:{width:1.6,color:'#85B7EB',type:'dashed'},yAxisIndex:1},
+      {name:CN.zj,type:'line',data:arr('zj'),smooth:true,symbol:'none',lineStyle:{width:2.2,color:'#D85A30'},yAxisIndex:1},
+      {name:CN.sb,type:'line',data:arr('sb'),smooth:true,symbol:'none',lineStyle:{width:2,color:'#1D9E75'},yAxisIndex:1},
+      {name:CN.wt,type:'line',data:arr('wt'),smooth:true,symbol:'none',lineStyle:{width:1.6,color:'#888780',type:'dotted'},yAxisIndex:1}
     ]
   };
   var chA=ech.init(document.getElementById('chA'));chA.setOption(oA);
   var oB={
-    grid:{left:52,right:58,top:14,bottom:26},
-    tooltip:{trigger:'axis'},
-    xAxis:{type:'category',data:dates,boundaryGap:false,axisLine:{lineStyle:{color:'#cbd5e1'}},axisLabel:{color:'#64748b',fontSize:11,interval:function(i){return i%6===0;}}},
+    grid:{left:52,right:64,top:24,bottom:dates.length>14?42:26},
+    tooltip:TT(null),
+    dataZoom:dzA,
+    xAxis:{type:'category',data:dates,boundaryGap:false,axisLine:{lineStyle:{color:'#cbd5e1'}},axisLabel:{color:'#64748b',fontSize:11,interval:function(i){return i%6===0;}},axisTick:{show:false}},
     yAxis:[
       {type:'value',name:'亿股',nameTextStyle:{color:'#94a3b8',fontSize:11},splitLine:{lineStyle:{color:'#eef2f7'}},axisLabel:{color:'#64748b',fontSize:11}},
       {type:'value',name:'只',nameTextStyle:{color:'#94a3b8',fontSize:11},min:0,max:function(v){return Math.max(2,Math.ceil((v.max+4)/10)*10);},splitLine:{show:false},axisLabel:{color:'#64748b',fontSize:11}}
     ],
     series:[
-      {name:'证金',type:'line',data:arr('zj'),smooth:true,symbol:'none',lineStyle:{width:2,color:'#D85A30'}},
+      {name:'证金',type:'line',data:arr('zj'),smooth:true,symbol:'none',lineStyle:{width:2.2,color:'#D85A30'}},
       {name:'社保/养老',type:'line',data:arr('sb'),smooth:true,symbol:'none',lineStyle:{width:2,color:'#1D9E75'}},
-      {name:'梧桐树',type:'line',data:arr('wt'),smooth:true,symbol:'none',lineStyle:{width:1.5,color:'#888780',type:'dotted'}},
-      {name:'覆盖票数',type:'bar',data:series.map(function(s){return s.ncov;}),barWidth:'46%',itemStyle:{color:'rgba(107,114,128,.28)'},yAxisIndex:1,barGap:0}
+      {name:'梧桐树',type:'line',data:arr('wt'),smooth:true,symbol:'none',lineStyle:{width:1.6,color:'#888780',type:'dotted'}},
+      {name:'覆盖票数',type:'bar',data:series.map(function(s){return s.ncov;}),barWidth:'46%',itemStyle:{color:'rgba(107,114,128,.30)',borderRadius:[2,2,0,0]},yAxisIndex:1,barGap:0}
     ]
   };
   var chB=ech.init(document.getElementById('chB'));chB.setOption(oB);
@@ -274,19 +407,21 @@ function renderEtf(e){
   function at(p,dt){var a=S[p.code]||[];for(var i=a.length-1;i>=0;i--){if(a[i][0]===dt)return a[i];}return null;}
   var totS=dates.map(function(dt){var s=0;pool.forEach(function(p){var v=at(p,dt);if(v)s+=v[1];});return +(s/1e8).toFixed(1);});
   var flow=dates.map(function(dt,i){if(!i)return 0;var f=0;pool.forEach(function(p){var c=at(p,dt),p2=at(p,dates[i-1]);if(c&&p2)f+=(c[1]-p2[1])*(c[2]||0);});return +(f/1e8).toFixed(2);});
-  var ech=window.echarts,chE=document.getElementById('chE');
+  var ech=window.echarts,chE=ech.init(document.getElementById('chE'));
+  var dzE=dates.length>8?zslider():[{type:'inside'}];
   var oE={
-    grid:{left:60,right:60,top:26,bottom:24},
-    tooltip:{trigger:'axis',valueFormatter:function(v,i){return (i===1?v+' 亿份':(v==null?v:v+' 亿元'));}},
-    legend:{data:['全池份额','每日净申赎'],top:0,textStyle:{color:'#64748b',fontSize:11},itemWidth:14},
-    xAxis:{type:'category',data:dates.map(function(d){return d.slice(5);}),axisLine:{lineStyle:{color:'#cbd5e1'}},axisLabel:{color:'#64748b',fontSize:11}},
+    grid:{left:60,right:62,top:30,bottom:dates.length>8?42:26},
+    tooltip:TT(function(v,i){return (i===1?v+' 亿份':(v==null?v:v+' 亿元'));}),
+    dataZoom:dzE,
+    legend:{data:['全池份额','每日净申赎'],top:2,textStyle:{color:'#55627a',fontSize:11},itemWidth:14,itemHeight:9},
+    xAxis:{type:'category',data:dates.map(function(d){return d.slice(5);}),axisLine:{lineStyle:{color:'#cbd5e1'}},axisLabel:{color:'#64748b',fontSize:11},axisTick:{show:false}},
     yAxis:[
       {type:'value',name:'亿份',nameTextStyle:{color:'#94a3b8',fontSize:11},splitLine:{lineStyle:{color:'#eef2f7'}},axisLabel:{color:'#64748b',fontSize:11}},
       {type:'value',name:'亿元',nameTextStyle:{color:'#94a3b8',fontSize:11},splitLine:{show:false},axisLabel:{color:'#64748b',fontSize:11}}
     ],
     series:[
-      {name:'全池份额',type:'line',data:totS,smooth:true,symbol:'circle',symbolSize:5,lineStyle:{width:2,color:'#185FA5'},itemStyle:{color:'#185FA5'},yAxisIndex:0},
-      {name:'每日净申赎',type:'bar',data:flow,barWidth:'42%',yAxisIndex:1,itemStyle:{color:function(p){return p.value>=0?'#e54545':'#18a058';},borderRadius:2}}
+      {name:'全池份额',type:'line',data:totS,smooth:true,symbol:'circle',symbolSize:6,lineStyle:{width:2.2,color:'#185FA5'},itemStyle:{color:'#185FA5'},areaStyle:{color:'rgba(24,95,165,.07)'},yAxisIndex:0},
+      {name:'每日净申赎',type:'bar',data:flow,barWidth:'42%',yAxisIndex:1,itemStyle:{color:function(p){return p.value>=0?'#e54545':'#18a058';},borderRadius:[2,2,0,0]}}
     ]};
   chE.setOption(oE);
   window.addEventListener('resize',function(){chE.resize();});
@@ -316,27 +451,62 @@ function renderEtfQ(e){
     var shr=rows.map(function(r){return +(+r[3]).toFixed(1);});
     var net=rows.map(function(r){var b=r[1]||0,rd=r[2]||0;return +((b-rd)).toFixed(1);}); // 当季净申赎 亿份
     var name='';pool.forEach(function(p){if(p.code===code)name=p.name;});
+    var dzQ=rows.length>14?zslider():[{type:'inside'}];
     if(!chq){chq=ech.init(ch);}
     chq.setOption({
-      grid:{left:56,right:56,top:34,bottom:26},
-      tooltip:{trigger:'axis',valueFormatter:function(v,i){return (i===0?(v+' 亿份'):(v>=0?'+'+v+' 亿份':v+' 亿份'));}},
-      legend:{data:['期末份额(亿份)','当季净申赎(亿份)'],top:0,textStyle:{color:'#64748b',fontSize:11},itemWidth:14},
+      grid:{left:56,right:62,top:34,bottom:rows.length>14?42:28},
+      tooltip:TT(function(v,i){return (i===0?(v+' 亿份'):(v>=0?'+'+v+' 亿份':v+' 亿份'));}),
+      dataZoom:dzQ,
+      legend:{data:['期末份额(亿份)','当季净申赎(亿份)'],top:2,textStyle:{color:'#55627a',fontSize:11},itemWidth:14,itemHeight:9},
       xAxis:{type:'category',data:dates,boundaryGap:false,axisLine:{lineStyle:{color:'#cbd5e1'}},axisLabel:{color:'#64748b',fontSize:11,interval:function(i){return i%Math.max(1,Math.floor(dates.length/10))===0;}},axisTick:{show:false}},
       yAxis:[
         {type:'value',name:'份额',nameTextStyle:{color:'#94a3b8',fontSize:11},splitLine:{lineStyle:{color:'#eef2f7'}},axisLabel:{color:'#64748b',fontSize:11}},
         {type:'value',name:'净申赎',nameTextStyle:{color:'#94a3b8',fontSize:11},splitLine:{show:false},axisLabel:{color:'#64748b',fontSize:11}}
       ],
       series:[
-        {name:'期末份额(亿份)',type:'line',data:shr,smooth:true,symbol:'none',lineStyle:{width:2.2,color:'#185FA5'},areaStyle:{color:'rgba(24,95,165,.07)'},yAxisIndex:0},
-        {name:'当季净申赎(亿份)',type:'bar',data:net,barWidth:'36%',yAxisIndex:1,itemStyle:{color:function(p){return p.value>=0?'#e54545':'#18a058';},borderRadius:1}}
+        {name:'期末份额(亿份)',type:'line',data:shr,smooth:true,symbol:'none',lineStyle:{width:2.4,color:'#185FA5'},areaStyle:{color:'rgba(24,95,165,.08)'},yAxisIndex:0},
+        {name:'当季净申赎(亿份)',type:'bar',data:net,barWidth:'38%',yAxisIndex:1,itemStyle:{color:function(p){return p.value>=0?'#e54545':'#18a058';},borderRadius:[2,2,0,0]}}
       ]
-    });
+    },true);
     hint.innerHTML='口径：基金季报披露（'+esc(name)+' 自 '+rows[0][0]+' 起 '+rows.length+' 期）· 折线=季末份额，柱=当季净申购(红)/净赎回(绿)。例：2024Q3 单季净申购 361.8 亿份(申376.5/赎14.6)=汇金进场峰；2026Q2 净赎回 259.1 亿份=大资金撤离。季报滞后 1~2 月，看当下用上方日度代理。';
   }
   sel.onchange=function(){draw(sel.value);};
   draw(curCode);
   window.addEventListener('resize',function(){if(chq)chq.resize();});
 }
+
+/* ===== 章节导航 scroll-spy ===== */
+(function(){
+  var nav=document.getElementById('pnav');if(!nav)return;
+  var links=nav.querySelectorAll('a'),secs=[];
+  for(var i=0;i<links.length;i++){
+    var id=links[i].getAttribute('href').slice(1);
+    var el=document.getElementById(id);if(el)secs.push([el,links[i]]);
+  }
+  if(!secs.length)return;
+  var ticking=false;
+  function spy(){
+    ticking=false;var pos=window.scrollY+110,best=null;
+    for(var i=0;i<secs.length;i++){
+      var r=secs[i][0].getBoundingClientRect();
+      if(r.top<=140)best=secs[i][1];
+    }
+    if(!best)best=secs[0][1];
+    for(var j=0;j<links.length;j++)links[j].classList.remove('on');
+    best.classList.add('on');
+  }
+  window.addEventListener('scroll',function(){if(!ticking){ticking=true;requestAnimationFrame(spy);}},{passive:true});
+  for(var k=0;k<links.length;k++){
+    links[k].addEventListener('click',function(ev){
+      var href=this.getAttribute('href');if(href.charAt(0)!=='#')return;
+      var t=document.getElementById(href.slice(1));if(!t)return;
+      ev.preventDefault();
+      t.scrollIntoView({behavior:'smooth',block:'start'});
+      try{history.replaceState(null,'',href);}catch(e){}
+    });
+  }
+  spy();
+})();
 
 fetch('national.json',{cache:'no-cache'}).then(function(r){if(!r.ok)throw new Error(r.status);return r.json();})
 .then(function(d){FETCH_OK=true;render(d);})
