@@ -442,6 +442,11 @@ def _ema(vals, n):
 # main 补拉块用前后快照差统计"本次"失败量(免 main 内 global 归零缠绕)。GIL 下 4 线程
 # 竞争极小, 即便偶丢一计数仅影响 WARN 阈值精度, 不影响数据正确性。
 _mb_net_fail = {"n": 0}
+# R400: 月线补拉「腾讯源停用短路」计数(与网络失败分开归类) —— 09-09 r11 首扫实况:
+# 腾讯日K源 16:43 连败停用后, qfqmonth 补拉 143 票被 _src_down 逐个短路成 None,
+# main 原统计把停用短路误归「数据不足 143」, 且 WARN 前置 _mb_net and 永不触发,
+# 月线排序键整键失效线上无痕。此计数使补拉块能正确分类 down 并落 meta。
+_mb_down_fail = {"n": 0}
 
 
 def _month_macd(sym):
@@ -467,6 +472,9 @@ def _month_macd(sym):
     16:00 起(收盘后源给完整当月根, 保留)本无窗口, 但本地盘中调试/提前调度会踩 —— 与
     R372 教训"日线有守卫周月常漏"对称, 独立自解析路径同样要补。"""
     if _src_down(_tx_down, _tx_lock):
+        # R400: 停用短路是「源不可用」不是「数据不足」—— 单列计数供补拉块分类/落痕
+        # (09-09 r11 实况: 143 票全被此短路, 原误归数据不足且不触发 WARN)。
+        _mb_down_fail["n"] += 1
         return None
     _tx_th.wait()
     pairs = None
@@ -1363,21 +1371,42 @@ def main():
                 if st.get("scenario") == "背驰见底机会" and st.get("bottom_bc")
                 and not s.startswith("bj")
                 and uni.get(s, {}).get("type") not in ("ETF",)]
+    _m_macd_stat = None   # R400: 月线补拉统计(meta.m_macd 落痕; None=无底背驰票不补拉)
     if _mb_syms:
         _t_mb = time.time()
         _mb_f0 = _mb_net_fail["n"]
-        with ThreadPoolExecutor(max_workers=4) as _mb_ex:
-            _mb_res = list(_mb_ex.map(_month_macd, _mb_syms))
-        for s, mm in zip(_mb_syms, _mb_res):
-            sts[s]["m_macd"] = mm
-        _mb_net = _mb_net_fail["n"] - _mb_f0
-        _mb_none = sum(1 for mm in _mb_res if mm is None)
-        _mb_line = ("  月线MACD状态 %d 票(成功 %d / 数据不足 %d / 网络失败 %d) %.0fs; null=中性"
-                    % (len(_mb_syms), len(_mb_syms) - _mb_none, _mb_none - _mb_net, _mb_net,
-                       time.time() - _t_mb))
-        if _mb_net and (_mb_none == len(_mb_syms) or _mb_net >= max(3, len(_mb_syms) // 5)):
-            _mb_line += "  ⚠ 腾讯月K大量网络失败, 月线排序键整键失效风险(前端全员中性)!"
-        print(_mb_line)
+        _mb_d0 = _mb_down_fail["n"]
+        if _tx_down.get("flag"):
+            # R400: 腾讯日K源整段停用时 qfqmonth 必被状态机短路 → 逐个空转无意义,
+            # 直接跳过并明确落痕(09-09 r11 实况 143 票 0s 全"数据不足" 的根因即此短路)。
+            _mb_line = ("  月线MACD状态 %d 票跳过(腾讯日K源停用中, 月K必失败); 月线排序键整键中性"
+                        % len(_mb_syms))
+            print(_mb_line)
+            _m_macd_stat = {"tried": len(_mb_syms), "ok": 0, "short": 0,
+                            "net": 0, "down": len(_mb_syms), "warn": True}
+        else:
+            with ThreadPoolExecutor(max_workers=4) as _mb_ex:
+                _mb_res = list(_mb_ex.map(_month_macd, _mb_syms))
+            for s, mm in zip(_mb_syms, _mb_res):
+                sts[s]["m_macd"] = mm
+            _mb_net = _mb_net_fail["n"] - _mb_f0
+            _mb_down = _mb_down_fail["n"] - _mb_d0
+            _mb_none = sum(1 for mm in _mb_res if mm is None)
+            _mb_short = _mb_none - _mb_net - _mb_down
+            _mb_ok = len(_mb_syms) - _mb_none
+            # R400: 原条件前置 `_mb_net and` 只盯网络失败 —— 09-09 实况「数据不足 143/143」被
+            # 静默放过(实际全是停用短路)。改总失败率口径: 全败或任一原因失败>=20% 即 ⚠。
+            _mb_warn = (_mb_none == len(_mb_syms)
+                        or _mb_none >= max(3, len(_mb_syms) // 5))
+            _mb_line = ("  月线MACD状态 %d 票(成功 %d / 数据不足 %d / 源停用 %d / 网络失败 %d) %.0fs; null=中性"
+                        % (len(_mb_syms), _mb_ok, _mb_short, _mb_down, _mb_net,
+                           time.time() - _t_mb))
+            if _mb_warn:
+                _mb_line += ("  ⚠ 月线键失败 %d/%d(>20%%或全败), 月线排序键整键失效风险(前端全员中性)!"
+                             % (_mb_none, len(_mb_syms)))
+            print(_mb_line)
+            _m_macd_stat = {"tried": len(_mb_syms), "ok": _mb_ok, "short": _mb_short,
+                            "net": _mb_net, "down": _mb_down, "warn": _mb_warn}
 
     # --- 门禁 + 信号 + 行业聚合(同时攒成分) ---
     signals, universe, ind_members, ind_total, ind_qual = [], {}, {}, {}, {}
@@ -1538,6 +1567,9 @@ def main():
         "degraded_pct": deg_pct,               # R374: 新浪占比%(前端严重度分级渲染)
         "degraded_reason": deg_reason,         # 降级黄条文案(前端优先展示)
         "src_fail": src_fail,                  # 各源失败原因计数(诊断腾讯/东财为何不可用)
+        "m_macd": _m_macd_stat,                # R400: 月线补拉统计 {tried,ok,short,net,down,warn}
+                                               # (09-09 r11 首扫 143 票全败曾无痕; 落痕后看门狗/前端可查
+                                               # 月线排序键失效 —— warn=true 时应视同降级提示)
         "mkt_last": _mkt_last or "",           # R272: 市场末交易日锚(新浪探测; 空=探测失败回落窗口表)
         "sanit_drop_bars": _sanit_drop_bars,   # R275: 净化丢弃 bar 数(坏根量化诊断; 正常≈0, 激增=源数据异常)
         "ind_cnt": ind_cnt,
