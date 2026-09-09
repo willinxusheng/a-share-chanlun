@@ -7,6 +7,7 @@
 # 仅"数据缺失(SKIP: 文件不存在/forecast_acc 缺失)"保持 exit 0 不阻断。
 # 反选依据见 sentiment/calc_v2.py 内 analysis(_grid.py): 最优 k=15/ctx=15/等权全局。
 import json
+import math
 import os
 import sys
 
@@ -35,10 +36,30 @@ def main():
     if acc.get("cov") is None or acc.get("mae") is None or acc.get("dir_acc") is None:
         print("  SKIP: forecast_acc 键缺失(结构异常, 按数据缺失处理不阻断)")
         return 0
-    cov = float(acc["cov"])
-    mae = float(acc["mae"])
-    dacc = float(acc["dir_acc"])
-    n = int(acc.get("n", 0))
+    # R396: float() 后补 isfinite 守卫 —— Python json.load 默认把 JSON 字面量 NaN/
+    # Infinity 解析为 float nan/inf(calc_v2 写盘 json.dump allow_nan 默认开), 而 nan 与
+    # 任何数比较恒 False, 会穿透阈值判定: cov=nan 时 nan<30/nan>65 均 False -> 静默放行
+    # (打印"合理区间"); dacc=nan 时 0<=nan<=100 恒 False -> 误阻断。同一 NaN 三种命运全错
+    # (audit_data_schema R170 已修同款 NaN 穿透, 本门禁为 R327 时代产物漏网)。非有限值=
+    # 产物异常, 按 R327「结构异常按数据缺失 SKIP 不阻断」语义透明提示后放行。
+    _acc_nums = []
+    for _k in ("cov", "mae", "dir_acc"):
+        try:
+            _v = float(acc[_k])
+        except (TypeError, ValueError):
+            _v = float("nan")
+        _acc_nums.append(_v)
+    if not all(math.isfinite(_v) for _v in _acc_nums):
+        print("  SKIP: forecast_acc 含非有限数值(cov=%r mae=%r dir_acc=%r, 产物异常按数据缺失不阻断)"
+              % (acc.get("cov"), acc.get("mae"), acc.get("dir_acc")))
+        return 0
+    cov, mae, dacc = _acc_nums
+    # R396: n 安全读取(R327 只给 cov/mae/dir_acc 加 None 守卫漏 n —— 键存在但 null/非
+    # 数字时 int(None) TypeError 崩断发布, 与 R327「键缺失=结构异常 SKIP」语义相悖)
+    try:
+        n = int(acc.get("n") or 0)
+    except (TypeError, ValueError):
+        n = 0
     print("  配置: k=%s ctx=%s weight=%s regime=%s" % (
         fc.get("k"), fc.get("ctx"), fc.get("weight"), fc.get("regime_weight")))
     print("  样本外回测(%d 锚点): 覆盖率=%.1f%%  方向命中=%.1f%%  平均误差=%.1f 分" % (n, cov, dacc, mae))

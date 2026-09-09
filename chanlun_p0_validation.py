@@ -229,7 +229,10 @@ def main():
         _fr[_k] = _fr.get(_k, 0) + 1
     print("失败原因分布:", json.dumps(_fr, ensure_ascii=False))
     st = analyze_batch(got)
-    _errs = [(s, str(v.get("err"))[:90]) for s, v in st.items() if not v.get("ok")][:3]
+    # R396: 原 not v.get("ok") 把全部成功样本误判为异常 —— analyze_batch 成功分支存
+    # 纯 stats dict(无 ok 键), v.get("ok")=None -> not None=True 全量误报, 异常样例打印
+    # 会列出 3 只成功票(打印 "None" 错误信息)误导排查; 与 summarize._is_ok 同用 "err" in v。
+    _errs = [(s, str(v["err"])[:90]) for s, v in st.items() if "err" in v][:3]
     if _errs:
         print("analyze 异常样例:", _errs, file=sys.stderr)
     summ = summarize(uni, got, fails, st)
