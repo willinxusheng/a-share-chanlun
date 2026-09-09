@@ -119,6 +119,16 @@ footer{color:var(--muted);font-size:11.5px;line-height:1.7;padding:4px 2px 0}
     <div class="hint" id="etfHint"></div>
   </div>
 
+  <div class="card" id="qCard">
+    <div class="mt"><h2>季度真身 · 宽基 ETF 份额长史（定期报告）</h2>
+      <div class="ft">基金季报披露口径（期末份额 / 当季申购赎回，<b>权威但滞后 1~2 月</b>）——复盘 2024Q3 汇金进场、2026 撤离等大资金动作；与上方<b>日度代理</b>互补：季度线看历史结构，日度线看当下动作</div></div>
+    <div style="margin-bottom:8px">
+      <select id="qSel"></select>
+    </div>
+    <div class="chart" id="chQ" style="height:270px"></div>
+    <div class="hint" id="qHint"></div>
+  </div>
+
   <div class="card">
     <h2>国家队关键动作时间轴</h2>
     <div class="hint">公开事件整理（非股东数据源），供对照上图持仓跳变时点</div>
@@ -282,13 +292,59 @@ function renderEtf(e){
   window.addEventListener('resize',function(){chE.resize();});
   hint.innerHTML=(dates.length<=1?'当前仅 '+dates.length+' 个快照日（'+esc(meta.latest||'-')+'）· 曲线随每个交易日盘后自动打点累积':('已积累 '+dates.length+' 个交易日快照 · 最新 '+esc(meta.latest||'-')))+'；全池份额=10 只宽基 ETF 合计，红柱=当日净申购（疑似国家队/大资金增持窗口），绿柱=净赎回。';
 }
+
+/* ===== 季度真身 · 份额长史 (quarter in etf_share.json) ===== */
+function renderEtfQ(e){
+  var meta=e.meta||{},Q=e.quarter||{},pool=meta.pool||[];
+  var sel=document.getElementById('qSel'),ch=document.getElementById('chQ'),hint=document.getElementById('qHint');
+  var codes=pool.filter(function(p){return Q[p.code]&&Q[p.code].length;}).map(function(p){return p.code;});
+  if(!codes.length){
+    if(sel){sel.innerHTML='<option>暂无季度数据</option>';}
+    hint.innerHTML='季度份额长史暂不可用（需 CI 重跑 calc_etf.py 补 quarter 字段）';
+    return;
+  }
+  sel.innerHTML=codes.map(function(c){
+    var nm='';pool.forEach(function(p){if(p.code===c)nm=p.name;});
+    return '<option value="'+c+'">'+esc(nm)+' ('+c+')</option>';
+  }).join('');
+  var ech=window.echarts,curCode=codes[0],chq=null;
+
+  function draw(code){
+    var rows=Q[code]||[];if(!rows.length)return;
+    // rows: [d, 期间申(亿份), 期间赎(亿份), 期末份额(亿份), 期末规模(亿元)] 升序
+    var dates=rows.map(function(r){return r[0].slice(0,7);});
+    var shr=rows.map(function(r){return +(+r[3]).toFixed(1);});
+    var net=rows.map(function(r){var b=r[1]||0,rd=r[2]||0;return +((b-rd)).toFixed(1);}); // 当季净申赎 亿份
+    var name='';pool.forEach(function(p){if(p.code===code)name=p.name;});
+    if(!chq){chq=ech.init(ch);}
+    chq.setOption({
+      grid:{left:56,right:56,top:34,bottom:26},
+      tooltip:{trigger:'axis',valueFormatter:function(v,i){return (i===0?(v+' 亿份'):(v>=0?'+'+v+' 亿份':v+' 亿份'));}},
+      legend:{data:['期末份额(亿份)','当季净申赎(亿份)'],top:0,textStyle:{color:'#64748b',fontSize:11},itemWidth:14},
+      xAxis:{type:'category',data:dates,boundaryGap:false,axisLine:{lineStyle:{color:'#cbd5e1'}},axisLabel:{color:'#64748b',fontSize:11,interval:function(i){return i%Math.max(1,Math.floor(dates.length/10))===0;}},axisTick:{show:false}},
+      yAxis:[
+        {type:'value',name:'份额',nameTextStyle:{color:'#94a3b8',fontSize:11},splitLine:{lineStyle:{color:'#eef2f7'}},axisLabel:{color:'#64748b',fontSize:11}},
+        {type:'value',name:'净申赎',nameTextStyle:{color:'#94a3b8',fontSize:11},splitLine:{show:false},axisLabel:{color:'#64748b',fontSize:11}}
+      ],
+      series:[
+        {name:'期末份额(亿份)',type:'line',data:shr,smooth:true,symbol:'none',lineStyle:{width:2.2,color:'#185FA5'},areaStyle:{color:'rgba(24,95,165,.07)'},yAxisIndex:0},
+        {name:'当季净申赎(亿份)',type:'bar',data:net,barWidth:'36%',yAxisIndex:1,itemStyle:{color:function(p){return p.value>=0?'#e54545':'#18a058';},borderRadius:1}}
+      ]
+    });
+    hint.innerHTML='口径：基金季报披露（'+esc(name)+' 自 '+rows[0][0]+' 起 '+rows.length+' 期）· 折线=季末份额，柱=当季净申购(红)/净赎回(绿)。例：2024Q3 单季净申购 361.8 亿份(申376.5/赎14.6)=汇金进场峰；2026Q2 净赎回 259.1 亿份=大资金撤离。季报滞后 1~2 月，看当下用上方日度代理。';
+  }
+  sel.onchange=function(){draw(sel.value);};
+  draw(curCode);
+  window.addEventListener('resize',function(){if(chq)chq.resize();});
+}
+
 fetch('national.json',{cache:'no-cache'}).then(function(r){if(!r.ok)throw new Error(r.status);return r.json();})
 .then(function(d){FETCH_OK=true;render(d);})
 .catch(function(e){
   document.getElementById('mcards').innerHTML='<div class="err">数据加载失败（'+e.message+'）<br>线上请访问 https://willinxusheng.github.io/a-share-chanlun/national/national.html<br>本地查看需在仓库目录起 http 服务后访问本页。</div>';
 });
 fetch('etf_share.json',{cache:'no-cache'}).then(function(r){if(!r.ok)throw new Error(r.status);return r.json();})
-.then(function(e){renderEtf(e);})
+.then(function(e){renderEtf(e);renderEtfQ(e);})
 .catch(function(err){
   var tb=document.getElementById('etfTb');
   if(tb)tb.innerHTML='<tr><td colspan="5" style="text-align:center;color:#94a3b8">ETF 日度数据暂不可用（'+err.message+'）· CI 每日盘后自动累积</td></tr>';
