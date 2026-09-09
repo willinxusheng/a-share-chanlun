@@ -163,6 +163,9 @@ jobs:
           # P2: 生成 index.html 前注入「缠论雷达入口按钮」到主报告 header 右上角
           # (替代旧版顶部信号横幅; 读 report.html, 恒可注入, 不依赖 radar.json)
           python radar/inject_banner.py report.html
+          # P1: 注入「国家队持仓入口按钮」到同一 header 右上角 (与雷达按钮并排, 冷蓝脉冲区分)
+          # 输入为上一步已含雷达按钮的 index.html, 输出就地追加国家队按钮+CSS (后写覆盖让位布局)
+          python national/inject_banner.py index.html
           # R330: 接线 audit_report_runtime(R169, 自述「阻断 CI」却从未被任何 workflow 调用)
           # —— 扫描最终 report.html 是否混入 NaN/Infinity/undefined 数据字面量(ECharts 解析
           # 失败或渲染 "NaN" 文本); 产物已含 inject_banner 注入态, report.html 存在故不触发

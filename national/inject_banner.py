@@ -1,0 +1,132 @@
+# -*- coding: utf-8 -*-
+"""主页面注入「国家队持仓入口按钮」(national/inject_banner.py)
+========================================================
+P1(2026-09-09): 用户在主报告顶部要求「与缠论雷达一样」放一个跳转按钮,
+指向同仓子站 national/national.html。
+
+设计原则 (深度美化优先, 不破坏 radar 契约):
+  - 共用 a.radar-btn 同款胶囊样式 + pulse 动效 (R398/409 已验证审美达预期);
+  - 但用冷蓝脉冲(雷达=暖黄) 颜色区分, 视觉层次清晰;
+  - 位置: 雷达按钮挪到 right:140px, 国家队按钮贴右 right:24px,
+    两按钮间隙 ≈ 116px, h1 padding-right 同步从 158 拓到 296 防遮挡;
+  - 窄屏(<=720px): 标题下移, 两按钮同行右上, 小尺寸, 不挤文字;
+  - 矮横屏(max-height:560px): 两按钮都改 static flex 子项, margin-left:auto,
+    雷达居中/国家队贴右, header 同一行紧凑展示。
+
+用法(挂在 deploy.yml radar/inject_banner.py 之后, audit_report_runtime.py 之后):
+  python3 national/inject_banner.py index.html
+  → 输出 index.html(就地追加国家队按钮+CSS)
+"""
+import os
+import re
+import sys
+
+BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# CSS 后写覆盖 radar 注入的同名选择器(CSS cascade 后写胜出 + specificity 同)。
+# 雷达按钮位置: right 24px → 140px 让位;  h1 标题右距 158px → 296px 给两按钮让位。
+NATIONAL_BTN_CSS = """
+<style>
+/* ===== P1 国家队持仓入口按钮 (与雷达按钮同位同款, 冷蓝脉冲区分) ===== */
+a.national-btn {
+  position: absolute; top: 50%; right: 24px; transform: translateY(-50%);
+  z-index: 3; display: inline-flex; align-items: center; gap: 5px;
+  background: rgba(255,255,255,.13); border: 1px solid rgba(255,255,255,.30);
+  color: #fff; font-size: 13px; font-weight: 600; line-height: 1;
+  padding: 8px 14px; border-radius: 999px; text-decoration: none;
+  white-space: nowrap; -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px);
+  box-shadow: 0 2px 8px rgba(0,0,0,.16); transition: background .2s, transform .2s;
+  font-family: inherit;
+}
+a.national-btn:hover { background: rgba(255,255,255,.24); }
+a.national-btn .nb-dot {
+  width: 7px; height: 7px; border-radius: 50%; background: #74c0fc;
+  box-shadow: 0 0 0 0 rgba(116,192,252,.55); animation: nbPulse 2.4s infinite;
+}
+@keyframes nbPulse {
+  0%   { box-shadow: 0 0 0 0 rgba(116,192,252,.5); }
+  70%  { box-shadow: 0 0 0 6px rgba(116,192,252,0); }
+  100% { box-shadow: 0 0 0 0 rgba(116,192,252,0); }
+}
+/* 让位: h1 右距拓到 296 防两按钮遮挡, 雷达按钮挪到 right:140px */
+.wrap > header > h1 { padding-right: 296px !important; box-sizing: border-box; }
+a.radar-btn { right: 140px !important; }
+
+/* 窄屏手机竖屏 (R398 验证 radar 已用 padding-right:158px; 现拓到 296 同覆盖) */
+@media (max-width: 720px) {
+  a.national-btn { right: 12px; font-size: 12px; padding: 6px 11px; }
+  a.radar-btn { right: 124px !important; font-size: 12px; padding: 6px 11px; }
+  .wrap > header > h1 { padding-right: 0 !important; }
+  .wrap > header > p { padding-right: 240px; }   /* 说明文字右端避让两按钮 */
+}
+/* 矮横屏 (R398 验证: radar 此时已 static flex, margin-left:auto 贴右) */
+@media (max-height: 560px) {
+  .wrap > header { justify-content: flex-start; flex-wrap: nowrap; }
+  a.national-btn { position: static; transform: none; margin-left: 8px; flex: 0 0 auto; padding: 5px 10px; font-size: 12px; }
+  a.radar-btn { right: auto !important; position: static; transform: none; margin-left: auto; flex: 0 0 auto; padding: 5px 10px; font-size: 12px; }
+  .wrap > header > h1 { padding-right: 0 !important; flex: 0 1 auto; }
+  .wrap > header > p { padding-right: 0 !important; flex: 0 1 auto; }
+}
+</style>
+"""
+
+
+def build_button():
+    """国家队入口按钮 (不依赖 national.json, 纯静态跳转)。"""
+    return ('<a class="national-btn" href="national/national.html" title="国家队持仓走势看板 · '
+            '汇金·证金·社保养老历史持仓季度跟踪, 逆向投资温度计">'
+            '<span class="nb-dot"></span>🏛️ 国家队持仓 →</a>')
+
+
+def main():
+    src = sys.argv[1] if len(sys.argv) > 1 else os.path.join(BASE, "index.html")
+    if not os.path.exists(src):
+        print("ERROR 源 index.html 不存在: %s" % src, file=sys.stderr)
+        print("提示: deploy.yml 链尾应先跑 `python radar/inject_banner.py report.html` 生成 index.html", file=sys.stderr)
+        sys.exit(1)
+    with open(src, "r", encoding="utf-8") as f:
+        html = f.read()
+
+    # 幂等 guard: 已含国家队按钮则跳过防双份 CSS/按钮 (R353 同款教训)
+    if 'class="national-btn"' in html:
+        print("WARN 源 %s 已含国家队按钮, 跳过注入(防双份 CSS/按钮)" % src, file=sys.stderr)
+        return 0
+
+    # 守卫: 确认 radar 已先注入按钮 (避免 national 在 radar 前跑导致布局错乱)
+    if 'class="radar-btn"' not in html:
+        print("WARN 源 %s 不含 radar 按钮, 国家队按钮依赖于 radar 按钮位置,"
+              "请确认 deploy.yml 链: radar/inject_banner.py → national/inject_banner.py", file=sys.stderr)
+
+    # 1) 注入 CSS 到 </head> 前 (后写覆盖 radar 注入的同名选择器, 见 CSS 注释)
+    head_end = html.find("</head>")
+    if head_end > 0:
+        html = html[:head_end] + NATIONAL_BTN_CSS + "\n" + html[head_end:]
+    else:
+        print("WARN 未找到 </head>, 国家队按钮样式追加到文件头", file=sys.stderr)
+        html = NATIONAL_BTN_CSS + html
+
+    # 2) 注入按钮到第一个 </header> 前 (与 radar 按钮同为绝对定位兄弟, DOM 顺序不影响布局)
+    hdr = re.search(r"<header[^>]*>.*?</header>", html, re.S)
+    if hdr:
+        tag_end = html.find("</header>", hdr.start())
+        html = html[:tag_end] + build_button() + "\n" + html[tag_end:]
+    else:
+        print("WARN 未找到 <header>, 国家队按钮追加到 <body> 后", file=sys.stderr)
+        b = html.find("<body")
+        if b >= 0:
+            j = html.find(">", b) + 1
+            html = html[:j] + build_button() + html[j:]
+        else:
+            html = build_button() + html
+
+    tmp = src + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(html)
+    os.replace(tmp, src)
+    size_kb = os.path.getsize(src) // 1024
+    has_btn = "class=\"national-btn\"" in html
+    print("index.html 就绪(国家队按钮=%s), %d KB" % ("有" if has_btn else "无", size_kb))
+
+
+if __name__ == "__main__":
+    main()
