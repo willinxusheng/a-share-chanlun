@@ -233,7 +233,7 @@ h1{font-size:21px;font-weight:700;letter-spacing:.4px;line-height:1.3}   /* R323
 .sigrad .gtt{display:flex;align-items:center;gap:7px;padding:6px 16px;font-size:12px;font-weight:700;letter-spacing:.3px;color:#94a3b8}
 .sigrad .gtt .ic{font-size:15px}
 .sigrad .gtt .n{color:var(--ink);background:#eef2f7;border-radius:8px;padding:0 7px;line-height:1.7}
-.sigrad .srow{display:grid;grid-template-columns:minmax(118px,1.25fr) 1fr minmax(64px,.8fr) minmax(108px,1.15fr) 96px;gap:6px;align-items:center;padding:7px 16px;cursor:pointer;border-top:1px solid #f5f8fb;transition:background .12s;font-size:12px}
+.sigrad .srow{display:grid;grid-template-columns:minmax(118px,1.25fr) 1fr minmax(64px,.8fr) minmax(108px,1.15fr) 56px 96px;gap:6px;align-items:center;padding:7px 16px;cursor:pointer;border-top:1px solid #f5f8fb;transition:background .12s;font-size:12px}   /* R406: +1列月线状态(56px) — sigrad 票级 mTag 与 R404 同源(月弱/月缩/月线—), 原本只 dev 列展示不够, 用户截图实证底部信号同样吃「底部刚启」独占绿徽章误导 */
 .sigrad .srow:hover{background:#f4f8fc}
 /* R380: 非低吸区(破位/已走高)灰显段 — 与"机会"主区视觉断开 */
 .sigrad .srow.ssub{opacity:.5;filter:grayscale(.75)}
@@ -265,7 +265,7 @@ h1{font-size:21px;font-weight:700;letter-spacing:.4px;line-height:1.3}   /* R323
 .sigrad .srow.res{border-left:3px solid #e54545}.sigrad .srow.res.bsig{border-left-color:#18a058}
 .sigrad .srow.div{border-left:3px solid #f59f00}
 @media(max-width:980px){.sigrad .sbody{grid-template-columns:1fr}.sigrad .sgrp+.sgrp{border-left:0;border-top:1px dashed #e8edf4}}
-@media(max-width:980px){.sigrad .srow{grid-template-columns:minmax(100px,1.2fr) .8fr 56px 90px 72px;padding:7px 12px}.sigrad .gtt{padding:6px 12px}.sigrad .shead{padding:12px}}
+@media(max-width:980px){.sigrad .srow{grid-template-columns:minmax(100px,1.2fr) .8fr 56px 90px 50px 72px;padding:7px 12px}.sigrad .gtt{padding:6px 12px}.sigrad .shead{padding:12px}}
 /* ===== R305: 逆向观察池(首页中部, 超窗底背驰埋伏候选) ===== */
 .revpool{margin-top:16px;background:var(--card);border:1px solid #d9e2ef;border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden;border-left:3px solid #18a058}
 .revpool .phead{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid #eef2f7;flex-wrap:wrap}
@@ -301,6 +301,11 @@ h1{font-size:21px;font-weight:700;letter-spacing:.4px;line-height:1.3}   /* R323
    背景: 09-09 r11 全宇宙 m_macd=null, 但原 L898 对 null 不渲染 mTag → 「底部刚启」绿徽章独占显示误导用户
    (2-5 名票真实月线绿柱加长却无声)。null 徽章弱样式(灰字+虚线边)与强样式区分, 不抢主徽章视觉。 */
 .revpool .prow .mtag.mnull{color:#64748b;background:rgba(100,116,139,.06);border:1px dashed rgba(100,116,139,.45)}
+/* R406: 月线 mTag 状态样式复用至 sigrad(sigrad.srow 新增第 5 列 56px) — 同样的月弱/月缩/月线— 三态, 底部信号雷达与逆向观察池同步不再「底部刚启」独占绿徽章误导用户截图实证场景 */
+.sigrad .srow .mtag{font-size:9.5px;font-weight:700;border:1px solid;padding:0 4px;border-radius:3px;line-height:1.55;white-space:nowrap;letter-spacing:.2px;display:inline-block}
+.sigrad .srow .mtag.mw{color:#c92a2a;background:rgba(229,69,69,.08);border-color:rgba(229,69,69,.45)}
+.sigrad .srow .mtag.ms{color:#b45309;background:rgba(232,160,16,.08);border-color:rgba(232,160,16,.45)}
+.sigrad .srow .mtag.mnull{color:#64748b;background:rgba(100,116,139,.06);border:1px dashed rgba(100,116,139,.45)}
 /* R387: 背离强度(area_ratio MACD面积背离比, 越小越极端可靠 — 绿<0.5强/橙0.5-0.8中/红≥0.8弱) + 走势状态(右侧涨势回调/左侧盘整磨底, 仅标签不入排序键) */
 .revpool .prow .artag{font-weight:700;font-size:9.5px;white-space:nowrap}
 .revpool .prow .artag.a1{color:#0e7d4a}.revpool .prow .artag.a2{color:#b45309}.revpool .prow .artag.a3{color:#c92a2a}
@@ -683,11 +688,18 @@ function sigRow(s,opt){   // R380: opt.sub=true = 非低吸区灰显行(破位/�
   var resMode=(ffNet!=null)&&((!t&&ffNet>0)||(t&&ffNet<0));   // R287: 资金同向共振(顶+流出/底+流入)
   var divMode=(ffNet!=null)&&((!t&&ffNet<0)||(t&&ffNet>0));   // 资金背离警示
   var rowCls='srow'+(resMode?' res'+(t?'':' bsig'):'')+(divMode?' div':'')+(opt.sub?' ssub':'');   // R380: sub 灰显(非低吸区)
+  // R406: 底部信号雷达加月线 mTag(与 R404 逆向观察池同源) — 用户截图实证 2-5 名 real 月线 green_grow 却只显「底部刚启」绿徽章, 同源「底部刚启」独占误导。今 r11 全 null → 显示「月线—」灰字徽章, 明日 r12 起按真实状态显示月弱/月缩
+  var mm=(u.st||{}).m_macd;
+  var mTag="";
+  if(mm&&mm.state==="green_grow")mTag='<span class="mtag mw" title="月线MACD绿柱加长(h1='+mm.h1+'→h2='+mm.h2+', '+esc(mm.date||"")+') — 月线下跌中继, 日线底背驰仅撑反弹易夭折 · 底信号雷达同名次均按月线键参考此标">月弱</span>';
+  else if(mm&&mm.state==="green_shrink")mTag='<span class="mtag ms" title="月线MACD绿柱缩短(h1='+mm.h1+'→h2='+mm.h2+', '+esc(mm.date||"")+') — 月线下跌动能衰减, 反转酝酿中">月缩</span>';
+  else if(mm==null)mTag='<span class="mtag mnull" title="月线MACD本次扫描未取得数据(腾讯月K源限流 / 北交无月K / 月K样本<40根) — 月线排序键对该信号中性, 名次未按月线校正, 「底部刚启」非全维度结论">月线—</span>';
   return '<div class="'+rowCls+'" title="'+esc(sigTip)+'" onclick="pickSigRad(\''+s.sym+'\')">'+
     '<div><div class="nm">'+(t?"⚠️ ":((opt.sub)?"🔍 ":"✅ "))+esc(nm)+lead+ffMini+'</div><div class="sub">'+esc(s.sym)+" · "+esc(indName)+'</div></div>'+
     '<div class="st">'+(t?'<b style="color:#c92a2a">顶背驰</b>':'<b style="color:#087f5b">底背驰</b>')+'<span>强'+(s.strong||0)+'/'+(s.vol?"缩":"")+((s.area!=null&&s.area>0)?" 面"+s.area:"")+'</span></div>'+
-    '<div class="st">'+(fr==null?"-":(fr===0?"当日":fr+"天前"))+frTag+'</div>'+   // R320: fresh=0(当日信号) 显示"当日", 原"0天前"语义误导(0=最新鲜却像过期)
+    '<div class="st">'+(fr==null?"-":(fr===0?"当日":fr+"天前"))+frTag+'</div>'+
     '<div class="dev '+devCls+'" title="'+esc(devTip||sigTip)+'">'+(dev!=null?devTxt:"-")+'<small>'+devSub+'</small></div>'+
+    '<div class="mcol" style="display:flex;align-items:center;justify-content:center">'+mTag+'</div>'+
     '<div class="spk">'+(spk&&spk.length>1?sparkSVG(spk.length>90?spk.slice(-90):spk,92,24):'<span style="color:#cbd5e1">-</span>')+'</div></div>';
 }
 var curSigMode="all";   // R287: all=🔥最新 | res=💰资金共振 | div=⚠️背离警示
