@@ -110,11 +110,9 @@ nav.pnav a.on{background:linear-gradient(120deg,var(--primary),#3b82c4);color:#f
   -webkit-overflow-scrolling:touch;scrollbar-width:thin}
 .tsc::-webkit-scrollbar{width:8px;height:8px}.tsc::-webkit-scrollbar-thumb{background:#cfd9e6;border-radius:4px}
 table{width:100%;border-collapse:separate;border-spacing:0;font-size:13px}
-.tsc table{min-width:640px}
-th,td{padding:8px 11px;text-align:right;white-space:nowrap;border-bottom:1px solid #eef2f7}
-th{color:#51617a;font-weight:600;background:#f2f6fa;font-size:12px;position:sticky;top:0;z-index:5;
-  border-bottom:1px solid #e0e8f1;text-align:right}
-th:first-child,td:first-child{text-align:left}
+.tsc table{min-width:640px;table-layout:fixed}
+th,td{padding:8px 11px;text-align:center;white-space:nowrap;border-bottom:1px solid #eef2f7;font-variant-numeric:tabular-nums}
+th{color:#51617a;font-weight:600;background:#f2f6fa;font-size:12px;position:sticky;top:0;z-index:5;border-bottom:1px solid #e0e8f1}
 tr:hover td{background:#f7fafd}
 tbody tr:last-child td{border-bottom:0}
 .stock{color:var(--ink);font-weight:600}
@@ -136,19 +134,19 @@ tbody tr:last-child td{border-bottom:0}
 .tsc th.sortable.srt.asc::after{border-bottom:5px solid #2b6cb0;border-top:0;vertical-align:1px;opacity:1}
 .tsc th.sortable.srt.desc::after{border-top:5px solid #2b6cb0;border-bottom:0;opacity:1}
 .tsc th.rn,.tsc td.rn{width:32px;text-align:center;padding-left:4px;padding-right:4px;color:#9aa7b8;font-size:11px;font-variant-numeric:tabular-nums}
-.tsc .l{text-align:left}
-.tsc td.num{font-variant-numeric:tabular-nums}
+.tsc .l{text-align:center}
+.tsc th.num,.tsc td.num{text-align:center;font-variant-numeric:tabular-nums}
 .tsc tbody tr:nth-child(even) td{background:rgba(246,249,253,.6)}
 .tsc tbody tr:hover td{background:#f0f6fc}
 .zero{color:#9aa7b8!important}
-.mbar{display:inline-block;width:52px;height:5px;background:#e7edf5;border-radius:3px;overflow:hidden;vertical-align:1.5px;margin-right:6px;flex:none}
+.mbar{display:inline-block;width:48px;height:5px;background:#e7edf5;border-radius:3px;overflow:hidden;vertical-align:1.5px;margin-right:6px;flex:none}
 .mbar i{display:block;height:100%;border-radius:3px;background:linear-gradient(90deg,#6aa4d8,#2b6cb0)}
 .cnt{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-top:8px;font-size:11.5px;color:#8a97aa}
 .cnt b{color:#33475f;font-variant-numeric:tabular-nums;font-weight:700}
 .cnt .n{color:#a4b0bf}
 .tsc .empty td{text-align:center;color:#94a3b8;padding:24px 12px;font-size:12.5px}
 .nm{font-weight:600;color:var(--ink);line-height:1.4}
-.sub{font-size:11px;color:#8a97aa;margin-top:2px;line-height:1.4;font-variant-numeric:tabular-nums;white-space:nowrap}
+.sub{font-size:11px;color:#8a97aa;margin-top:2px;line-height:1.4;font-variant-numeric:tabular-nums;white-space:normal;word-break:keep-all}
 /* ========== 时间轴 ========== */
 .ev{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .ev .it{display:flex;gap:12px;align-items:flex-start;background:linear-gradient(180deg,#fbfdff,#f6f9fc);
