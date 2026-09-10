@@ -34,7 +34,12 @@ header.top .inner::before{content:"";position:absolute;top:-60%;right:-8%;width:
 header.top .inner::after{content:"";position:absolute;left:-6%;bottom:-110%;width:34%;height:200%;pointer-events:none;
   background:radial-gradient(closest-side, rgba(96,165,250,.16), transparent 72%)}
 .brand{display:flex;flex-direction:column;flex:1 1 auto;min-width:0;position:relative;z-index:1}
-.bt{display:flex;align-items:center;gap:12px;min-width:0}
+/* (R423 修复) 此处原为 `.bt` —— 与下方回测卡容器 `<div class="bt" id="btBox">` 撞名:
+   `.bt` 是全局类, hero 的 flex 规则因此泄漏到回测卡, 使其 display:flex + align-items:center
+   → 标题/副标题/列表/脚注四块横向挤在一行, 标题被压成 102px 宽逐字换行 (线上实测)。
+   现 hero 侧改名为语义独立的 .brandline, `.bt` 归还给回测卡(backtest)独占。
+   注: R420 曾修过同源的 hero 白条问题, 但当时只救了 hero 一侧, 未根治撞名。 */
+.brandline{display:flex;align-items:center;gap:12px;min-width:0}
 .emblem{flex:0 0 auto;width:38px;height:38px;border-radius:11px;display:flex;align-items:center;justify-content:center;
   background:linear-gradient(135deg,#4f9ef0,#1e4f8f);color:#fff;font-size:17px;font-weight:800;letter-spacing:0;
   box-shadow:inset 0 1px 0 rgba(255,255,255,.35), 0 3px 8px rgba(0,0,0,.25)}
@@ -126,6 +131,30 @@ tbody tr:last-child td{border-bottom:0}
 .ebadge.up{background:var(--up-soft);color:#c53030;border:1px solid #f3c6c6}
 .ebadge.dn{background:var(--down-soft);color:#0f7a52;border:1px solid #bce3d2}
 .ebadge.flat{background:#eef1f5;color:#64748b;border:1px solid #dde4ec}
+/* ===== 资金流信号面板 (R423) —— 只呈现「状态」与历史统计, 不给操作指令 ===== */
+.sigp{margin:12px 0 14px}
+.sigp .sgrid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.5fr);gap:14px}
+.sigp .slag{font-size:11px;color:#8a97aa;letter-spacing:.3px}
+.sigp .scur{border:1px solid #dbe4ef;border-radius:12px;padding:13px 15px;background:#f7fafd}
+.sigp .scur.strong{border-color:#9ad3b8;background:#f1fbf6}
+.sigp .scur.weak{border-color:#eccf9c;background:#fdfaf2}
+.sigp .scur.mute{border-color:#dbe4ef;background:#f7fafd}
+.sigp .sname{font-size:19px;font-weight:800;color:#1e4d86;margin:4px 0 1px;line-height:1.3}
+.sigp .sdesc{font-size:12px;color:#5a6b80;line-height:1.6}
+.sigp .snum{margin-top:9px;font-size:12.5px;color:#33475f;line-height:1.9;font-variant-numeric:tabular-nums}
+.sigp .snum b{color:#1e4d86;font-weight:700}
+.sigp .sverd{margin-top:9px;padding-top:8px;border-top:1px dashed #dfe8f2;font-size:12px;color:#5a6b80;line-height:1.7}
+.sigp .sqrow{display:grid;grid-template-columns:104px minmax(0,1fr);gap:10px;align-items:baseline;
+  padding:7px 11px;border-radius:8px;margin-bottom:5px;background:#f8fafc;border-left:3px solid #cfd8e3}
+.sigp .sqrow.strong{border-left-color:#1d9e75}
+.sigp .sqrow.weak{border-left-color:#e0a94f}
+.sigp .sqrow.mute{border-left-color:#cbd5e1}
+.sigp .sqrow.on{background:#eaf3fd;box-shadow:inset 0 0 0 1px #bcd8f2}
+.sigp .sqn{font-size:12.5px;font-weight:700;color:#1e4d86}
+.sigp .sqrow.mute .sqn{color:#7b8899}
+.sigp .sqd{font-size:12px;color:#5a6b80;line-height:1.65;font-variant-numeric:tabular-nums}
+.sigp .sqd em{font-style:normal;color:#a4b0bf}
+@media(max-width:760px){.sigp .sgrid{grid-template-columns:1fr}}
 /* ===== 表格增强: 排序/序号/迷你条/斑马/计数 ===== */
 .tsc th.sortable{cursor:pointer;user-select:none;transition:background .15s}
 .tsc th.sortable:hover{background:#e7eef7;color:#1d4f8f}
@@ -160,6 +189,9 @@ tbody tr:last-child td{border-bottom:0}
 .chip.ok b{color:#6ee7b7}
 /* ===== R420 回测结论 ===== */
 #btBox{margin-top:14px;border:1px solid #e2eaf3;border-radius:12px;background:linear-gradient(180deg,#fbfdff,#f5f9fd);padding:13px 16px}
+/* (R423) 回测卡容器 —— 撞名修复后 `.bt` 归回测卡(backtest)独占, 在此定义其块级竖排布局;
+   用 `.card .bt` 限定, 不回落到全局。 */
+.card .bt{display:block;margin-top:14px;padding-top:12px;border-top:1px dashed #dfe8f2}
 .bt-h{font-size:13px;font-weight:700;color:#1e4d86;margin-bottom:4px}
 .bt-s{font-size:11.5px;color:#8a97aa;margin-bottom:8px;line-height:1.6}
 .bt-l{margin:0;padding-left:18px;font-size:12.5px;color:#3c4a5e;line-height:1.85}
@@ -200,7 +232,7 @@ footer{color:var(--muted);font-size:11.5px;line-height:1.8;padding:2px 2px 0}
   .mcards{grid-template-columns:1fr 1fr;gap:9px}
   .mc .vl{font-size:22px}
   nav.pnav{justify-content:flex-start;border-radius:16px;margin:12px 0 12px;top:8px}
-  .bt{flex-wrap:wrap}
+  .brandline{flex-wrap:wrap}
   .emblem{width:32px;height:32px;border-radius:9px;font-size:15px}
   .goback{margin-left:auto}
 }
@@ -209,7 +241,7 @@ footer{color:var(--muted);font-size:11.5px;line-height:1.8;padding:2px 2px 0}
 <body>
 <header class="top"><div class="inner">
   <div class="brand">
-    <div class="bt">
+    <div class="brandline">
       <span class="emblem">国</span>
       <h1>国家队持仓走势 · 核心重仓池</h1>
     </div>
@@ -228,10 +260,10 @@ footer{color:var(--muted);font-size:11.5px;line-height:1.8;padding:2px 2px 0}
 <div class="wrap">
 <nav class="pnav" id="pnav">
   <a href="#sec-over" class="on">总览</a>
-  <a href="#sec-trend">主体持仓走势</a>
-  <a href="#sec-top">持仓明细</a>
   <a href="#sec-etf">ETF 日度代理</a>
   <a href="#sec-quar">季度真身</a>
+  <a href="#sec-top">持仓明细</a>
+  <a href="#sec-trend">主体持仓走势</a>
   <a href="#sec-events">时间轴</a>
 </nav>
 
@@ -239,44 +271,11 @@ footer{color:var(--muted);font-size:11.5px;line-height:1.8;padding:2px 2px 0}
   <div class="mcards" id="mcards"></div>
 </section>
 
-<div class="card" id="sec-trend">
-  <div class="mt"><h2>主体持仓走势（季末，亿股）</h2>
-    <div class="ft">汇金投资为长期压舱石（左轴）；证金 / 社保 / 梧桐树操作更灵活（右轴）</div></div>
-  <div class="legend" id="lgA"></div>
-  <div class="chart" id="chA"></div>
-</div>
-
-<div class="card" id="sec-total">
-  <div class="mt"><h2>国家队持仓合计与覆盖票数</h2>
-    <div class="ft">ncov = 本期在池内前十大股东中出现国家队主体的股票数</div></div>
-  <div class="legend" id="lgB"></div>
-  <div class="chart" id="chB" style="height:230px"></div>
-</div>
-
-<div class="card" id="sec-top">
-  <div class="mt"><h2>最新报告期 · 国家队持仓明细 TOP</h2>
-    <div class="ft"><span id="topHint"></span></div></div>
-  <div class="toolrow"><span class="n">主体筛选</span>
-    <select id="filt"><option value="all">全部主体</option></select>
-  </div>
-  <div class="tsc" id="tscTop"><table>
-    <thead><tr>
-      <th class="rn">#</th>
-      <th class="l">代码 / 名称</th>
-      <th class="l">主体</th>
-      <th class="sortable num" data-k="hold">持股（亿股）</th>
-      <th class="sortable num" data-k="ratio">占流通股本</th>
-      <th class="sortable num" data-k="chg">较上季末</th>
-    </tr></thead>
-    <tbody id="tbody"></tbody>
-  </table></div>
-  <div class="cnt"><span>共 <b id="topNS">–</b> 只个股 · <b id="topN">–</b> 条主体持仓（最新报告期口径 · 最多展示 60 条）</span><span class="n">点击列头排序 · 动作按占流通比口径判定（送转免疫）</span></div>
-</div>
-
 <div class="card" id="sec-etf">
   <div class="mt"><h2>日度代理 · 宽基 ETF 资金流（疑似国家队）</h2>
     <div class="ft">份额源<b>上交所官方</b>（每交易日披露）· 净流入 = Δ份额 × 收盘价</div></div>
   <div class="hint">口径：份额为全体持有人合计，汇金 2024 起为宽基 ETF 最大买家之一，大额净申购窗口与国家队增持实证相关——<b style="color:#b45309">方向参考，非精确真身</b>。数据日期取交易所官方披露日（T 日盘后发布），<b>不看单日、看 5 日 / 20 日累计与共振</b>（回测：20 日累计信号最强，单日无预测力）。</div>
+  <div id="sigPanel" class="sigp"></div>
   <div class="tsc" id="tscEtf" style="max-height:300px"><table>
     <thead><tr>
       <th class="rn">#</th>
@@ -314,6 +313,40 @@ footer{color:var(--muted);font-size:11.5px;line-height:1.8;padding:2px 2px 0}
   </div>
   <div class="chart" id="chQ" style="height:280px"></div>
   <div class="fnote" id="qHint"></div>
+</div>
+
+<div class="card" id="sec-top">
+  <div class="mt"><h2>最新报告期 · 国家队持仓明细 TOP</h2>
+    <div class="ft"><span id="topHint"></span></div></div>
+  <div class="toolrow"><span class="n">主体筛选</span>
+    <select id="filt"><option value="all">全部主体</option></select>
+  </div>
+  <div class="tsc" id="tscTop"><table>
+    <thead><tr>
+      <th class="rn">#</th>
+      <th class="l">代码 / 名称</th>
+      <th class="l">主体</th>
+      <th class="sortable num" data-k="hold">持股（亿股）</th>
+      <th class="sortable num" data-k="ratio">占流通股本</th>
+      <th class="sortable num" data-k="chg">较上季末</th>
+    </tr></thead>
+    <tbody id="tbody"></tbody>
+  </table></div>
+  <div class="cnt"><span>共 <b id="topNS">–</b> 只个股 · <b id="topN">–</b> 条主体持仓（最新报告期口径 · 最多展示 60 条）</span><span class="n">点击列头排序 · 动作按占流通比口径判定（送转免疫）</span></div>
+</div>
+
+<div class="card" id="sec-trend">
+  <div class="mt"><h2>主体持仓走势（季末，亿股）</h2>
+    <div class="ft">汇金投资为长期压舱石（左轴）；证金 / 社保 / 梧桐树操作更灵活（右轴）</div></div>
+  <div class="legend" id="lgA"></div>
+  <div class="chart" id="chA"></div>
+</div>
+
+<div class="card" id="sec-total">
+  <div class="mt"><h2>国家队持仓合计与覆盖票数</h2>
+    <div class="ft">ncov = 本期在池内前十大股东中出现国家队主体的股票数</div></div>
+  <div class="legend" id="lgB"></div>
+  <div class="chart" id="chB" style="height:230px"></div>
 </div>
 
 <div class="card" id="sec-events">
@@ -692,6 +725,15 @@ function drawEtfChart(e){
     for(var k=Math.max(1,i-4);k<=i;k++)s+=flow[k];
     return +s.toFixed(2);
   });
+  /* (R423) 20 日累计净申赎 —— 回测里的最强口径(未来 20 日秩相关 +0.154***,
+     最强/最弱四分位收益差 +4.24pp, p<0.0001)。窗口未满(<20)返回 null 让折线断开,
+     与 backtest_etf.py 的 cum(i,w) 口径一致 —— 不用短窗口值冒充 N 日累计。 */
+  var cum20=dates.map(function(_,i){
+    if(i<20)return null;
+    var s=0;
+    for(var k=i-19;k<=i;k++)s+=flow[k];
+    return +s.toFixed(2);
+  });
   var ech=window.echarts,chE=ech.init(document.getElementById('chE'));
   var dzE=dates.length>8?zslider():[{type:'inside'}];
   var oE={
@@ -699,7 +741,7 @@ function drawEtfChart(e){
     tooltip:TT(null,axTip(function(n){return n==='全池份额'?' 亿份':' 亿元';},
                           function(n){return n!=='全池份额';})),
     dataZoom:dzE,
-    legend:{data:['全池份额','每日净申赎','5日累计'],top:2,textStyle:{color:'#55627a',fontSize:11},itemWidth:14,itemHeight:9},
+    legend:{data:['全池份额','每日净申赎','5日累计','20日累计'],top:2,textStyle:{color:'#55627a',fontSize:11},itemWidth:14,itemHeight:9},
     xAxis:{type:'category',data:dates,axisLine:{lineStyle:{color:'#cbd5e1'}},axisLabel:{color:'#64748b',fontSize:11,formatter:function(v){return v.slice(5);}},axisTick:{show:false}},
     yAxis:[
       {type:'value',name:'亿份',nameTextStyle:{color:'#94a3b8',fontSize:11},splitLine:{lineStyle:{color:'#eef2f7'}},axisLabel:{color:'#64748b',fontSize:11}},
@@ -711,14 +753,87 @@ function drawEtfChart(e){
         label:{show:true,position:'insideTop',distance:8,color:'#1e4d86',fontWeight:700,fontSize:12,align:'center'},
         data:yearBands.map(function(b){return [{xAxis:b.start,itemStyle:{color:'rgba(43,108,176,.04)'},label:{formatter:b.year}},{xAxis:b.end}];})}},
       {name:'每日净申赎',type:'bar',data:flow,barWidth:'52%',yAxisIndex:1,itemStyle:{color:function(p){return p.value>=0?'#e54545':'#18a058';},borderRadius:[2,2,0,0]}},
-      {name:'5日累计',type:'line',data:cum,smooth:true,symbol:'none',lineStyle:{width:2,color:'#d97706'},itemStyle:{color:'#d97706'},yAxisIndex:1}
+      {name:'5日累计',type:'line',data:cum,smooth:true,symbol:'none',lineStyle:{width:1.8,color:'#d97706'},itemStyle:{color:'#d97706'},yAxisIndex:1},
+      {name:'20日累计',type:'line',data:cum20,smooth:true,symbol:'none',lineStyle:{width:2.2,color:'#534AB7'},itemStyle:{color:'#534AB7'},yAxisIndex:1}
     ]};
   chE.setOption(oE);
   window.addEventListener('resize',function(){chE.resize();});
   hint.innerHTML='数据日期 <b>'+esc(meta.data_date||meta.latest||'-')+'</b> · 已积累 '+dates.length+' 个交易日 · '+use.length+' 只沪市宽基参与合计（深市 3 只无免费长史源，自 2026-09-09 起逐日累积，未计入曲线）。'+
     '<div style="margin-top:5px;line-height:1.75"><b>怎么读</b>：'+
     '<b>净申赎</b>=当日申购金额−赎回金额（Δ份额×当日收盘价），是 ETF <b>全体持有人</b>的合计净额，<b style="color:#b45309">不是国家队专属持仓</b>——汇金只是其中最大的参与者之一。'+
-    '红柱=净申购、绿柱=净赎回。<b>橙线</b>=最近 5 个交易日净申赎之和（回测证明单日无预测力、5/20 日累计才有效）。拖拽底部滑条查看历史。</div>';
+    '红柱=净申购、绿柱=净赎回。<b>橙线</b>=最近 5 个交易日累计、<b style="color:#534AB7">紫线</b>=最近 20 个交易日累计（回测：20 日累计信号最强，单日无预测力）。拖拽底部滑条查看历史。</div>';
+  drawSigPanel(dates,flow,S,use,meta.data_date||meta.latest||'');
+}
+
+/* ===== 资金流信号面板 (R423) =====
+   实证依据见 national/backtest_etf.py（599 个交易日, 2024-03-25 ~ 2026-09-09, 沪市 7 只):
+     · 单日净申赎对未来 5 / 20 日收益秩相关仅 +0.01 / +0.04（均不显著）→ **无预测力**,
+       因此图上单日红绿柱**不叠加任何加减仓标签**, 信号一律走累计口径。
+     · 5 日累计 +0.098 (p<0.01) / 20 日累计 +0.154 (p<0.001); 最强与最弱四分位
+       未来 20 日收益差 +4.24pp (p<0.0001) → 主信号取 20 日累计。
+     · 四象限(份额变动 × 指数涨跌)中「跌中赎回」最强: 未来 5 日胜率 71.4%
+       (n=126, 超额 +0.69pp, p=0.0006); 「涨中赎回」5 日与 20 日两个窗口一致偏空。
+   分类基准价取 510300(沪深300ETF)收盘价 —— 该价已在 series 内, **零新增数据源**;
+   与沪深300指数口径实测一致率 98.48%（594 个可比交易日）, 差异源自 ETF 分红除权跳空。
+   口径纪律: 面板只陈述「状态」与「历史统计」, 不输出加仓 / 减仓指令。 */
+var SQ={
+  dn_red:{lab:'跌中赎回',desc:'份额减 + 指数跌（恐慌赎回）',
+    exc5:0.69,p5:0.0006,exc20:-0.12,p20:0.7595,tier:'strong',
+    note:'全场最强偏多信号，但只在 5 日窗口成立'},
+  up_red:{lab:'涨中赎回',desc:'份额减 + 指数涨（涨了却被赎）',
+    exc5:-0.44,p5:0.0150,exc20:-0.76,p20:0.0268,tier:'weak',
+    note:'5 日与 20 日两个窗口一致偏空'},
+  ct_up:{lab:'逆势申购',desc:'份额增 + 指数跌（低位承接）',
+    exc5:-0.26,p5:0.2271,exc20:1.35,p20:0.0351,tier:'weak',
+    note:'仅 20 日窗口偏多，5 日不显著'},
+  sync_up:{lab:'顺势申购',desc:'份额增 + 指数涨',
+    exc5:0.31,p5:0.5057,exc20:-0.28,p20:0.6360,tier:'mute',
+    note:'两个窗口均无统计意义'}
+};
+function drawSigPanel(dates,flow,S,use,dataDate){
+  var el=document.getElementById('sigPanel');if(!el)return;
+  function sg(x,d){return (x>=0?'+':'')+x.toFixed(d==null?2:d);}
+  function sp(p){return p<0.001?'p&lt;0.001':'p='+p.toFixed(3);}
+  var N=dates.length;
+  var px3={};(S['510300']||[]).forEach(function(r){if(r[2])px3[r[0]]=r[2];});
+  if(!Object.keys(px3).length&&use.length){(S[use[0].code]||[]).forEach(function(r){if(r[2])px3[r[0]]=r[2];});}
+  function cumN(i,w){if(i<w)return null;var s=0;for(var k=i-w+1;k<=i;k++)s+=flow[k];return +s.toFixed(2);}
+  var c5=cumN(N-1,5), c20=cumN(N-1,20);
+  var a=px3[dates[N-1]], b=px3[dates[N-6]], r5=(a&&b)?(a/b-1):null;
+  var q=null;
+  if(c5!=null&&r5!=null)q=(c5>0&&r5<0)?'ct_up':(c5>0?'sync_up':(r5>=0?'up_red':'dn_red'));
+  /* 20 日累计的历史分位（越小 = 越偏向净赎回） */
+  var arr=[];for(var i=0;i<N;i++){var v=cumN(i,20);if(v!=null)arr.push(v);}
+  var pct=null;
+  if(c20!=null&&arr.length){var c=0;for(var j=0;j<arr.length;j++)if(arr[j]<c20)c++;pct=Math.round(c/arr.length*100);}
+  var cur=q?SQ[q]:null;
+  var head=cur
+    ? '<div class="slag">当前资金流状态 · '+esc(dataDate)+'</div><div class="sname">'+cur.lab+
+      '</div><div class="sdesc">'+cur.desc+'</div>'
+    : '<div class="slag">当前资金流状态</div><div class="sname">数据不足</div><div class="sdesc">累计窗口尚未成型</div>';
+  var nums='<div class="snum">5 日累计 <b>'+sg(c5==null?0:c5,1)+'</b> 亿元'+
+    (r5!=null?' · 沪深300ETF 5 日 <b>'+sg(r5*100)+'%</b>':'')+'<br>'+
+    '20 日累计 <b>'+sg(c20==null?0:c20,1)+'</b> 亿元'+
+    (pct!=null?' · 历史分位 <b>'+pct+'%</b>':'')+'</div>';
+  var verd='';
+  if(cur){
+    var sig=cur.p20<0.05;
+    verd='<div class="sverd">该状态历史：未来 20 日 <b style="color:'+(cur.exc20>=0?'#c53030':'#0f7a52')+'">'+
+      sg(cur.exc20)+'pp</b>（'+sp(cur.p20)+'）· 未来 5 日 '+sg(cur.exc5)+'pp（'+sp(cur.p5)+'）<br>'+
+      (sig?'<b>统计上显著</b> —— 可作为风险偏好的参考':'<b>无统计意义</b> —— 不构成加仓 / 减仓提示')+'</div>';
+  }
+  var rows=['dn_red','up_red','ct_up','sync_up'].map(function(k){
+    var s=SQ[k];
+    return '<div class="sqrow '+s.tier+(k===q?' on':'')+'">'+
+      '<div class="sqn">'+s.lab+(k===q?' · 当前':'')+'</div>'+
+      '<div class="sqd">未来 5 日 <b>'+sg(s.exc5)+'pp</b> <em>('+sp(s.p5)+')</em> · '+
+      '未来 20 日 <b>'+sg(s.exc20)+'pp</b> <em>('+sp(s.p20)+')</em><br>'+
+      '<em>'+s.desc+'　'+s.note+'</em></div></div>';
+  }).join('');
+  el.innerHTML='<div class="sgrid">'+
+    '<div class="scur '+(cur?cur.tier:'mute')+'">'+head+nums+verd+'</div>'+
+    '<div><div class="slag" style="margin-bottom:7px">四象限历史表现 · 超额收益 vs 全样本基准 · 599 个交易日实证</div>'+
+    rows+'</div></div>';
 }
 
 /* ===== 季度真身 · 份额长史 (quarter in etf_share.json) ===== */
