@@ -289,7 +289,7 @@ footer{color:var(--muted);font-size:11.5px;line-height:1.8;padding:2px 2px 0}
     </tr></thead>
     <tbody id="etfTb"></tbody>
   </table></div>
-  <div class="cnt"><span>合计 <b id="etfTot">–</b> 亿份 · <b id="etfN">–</b> 只</span><span class="n">份额×收盘价口径 · 大额净申购为疑似国家队窗口</span></div>
+  <div class="cnt"><span>合计 <b id="etfTot">–</b> 亿份 · <b id="etfN">–</b> 只</span><span class="n">5 日累计＝该只近 5 个交易日净申赎之和 · 全体持有人口径非国家队专属</span></div>
   <div class="chart" id="chE" style="height:270px;margin-top:12px"></div>
   <div class="fnote" id="etfHint"></div>
   <div class="bt" id="btBox">
@@ -342,12 +342,31 @@ var CN={'hj_tz':'中央汇金投资','hj_zg':'汇金资管','zj':'证金','sb':'
 var LAST=[];
 
 /* ===== 图表主题常量 (与主看板视觉一致) ===== */
-var TT=function(fmt){
-  return {trigger:'axis',backgroundColor:'rgba(255,255,255,.98)',borderColor:'#dfe7f0',borderWidth:1,
+/* TT(fmt)       → valueFormatter 模式: 各系列共用同一格式化 (fmt(value))
+   TT(null, raw) → formatter 模式: raw(params[]) 自行渲染, 需要按系列区分单位时用
+   注意: echarts 的 valueFormatter 第二参是 valueStr 不是 seriesIndex,
+        所以「按系列给不同单位」必须走 formatter 模式, 否则判据恒不成立. */
+var TT=function(fmt,raw){
+  var t={trigger:'axis',backgroundColor:'rgba(255,255,255,.98)',borderColor:'#dfe7f0',borderWidth:1,
     padding:[8,12],textStyle:{color:'#334155',fontSize:12},
-    extraCssText:'box-shadow:0 8px 22px rgba(15,23,42,.13);border-radius:10px;',
-    valueFormatter:fmt||null};
+    extraCssText:'box-shadow:0 8px 22px rgba(15,23,42,.13);border-radius:10px;'};
+  if(raw)t.formatter=raw;else t.valueFormatter=fmt||null;
+  return t;
 };
+/* axis tooltip 通用渲染: unitOf(seriesName)→单位; plusOf(seriesName)→true 则正数加 + 号 */
+function axTip(unitOf,plusOf){
+  return function(ps){
+    if(!ps||!ps.length)return '';
+    var out='<b>'+esc(ps[0].axisValue)+'</b>';
+    for(var i=0;i<ps.length;i++){
+      var p=ps[i],v=p.value,u=unitOf(p.seriesName);
+      var txt=(v==null)?'-':((plusOf&&plusOf(p.seriesName)&&typeof v==='number'&&v>0?'+':'')+v+u);
+      out+='<br>'+p.marker+esc(p.seriesName)+
+        '<b style="float:right;margin-left:22px;font-variant-numeric:tabular-nums">'+txt+'</b>';
+    }
+    return out;
+  };
+}
 function zslider(start){
   return [{type:'inside',zoomOnMouseWheel:true,zoomOnPinch:true},
     {type:'slider',height:13,bottom:3,start:start||0,end:100,borderColor:'transparent',backgroundColor:'rgba(148,163,184,.14)',
@@ -649,7 +668,8 @@ function drawEtfChart(e){
   var dzE=dates.length>8?zslider():[{type:'inside'}];
   var oE={
     grid:{left:60,right:62,top:30,bottom:dates.length>8?42:26},
-    tooltip:TT(function(v,i){return (i===0?v+' 亿份':(v==null?'-':v+' 亿元'));}),
+    tooltip:TT(null,axTip(function(n){return n==='全池份额'?' 亿份':' 亿元';},
+                          function(n){return n!=='全池份额';})),
     dataZoom:dzE,
     legend:{data:['全池份额','每日净申赎','5日累计'],top:2,textStyle:{color:'#55627a',fontSize:11},itemWidth:14,itemHeight:9},
     xAxis:{type:'category',data:dates,axisLine:{lineStyle:{color:'#cbd5e1'}},axisLabel:{color:'#64748b',fontSize:11,formatter:function(v){return v.slice(5);}},axisTick:{show:false}},
@@ -667,7 +687,10 @@ function drawEtfChart(e){
     ]};
   chE.setOption(oE);
   window.addEventListener('resize',function(){chE.resize();});
-  hint.innerHTML='数据日期 <b>'+esc(meta.data_date||meta.latest||'-')+'</b> · 已积累 '+dates.length+' 个交易日 · '+use.length+' 只沪市宽基参与合计（深市 3 只无免费长史源，自 2026-09-09 起逐日累积，未计入曲线）。红柱=当日净申购、绿柱=净赎回；<b>橙线=5 日累计净申赎（回测证明最有效口径）</b>。拖拽底部滑条查看历史。';
+  hint.innerHTML='数据日期 <b>'+esc(meta.data_date||meta.latest||'-')+'</b> · 已积累 '+dates.length+' 个交易日 · '+use.length+' 只沪市宽基参与合计（深市 3 只无免费长史源，自 2026-09-09 起逐日累积，未计入曲线）。'+
+    '<div style="margin-top:5px;line-height:1.75"><b>怎么读</b>：'+
+    '<b>净申赎</b>=当日申购金额−赎回金额（Δ份额×当日收盘价），是 ETF <b>全体持有人</b>的合计净额，<b style="color:#b45309">不是国家队专属持仓</b>——汇金只是其中最大的参与者之一。'+
+    '红柱=净申购、绿柱=净赎回。<b>橙线</b>=最近 5 个交易日净申赎之和（回测证明单日无预测力、5/20 日累计才有效）。拖拽底部滑条查看历史。</div>';
 }
 
 /* ===== 季度真身 · 份额长史 (quarter in etf_share.json) ===== */
@@ -697,7 +720,8 @@ function renderEtfQ(e){
     if(!chq){chq=ech.init(ch);}
     chq.setOption({
       grid:{left:56,right:62,top:34,bottom:rows.length>14?42:28},
-      tooltip:TT(function(v,i){return (i===0?(v+' 亿份'):(v>=0?'+'+v+' 亿份':v+' 亿份'));}),
+      tooltip:TT(null,axTip(function(){return ' 亿份';},
+                            function(n){return n.indexOf('净申赎')>=0;})),
       dataZoom:dzQ,
       legend:{data:['期末份额(亿份)','当季净申赎(亿份)'],top:2,textStyle:{color:'#55627a',fontSize:11},itemWidth:14,itemHeight:9},
       xAxis:{type:'category',data:dates,boundaryGap:false,axisLine:{lineStyle:{color:'#cbd5e1'}},axisLabel:{color:'#64748b',fontSize:11,interval:function(i){return i%Math.max(1,Math.floor(dates.length/10))===0;}},axisTick:{show:false}},
