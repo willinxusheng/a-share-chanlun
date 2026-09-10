@@ -276,31 +276,31 @@ footer{color:var(--muted);font-size:11.5px;line-height:1.8;padding:2px 2px 0}
 <div class="card" id="sec-etf">
   <div class="mt"><h2>日度代理 · 宽基 ETF 资金流（疑似国家队）</h2>
     <div class="ft">份额源<b>上交所官方</b>（每交易日披露）· 净流入 = Δ份额 × 收盘价</div></div>
-  <div class="hint">口径：份额为全体持有人合计，汇金 2024 起为宽基 ETF 最大买家之一，大额净申购窗口与国家队增持实证相关——<b style="color:#b45309">方向参考，非精确真身</b>。数据日期取交易所官方披露日（T 日盘后发布），<b>不看单日、看 5 日累计与共振</b>。</div>
+  <div class="hint">口径：份额为全体持有人合计，汇金 2024 起为宽基 ETF 最大买家之一，大额净申购窗口与国家队增持实证相关——<b style="color:#b45309">方向参考，非精确真身</b>。数据日期取交易所官方披露日（T 日盘后发布），<b>不看单日、看 5 日 / 20 日累计与共振</b>（回测：20 日累计信号最强，单日无预测力）。</div>
   <div class="tsc" id="tscEtf" style="max-height:300px"><table>
     <thead><tr>
       <th class="rn">#</th>
       <th class="l">宽基 ETF</th>
       <th class="sortable num" data-k="shr">份额（亿份）</th>
-      <th class="sortable num" data-k="dshr">当日 Δ</th>
+      <th class="sortable num" data-k="dshr">当日 Δ（亿元）</th>
       <th class="sortable num" data-k="cum5">5 日累计（亿元）</th>
       <th class="num">池内占比</th>
       <th class="l">资金方向</th>
     </tr></thead>
     <tbody id="etfTb"></tbody>
   </table></div>
-  <div class="cnt"><span>合计 <b id="etfTot">–</b> 亿份 · <b id="etfN">–</b> 只</span><span class="n">5 日累计＝该只近 5 个交易日净申赎之和 · 全体持有人口径非国家队专属</span></div>
+  <div class="cnt"><span>沪市 <b id="etfN">–</b> 只合计 <b id="etfTot">–</b> 亿份（深市 3 只自 2026-09-09 起逐日累积、未计入合计）</span><span class="n">当日 Δ 与 5 日累计均为金额口径（Δ份额×当日收盘价）· 全体持有人合计、非国家队专属</span></div>
   <div class="chart" id="chE" style="height:270px;margin-top:12px"></div>
   <div class="fnote" id="etfHint"></div>
   <div class="bt" id="btBox">
     <div class="bt-h">信号有效性回测 · 跟着 ETF 资金流加减仓到底有没有用</div>
-    <div class="bt-s">样本 2024-03-25 ~ 2026-09-09 · 599 个交易日 · 沪市 7 只官方份额 + 沪深300 收益 · 括号内为 Welch t 检验 p 值</div>
+    <div class="bt-s">样本 2024-03-25 ~ 2026-09-09 · 599 个交易日（滚动窗口需预热，各信号有效样本 559~593）· 沪市 7 只官方份额 + 沪深300 收益 · 括号内为 Welch t 检验 p 值</div>
     <ul class="bt-l">
       <li><b>单日净申赎没有预测力</b>：对未来 5 日 / 20 日收益的秩相关仅 +0.01 / +0.04（均不显著）——按单日红绿柱跟随等于跟噪声。</li>
-      <li><b>20 日累计净申赎最有效</b>：最强四分位组未来 20 日平均 +2.88%，最弱组 −1.16%，<b>差 4.03pp（p&lt;0.0001）</b>；未来 5 日差 1.07pp（p=0.007）。</li>
-      <li><b>逆势申购是最强信号</b>：份额增 + 指数跌（疑似国家队抄底）后 20 日平均 <b>+2.40%</b>，跑赢基准 <b>+1.36pp（p=0.033）</b>。</li>
+      <li><b>20 日累计净申赎最有效</b>：最强四分位组未来 20 日平均 +3.00%，最弱组 −1.24%，<b>差 4.24pp（p&lt;0.0001）</b>；未来 5 日差 1.09pp（p=0.007）。</li>
+      <li><b>逆势申购是最强信号</b>：份额增 + 指数跌（疑似国家队抄底）后 20 日平均 <b>+2.40%</b>，跑赢基准 <b>+1.35pp（p=0.035）</b>。</li>
       <li><b>涨中赎回是偏弱信号</b>：上涨期份额被赎回后 20 日跑输基准 −0.76pp（p=0.027）。</li>
-      <li><b>共振只数有区分度</b>：4 只以上同向净申购后 20 日 +1.67%，0~1 只时仅 +0.47%——单只变动可能是做市，多只同向才像国家队。</li>
+      <li><b>共振只数有区分度</b>：4 只以上同向净申购后 20 日 +1.67%，0~1 只时仅 +0.47%（<b>组间差 1.19pp，p=0.022</b>）——单只变动可能是做市，多只同向才像国家队。</li>
     </ul>
     <div class="bt-n">口径与边界：净流入 = Σ(Δ份额 × 当日收盘价)；沪市 7 只（上交所官方长史）参与，深市 3 只无免费长史源、自 2026-09-09 起逐日累积。样本为单一市场周期（2024-03 起），不构成投资建议。</div>
   </div>
@@ -378,8 +378,17 @@ function render(data){
   var meta=data.meta||{},series=data.series||[],top=data.top||[],stocks=data.stocks||{};
   document.getElementById('metaRp').textContent=meta.latest_report||'-';
   document.getElementById('metaVer').textContent=(meta.version||'-')+(meta.failed&&meta.failed.length?(' ('+meta.failed.length+' 票拉取失败)'):'');
-  var ga=new Date(meta.generated_at);ga.setHours(ga.getHours()+8);
-  document.getElementById('metaVer').textContent+=' · 数据更新 '+ga.toISOString().slice(0,16).replace('T',' ')+' 北京';
+  /* generated_at 为 UTC, 显式 +8h 换算北京时间。
+     (R421 修复) 旧写法 `new Date(t); ga.setHours(getHours()+8); ga.toISOString()`
+     在 generated_at 缺失 / 空串 / 非法字符串时 new Date 得到 Invalid Date, 随后
+     toISOString() 抛 RangeError: Invalid time value → render() 整个中断, KPI 卡 /
+     图表 / 明细 / 时间轴全部渲染不出来 (只剩 "数据加载失败" 提示)。
+     注: 跨 4 时区(UTC/北京/纽约/伦敦)实测, 旧写法在正常输入下**本就时区无关**
+     (setHours 等价于"时刻 +8h"), 故本次修复的是"缺 Invalid Date 兜底"而非时区。
+     改为纯时间戳运算 + isNaN 兜底, 任一异常输入均退化为当前时刻, 不阻断渲染。 */
+  var gt=meta.generated_at, btm=gt?new Date(gt).getTime()+8*36e5:NaN;
+  document.getElementById('metaVer').textContent+=' · 数据更新 '+
+    new Date(isNaN(btm)?Date.now():btm).toISOString().slice(0,16).replace('T',' ')+' 北京';
   /* R419: generated_at 现为「内容最近一次实质更新」时刻(无变化不写盘), 故补 tooltip 说明 */
   (function(){var v=document.getElementById('metaVer');if(v&&v.parentNode)v.parentNode.title=
     '系统每交易日盘后（北京 16:00 起每 30 分钟）自动检查刷新；此时间为数据内容最近一次发生实质变化的时刻，非披露窗口内保持不变属正常。';})();
@@ -539,9 +548,10 @@ function drawTopRows(){
   }
   var vis=rows.slice(0,60),maxR=0;
   vis.forEach(function(r){if(r.free_ratio&&r.free_ratio>maxR)maxR=r.free_ratio;});
+  var rDen=maxR>0?maxR:1;   /* (R421) 除零守卫: 占比全缺/全为 0 时避免 width:NaN% */
   tb.innerHTML=vis.map(function(r,i){
     var ratioTxt=r.free_ratio==null?'-':
-      '<span class="mbar"><i style="width:'+Math.max(4,Math.round(r.free_ratio/maxR*100))+'%"></i></span>'+r.free_ratio.toFixed(1)+'%';
+      '<span class="mbar"><i style="width:'+Math.max(4,Math.round(r.free_ratio/rDen*100))+'%"></i></span>'+r.free_ratio.toFixed(1)+'%';
     return '<tr>'+
       '<td class="rn">'+(i+1)+'</td>'+
       '<td class="l"><span class="stock">'+esc(r.name)+'</span> <span class="code">'+esc(r.code)+'</span></td>'+
@@ -583,7 +593,9 @@ function cum5v(a){
 function v2(p,k,e){
   var a=(e.series[p.code])||[];if(!a.length)return null;
   if(k==='shr')return a[a.length-1][1];
-  if(k==='dshr'){if(a.length<2)return null;return a[a.length-1][1]-a[a.length-2][1];}
+  /* (R421) dshr 排序键同步改金额口径, 与列显示/图表柱一致 */
+  if(k==='dshr'){if(a.length<2)return null;var c=a[a.length-1],b=a[a.length-2];
+    return (c[1]-b[1])*(c[2]||0);}
   if(k==='cum5')return cum5v(a);
   return null;
 }
@@ -608,7 +620,7 @@ function drawEtfRows(){
   var tb=document.getElementById('etfTb');
   var rows=pool.filter(function(p){return (S[p.code]||[]).length;});
   if(!rows.length){
-    tb.innerHTML='<tr class="empty"><td colspan="6">暂无快照 · 每交易日 16:00 盘后自动打点累积</td></tr>';
+    tb.innerHTML='<tr class="empty"><td colspan="7">暂无快照 · 每交易日 16:00 盘后自动打点累积</td></tr>';
     document.getElementById('etfTot').textContent='–';document.getElementById('etfN').textContent='0';return;
   }
   if(S2.k){var dir=S2.d;
@@ -618,23 +630,35 @@ function drawEtfRows(){
       return (va-vb)*dir;
     });
   }
-  var tot=0;
-  rows.forEach(function(p){var a=S[p.code]||[];if(a.length)tot+=a[a.length-1][1];});
+  /* 合计/占比口径与图表一致: 仅沪市 (深市无长史、逐日累积, 计入会与曲线/回测打架) */
+  var tot=0,shN=0;
+  rows.forEach(function(p){if(p.market==='sz')return;var a=S[p.code]||[];if(a.length){tot+=a[a.length-1][1];shN++;}});
   var maxPct=0;
-  rows.forEach(function(p){var a=S[p.code],l=a[a.length-1],pct=tot?l[1]/tot*100:0;if(pct>maxPct)maxPct=pct;});
+  rows.forEach(function(p){if(p.market==='sz')return;var a=S[p.code],l=a[a.length-1],pct=tot?l[1]/tot*100:0;if(pct>maxPct)maxPct=pct;});
   tb.innerHTML=rows.map(function(p,idx){
     var a=S[p.code],last=a[a.length-1],prev=a.length>1?a[a.length-2]:null;
-    var dshr=prev?((last[1]-prev[1])/1e8):null;
+    /* (R421 修复) 原「当日 Δ」列显示 Δ**份额**(亿份): 09-09 全池合计 −1.83 亿份,
+       而同卡片内「5 日累计(亿元)」、图表「每日净申赎」柱(09-09 全池 −21.19 亿元)、
+       「资金方向」徽章 三处都是金额口径 —— 相差 ETF 单价倍数(约 11.6 倍), 极易把
+       −2.83 亿份误读成 −2.83 亿元。此处统一为金额: Δ份额 × 当日收盘价(亿元),
+       阈值与 5 日累计列一致(|x|<0.05 显示 0.0)。 */
     var nd=prev?dayDiff(prev[0],last[0]):null;
-    var chg=dshr==null?'<span class="zero">-</span>':(dshr===0?'<span class="zero">0</span>':(dshr>0?'<span class="chg-up">+'+dshr.toFixed(2)+'</span>':'<span class="chg-dn">'+dshr.toFixed(2)+'</span>'));
+    var dAmt=prev?((last[1]-prev[1])*(last[2]||0)/1e8):null;
+    var chg=dAmt==null?'<span class="zero">-</span>':(Math.abs(dAmt)<0.05?'<span class="zero">0.0</span>':(dAmt>0?'<span class="chg-up">+'+dAmt.toFixed(1)+'</span>':'<span class="chg-dn">'+dAmt.toFixed(1)+'</span>'));
     var cv=cum5v(a);
     var c5=cv==null?'<span class="zero">-</span>':(Math.abs(cv)<0.05?'<span class="zero">0.0</span>':(cv>0?'<span class="chg-up">+'+cv.toFixed(1)+'</span>':'<span class="chg-dn">'+cv.toFixed(1)+'</span>'));
-    var badge=cv==null?'<span class="ebadge flat">数据积累中</span>':(cv>0?'<span class="ebadge up">↑ 净申购</span>':'<span class="ebadge dn">↓ 净赎回</span>');
-    var pct=tot?(last[1]/tot*100):0;
-    var pctTxt='<span class="mbar"><i style="width:'+Math.max(3,Math.round(pct/maxPct*100))+'%"></i></span>'+pct.toFixed(1)+'%';
+    /* (R421 修复) cv===0 时旧写法落到 else 分支显示「↓ 净赎回」, 与同行 c5 单元格
+       的「0.0」(|cv|<0.05 判定) 自相矛盾 —— 补持平档, 与 c5 用同一阈值。 */
+    var badge=cv==null?'<span class="ebadge flat">数据积累中</span>':(Math.abs(cv)<0.05?'<span class="ebadge flat">持平</span>':(cv>0?'<span class="ebadge up">↑ 净申购</span>':'<span class="ebadge dn">↓ 净赎回</span>'));
+    /* (R421) 深市不参与沪市合计, 占比列显式标「未计入」; 除零守卫避免 width:NaN% */
+    var isSz=p.market==='sz';
+    var pct=(!isSz&&tot)?(last[1]/tot*100):0;
+    var pctDen=maxPct>0?maxPct:1;
+    var pctTxt=isSz?'<span class="zero">未计入</span>'
+      :('<span class="mbar"><i style="width:'+Math.max(3,Math.round(pct/pctDen*100))+'%"></i></span>'+pct.toFixed(1)+'%');
     return '<tr>'+
       '<td class="rn">'+(idx+1)+'</td>'+
-      '<td class="l"><div class="nm">'+esc(p.name)+'</div><div class="sub">'+esc(p.code)+' · 数据 '+esc(last[0])+(nd!=null&&nd>1?'（距上 '+nd+' 日）':'')+'</div></td>'+
+      '<td class="l"><div class="nm">'+esc(p.name)+'</div><div class="sub">'+esc(p.code)+' · 数据 '+esc(last[0])+(nd!=null&&nd>1?'（距上 '+nd+' 日）':'')+(isSz?' · 深市未计入合计':'')+'</div></td>'+
       '<td class="num">'+fmtE(last[1]/1e8)+'</td>'+
       '<td class="num">'+chg+'</td>'+
       '<td class="num">'+c5+'</td>'+
@@ -642,13 +666,17 @@ function drawEtfRows(){
       '<td class="l">'+badge+'</td></tr>';
   }).join('');
   document.getElementById('etfTot').textContent=fmtE(tot/1e8);
-  document.getElementById('etfN').textContent=rows.length;
+  document.getElementById('etfN').textContent=shN;
 }
 function drawEtfChart(e){
   var meta=e.meta||{},S=e.series||{},pool=meta.pool||[];
   var hint=document.getElementById('etfHint');
-  /* 仅用有长史的 code 参与合计(深市无免费长史源、只有单点, 计入会让曲线跳变) */
-  var use=pool.filter(function(p){return (S[p.code]||[]).length>=2;});
+  /* 合计口径必须 **恒定** 为沪市 7 只 —— (R421 修复) 旧写法只按「期数>=2」过滤:
+     深市 3 只自 2026-09-09 起逐日累积, 一旦攒到 2 期就被卷进合计, 使曲线末端
+     相对前面 500+ 个「仅沪市」的点突然抬升数十亿份, 极易误读成「大举申购」。
+     改按 market 过滤 (用 !=='sz' 而非 ==='sh', 兼容无该字段的旧产物),
+     使 图表合计 / 表格合计 / 回测口径 三者一致。 */
+  var use=pool.filter(function(p){return p.market!=='sz'&&(S[p.code]||[]).length>=2;});
   var ds={};
   use.forEach(function(p){(S[p.code]||[]).forEach(function(r){ds[r[0]]=1;});});
   var dates=Object.keys(ds).sort();
@@ -783,7 +811,7 @@ fetch('etf_share.json',{cache:'no-cache'}).then(function(r){if(!r.ok)throw new E
 .then(function(e){renderEtf(e);renderEtfQ(e);})
 .catch(function(err){
   var tb=document.getElementById('etfTb');
-  if(tb)tb.innerHTML='<tr class="empty"><td colspan="6">ETF 日度数据暂不可用（'+err.message+'）· CI 每日盘后自动累积</td></tr>';
+  if(tb)tb.innerHTML='<tr class="empty"><td colspan="7">ETF 日度数据暂不可用（'+err.message+'）· CI 每日盘后自动累积</td></tr>';
 });
 </script>
 </body>

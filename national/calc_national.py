@@ -102,18 +102,25 @@ def report_window_of(dt: str):
 def decide_state(mp: dict, latest: str):
     """按 (code,bucket) 的 {dt:[hold,ratio]} 判定 R418 动作标签。
 
-    返回 dict 供 top 行扩展; latest 必须在该主体披露中出现(调用方保证)。
+    返回 dict 供 top 行扩展。
     主判据 = free_ratio 环比百分点(送转免疫); 股数差仅参考; 股本事件显式标记。
+    (R421) 显式以调用方传入的 latest 作为「本期基准」, 不再隐式取 dates[-1]。
+    二者在当前调用路径下等价(调用方保证 latest in mp 且为全局最新), 但去掉隐式
+    推导可避免本函数将来被复用时静默以错误的报告期为基准给出错误的环比标签。
     """
     dates = sorted(mp)
-    last_dt = dates[-1]
+    # (R421) 以 latest 在序列中的位置为基准: pdt 必须是「latest 的前一个披露期」,
+    # 而不是硬编码的 dates[-2] —— 二者仅在 latest 为末项时等价 (当前调用路径即如此),
+    # 一旦以非末项为基准, dates[-2] 会取到错误的前一期, 静默给出错误环比标签。
+    idx = dates.index(latest) if latest in mp else len(dates) - 1
+    last_dt = dates[idx]
     hold, ratio = mp[last_dt]
     out = {"state": None, "prev_dt": None, "hold_chg": None,
            "ratio_chg": None, "gap": None, "cap": None}
-    if len(dates) == 1:
-        out["state"] = "new"          # 历史首季现身 (无上季可对比)
+    if idx == 0:
+        out["state"] = "new"          # 该报告期之前无披露 (历史首季现身)
         return out
-    pdt = dates[-2]
+    pdt = dates[idx - 1]
     p_hold, p_ratio = mp[pdt]
     hold_chg = hold - p_hold
     rc = (ratio - p_ratio) if (ratio is not None and p_ratio is not None) else None
@@ -171,7 +178,11 @@ def guard_write(out, old, failed, pool_n):
     return True, "写盘"
 
 
-# ---------- 核心池 (~88 只: 金融蓝筹 + 中字头能源 + 大消费医药制造 + 2015 救市重仓; SH/SZ) ----------
+# ---------- 核心池 (86 只: 金融蓝筹 + 中字头能源 + 大消费医药制造 + 2015 救市重仓; SH/SZ) ----------
+# (R421) 原字面量里 601766.SH 写了两次(值相同), 靠下方 OrderedDict 重建去重 —— 已删除
+# 冗余行与该重建语句。注: Python 字面量本就自动去重, len(POOL) 一直是 86, 故本次**无
+# 功能变更**; 清理目的是消除「字面上写了 87 行、实际只有 86 个键」这一维护陷阱
+# (若将来两次定义的值不同, 会静默取后者造成"改了却没生效"的误判)。
 POOL = {
     # 银行 (19)
     "601398.SH": "工商银行", "601939.SH": "建设银行", "601288.SH": "农业银行",
@@ -190,14 +201,13 @@ POOL = {
     "601881.SH": "中国银河", "600958.SH": "东方证券", "601377.SH": "兴业证券",
     "601788.SH": "光大证券", "601901.SH": "方正证券", "601878.SH": "浙商证券",
     "600109.SH": "国金证券", "000166.SZ": "申万宏源", "002736.SZ": "国信证券",
-    # 能源/中字头 (19)
+    # 能源/中字头 (18)
     "600028.SH": "中国石化", "601857.SH": "中国石油", "601088.SH": "中国神华",
     "601898.SH": "中煤能源", "600900.SH": "长江电力", "600019.SH": "宝钢股份",
     "601668.SH": "中国建筑", "601390.SH": "中国中铁", "601186.SH": "中国铁建",
     "601800.SH": "中国交建", "601766.SH": "中国中车", "601618.SH": "中国中冶",
     "601111.SH": "中国国航", "600050.SH": "中国联通", "601728.SH": "中国电信",
     "600941.SH": "中国移动", "601669.SH": "中国电建", "601989.SH": "中国重工",
-    "601766.SH": "中国中车",
     # 消费/医药/制造 (12)
     "600519.SH": "贵州茅台", "601888.SH": "中国中免", "600887.SH": "伊利股份",
     "600276.SH": "恒瑞医药", "601899.SH": "紫金矿业", "600585.SH": "海螺水泥",
@@ -211,10 +221,6 @@ POOL = {
     "002594.SZ": "比亚迪", "300124.SZ": "汇川技术", "000538.SZ": "云南白药",
     "000625.SZ": "长安汽车", "000568.SZ": "泸州老窖",
 }
-
-# 移除重复键 (601766 重复定义, 保后者同名)
-POOL = dict(collections.OrderedDict((k, v) for k, v in POOL.items()))
-
 
 def http_get(url: str, tries: int = 3):
     last = None

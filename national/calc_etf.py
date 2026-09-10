@@ -30,10 +30,14 @@ R420 重构 (根治"日期戳错位"bug):
 幂等/防循环守卫 (CI 每次 deploy 都会跑本脚本):
   G0 季度: 仅当产物缺 quarter 或 meta.quarter_through 落后于最新报告期才全池重拉;
   G1 数据日期: 全部 code 的最后记录日期 >= 官方最新数据日期 → skip (不写盘);
-  G2 无变化: 数据日期前进但份额与最新记录一致(相对差<1e-4) → 不 append;
+  G2 重复: 同一数据日期已记录 → skip (按日期去重; **不再比较份额值** — 实测
+     4.5% 的相邻交易日相对变化本就 <1e-4, 按值判"无变化"会误丢合法数据,
+     致数据日期停滞/series 缺口/每轮重复拉取, 详见 daily() 内注释);
   G3 异常: 单只份额环比变动 >30% → WARN 照记(拆份额/折算可识别);
   G4 全败: 官方源不可用或无可写数据 → exit 0 不阻断 deploy, 不写盘;
-  G5 时段: 北京时间 15:00 前一律 no-op (官方数据盘后才发布, 该时段无新数据)。
+  G5 时段: 北京时间 15:00 前一律 no-op (官方数据盘后才发布, 该时段无新数据);
+  G6 价格: 缺当日收盘价(新浪日K 未更新/限流) → 本轮跳过该 code 待下轮,
+     **绝不写 0** (写 0 会被数据日期幂等永久锁死, 静默低估资金流)。
 
 产物: national/etf_share.json (tracked, CI 提交, ~KB 级):
    { "meta": {...},
@@ -81,8 +85,7 @@ POOL = [
     ("1.510880", "510880", "sh", "红利"),
 ]
 
-CHG_WARN = 0.30   # 单只份额环比变动告警阈值
-G2_TOL = 1e-4     # 无变化容差 (相对, 0.01%)
+CHG_WARN = 0.30   # 单只份额环比变动告警阈值 (G3)
 
 # 上交所官方 ETF 份额接口: 不指定 STAT_DATE 返回最新, 指定则回溯该交易日
 SSE_URL = ("http://query.sse.com.cn/commonQuery.do?"
@@ -111,8 +114,11 @@ def _load():
 
 
 def _save(data):
-    with open(OUT, "w", encoding="utf-8") as f:
+    """原子写: 先落 .tmp 再 os.replace, 避免 CI 中途被杀留下半个 JSON 产物。"""
+    tmp = OUT + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False)
+    os.replace(tmp, OUT)
 
 
 def _pool_meta():
@@ -350,14 +356,26 @@ def daily(force=False):
                 continue
             v = x["shr"]
 
-        # ---- G2 无变化守卫 ----
-        if arr:
-            last = arr[-1][1]
-            if last and abs(v - last) / last < G2_TOL:
-                print("  [skip] %s 份额与最新记录一致 (G2)" % code)
-                continue
+        # ---- G2 重复守卫: 只按「数据日期」去重, 不再比较份额值 ----
+        # (R421 修复) 旧写法用 |Δ份额|/份额 < 1e-4 判「无变化」并跳过 —— 在官方源
+        # 口径下**有害**: 实测 599 个交易日中 4.5% 的相邻日相对变化本就 <1e-4
+        # (510180 上证180 高达 22.7%), 会被误判为「无变化」而丢弃该日记录, 后果:
+        #   ① 数据日期停滞 → 前端长期显示旧日期; ② 部分 code 被拦 → series 出现
+        #   缺口; ③ 每轮 CI 重复拉取同一只。陈旧值(T-1 冒充 T 日)问题已由 G1 的
+        # 数据日期幂等根治, 故此处职责只剩「同一数据日期不重复写」。
+        if arr and arr[-1][0] >= dd:
+            print("  [skip] %s 数据日期 %s 已记录 (G2)" % (code, arr[-1][0]))
+            continue
 
+        # ---- 价格守卫: 缺收盘价则本轮跳过该 code, 绝不写 0 ----
+        # (R421 修复) 旧写法用 `or 0.0` 兜底 → 新浪日K 未更新/限流时会把
+        # nav=0, mkt=0 写进 series; 该日净申赎金额恒为 0 且被数据日期幂等
+        # **永久锁死**(G1 认为已记录, 再也不会用正确价格重算) → 静默低估资金流。
         p = px.get(code, {}).get(dd) or (x["nav"] if x else 0.0)
+        if not p or p <= 0:
+            print("  [skip-price] %s %s 缺 %s 收盘价(新浪日K 未更新?), 本轮跳过待下轮"
+                  % (code, name, dd))
+            continue
         arr.append([dd, v, round(p, 6), round(v * p, 2)])
         written += 1
         prev = arr[-2][1] if len(arr) > 1 else None
@@ -435,16 +453,26 @@ def backfill(days=420):
                 if v and p:
                     rows.append([dt, v, round(p, 6), round(v * p, 2)])
         else:
-            # 深市: 官方无覆盖 → 东财当前值单点 (数据日期=官方最新), 后续逐日累积;
-            # 拉取失败则保留产物中已有的深市记录, 不清空
+            # 深市: 官方无覆盖 → 东财实时值 append/更新 (数据日期=官方最新)。
+            # (R421 修复) 旧写法每次回溯都把 rows 重置为**单点**, 深市一旦已逐日
+            # 累积出多期, 再跑 --backfill 就会把历史压成 1 条 (静默数据丢失)。
+            # 改为 **合并已有序列**: 同日则更新、更晚则追加、拉取失败则原样保留。
             x = fetch_em(sid)
             p = px.get(code, {}).get(dd_latest)
-            if x and p:
-                rows = [[dd_latest, x["shr"], round(p, 6), round(x["shr"] * p, 2)]]
+            rows = list((data.get("series") or {}).get(code) or [])
+            if x and p and p > 0:
+                pt = [dd_latest, x["shr"], round(p, 6), round(x["shr"] * p, 2)]
+                if rows and rows[-1][0] == dd_latest:
+                    rows[-1] = pt
+                    print("    (深市 %s 同日 %s 更新)" % (code, dd_latest))
+                elif rows and rows[-1][0] > dd_latest:
+                    print("    (深市 %s 已有更新记录 %s, 不覆盖)" % (code, rows[-1][0]))
+                else:
+                    rows.append(pt)
+            elif rows:
+                print("    (深市 %s 拉取失败, 保留已有 %d 期)" % (code, len(rows)))
             else:
-                rows = (data.get("series") or {}).get(code) or []
-                if rows:
-                    print("    (深市 %s 拉取失败, 保留已有 %d 期)" % (code, len(rows)))
+                print("    (深市 %s 无数据: 东财拉取失败且无历史)" % code)
             time.sleep(0.3)
         if rows:
             series[code] = rows

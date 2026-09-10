@@ -235,13 +235,18 @@ jobs:
       - name: ETF 份额日度快照（疑似国家队资金流代理, 幂等）
         # R413: 宽基 ETF 总份额每交易日披露(东财 push2 f84, 与腾讯 total_shares 双源互证),
         # 日度份额×净值=净申赎 → 国家队(汇金 2024 起宽基主战场)疑似方向参考。
-        # calc_etf.py 内部守卫: G1 当日已记跳过 / G2 份额无变化不写盘(防死循环) /
-        # G4 全池拉取失败 exit 0 不阻断本站发布(留给下个 cron-job 时点补)。
+        # calc_etf.py 内部守卫: G0 季度幂等 / G1 数据日期幂等(当日已记则跳过) /
+        # G2 同一数据日期不重复写 / G3 环比 >30% 仅 WARN / G4 全池拉取失败 exit 0
+        # 不阻断本站发布(留给下个 cron-job 时点补) / G5 北京 15:00 前 no-op /
+        # G6 缺当日收盘价则跳过该只(绝不写 0)。
+        # R421: G2 旧语义为「份额值相对差 <1e-4 视为无变化不写盘」, 在官方源口径下
+        # 有害(实测 4.5% 的相邻交易日本就 <1e-4, 510180 达 22.7%) → 会误丢合法数据,
+        # 致数据日期停滞 / series 缺口 / 每轮重复拉取; 已改为纯按数据日期去重。
         run: python national/calc_etf.py
 
       - name: 提交 ETF 份额快照（当日有变化才提交, 防重复触发循环）
-        # etf_share.json 为 tracked 累积产物; 仅当 calc_etf 真正 append(份额变化)时才
-        # commit+push → push 触发下次 deploy → calc_etf 见当日已记(G1)无变化 → 不提交,
+        # etf_share.json 为 tracked 累积产物; 仅当 calc_etf 真正 append 了新数据日期时才
+        # commit+push → push 触发下次 deploy → calc_etf 见该数据日期已记(G2) → 不写盘,
         # 循环自然终止(radar-scan 同款"当日守卫"模式)。[skip ci] 防 push 触发冗余 run。
         run: |
           set -euo pipefail
