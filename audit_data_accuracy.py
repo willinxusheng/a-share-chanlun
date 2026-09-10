@@ -141,6 +141,13 @@ def audit_forecast(data):
     return ok
 
 
+# R422: 崩溃的深层监控门禁登记表 —— _run_mon 只往日志打一行 ⚠, 而汇总行(gate→"MON")
+# 与退出码都不体现, 于是"子门禁没跑完"仍会被汇总读成"已监测"。R327/R360 的既定原则是
+# 不许把"没跑完"掩盖成"已监测", 故此处登记后由 main() 在汇总块显式复述一遍(仍不阻断,
+# 不回归 R207「监控告警不误杀部署」的语义)。
+_MON_CRASHED = []
+
+
 def _run_mon(script):
     """深层监控门禁统一委托(R360 收敛 13 个重复 subprocess 段)。
 
@@ -148,10 +155,13 @@ def _run_mon(script):
     避免监控告警误杀部署)。R360 补齐盲点: 子脚本「崩溃」(rc!=0, 如 import 错/数据损坏/
     内部异常——R358 audit_forecast_drift 曾 rc=1 实证)与「跑完但打印告警」是两回事; 崩溃
     时若只靠汇总行 MON/✅, 会把「没跑完」掩盖成「已监测且无告警」。rc!=0 显式提示判定
-    不可信须人工跟进(仍不阻断, 不回归 R207 之前误杀部署)。"""
+    不可信须人工跟进(仍不阻断, 不回归 R207 之前误杀部署)。
+    R422: 该提示此前只在子脚本正上方打印一行, 汇总块(旭总实际会读的那几行)仍标 MON;
+    现在同时登记进 _MON_CRASHED, 由汇总块复述, 使崩溃在结论处即可见。"""
     r = subprocess.run([sys.executable, script],
                        cwd=os.path.dirname(os.path.abspath(__file__)))
     if r.returncode != 0:
+        _MON_CRASHED.append("%s(rc=%d)" % (script, r.returncode))
         print("  ⚠ 子脚本 %s 异常退出(rc=%d) —— 该关未能跑完, 上方输出含错误详情, 判定与汇总的 MON 不可信, 须人工跟进"
               % (script, r.returncode))
     return True
@@ -291,6 +301,11 @@ def main():
              ("SKIP" if not deep else "MON")))
     print("离线门禁补充: 关S数据schema=%s  关R报告运行时=%s" % (
         ["FAIL", "OK"][ok_schema], ["FAIL", "OK"][ok_rt]))
+    # R422: 把"没跑完"的监控门禁在汇总块复述 —— 上方汇总行对所有深层门禁统一标 MON,
+    # 无法区分「已监测且无告警」与「压根没跑完」; 崩溃项在此显式点出(仍不阻断)。
+    if _MON_CRASHED:
+        print("⚠ 深层监控门禁未跑完(该关判定不可信, 汇总行 MON 对其不成立, 须人工跟进): %s"
+              % "、".join(_MON_CRASHED))
     allok = ok_schema and ok_rt and ok1 and ok2 and ok3 and (ok4 if deep else True) and (ok5 if deep else True) and (ok6 if deep else True) and (ok7 if deep else True) and (ok8 if deep else True) and (ok9 if deep else True) and (ok10 if deep else True) and (ok11 if deep else True) and (ok12 if deep else True) and (ok13 if deep else True) and (ok14 if deep else True) and (ok15 if deep else True) and (ok16 if deep else True)
     # R327: 诚实分层 —— allok 只含阻断项(关1/2/3 + schema/rt); 深层监控门禁(关4-16)
     # 自 R207 起恒不阻断(子脚本退出码被忽略), 若其子报告打了 CRITICAL/❌, 总结论仍称

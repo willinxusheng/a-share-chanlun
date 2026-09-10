@@ -67,10 +67,18 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -uo pipefail
+          # R422: 必须显式 `set +e` —— GitHub Actions 对 run: 的默认 shell 是
+          # `bash --noprofile --norc -eo pipefail {0}`, -e 由**runner 调用参数**给出,
+          # 并非由本行 set 决定; 故只写 `set -uo pipefail` 时 -e 依然生效 →
+          # `python check_freshness.py` 一旦返回 1 脚本立即被终止, 下面的 rc=$? 与
+          # ::error:: 注解**全是死代码**(与注释声称的"不用 set -e, 需要捕获退出码后再
+          # 决定是否以失败结束"不一致: 设计意图未实现, 红叉里永远不会出现那句诊断文案)。
+          # 显式关掉 -e 完成捕获, 再用 set -e 恢复默认严格模式。
+          set +e
           # 退出码: 0=已最新; 1=落后(脚本内已尝试自动触发重新部署)
-          # 不用 set -e —— 需要捕获退出码后再决定是否以失败结束本 job
           python check_freshness.py
           rc=$?
+          set -e
           if [ "$rc" -ne 0 ]; then
             echo "::error::线上数据落后于源端最新交易日。已尝试自动触发重新部署，请查看 deploy 工作流结果；若仍落后请人工介入。"
             exit 1

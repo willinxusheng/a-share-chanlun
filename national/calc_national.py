@@ -379,8 +379,15 @@ def main():
         print(f"[skip] {why}")
         print(f"[skip] 未改动 {args.out} → CI 无提交 (预期行为, 非错误)")
         return 0
-    with open(args.out, "w", encoding="utf-8") as f:
+    # R422: 原子写(先落 .tmp 再 os.replace) —— 与 R421 给 calc_etf._save 加的同款理由:
+    # national.json 是 tracked 产物, 就地 open("w") 在 CI 中途被杀/磁盘满时会留下**半个
+    # JSON**; 虽被下方 git status 提交步骤与上传步骤的 success 门控挡住大部分路径, 但
+    # "半截产物出现在工作树"本身没有价值(下一轮的旧产物解析只会打一条 WARN 当首生成)。
+    # 同仓两处写盘口径应一致, 故此处对齐 calc_etf。
+    _tmp = args.out + ".tmp"
+    with open(_tmp, "w", encoding="utf-8") as f:
         json.dump(out, f, ensure_ascii=False, separators=(",", ":"))
+    os.replace(_tmp, args.out)
     print(f"[write] {why} → {args.out}")
     if latest and series:
         r0 = series[-1]

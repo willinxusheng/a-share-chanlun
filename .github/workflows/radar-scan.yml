@@ -53,7 +53,12 @@ jobs:
             # 被自身阻断, job 只红叉不产新数据)。与下方 L66 远端解析(R374 已带 2>/dev/null
             # || echo "")不对称, 现对齐: 解析失败 BD="" != TODAY -> 自然放行全量重扫,
             # scan_radar 新产物覆盖损坏文件完成自愈。
-            BD=$(python3 -c "import json;print(json.load(open('radar/radar.json'))['meta'].get('build_time','')[:10])" 2>/dev/null || echo "")
+            # R422: 补 encoding="utf-8" —— 与同文件 L95/L121 一致。原缺省依赖 runner 的
+            # locale(getpreferredencoding), LC_ALL=C 等非 UTF-8 环境下读含中文的 radar.json
+            # 会抛 UnicodeDecodeError; 虽被 2>/dev/null 兜成 BD="" 不致报错, 但会让"当日已扫
+            # 过"守卫**恒判非今日** → 每个 dispatch 都放行全量重扫(20~60min, 与 R374 修掉的
+            # 双扫/堆积同型后果)。radar.json 恒为 UTF-8, 显式声明即可免疫 locale。
+            BD=$(python3 -c "import json;print(json.load(open('radar/radar.json',encoding='utf-8'))['meta'].get('build_time','')[:10])" 2>/dev/null || echo "")
             echo "radar build_date=$BD  北京今天=$TODAY"
             if [ "$BD" = "$TODAY" ]; then
               echo "今日(北京 $TODAY)已完成扫描并入库, 本次 dispatch 跳过(数据已当日)"

@@ -3011,7 +3011,15 @@ def main():
     # 数据新鲜度护栏：推演完全基于截至 last_date 的行情，若严重滞后应醒目预警，
     # 避免用户拿过期数据得出的预测当作当下结论（过期行情→结构/概率全失真）。
     _last_d = datetime.strptime(last_date, "%Y-%m-%d").date()
-    _today = datetime.now().date()
+    # R422: "今天"必须取**北京时间** —— GitHub runner 本地时区是 UTC(与 fetch_data.py L219
+    # 注释同源的坑, 那边已修、此处漏改), 裸 datetime.now() 在北京 00:00~08:00 区间会取到
+    # **前一天**的日期(该时段 UTC 仍停在昨日), 使 _gap_days 少 1 天、_gap_td 随之少算 1 个
+    # 交易日。实证(2026 年看门狗 261 个真实调度点 × 前 1~20 个 last_date = 3435 组):
+    # 74% 的组合 gap_td 被低估, 16.5% 连告警等级都被降级 —— 例: 真实「滞后 3 个交易日
+    # [轻度]」被判成 2 个 → **完全不告警**(阈值 >2); 真实「11 日[严重]」→「10 日[中度]」。
+    # 该数字由下方 L3034「已滞后约 N 个交易日」直接展示给用户, 错的正是它。
+    # 口径与同文件 L3103(gen_time) / L2961(证书时间) 统一为 UTC+8, 消除时区口径分裂。
+    _today = datetime.now(timezone(timedelta(hours=8))).date()
     _gap_days = (_today - _last_d).days
     # 滞后交易日：复用 R55 的 A 股交易日历 _is_trading_day（跳过周末+法定假期、保留补班），
     # 避免把国庆/春节等长假的休市日误算为「滞后交易日」（此前 weekday()<5 会在休市期误报
