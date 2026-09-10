@@ -703,7 +703,7 @@ function sigRow(s,opt){   // R380: opt.sub=true = 非低吸区灰显行(破位/�
   var mTag="";
   if(mm&&mm.state==="green_grow")mTag='<span class="mtag mw" title="月线MACD绿柱加长(h1='+mm.h1+'→h2='+mm.h2+', '+esc(mm.date||"")+') — 月线下跌中继, 日线底背驰仅撑反弹易夭折 · 底信号雷达同名次均按月线键参考此标">月弱</span>';
   else if(mm&&mm.state==="green_shrink")mTag='<span class="mtag ms" title="月线MACD绿柱缩短(h1='+mm.h1+'→h2='+mm.h2+', '+esc(mm.date||"")+') — 月线下跌动能衰减, 反转酝酿中">月缩</span>';
-  else if(mm==null)mTag='<span class="mtag mnull" title="月线MACD本次扫描未取得数据(腾讯月K源限流 / 北交无月K / 月K样本<40根) — 月线排序键对该信号中性, 名次未按月线校正, 「底部刚启」非全维度结论">月线—</span>';
+  else if(mm==null)mTag='<span class="mtag mnull" title="月线MACD本次扫描未取得数据(已尝试腾讯 qfq 月K → 新浪日线聚合兜底 两条路径, 均不足: 多为次新股月K<40根 / 北交无月K / 两源同时不可用) — 月线排序键对该信号中性, 名次未按月线校正, 「底部刚启」非全维度结论">月线—</span>';
   return '<div class="'+rowCls+'" title="'+esc(sigTip)+'" onclick="pickSigRad(\''+s.sym+'\')">'+
     '<div><div class="nm">'+(t?"⚠️ ":((opt.sub)?"🔍 ":"✅ "))+esc(nm)+lead+ffMini+'</div><div class="sub">'+esc(s.sym)+" · "+esc(indName)+'</div></div>'+
     '<div class="st">'+(t?'<b style="color:#c92a2a">顶背驰</b>':'<b style="color:#087f5b">底背驰</b>')+'<span>强'+(s.strong||0)+'/'+(s.vol?"缩":"")+((s.area!=null&&s.area>0)?" 面"+s.area:"")+'</span></div>'+
@@ -931,7 +931,7 @@ function revRow(c){
   var mm=c.st&&c.st.m_macd, mTag="";
   if(mm&&mm.state==="green_grow")mTag='<span class="mtag mw" title="月线MACD绿柱加长(h1='+mm.h1+'→h2='+mm.h2+', '+esc(mm.date||"")+') — 月线下跌中继, 日线级底背驰仅撑反弹易夭折 · 双周期键已沉同档尾(不剔除)">月弱</span>';
   else if(mm&&mm.state==="green_shrink")mTag='<span class="mtag ms" title="月线MACD绿柱缩短(h1='+mm.h1+'→h2='+mm.h2+', '+esc(mm.date||"")+') — 月线下跌动能衰减, 反转在酝酿">月缩</span>';
-  else if(mm==null)mTag='<span class="mtag mnull" title="月线MACD本次扫描未取得数据(腾讯月K源限流 / 票为北交无月K / 月K样本<40根) — 月线排序键对该票中性, 名次未按月线校正, 「底部刚启」绿徽章独占非全维度结论">月线—</span>';
+  else if(mm==null)mTag='<span class="mtag mnull" title="月线MACD本次扫描未取得数据(已尝试腾讯 qfq 月K → 新浪日线聚合兜底 两条路径, 均不足: 多为次新股月K<40根 / 北交无月K / 两源同时不可用) — 月线排序键对该票中性, 名次未按月线校正, 「底部刚启」绿徽章独占非全维度结论">月线—</span>';
   // -- R387: 背离强度(area_ratio MACD面积背离比: 越小=下跌动能衰竭越彻底, 底越可靠) + 走势状态(trend: 右/左侧标签, 不入排序键)
   var arv=+(bb.area_ratio), arTag="", arWord="", arTip="", arTipL="";
   if(bb.area_ratio!=null&&bb.area_ratio!==""&&!isNaN(arv)){
