@@ -253,6 +253,18 @@ tbody tr:last-child td{border-bottom:0}
 .cnt{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-top:8px;font-size:11.5px;color:#8a97aa}
 .cnt b{color:#33475f;font-variant-numeric:tabular-nums;font-weight:700}
 .cnt .n{color:#a4b0bf}
+/* ===== R430 数据新鲜度条: 显式标注「交易所最新已披露交易日」+ T+1 口径,
+   根治「看板数据没更新」的误判 —— 交易所逐日披露自带时滞, 盘后看到最新一期
+   为「上一交易日」是正常态, 必须写在最显眼处而不是埋在脚注里。 ===== */
+.fbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:9px 0 3px;padding:8px 13px;
+  border-radius:10px;font-size:12.5px;line-height:1.65;background:#f2f7fb;border:1px solid #dfe9f2;color:#4a5c70}
+.fbar .dot{width:8px;height:8px;border-radius:50%;background:#22c55e;flex:none;box-shadow:0 0 0 3px rgba(34,197,94,.16)}
+.fbar.stale{background:#fff8ec;border-color:#f5e0b9;color:#7a5a1e}
+.fbar.stale .dot{background:#f59e0b;box-shadow:0 0 0 3px rgba(245,158,11,.18)}
+.fbar b{color:#0f2036;font-weight:700;font-variant-numeric:tabular-nums}
+.fbar.stale b{color:#8a5a00}
+.fbar .sep{color:#c3d0dd}
+.fbar .nx{color:#8a5a00;font-weight:600}
 .tsc .empty td{text-align:center;color:#94a3b8;padding:24px 12px;font-size:12.5px}
 .nm{font-weight:600;color:var(--ink);line-height:1.4}
 .tsc .sub{font-size:11px;color:#8a97aa;margin-top:2px;line-height:1.4;font-variant-numeric:tabular-nums;white-space:normal;word-break:keep-all}
@@ -353,8 +365,9 @@ footer{color:var(--muted);font-size:11.5px;line-height:1.8;padding:2px 2px 0}
 
 <div class="card" id="sec-etf">
   <div class="mt"><h2>日度代理 · 宽基 ETF 资金流（疑似国家队）</h2>
-    <div class="ft">份额源<b>上交所官方</b>（每交易日披露）· 净流入 = Δ份额 × 收盘价</div></div>
-  <div class="hint">口径：份额为全体持有人合计，汇金 2024 起为宽基 ETF 最大买家之一，大额净申购窗口与国家队增持实证相关——<b style="color:#b45309">方向参考，非精确真身</b>。数据日期取交易所官方披露日（T 日盘后发布），<b>不看单日、看 5 日 / 20 日累计与共振</b>（回测：20 日累计信号最强，单日无预测力）。</div>
+    <div class="ft">份额源<b>上交所官方</b>（每交易日披露 · T+1 可得）· 净流入 = Δ份额 × 收盘价</div></div>
+  <div class="fbar" id="etfFresh"></div>
+  <div class="hint">口径：份额为全体持有人合计，汇金 2024 起为宽基 ETF 最大买家之一，大额净申购窗口与国家队增持实证相关——<b style="color:#b45309">方向参考，非精确真身</b>。数据日期一律以交易所官方 STAT_DATE 为准（<b>最新已披露交易日</b>）；交易所逐日份额披露自带 T+1 时滞，故盘后看到最新一期为「上一交易日」属正常，<b>不要据此判断看板停更</b>。<b>不看单日、看 5 日 / 20 日累计与共振</b>（回测：20 日累计信号最强，单日无预测力）。</div>
   <div id="sigPanel" class="sigp"></div>
   <div class="tsc" id="tscEtf" style="max-height:300px"><table>
     <thead><tr>
@@ -713,6 +726,47 @@ function v2(p,k,e){
   return null;
 }
 function dayDiff(d1,d2){return Math.round((new Date(d2)-new Date(d1))/864e5);}
+/* ===== R430: 数据新鲜度条 =====
+   交易所 ETF 逐日份额披露自带 T+1 时滞(官方 STAT_DATE 锚定), 所以任何一个盘后
+   时刻, 页面上最新一期都可能是「上一交易日」。旧版只把数据日期写在图表脚注
+   (etfHint) 里, 用户扫一眼卡片头看不到日期 → 直接判定「数据没更新」。此处把
+   数据日期 + 相对今天的位置 + 下一期补齐预期 顶到卡片最上方, 并给出 3 自然日
+   以上的橙黄警示(覆盖周末 gap=3 的正常情形, 故阈值取 >=4)。 */
+function nextBiz(dstr){
+  /* 下一工作日(跳过周六日; 法定节假日由交易所空返回自然兜底, 不在此处理)。
+     注意: 必须用「本地午夜 + 手工拼串」而不是 toISOString() —— 本机在东八区时,
+     `new Date('2026-09-09T00:00:00')` 是本地午夜=UTC 前一日 16:00, 再 toISOString()
+     取 UTC 日期会**回退一天**(实测 nextBiz('2026-09-09') 返回 '2026-09-09' 自噬),
+     导致「下一交易日」永远显示成数据当天。 */
+  var p=String(dstr).split('-');
+  var d=new Date(+p[0],+p[1]-1,+p[2]);
+  if(isNaN(d.getTime()))return '';
+  do{d.setDate(d.getDate()+1);}while(d.getDay()===0||d.getDay()===6);
+  var m=d.getMonth()+1,dd=d.getDate();
+  return d.getFullYear()+'-'+(m<10?'0':'')+m+'-'+(dd<10?'0':'')+dd;
+}
+function bjToday(){
+  /* 浏览器本地时区可能非北京, 统一按 UTC+8 取「北京今天」, 与脚本侧 bj_now() 同口径。
+     此处用绝对时间 Date.now()+8h 再取 UTC 日期 —— 与本地时区无关, 故可安全用
+     toISOString()(与 nextBiz 的坑不同: 那里构造的是本地墙上时间, 不可混用)。 */
+  return new Date(Date.now()+8*36e5).toISOString().slice(0,10);
+}
+function drawEtfFresh(e){
+  var el=document.getElementById('etfFresh');if(!el)return;
+  var m=(e&&e.meta)||{},dd=m.data_date||m.latest,dt=bjToday();
+  if(!dd){el.className='fbar';
+    el.innerHTML='<span class="dot"></span><span>尚未取得快照 · 每交易日盘后自动打点累积</span>';return;}
+  var gap=dayDiff(dd,dt),stale=gap>=4;
+  el.className='fbar'+(stale?' stale':'');
+  var nx=nextBiz(dd);
+  var lagTxt=gap<=0?'即今日':(gap===1?'上一交易日':gap+' 天前');
+  var h='<span class="dot"></span><span>数据日期（交易所最新已披露交易日）<b>'+esc(dd)+'</b>'+
+        '<span class="sep"> · </span>'+lagTxt+'</span>'+
+        '<span class="sep"> · </span>'+
+        '<span>下一交易日 <b>'+esc(nx)+'</b> 份额尚未披露，交易所披露后本页自动补齐（盘后每 30 分钟重试）</span>';
+  if(stale)h+='<span class="nx">⚠ 已 '+gap+' 个自然日未前进，可能是交易所停更 / 假期，或数据源异常 —— 下一轮自动重试，无需人工干预</span>';
+  el.innerHTML=h;
+}
 function renderEtf(e){
   ETFT.e=e;
   var thd=document.getElementById('tscEtf');
@@ -724,6 +778,7 @@ function renderEtf(e){
       drawEtfRows();
     };}
   }
+  drawEtfFresh(e);
   drawEtfRows();
   drawEtfChart(e);
 }
