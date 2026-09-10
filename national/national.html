@@ -888,15 +888,22 @@ function drawEtfChart(e){
         label:{show:true,position:'insideTop',distance:8,color:'#1e4d86',fontWeight:700,fontSize:12,align:'center'},
         data:yearBands.map(function(b){return [{xAxis:b.start,itemStyle:{color:'rgba(43,108,176,.04)'},label:{formatter:b.year}},{xAxis:b.end}];})}},
       {name:'每日净申赎',type:'bar',data:flow,barWidth:'52%',yAxisIndex:1,itemStyle:{color:function(p){return p.value>=0?'#e54545':'#18a058';},borderRadius:[2,2,0,0]}},
-      {name:'5日累计',type:'line',data:cum,smooth:true,symbol:'none',lineStyle:{width:1.8,color:'#d97706'},itemStyle:{color:'#d97706'},yAxisIndex:1},
-      {name:'20日累计',type:'line',data:cum20,smooth:true,symbol:'none',lineStyle:{width:2.2,color:'#534AB7'},itemStyle:{color:'#534AB7'},yAxisIndex:1}
+      /* (R431) 配色去混淆: 旧「20日累计」用 #534AB7(紫, 色相≈245°) 与「全池份额」
+         #185FA5(蓝, 色相≈210°) 仅差 35°, 两者又都在同一纵向区间纠缠, 密集平滑曲线上
+         肉眼几乎无法分离(用户实测反馈「看花了」)。蓝色在本页是语义色(COL.hj_tz
+         =中央汇金系, 同时用于持仓图/表格合计行/强信号条), 不可改动, 因此改紫→品红
+         #c026d3(色相≈293°, 与蓝拉开 83°, 与橙 32° / 红柱 0° / 绿柱 152° 亦均远离),
+         并把线宽 2.2→2.4 强化主信号层级(20 日累计为回测最强口径), 5 日累计 1.8→1.6
+         相应退让。 */
+      {name:'5日累计',type:'line',data:cum,smooth:true,symbol:'none',lineStyle:{width:1.6,color:'#d97706'},itemStyle:{color:'#d97706'},yAxisIndex:1},
+      {name:'20日累计',type:'line',data:cum20,smooth:true,symbol:'none',lineStyle:{width:2.4,color:'#c026d3'},itemStyle:{color:'#c026d3'},z:3,yAxisIndex:1}
     ]};
   chE.setOption(oE);
   window.addEventListener('resize',function(){chE.resize();});
   hint.innerHTML='数据日期 <b>'+esc(meta.data_date||meta.latest||'-')+'</b> · 已积累 '+dates.length+' 个交易日 · '+use.length+' 只沪市宽基参与合计（深市 3 只无免费长史源，自 2026-09-09 起逐日累积，未计入曲线）。'+
     '<div style="margin-top:5px;line-height:1.75"><b>怎么读</b>：'+
     '<b>净申赎</b>=当日申购金额−赎回金额（Δ份额×当日收盘价），是 ETF <b>全体持有人</b>的合计净额，<b style="color:#b45309">不是国家队专属持仓</b>——汇金只是其中最大的参与者之一。'+
-    '红柱=净申购、绿柱=净赎回。<b>橙线</b>=最近 5 个交易日累计、<b style="color:#534AB7">紫线</b>=最近 20 个交易日累计（回测：20 日累计信号最强，单日无预测力）。拖拽底部滑条查看历史。</div>';
+    '红柱=净申购、绿柱=净赎回。<b style="color:#c026d3">品红线</b>=最近 20 个交易日累计（回测：20 日累计信号最强，单日无预测力）、<b>橙线</b>=最近 5 个交易日累计、<b style="color:#185FA5">蓝线</b>=全池份额（左轴，亿份）。拖拽底部滑条查看历史。</div>';
   drawSigPanel(dates,flow,S,use,meta.data_date||meta.latest||'');
 }
 
