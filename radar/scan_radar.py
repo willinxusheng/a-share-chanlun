@@ -1635,7 +1635,12 @@ def main():
         "title": "A股全市场缠论雷达",
         "asof": asof, "build_time": datetime.datetime.now(
             datetime.timezone(datetime.timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S"),
-        "version": "P3b-r11",   # r11=R393: radar.html .stk-grid 加 760px 窄屏适配(5 关键列, 桌面 11 列零影响) — 全文件唯一无 980 变体的 grid 列表, 11列min宽~650px 在手机容器被 overflow:hidden 直裁右侧 4-5 列
+        "version": "P3b-r12",   # r12=R429: 月线补拉批前复探腾讯源 + 新浪日线聚合兜底(修 CI 上月线 100% 落空);
+                                #     meta.m_macd 落痕加 tx/sina 维。补记 R400(落痕首版)/R403/R404(灰字「月线—」徽章)
+                                #     /R406(sigrad 同步月线徽章) 四轮改动**均未 bump 版本号**(R373 纪律漏执行) ——
+                                #     后果: 线上 version 停在 r11, 无法从产物判断跑的是哪版代码(09-10 定位月线问题时
+                                #     即受此扰, 只能靠 m_macd 落痕有无反推 R400 是否上线)。r12 起恢复"实质改动必 bump"。
+                               # r11=R393: radar.html .stk-grid 加 760px 窄屏适配(5 关键列, 桌面 11 列零影响) — 全文件唯一无 980 变体的 grid 列表, 11列min宽~650px 在手机容器被 overflow:hidden 直裁右侧 4-5 列
                                # r10=R392: signals area 键反转(强背离优先, 原降序把弱背离顶前; R283 引入方向未审)
                                # r6 覆盖 R320(新浪科创板volume 单位=股)/R348(北交920段tx跳过来新浪兜底)/R352(缺员冻结)/
                                # R361(行业映射收敛)等 20+ 轮口径变更, 版本号如实反映当前 schema
