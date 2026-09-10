@@ -1,47 +1,48 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""宽基 ETF 份额日度快照 — 疑似国家队资金流代理 (national/calc_etf.py)
-====================================================================
+"""宽基 ETF 份额日度快照 v2 — 官方口径 + 数据日期锚定 (national/calc_etf.py)
+=====================================================================
 背景: 国家队个股持仓仅季度披露(滞后 1-2 月), 对实操滞后。汇金 2024 起主战场
-切至宽基 ETF, 而 ETF 总份额为基金公司**每个交易日披露** → 日度代理通道:
-   日度 Δ份额 × 净值 = 当日净申赎资金 → "疑似国家队/大资金" 方向参考
-   (博主"ETF 份额看国家队加减仓"同款方法)。
+切至宽基 ETF, 而 ETF 总份额**每交易日披露** → 日度代理通道:
+   日度 Δ份额 × 收盘价 = 当日净申赎资金 → "疑似国家队/大资金" 方向参考
 
-数据源: 东财 push2 行情接口 f84=总份额(份) / f43=现价(fltt=1 为小数) / f116=总市值。
-   已双源互证(2026-09-09): 510300 东财 f84=23468887808 份 ≈ 腾讯自选股
-   total_shares=23468887700 份, 总市值 1088.25 亿两侧完全相等。
-   单次 HTTP 即得, CI 可直连; 多数字子域轮换抗限流。
-
-产物: national/etf_share.json (tracked, CI 提交, 轻量 ~KB 级):
-   { "meta": {...},
-     "series":  { "510300": [["2026-09-09", shr_份, nav_元, mkt_元], ...] },  日度快照(自建)
-     "quarter": { "510300": [["2026-06-30", 期间申_亿份, 期间赎_亿份, 期末份额_亿份, 期末规模_亿元], ...] } }
-   quarter = 基金定期报告(季报)披露的份额/申赎长史, 免费接口可回溯至上市日
-   (510300 自 2012-05 共 71 期 / 510050 自 2004 共 91 期), 与日度 series 互补:
-   季度线看历史复盘(2024 汇金进场/2026 撤离), 日度线看当下动作。
+R420 重构 (根治"日期戳错位"bug):
+  [旧] 16:00 首扫拉东财 f84, 此时交易所尚未发布 T 日份额 → 拿到的是 T-1 值,
+       却被标成 T 日 → 整个 series 错位一天; 且 G1 幂等键用"拉取日", 把
+       20:00 到货的真 T 日数据挡在门外。
+       实证: 旧产物标 2026-09-09 的 510300 = 23,468,887,700 份;
+             上交所官方 STAT_DATE=2026-09-08 同为 23,468,887,700 份(逐位一致),
+             而 STAT_DATE=2026-09-09 实为 23,185,387,700 份。
+  [新] ① 主源换 **上交所官方** (COMMON_SSE_ZQPZ_ETFZL_XXPL_ETFGM_SEARCH_L),
+         返回自带 STAT_DATE 明确数据日期, 单次请求返全量 ~900 只,
+         且可带 STAT_DATE 回溯 (实测 2016-01-04 起);
+       ② 幂等键从"拉取日"改 **数据日期** — 数据日期未前进则 skip,
+         数据到位才落盘, 不再用拉取时刻冒充数据日期;
+       ③ `--backfill N` 用官方源回溯补齐近 N 个自然日的交易日序列;
+       ④ 沪市 7 只走官方长史; 深市 3 只官方无覆盖 → 东财实时值逐日累积。
 
 数据源:
-  日度 = 东财 push2 行情接口 f84=总份额(份) / f43=现价(fltt=1 为小数) / f116=总市值。
-     已双源互证(2026-09-09): 510300 东财 f84=23468887808 份 ≈ 腾讯自选股
-     total_shares=23468887700 份, 总市值 1088.25 亿两侧完全相等。
-     单次 HTTP 即得, CI 可直连; 多数字子域轮换抗限流。
-  季度 = 天天基金 FundArchivesDatas type=gmbd (fundf10.eastmoney.com), 单次请求全量
-     列: [报告期, 期间申购(亿份), 期间赎回(亿份), 期末份额(亿份), 期末规模(亿元)]
-     实测 510300: 2024-09-30 期末 969.22 亿份(汇金 Q3 进场峰) ↔ 2026-06-30 189.15(撤离)
+  沪市份额 = 上交所 query.sse.com.cn, 字段 TOT_VOL (**单位万份**);
+  深市份额 = 东财 push2 f84 (份), 覆盖 159919/159915/159949;
+  收盘价   = 新浪日K (给每行补 nav, 保证回溯与日常口径一致);
+  季度长史 = 天天基金 FundArchivesDatas type=gmbd (保持原逻辑)。
 
-幂等/防循环守卫(关键, CI 每次 deploy 都会跑本脚本):
-  G0 季度: 仅当产物缺 quarter 或 meta.quarter_through 落后于 510300 probe 到的最新报告期
-     才全池重拉(日常 probe 510300 一次即 [skip], 不写盘 → git 干净 → 无循环);
-  G1 当日(北京)该 code 最后一条已记录 → 跳过(不 append 不 commit);
-  G2 份额与最新记录一致(相对差 <0.01% 容差, 消除双源同值微差噪音)且非当日 →
-     非交易日/无申赎 → 跳过 append, 防止"无变化也写盘 → commit → push → 再触发 deploy"死循环;
-  G3 单只份额环比变动 >30% → WARN 照记(拆份额/数据异常可识别);
-  G4 全池拉取失败 → exit 0 不阻断 deploy(留给下个时点补), 不写盘;
-  G5 时段守卫: 北京时间 15:00 前(00:xx-14:59)一律 no-op 不写盘 — 该时段东财仍返回
-     上一交易日份额, 若照常 append 会生成"伪当日"快照(如 00:xx 的伪 09-10),
-     既污染 series 又把 16:00 真快照挡在 G1 外; 覆盖 watchdog 02:00/深夜人为 deploy。
+幂等/防循环守卫 (CI 每次 deploy 都会跑本脚本):
+  G0 季度: 仅当产物缺 quarter 或 meta.quarter_through 落后于最新报告期才全池重拉;
+  G1 数据日期: 全部 code 的最后记录日期 >= 官方最新数据日期 → skip (不写盘);
+  G2 无变化: 数据日期前进但份额与最新记录一致(相对差<1e-4) → 不 append;
+  G3 异常: 单只份额环比变动 >30% → WARN 照记(拆份额/折算可识别);
+  G4 全败: 官方源不可用或无可写数据 → exit 0 不阻断 deploy, 不写盘;
+  G5 时段: 北京时间 15:00 前一律 no-op (官方数据盘后才发布, 该时段无新数据)。
 
-用法: python3 calc_etf.py            # 读/写 national/etf_share.json
+产物: national/etf_share.json (tracked, CI 提交, ~KB 级):
+   { "meta": {...},
+     "series":  { "510300": [["2026-09-09", shr_份, nav_元, mkt_元], ...] },  日度快照
+     "quarter": { "510300": [["2026-06-30", 期间申_亿份, 期间赎_亿份, 期末份额_亿份, 期末规模_亿元], ...] } }
+
+用法:
+  python3 calc_etf.py                  # 常规: 探测官方最新数据日期并落盘(幂等)
+  python3 calc_etf.py --backfill 420   # 回溯: 重建近 420 自然日的日度序列
 """
 import json
 import os
@@ -51,63 +52,148 @@ import ssl
 import sys
 import time
 import urllib.request
-from datetime import datetime, timedelta
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta, timezone
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(BASE, "etf_share.json")
+
+UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+      "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36")
 
 # 东财行情多域名轮换(抗本机/CI 偶发断连)
 HOSTS = ["push2.eastmoney.com", "1.push2.eastmoney.com", "7.push2.eastmoney.com",
          "13.push2.eastmoney.com", "33.push2.eastmoney.com"]
 
-# 国家队主力宽基 ETF 池: (secid, 名称) —— 沪 1. / 深 0.
+# 国家队主力宽基 ETF 池: (secid, code, market, name) —— market: sh 沪 / sz 深
 # 聚焦: 沪深300双地/上证50/180/中证500/1000 + 创业板/科创50(成长) + 红利(险资&国家队)
 # 注: 588080 与 588000 同为科创50(指数重复)剔除; 黄金/商品 ETF 非国家队宽基方向剔除
 POOL = [
-    ("1.510300", "沪深300(沪)"),
-    ("0.159919", "沪深300(深)"),
-    ("1.510050", "上证50"),
-    ("1.510180", "上证180"),
-    ("1.510500", "中证500"),
-    ("1.512100", "中证1000"),
-    ("0.159915", "创业板"),
-    ("0.159949", "创业板50"),
-    ("1.588000", "科创50"),
-    ("1.510880", "红利"),
+    ("1.510300", "510300", "sh", "沪深300(沪)"),
+    ("0.159919", "159919", "sz", "沪深300(深)"),
+    ("1.510050", "510050", "sh", "上证50"),
+    ("1.510180", "510180", "sh", "上证180"),
+    ("1.510500", "510500", "sh", "中证500"),
+    ("1.512100", "512100", "sh", "中证1000"),
+    ("0.159915", "159915", "sz", "创业板"),
+    ("0.159949", "159949", "sz", "创业板50"),
+    ("1.588000", "588000", "sh", "科创50"),
+    ("1.510880", "510880", "sh", "红利"),
 ]
 
-CHG_WARN = 0.30  # 单只份额环比变动告警阈值
+CHG_WARN = 0.30   # 单只份额环比变动告警阈值
+G2_TOL = 1e-4     # 无变化容差 (相对, 0.01%)
+
+# 上交所官方 ETF 份额接口: 不指定 STAT_DATE 返回最新, 指定则回溯该交易日
+SSE_URL = ("http://query.sse.com.cn/commonQuery.do?"
+           "sqlId=COMMON_SSE_ZQPZ_ETFZL_XXPL_ETFGM_SEARCH_L"
+           "&pageHelp.pageSize=2000&pageHelp.pageNo=1"
+           "&pageHelp.beginPage=1&pageHelp.cacheSize=1&pageHelp.endPage=1")
+
+SINA_K = ("https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/"
+          "CN_MarketData.getKLineData?symbol=%s%s&scale=240&ma=no&datalen=%d")
 
 
-def fetch_one(sid, tries=4):
+def _utcnow():
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def bj_now():
+    """北京时间 datetime (UTC+8)。"""
+    return datetime.now(timezone.utc) + timedelta(hours=8)
+
+
+def _load():
+    if os.path.exists(OUT):
+        with open(OUT, encoding="utf-8") as f:
+            return json.load(f)
+    return {"meta": {}, "series": {}}
+
+
+def _save(data):
+    with open(OUT, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False)
+
+
+def _pool_meta():
+    return [{"code": c, "name": n, "secid": s, "market": mk} for s, c, mk, n in POOL]
+
+
+# ---------------------------------------------------------------- 源 1: 上交所官方
+def fetch_sse(stat_date=None, tries=3):
+    """上交所官方 ETF 份额 → (data_date, {code: 份})；无数据返回 (None, None)。
+
+    TOT_VOL 单位为**万份**, 此处统一换算为份。
+    stat_date=None 时接口返回**最新**有数据的交易日。
+    """
+    for k in range(tries):
+        try:
+            url = SSE_URL + ("&STAT_DATE=" + stat_date if stat_date else "")
+            h = {"User-Agent": UA, "Referer": "http://www.sse.com.cn/"}
+            r = urllib.request.urlopen(urllib.request.Request(url, headers=h),
+                                       timeout=20, context=ssl.create_default_context())
+            rows = (json.loads(r.read().decode("utf-8", "ignore")).get("result") or [])
+            if not rows:
+                return None, None
+            dd = rows[0].get("STAT_DATE")
+            out = {}
+            for x in rows:
+                c, v = x.get("SEC_CODE"), x.get("TOT_VOL")
+                if c and v not in (None, "", "-", "--"):
+                    try:
+                        out[c] = int(round(float(str(v).replace(",", "")) * 1e4))
+                    except (TypeError, ValueError):
+                        pass
+            return (dd, out) if out else (None, None)
+        except Exception:
+            time.sleep(0.8 + k * 0.4)
+    return None, None
+
+
+# ---------------------------------------------------------------- 源 2: 东财 push2
+def fetch_em(sid, tries=6):
     """拉单只 ETF {shr份, nav元, mkt元}; 失败返回 None。"""
-    for _ in range(tries):
+    for k in range(tries):
         hst = random.choice(HOSTS)
         url = ("https://%s/api/qt/stock/get?secid=%s"
                "&fields=f57,f58,f43,f84,f116&fltt=1" % (hst, sid))
         try:
-            h = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                               "AppleWebKit/537.36 Chrome/120",
-                 "Referer": "https://quote.eastmoney.com/", "Accept": "*/*",
-                 "Connection": "close"}
-            ctx = ssl.create_default_context()
+            h = {"User-Agent": UA, "Referer": "https://quote.eastmoney.com/",
+                 "Accept": "*/*", "Connection": "close"}
             r = urllib.request.urlopen(urllib.request.Request(url, headers=h),
-                                       timeout=12, context=ctx)
+                                       timeout=12, context=ssl.create_default_context())
             d = json.loads(r.read().decode("utf-8", "ignore")).get("data") or {}
             if d.get("f84"):
                 shr = int(d["f84"])
                 nav = float(d.get("f43") or 0)
                 mkt = float(d.get("f116") or 0)
-                # R414: nav 单位兜底 — fltt 在部分子域失效时 f43 返回厘(如 4637=4.637 元),
+                # nav 单位兜底: fltt 在部分子域失效时 f43 返回厘(如 4637=4.637 元),
                 # 特征 nav>100 必为厘级 → 用总市值/总份额精确重算 (mkt/shr 恒为元)
                 if nav > 100 and shr and mkt:
                     nav = round(mkt / shr, 6)
                 return {"shr": shr, "nav": nav, "mkt": mkt}
         except Exception:
-            time.sleep(1.2)
+            time.sleep(0.8 + k * 0.5)
     return None
 
 
+# ---------------------------------------------------------------- 源 3: 新浪日K
+def fetch_sina_close(code, market, n=60, tries=3):
+    """新浪日K收盘价 → {date: close}；失败返回 {}。"""
+    for k in range(tries):
+        try:
+            url = SINA_K % (market, code, n)
+            h = {"User-Agent": UA, "Referer": "https://finance.sina.com.cn"}
+            r = urllib.request.urlopen(urllib.request.Request(url, headers=h),
+                                       timeout=20, context=ssl.create_default_context())
+            arr = json.loads(r.read().decode("utf-8", "ignore"))
+            return {x["day"]: float(x["close"]) for x in arr if x.get("day")}
+        except Exception:
+            time.sleep(0.8 + k * 0.4)
+    return {}
+
+
+# ---------------------------------------------------------------- 季度长史 (G0)
 GMBD_URL = "https://fundf10.eastmoney.com/FundArchivesDatas.aspx?type=gmbd&code=%s&rt=0.1"
 GMBD_REF = "http://fundf10.eastmoney.com/"
 
@@ -129,16 +215,13 @@ def fetch_quarter_history(code, tries=3):
     """天天基金 gmbd: 单次请求全量季度份额历史(自上市日至今)。
 
     返回升序 [[报告期, 期间申(亿份), 期间赎(亿份), 期末份额(亿份), 期末规模(亿元)], ...]
-    首条=最近报告期(2026-06-30)。失败返回 None。
+    首条=最近报告期。失败返回 None。
     """
     for _ in range(tries):
         try:
-            h = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                               "AppleWebKit/537.36 Chrome/120",
-                 "Referer": GMBD_REF}
-            ctx = ssl.create_default_context()
+            h = {"User-Agent": UA, "Referer": GMBD_REF}
             r = urllib.request.urlopen(urllib.request.Request(GMBD_URL % code, headers=h),
-                                       timeout=15, context=ctx)
+                                       timeout=15, context=ssl.create_default_context())
             html = r.read().decode("utf-8", "ignore")
             out = []
             for m in re.finditer(r"<tr>(.*?)</tr>", html, re.S):
@@ -163,21 +246,14 @@ def fetch_quarter_history(code, tries=3):
     return None
 
 
-def bj_today():
-    """北京时间日期 (UTC+8)。"""
-    return (datetime.utcnow() + timedelta(hours=8)).strftime("%Y-%m-%d")
-
-
 def refresh_quarter(data):
     """季度真身长史刷新 (G0 幂等)。
 
     规则: 当 data 无 quarter 字段, 或 data.meta.quarter_through != 最新报告期
-    (以池内第一只 probe 为准), 才全池重拉 gmbd 历史。否则返回 False 不写盘
-    (防 commit→push→deploy 死循环)。
+    (以池内第一只 probe 为准), 才全池重拉 gmbd 历史。否则返回 False 不写盘。
 
     返回 (changed: bool, latest_dt: str|None)
     """
-    # probe: 池内第一只(510300)看最新报告期, 同时缓存其历史
     probe_rows = fetch_quarter_history("510300")
     if not probe_rows:
         print("[skip] quarter probe 510300 失败, 本轮不刷 (留待下轮)")
@@ -188,11 +264,9 @@ def refresh_quarter(data):
         print("[skip] quarter 已最新 (%s, %d 只) 幂等 G0" % (latest_dt, len(data["quarter"])))
         return False, latest_dt
 
-    # 全池拉季度历史
     quarter = {}
     ok = 0
-    for sid, name in POOL:
-        code = sid.split(".")[1]
+    for sid, code, mk, name in POOL:
         rows = probe_rows if code == "510300" else fetch_quarter_history(code)
         if rows:
             quarter[code] = rows
@@ -209,126 +283,199 @@ def refresh_quarter(data):
     m = data.setdefault("meta", {})
     m["quarter_through"] = latest_dt
     if not m.get("pool"):
-        m["pool"] = [{"code": s.split(".")[1], "name": n, "secid": s}
-                     for s, n in POOL]
+        m["pool"] = _pool_meta()
     if not m.get("latest"):
-        m["latest"] = latest_dt  # 只有季度时也至少给报告期
+        m["latest"] = latest_dt
     print("quarter 已更新: %d 只, 最新报告期 %s" % (ok, latest_dt))
     return True, latest_dt
 
 
-def _save(data):
-    with open(OUT, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False)
+# ---------------------------------------------------------------- 常规日更
+def daily(force=False):
+    """常规日更: 探测官方最新数据日期, 幂等落盘。
 
-
-def main():
-    today = bj_today()
-    hhmm = (datetime.utcnow() + timedelta(hours=8)).strftime("%H%M")
-
-    # ---- G5 时段守卫 (R414b: 防预开盘 append 伪当日快照) ----
-    #   北京 00:xx-14:59 东财 f84 仍是上一交易日份额, 照常 append 会生成伪当日行,
-    #   既污染 series 又把 16:00 真快照挡在 G1 外(见 c86b203 事故: 510300 两条伪 09-10)。
-    #   日度/季度写入仅允许北京时间 15:00-23:59 (调度: 16:00 起 30min×12 + watchdog 23:35)。
-    if hhmm < "1500":
+    force=True 绕过 G5 时段守卫 (仅供本地补数/验证, CI 不传)。
+    """
+    hhmm = bj_now().strftime("%H%M")
+    # ---- G5 时段守卫: 北京 15:00 前一律 no-op (官方数据盘后才发布) ----
+    if not force and hhmm < "1500":
         print("[skip] 当前北京时间 %s 非盘后时段 (<15:00), 本轮不写盘 (G5)" % hhmm)
         return 0
 
-    # ---- 读旧产物 ----
-    if os.path.exists(OUT):
-        with open(OUT, encoding="utf-8") as f:
-            data = json.load(f)
-    else:
-        data = {"meta": {}, "series": {}}
+    data = _load()
     series = data.setdefault("series", {})
 
-    # ---- G0 季度长史刷新(独立于日度; 报告期更新才写盘) ----
+    # ---- G0 季度长史刷新 ----
     q_changed, q_latest = refresh_quarter(data)
     if q_changed:
-        data.setdefault("meta", {})["updated_at"] = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+        data.setdefault("meta", {})["updated_at"] = _utcnow()
         _save(data)
 
-    # ---- G1 当日已记? (R414b: 修复 POOL 二元组 secid 当 code 用导致永不命中) ----
-    any_today = False
-    for sid, _ in POOL:
-        code = sid.split(".")[1]
+    # ---- 探测官方最新数据日期 (数据日期锚定, 取代原"拉取日"口径) ----
+    dd, sse = fetch_sse()
+    if not dd:
+        print("[skip] 上交所官方源无数据, 本轮不写盘 (留给下轮, G4)")
+        return 0
+    print("官方最新数据日期: %s (%d 只沪市)" % (dd, len(sse)))
+
+    need = []
+    for sid, code, mk, name in POOL:
         arr = series.get(code) or []
-        if arr and arr[-1][0] == today:
-            any_today = True
-            break
-    if any_today:
-        print("[skip] 当日 %s 已有快照 (幂等 G1)" % today)
+        if not arr or arr[-1][0] < dd:
+            need.append((sid, code, mk, name))
+    if not need:
+        print("[skip] 数据日期 %s 已记录, 无新数据 (数据日期幂等 G1)" % dd)
         return 0
+    print("需更新 %d 只: %s" % (len(need), ", ".join(c for _, c, _, _ in need)))
 
-    # ---- 拉取全池 ----
-    got = {}
-    failed = []
-    for sid, name in POOL:
-        x = fetch_one(sid)
-        code = sid.split(".")[1]
-        if x:
-            got[code] = x
-        else:
-            failed.append(code)
-        time.sleep(0.35)
-    print("拉取完成: %d/%d, 失败 %s" % (len(got), len(POOL), failed or "无"))
+    # ---- 收盘价 (仅在有新数据时才拉) ----
+    px = {}
+    for sid, code, mk, name in POOL:
+        px[code] = fetch_sina_close(code, mk, n=60)
+        time.sleep(0.15)
 
-    # ---- G4 全败不写盘 ----
-    if not got:
-        print("[skip] 全池拉取失败, 不写盘 (留给下个时点补, G4)")
-        return 0
-
-    # ---- G2 无变化守卫(防 commit→push→deploy 死循环) ----
-    #   R414b: 相对容差 1e-4 (0.01%) — 双源同值微差(如 510300 腾讯首快照 23468887700
-    #    vs 东财 23468887808, 差 108 份=0.0000005%)若按原"!= 即变"会把无变化误判为
-    #   有变化而 append 噪音行; 真实申赎变动量级 ≥0.05%, 容差远低于信号。
-    G2_TOL = 1e-4
-    no_change_all = True
-    for code, x in got.items():
-        arr = series.get(code) or []
-        if arr:  # 与最新记录比较(相对差 <0.01% 视为无变化)
-            last = arr[-1][1]
-            if last and abs(x["shr"] - last) / last >= G2_TOL:
-                no_change_all = False
-                break
-        else:
-            no_change_all = False  # 新 code 首次记录
-    if no_change_all:
-        print("[skip] 全池份额与最新记录一致(非交易日/无申赎/同值微差), 不 append (G2)")
-        return 0
-
-    # ---- append 当日快照 ----
-    changed = []
-    for sid, name in POOL:
-        code = sid.split(".")[1]
-        if code not in got:
-            continue
-        x = got[code]
+    written = 0
+    for sid, code, mk, name in need:
         arr = series.setdefault(code, [])
-        prev = arr[-1][1] if arr else None
-        arr.append([today, x["shr"], x["nav"], x["mkt"]])
-        if prev is not None and prev:
-            chg = (x["shr"] - prev) / prev
-            if abs(chg) > CHG_WARN:
-                print("[WARN G3] %s %s 份额环比 %+.1f%% (>%d%%, 疑拆份额/异常)"
-                      % (code, name, chg * 100, int(CHG_WARN * 100)))
-        changed.append((code, name, prev, x["shr"]))
+        x = None
+        if mk == "sh":
+            v = sse.get(code)
+            if not v:
+                print("  [miss] %s 官方源无此代码" % code)
+                continue
+        else:
+            x = fetch_em(sid)
+            if not x:
+                print("  [miss] %s 东财拉取失败" % code)
+                continue
+            v = x["shr"]
 
-    data["meta"] = {
-        "pool": [{"code": s.split(".")[1], "name": n, "secid": s}
-                 for s, n in POOL],
-        "latest": today,
-        "updated_at": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "quarter_through": q_latest or (data.get("meta") or {}).get("quarter_through"),
-    }
+        # ---- G2 无变化守卫 ----
+        if arr:
+            last = arr[-1][1]
+            if last and abs(v - last) / last < G2_TOL:
+                print("  [skip] %s 份额与最新记录一致 (G2)" % code)
+                continue
+
+        p = px.get(code, {}).get(dd) or (x["nav"] if x else 0.0)
+        arr.append([dd, v, round(p, 6), round(v * p, 2)])
+        written += 1
+        prev = arr[-2][1] if len(arr) > 1 else None
+        dshr = (v - prev) / 1e8 if prev else None
+        print("  %s %-10s %10.2f 亿份 %s" % (
+            code, name, v / 1e8,
+            ("Δ %+.2f 亿份" % dshr) if dshr is not None else "(首条)"))
+        if prev and prev > 0 and abs((v - prev) / prev) > CHG_WARN:
+            print("  [WARN G3] %s 环比 %+.1f%% (>%d%%, 疑拆份额/折算)"
+                  % (code, (v - prev) / prev * 100, int(CHG_WARN * 100)))
+
+    if not written:
+        print("[skip] 无可写数据, 不写盘 (G4)")
+        return 0
+
+    m = data.setdefault("meta", {})
+    m["pool"] = _pool_meta()
+    m["latest"] = dd
+    m["data_date"] = dd
+    m["updated_at"] = _utcnow()
+    m["source"] = ("沪市=上交所官方 ETF 份额(万份) + 新浪收盘价; "
+                   "深市=东财 push2 逐日累积")
+    if q_latest:
+        m["quarter_through"] = q_latest
     _save(data)
-    size_kb = os.path.getsize(OUT) // 1024
-    print("etf_share.json 已更新 (%d KB, 快照期 %s)" % (size_kb, today))
-    for code, name, prev, cur in changed:
-        dshr = (cur - prev) / 1e8 if prev else float("nan")
-        print("  %s %-10s 份额 %10.2f 亿份 (Δ %s 亿份)" %
-              (code, name, cur / 1e8, ("%+.2f" % dshr) if prev else "首次"))
+    print("etf_share.json 已更新: 数据日期 %s, 写入 %d 只 (%d KB)"
+          % (dd, written, os.path.getsize(OUT) // 1024))
     return 0
+
+
+# ---------------------------------------------------------------- 回溯重建
+def backfill(days=420):
+    """用上交所官方源回溯重建近 days 自然日的日度序列 (沪市), 深市取当前值。"""
+    data = _load()
+    end = bj_now().date()
+    start = end - timedelta(days=days)
+    dts = []
+    d = start
+    while d <= end:
+        if d.weekday() < 5:          # 粗筛工作日 (法定节假日由官方空返回自动剔除)
+            dts.append(d.strftime("%Y-%m-%d"))
+        d += timedelta(days=1)
+    print("回溯窗口 %s ~ %s · 候选交易日 %d 个" % (dts[0], dts[-1], len(dts)))
+
+    def work(dt):
+        got_dd, m = fetch_sse(dt)
+        return dt, (m if got_dd == dt else None)   # 只认与请求日期一致的返回
+
+    got = {}
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        for i, (dt, m) in enumerate(ex.map(work, dts)):
+            if m:
+                got[dt] = m
+            if (i + 1) % 60 == 0:
+                print("  ... 已探 %d/%d" % (i + 1, len(dts)))
+    print("官方命中 %d 个交易日" % len(got))
+    if not got:
+        print("[abort] 官方回溯全空, 不写盘")
+        return 1
+
+    px = {}
+    for sid, code, mk, name in POOL:
+        px[code] = fetch_sina_close(code, mk, n=days + 60)
+        print("  价 %s %-10s %d 日" % (code, name, len(px[code])))
+        time.sleep(0.2)
+
+    dd_latest = max(got)
+    series = {}
+    for sid, code, mk, name in POOL:
+        rows = []
+        if mk == "sh":
+            for dt in sorted(got):
+                v = got[dt].get(code)
+                p = px.get(code, {}).get(dt)
+                if v and p:
+                    rows.append([dt, v, round(p, 6), round(v * p, 2)])
+        else:
+            # 深市: 官方无覆盖 → 东财当前值单点 (数据日期=官方最新), 后续逐日累积;
+            # 拉取失败则保留产物中已有的深市记录, 不清空
+            x = fetch_em(sid)
+            p = px.get(code, {}).get(dd_latest)
+            if x and p:
+                rows = [[dd_latest, x["shr"], round(p, 6), round(x["shr"] * p, 2)]]
+            else:
+                rows = (data.get("series") or {}).get(code) or []
+                if rows:
+                    print("    (深市 %s 拉取失败, 保留已有 %d 期)" % (code, len(rows)))
+            time.sleep(0.3)
+        if rows:
+            series[code] = rows
+            print("  %s %-10s %4d 期  %s ~ %s" %
+                  (code, name, len(rows), rows[0][0], rows[-1][0]))
+
+    if not series:
+        print("[abort] 组装后无数据, 不写盘")
+        return 1
+
+    data["series"] = series
+    m = data.setdefault("meta", {})
+    m["pool"] = _pool_meta()
+    m["latest"] = dd_latest
+    m["data_date"] = dd_latest
+    m["updated_at"] = _utcnow()
+    m["source"] = ("沪市=上交所官方 ETF 份额(万份) + 新浪收盘价; "
+                   "深市=东财 push2 逐日累积")
+    m["backfilled"] = "%s ~ %s" % (min(got), dd_latest)
+    _save(data)
+    print("回溯完成: %d 只 · 区间 %s ~ %s · %d KB"
+          % (len(series), min(got), dd_latest, os.path.getsize(OUT) // 1024))
+    return 0
+
+
+def main():
+    args = sys.argv[1:]
+    if args and args[0] == "--backfill":
+        n = int(args[1]) if len(args) > 1 else 420
+        return backfill(n)
+    return daily(force="--force" in args)
 
 
 if __name__ == "__main__":
