@@ -16,10 +16,22 @@ calc_national.py — 国家队持仓走势子站 · 数据脚本 (national/ 子�
   * 环比变动 = 同 code 同 bucket 上一季末差 (自算, 不依赖接口变动字段)。
 
 产物: national/national.json (tracked, 由 CI 在季度披露结束后重跑并提交)
-  meta  : generated_at(UTC)/version/pool/failed/latest_report/latest_notice
+  meta  : generated_at(UTC)/version/pool/failed/latest_report/report_window/top_rows/top_stocks
   series: 每季末聚合行 [{d, hj_tz, hj_zg, zj, sb, wt, hjx, ncov}]  (亿股单位在 HTML 换算)
-  top   : 最新报告期命中明细 [{code, name, bucket, hold, free_ratio}] 按持股数降序
-  stocks: 每票每主体季末序列 {code:{name, b:{hj_tz:[[d,hold]...]}}}   (个股走势, 备用)
+  top   : 最新报告期命中明细, 每行带 R418 动作标签与股本校准字段
+          [{code, name, bucket, hold, free_ratio, state, prev_dt, prev_hold,
+            hold_chg, ratio_chg, gap, cap}] 按持股数降序
+          state : new 首季现身 / up 增持 / keep 持平 / down 减持 / reappear 隔 N 季再现
+          cap   : None | split 疑似送转(股数正增而占流通比不变) | dilute 疑似解禁稀释
+                  (占比 <0.3% 的小仓位 hd 天然剧烈, 不判股本事件)
+          ratio_chg 为占流通股本百分点差(送转免疫, 作五态主判据); hold_chg 仅参考
+  stocks: 每票每主体季末序列 {code:{name, b:{hj_tz:[[d,hold,free_ratio]...]}}}  (个股走势, 备用)
+
+R418 股本变动校准: 国家队持股环比若直接用股数差, 送转/增发等股本事件
+  (股数 ×N 而占流通比例不变) 会误报为大额增持。因此环比状态一律以
+  free_ratio(占流通股本, 送转免疫)为主判据, 股数仅作参考, 并显式标记
+  split/dilute 两类股本事件供前端提示。披露期隔季未现身的行不假装环比,
+  标 reappear(隔 gap 季再现)。
 
 用法: python3 calc_national.py [--out national.json] [--pool 精简子集名]
 约束: 请求间 0.22s 节流 + 单票 2 次重试; UA/Referer 齐全; 失败票进 meta.failed 不 abort。
@@ -32,7 +44,7 @@ UA = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit
 CTX = ssl.create_default_context()
 QUARTER_END = {"03-31", "06-30", "09-30", "12-31"}
 
-VERSION = "n1"
+VERSION = "n2"
 
 # ---------- 主体词典 (顺序: 先长名后短名, 前缀匹配) ----------
 def bucket_of(name: str):
@@ -47,6 +59,73 @@ def bucket_of(name: str):
 
 SUBJECT_CN = {"hj_tz": "中央汇金投资", "hj_zg": "汇金资管", "zj": "证金",
               "sb": "社保/养老", "wt": "梧桐树", "gx": "国新", "ct": "诚通"}
+
+# ---------- R418 动作标签 / 股本校准辅助 ----------
+_QM = {"03": 0, "06": 1, "09": 2, "12": 3}
+
+
+def quarter_prev(dt: str):
+    """返回 dt 的前一自然季末 (如 2026-06-30 -> 2026-03-31)。"""
+    y = dt[:4]; q = _QM[dt[5:7]]
+    if q == 0:
+        return f"{int(y) - 1}-12-31"
+    return f"{y}-" + {1: "03-31", 2: "06-30", 3: "09-30"}[q]
+
+
+def quarter_gap(a: str, b: str):
+    """a 到 b 相隔的季度数 (a < b)。"""
+    return (int(b[:4]) - int(a[:4])) * 4 + (_QM[b[5:7]] - _QM[a[5:7]])
+
+
+def report_window_of(dt: str):
+    """报告期 -> {name, due(披露截止日), next_name}。A 股季报披露法定截止。"""
+    y = int(dt[:4]); md = dt[5:10]
+    if md == "03-31":
+        return {"name": f"{y} 一季报", "due": f"{y}-04-30", "next_name": f"{y} 中报"}
+    if md == "06-30":
+        return {"name": f"{y} 中报", "due": f"{y}-08-31", "next_name": f"{y} 三季报"}
+    if md == "09-30":
+        return {"name": f"{y} 三季报", "due": f"{y}-10-31", "next_name": f"{y} 年报"}
+    return {"name": f"{y} 年报", "due": f"{y + 1}-04-30", "next_name": f"{y + 1} 一季报"}
+
+
+def decide_state(mp: dict, latest: str):
+    """按 (code,bucket) 的 {dt:[hold,ratio]} 判定 R418 动作标签。
+
+    返回 dict 供 top 行扩展; latest 必须在该主体披露中出现(调用方保证)。
+    主判据 = free_ratio 环比百分点(送转免疫); 股数差仅参考; 股本事件显式标记。
+    """
+    dates = sorted(mp)
+    last_dt = dates[-1]
+    hold, ratio = mp[last_dt]
+    out = {"state": None, "prev_dt": None, "hold_chg": None,
+           "ratio_chg": None, "gap": None, "cap": None}
+    if len(dates) == 1:
+        out["state"] = "new"          # 历史首季现身 (无上季可对比)
+        return out
+    pdt = dates[-2]
+    p_hold, p_ratio = mp[pdt]
+    hold_chg = hold - p_hold
+    rc = (ratio - p_ratio) if (ratio is not None and p_ratio is not None) else None
+    hd = (hold_chg / p_hold * 100) if p_hold else 0.0
+    out.update(prev_dt=pdt, hold_chg=hold_chg, ratio_chg=rc)
+    if pdt != quarter_prev(last_dt):
+        out["state"] = "reappear"     # 上季未现身: 隔季再现, 不假装环比
+        out["gap"] = quarter_gap(pdt, last_dt)
+        return out
+    # 连续季: ratio 主判 (0.05pp 阈值 — 实证无样本踩空, 锁仓 rc≈0 判 keep)
+    if rc is None:
+        out["state"] = "up" if hd > 0.5 else ("down" if hd < -0.5 else "keep")
+    else:
+        out["state"] = "up" if rc >= 0.05 else ("down" if rc <= -0.05 else "keep")
+    # 股本事件检测 (股数与占比"打架"; 仓位过小者 hd 天然剧烈, 不判)
+    if rc is not None:
+        big = min(ratio or 0, p_ratio or 0) >= 0.3      # 占比 >=0.3% 才值得判股本事件
+        if hold_chg > 0 and hd >= 8 and abs(rc) < 0.02 and big:
+            out["cap"] = "split"      # 送转类: 股数大增而占比精确不变
+        elif abs(hd) < 0.5 and rc <= -0.1 and big:
+            out["cap"] = "dilute"     # 解禁类: 股数不动占比被动降
+    return out
 
 # ---------- 核心池 (~88 只: 金融蓝筹 + 中字头能源 + 大消费医药制造 + 2015 救市重仓; SH/SZ) ----------
 POOL = {
@@ -186,17 +265,20 @@ def main():
 
     latest = series[-1]["d"] if series else None
 
-    # ---- 最新报告期 top 明细 (code, bucket) ----
+    # ---- 最新报告期 top 明细 (code, bucket) + R418 动作标签 ----
     top = []
     if latest:
         for code, c in per_stock.items():
             for b, mp in c["b"].items():
                 if latest in mp:
-                    top.append({"code": code.split(".")[0], "name": c["name"],
-                                "bucket": b, "subject": SUBJECT_CN[b],
-                                "hold": mp[latest][0],
-                                "free_ratio": mp[latest][1]})
+                    row = {"code": code.split(".")[0], "name": c["name"],
+                           "bucket": b, "subject": SUBJECT_CN[b],
+                           "hold": mp[latest][0],
+                           "free_ratio": mp[latest][1]}
+                    row.update(decide_state(mp, latest))
+                    top.append(row)
     top.sort(key=lambda r: r["hold"], reverse=True)
+    top_stocks = len({r["code"] for r in top})
 
     # ---- 个股全序列 (备用) ----
     stocks = {}
@@ -218,6 +300,9 @@ def main():
             "pool_size": len(POOL),
             "failed": failed,
             "latest_report": latest,
+            "report_window": report_window_of(latest) if latest else None,
+            "top_rows": len(top),
+            "top_stocks": top_stocks,
             "subject_map": SUBJECT_CN,
         },
         "series": series,
@@ -227,8 +312,11 @@ def main():
     with open(args.out, "w", encoding="utf-8") as f:
         json.dump(out, f, ensure_ascii=False, separators=(",", ":"))
     n_hit_stock = sum(1 for c in per_stock.values() if any(c["b"].values()))
+    from collections import Counter
+    st_cnt = Counter(r["state"] for r in top)
     print(f"\n写入 {args.out}: pool={len(POOL)} 命中票={n_hit_stock} 报告期={len(series)} "
-          f"最新={latest} failed={len(failed)}")
+          f"最新={latest} failed={len(failed)} top_rows={len(top)} top_stocks={top_stocks}")
+    print(f"R418 动作分布: " + " ".join(f"{k}={v}" for k, v in sorted(st_cnt.items())))
     if latest and series:
         r0 = series[-1]
         print(f"最新期({latest}): 汇金投资={r0['hj_tz']/1e8:.1f}亿 汇金资管={r0['hj_zg']/1e8:.1f}亿 "

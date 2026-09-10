@@ -146,7 +146,18 @@ tbody tr:last-child td{border-bottom:0}
 .cnt .n{color:#a4b0bf}
 .tsc .empty td{text-align:center;color:#94a3b8;padding:24px 12px;font-size:12.5px}
 .nm{font-weight:600;color:var(--ink);line-height:1.4}
-.sub{font-size:11px;color:#8a97aa;margin-top:2px;line-height:1.4;font-variant-numeric:tabular-nums;white-space:normal;word-break:keep-all}
+.tsc .sub{font-size:11px;color:#8a97aa;margin-top:2px;line-height:1.4;font-variant-numeric:tabular-nums;white-space:normal;word-break:keep-all}
+/* ===== R418 动作徽章 (红涨绿跌 A 股口径: 增持红 / 减持绿) ===== */
+.stb{display:inline-block;padding:1px 8px;border-radius:999px;font-size:11px;font-weight:700;line-height:1.65;
+  border:1px solid transparent;white-space:nowrap}
+.stb.new{background:#e6f0fb;color:#155a9c;border-color:#c5dcf5}
+.stb.up{background:var(--up-soft);color:#c53030;border-color:#f3c6c6}
+.stb.down{background:var(--down-soft);color:#0f7a52;border-color:#bce3d2}
+.stb.keep{background:#eef1f5;color:#64748b;border-color:#dde4ec}
+.stb.re{background:#f2ecfb;color:#6d3fb5;border-color:#ddcdf3}
+.chip.warn b{color:#fcd34d}
+.chip.alert b{color:#fca5a5}
+.chip.ok b{color:#6ee7b7}
 /* ========== 时间轴 ========== */
 .ev{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .ev .it{display:flex;gap:12px;align-items:flex-start;background:linear-gradient(180deg,#fbfdff,#f6f9fc);
@@ -196,6 +207,8 @@ footer{color:var(--muted);font-size:11.5px;line-height:1.8;padding:2px 2px 0}
     <div class="sub">中央汇金 / 证金 / 社保 等 &nbsp;·&nbsp; 定期报告前十大流通股东口径</div>
     <div class="chips">
       <span class="chip"><i>最新报告期</i><b id="metaRp">-</b></span>
+      <span class="chip" id="chipLag"><i>数据滞后</i><b id="metaLag">-</b></span>
+      <span class="chip" id="chipWin"><i>披露窗口</i><b id="metaWin">-</b></span>
       <span class="chip"><i>数据版本</i><b id="metaVer">-</b></span>
     </div>
   </div>
@@ -247,7 +260,7 @@ footer{color:var(--muted);font-size:11.5px;line-height:1.8;padding:2px 2px 0}
     </tr></thead>
     <tbody id="tbody"></tbody>
   </table></div>
-  <div class="cnt"><span>共 <b id="topN">–</b> 只（最新报告期口径 · 最多展示 60）</span><span class="n">点击列头排序</span></div>
+  <div class="cnt"><span>共 <b id="topNS">–</b> 只个股 · <b id="topN">–</b> 条主体持仓（最新报告期口径 · 最多展示 60 条）</span><span class="n">点击列头排序 · 动作按占流通比口径判定（送转免疫）</span></div>
 </div>
 
 <div class="card" id="sec-etf">
@@ -324,6 +337,22 @@ function render(data){
   document.getElementById('metaVer').textContent=(meta.version||'-')+(meta.failed&&meta.failed.length?(' ('+meta.failed.length+' 票拉取失败)'):'');
   var ga=new Date(meta.generated_at);ga.setHours(ga.getHours()+8);
   document.getElementById('metaVer').textContent+=' · 生成 '+ga.toISOString().slice(0,16).replace('T',' ')+' 北京';
+  /* R418 数据时效: 滞后天数(色级警示) + 披露窗口状态 */
+  (function(){
+    var rp=meta.latest_report;if(!rp)return;
+    var end=new Date(rp+'T00:00:00'),now=new Date();now.setHours(0,0,0,0);
+    var lag=Math.round((now-end)/86400000);
+    var lagEl=document.getElementById('metaLag');if(lagEl)lagEl.textContent=lag+' 天';
+    var cLag=document.getElementById('chipLag');
+    if(cLag)cLag.className='chip'+(lag>=90?' alert':(lag>=45?' warn':' ok'));
+    var w=meta.report_window,winEl=document.getElementById('metaWin'),cWin=document.getElementById('chipWin');
+    if(w&&winEl){
+      var due=new Date(w.due+'T00:00:00'),done=now>due;
+      winEl.textContent=w.name+(done?' · 已披露完毕':' · 披露中');
+      winEl.title=done?('下一窗口 '+w.next_name+'（本期法定截止 '+w.due+'）'):('法定截止 '+w.due);
+      if(cWin)cWin.className='chip'+(done?' ok':' warn');
+    }
+  })();
   var cur=series[series.length-1],prev=series.length>1?series[series.length-2]:null;
   if(!cur){document.getElementById('mcards').innerHTML='<div class="err">暂无数据</div>';return;}
   function diff(k){if(!prev)return '<b class="fl">-</b>';var d=cur[k]-prev[k];if(d===0)return '<b class="fl">0</b>';return '<b class="'+(d>0?'up':'dn')+'">'+(d>0?'+':'')+fmtB(d)+' 亿</b>';}
@@ -334,7 +363,9 @@ function render(data){
     ['覆盖票数（前十大命中）',cur.ncov+' / '+meta.pool_size,diff('ncov').replace(' 亿',' 只'),'#6b7280']
   ];
   document.getElementById('mcards').innerHTML=cards.map(function(c){return '<div class="mc"><div class="lb"><span class="dot" style="background:'+c[3]+'"></span>'+c[0]+'</div><div class="vl">'+c[1]+'</div><div class="ch">较上季末 '+c[2]+'</div></div>';}).join('');
-  document.getElementById('topHint').textContent='最新报告期 '+meta.latest_report+' · 覆盖池 '+meta.pool_size+' 只 · 持股为前十大流通股东口径';
+  var rw=meta.report_window?meta.report_window.name:'';
+  document.getElementById('topHint').textContent='数据截至 '+meta.latest_report+'（'+rw+'）· 池 '+meta.pool_size+
+    ' 只中本期 '+(meta.top_stocks||'–')+' 只现身 · 口径: 定期报告前十大流通股东（十名外持股不可见, 未现身≠清仓）';
 
   var dates=series.map(function(s){return s.d.slice(2,7);});
   function arr(k){return series.map(function(s){return +(s[k]/1e8).toFixed(2);});}
@@ -396,11 +427,40 @@ function markTh(ths,s){
   for(var j=0;j<ths.length;j++){var t=ths[j];
     if(t.getAttribute('data-k')===s.k){t.classList.add('srt');t.classList.add(s.d>0?'asc':'desc');}}
 }
+/* R418 动作徽章 (五态): new 新进 / up 增持 / keep 持平 / down 减持 / reappear 隔季回补 */
+var STB={new:['new','新进'],up:['up','增持'],keep:['keep','持平'],down:['down','减持'],reappear:['re','回补']};
+function stbHtml(state){
+  var t=STB[state]||['keep','—'];
+  return '<span class="stb '+t[0]+'">'+t[1]+'</span>';
+}
+/* 较上季末单元格: 徽章 + 校准后幅度 (ratio 口径为主, 送转免疫) */
+function chgCell(r,stocks){
+  if(!r.state){   /* 兼容旧产物 (无 R418 字段): 回退纯股数差 */
+    var st=stocks[r.code]||{},sb=st.b?st.b[r.bucket]:null;
+    if(sb&&sb.length>1){var d=sb[sb.length-1][1]-sb[sb.length-2][1];
+      return d===0?'<span class="zero">0</span>':(d>0?'<span class="chg-up">+'+fmtB(d)+'</span>':'<span class="chg-dn">'+fmtB(d)+'</span>');}
+    return '<span class="zero">-</span>';
+  }
+  var hc=r.hold_chg,rc=r.ratio_chg,sub='';
+  if(r.state==='new'){sub='首季现身';}
+  else if(r.state==='reappear'){sub='隔 '+r.gap+' 季再现';}
+  else if(r.cap==='split'){sub='送转? 占比未变';}
+  else if(r.cap==='dilute'){sub='解禁? 占比'+(rc==null?'-':(rc>=0?'+':'')+rc.toFixed(2)+'pp');}
+  else if(r.state==='keep'){sub='无变动';}
+  else{sub=(hc>=0?'+':'')+fmtB(hc)+'亿'+(rc==null?'':' ('+(rc>=0?'+':'')+rc.toFixed(2)+'pp)');}
+  return stbHtml(r.state)+'<div class="sub">'+sub+'</div>';
+}
 function v1(r,k,stocks){
   if(k==='hold')return r.hold;
   if(k==='ratio')return r.free_ratio==null?null:r.free_ratio;
-  if(k==='chg'){var st=stocks[r.code]||{},sb=st.b?st.b[r.bucket]:null;
-    if(sb&&sb.length>1)return sb[sb.length-1][1]-sb[sb.length-2][1];return null;}
+  if(k==='chg'){
+    if(!r.state){   /* 旧产物回退 */
+      var st=stocks[r.code]||{},sb=st.b?st.b[r.bucket]:null;
+      return (sb&&sb.length>1)?(sb[sb.length-1][1]-sb[sb.length-2][1]):null;
+    }
+    var rk={new:4,reappear:3,up:2,keep:1,down:0}[r.state];
+    return ((rk==null?-1:rk)*1e15)+(r.hold_chg||0);   /* 动作序主导, 幅度次之 */
+  }
   return null;
 }
 function drawTop(top,stocks,f){
@@ -421,6 +481,7 @@ function drawTopRows(){
   var rows=top.filter(function(r){return f==='all'||r.bucket===f;});
   if(!rows.length){
     tb.innerHTML='<tr class="empty"><td colspan="6">无命中（该主体本期未出现在池内前十大流通股东）</td></tr>';
+    document.getElementById('topNS').textContent='0';
     document.getElementById('topN').textContent='0';return;
   }
   if(S1.k){var dir=S1.d;
@@ -433,9 +494,6 @@ function drawTopRows(){
   var vis=rows.slice(0,60),maxR=0;
   vis.forEach(function(r){if(r.free_ratio&&r.free_ratio>maxR)maxR=r.free_ratio;});
   tb.innerHTML=vis.map(function(r,i){
-    var st=stocks[r.code]||{},sb=st.b?st.b[r.bucket]:null,delta=null,chg='-';
-    if(sb&&sb.length>1){delta=sb[sb.length-1][1]-sb[sb.length-2][1];
-      chg=delta===0?'<span class="zero">0</span>':(delta>0?'<span class="chg-up">+'+fmtB(delta)+'</span>':'<span class="chg-dn">'+fmtB(delta)+'</span>');}
     var ratioTxt=r.free_ratio==null?'-':
       '<span class="mbar"><i style="width:'+Math.max(4,Math.round(r.free_ratio/maxR*100))+'%"></i></span>'+r.free_ratio.toFixed(1)+'%';
     return '<tr>'+
@@ -444,8 +502,10 @@ function drawTopRows(){
       '<td class="l">'+mtag(r.bucket)+'</td>'+
       '<td class="num">'+fmtB(r.hold)+'</td>'+
       '<td class="num">'+ratioTxt+'</td>'+
-      '<td class="num">'+chg+'</td></tr>';
+      '<td class="num">'+chgCell(r,stocks)+'</td></tr>';
   }).join('');
+  var ncodes={};rows.forEach(function(r){ncodes[r.code]=1;});
+  document.getElementById('topNS').textContent=Object.keys(ncodes).length;
   document.getElementById('topN').textContent=rows.length;
 }
 
