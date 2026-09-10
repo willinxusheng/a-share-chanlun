@@ -154,6 +154,10 @@ tbody tr:last-child td{border-bottom:0}
 .sigp .stier.strong{background:#e6f1fb;color:#0c447c;border-color:#b5d4f4}
 .sigp .stier.weak{background:#faeeda;color:#854f0b;border-color:#f0d9a8}
 .sigp .sname{font-size:21px;font-weight:800;color:#1e4d86;margin:8px 0 2px;line-height:1.25;letter-spacing:.2px}
+/* (R426) 无统计显著时状态名降级为中性蓝灰。旧写法恒为 21px 深蓝粗体,
+   视觉权重压过右上角 11px「无信号」徽章 —— 把「无统计意义」的状态
+   渲染得像一条结论, 是「面板在提示我操作吗」这一误读的视觉主因。 */
+.sigp .sname.dim{color:#5b7189}
 .sigp .sdesc{font-size:12px;color:#5a6b80;line-height:1.55}
 .sigp .mchips{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:12px 0 auto}
 .sigp .mchip{background:#f4f7fb;border:1px solid #e6edf6;border-radius:10px;padding:8px 10px;
@@ -368,7 +372,7 @@ footer{color:var(--muted);font-size:11.5px;line-height:1.8;padding:2px 2px 0}
   <div class="chart" id="chE" style="height:270px;margin-top:12px"></div>
   <div class="fnote" id="etfHint"></div>
   <div class="bt" id="btBox">
-    <div class="bt-h">信号有效性回测 · 跟着 ETF 资金流加减仓到底有没有用</div>
+    <div class="bt-h">信号有效性回测 · ETF 资金流对后续收益有预测力吗</div>
     <div class="bt-s">样本 2024-03-25 ~ 2026-09-09 · 599 个交易日（滚动窗口需预热，各信号有效样本 559~593）· 沪市 7 只官方份额 + 沪深300 收益 · 括号内为 Welch t 检验 p 值</div>
     <ul class="bt-l">
       <li><b>单日净申赎没有预测力</b>：对未来 5 日 / 20 日收益的秩相关仅 +0.01 / +0.04（均不显著）——按单日红绿柱跟随等于跟噪声。</li>
@@ -896,8 +900,8 @@ function drawSigPanel(dates,flow,S,use,dataDate){
   var head='<div class="shead"><span class="stag">当前资金流状态'+(dataDate?' · '+esc(dataDate):'')+'</span>'+
     '<span class="stier '+tier+'">'+(cur?TIER[tier]:'数据不足')+'</span></div>';
   var nm=cur
-    ? '<div class="sname">'+cur.lab+'</div><div class="sdesc">'+cur.desc+'</div>'
-    : '<div class="sname">数据不足</div><div class="sdesc">累计窗口尚未成型</div>';
+    ? '<div class="sname'+(sig?'':' dim')+'">'+cur.lab+'</div><div class="sdesc">'+cur.desc+'</div>'
+    : '<div class="sname dim">数据不足</div><div class="sdesc">累计窗口尚未成型</div>';
   var chips='<div class="mchips">'+
     '<div class="mchip"><span class="mclab">5 日累计</span><span class="mcval '+(c5==null?'dim':(c5>=0?'up':'dn'))+'">'+
       (c5==null?'—':sg(c5,1))+'<span class="mcunit">亿元</span></span></div>'+
