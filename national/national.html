@@ -209,6 +209,7 @@ footer{color:var(--muted);font-size:11.5px;line-height:1.8;padding:2px 2px 0}
       <span class="chip"><i>最新报告期</i><b id="metaRp">-</b></span>
       <span class="chip" id="chipLag"><i>数据滞后</i><b id="metaLag">-</b></span>
       <span class="chip" id="chipWin"><i>披露窗口</i><b id="metaWin">-</b></span>
+      <span class="chip" title="与主看板同一条调度链：北京时间 16:00 起每 30 分钟一轮、共 12 轮（cron-job.org 外部定时 → 云端 CI 自动刷新并发布）。非披露窗口数据无变化时不重复写盘。"><i>自动刷新</i><b>盘后 16:00 起 · 每 30 分钟</b></span>
       <span class="chip"><i>数据版本</i><b id="metaVer">-</b></span>
     </div>
   </div>
@@ -302,6 +303,7 @@ footer{color:var(--muted);font-size:11.5px;line-height:1.8;padding:2px 2px 0}
 <div class="disc"><b>口径提示：</b>本页仅覆盖核心重仓池（金融 / 中字头 / 大市值蓝筹，非全市场），个股持股为定期报告前十大流通股东口径，非十大股东者可未显示；国家 ETF 通道持仓另计、未含在此。"社保/养老"含全国社会保障基金理事会与社保基金/基本养老保险组合。</div>
 <footer>
   数据来源：东方财富 datacenter（RPT_F10_EH_FREEHOLDERS 上市公司定期报告·前十大流通股东），季度披露天然滞后 1~2 个月，最新数据为最近已披露报告期快照；ETF 通道数据源为东财 push2 / 天天基金定期报告。
+  <b>更新节奏</b>：与主看板共用同一条调度链 —— 北京时间 16:00 起每 30 分钟自动刷新一轮（共 12 轮），季度持仓、披露进度与 ETF 日度快照均随之更新；数据无实质变化时不重复写盘，故「数据更新」时刻保持不变属正常。
   本页为数据展示，不构成投资建议。
 </footer>
 </div>
@@ -336,7 +338,10 @@ function render(data){
   document.getElementById('metaRp').textContent=meta.latest_report||'-';
   document.getElementById('metaVer').textContent=(meta.version||'-')+(meta.failed&&meta.failed.length?(' ('+meta.failed.length+' 票拉取失败)'):'');
   var ga=new Date(meta.generated_at);ga.setHours(ga.getHours()+8);
-  document.getElementById('metaVer').textContent+=' · 生成 '+ga.toISOString().slice(0,16).replace('T',' ')+' 北京';
+  document.getElementById('metaVer').textContent+=' · 数据更新 '+ga.toISOString().slice(0,16).replace('T',' ')+' 北京';
+  /* R419: generated_at 现为「内容最近一次实质更新」时刻(无变化不写盘), 故补 tooltip 说明 */
+  (function(){var v=document.getElementById('metaVer');if(v&&v.parentNode)v.parentNode.title=
+    '系统每交易日盘后（北京 16:00 起每 30 分钟）自动检查刷新；此时间为数据内容最近一次发生实质变化的时刻，非披露窗口内保持不变属正常。';})();
   /* R418 数据时效: 滞后天数(色级警示) + 披露窗口状态 */
   (function(){
     var rp=meta.latest_report;if(!rp)return;

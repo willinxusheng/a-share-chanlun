@@ -203,6 +203,35 @@ jobs:
           path: ${{ runner.temp }}/_ov.txt
           if-no-files-found: ignore
 
+      - name: 国家队持仓数据刷新（与主看板同节奏, 幂等）
+        # R419: 国家队主数据 national.json 此前从不随 CI 刷新(只在手动跑时更新),
+        # 现接入与主看板完全相同的调度链 —— cron-job.org 北京 16:00 起每 30 分钟
+        # dispatch 本 workflow, 故国家队持仓/披露数据与主看板同步刷新(每日 12 轮起)。
+        # 实测全量 86 票约 1.5 分钟(30 分钟间隔绰绰有余), 失败票 0。
+        # calc_national.py 内部三重守卫保证"每轮都跑、只在真有新披露时才写盘":
+        #   G1 失败票超阈值拒写(云端限流时残缺产物不得覆盖完整产物)
+        #   G2 报告期数/覆盖票数收缩拒写(历史只增不减)
+        #   G3 剔除 generated_at 后与旧产物一致 → 跳过写盘(非披露窗口零提交噪音)
+        run: python national/calc_national.py --out national/national.json
+
+      - name: 提交国家队持仓数据（有实质变化才提交, 防重复触发循环）
+        # 与下方 ETF 快照同款模式: 仅当 calc_national 真正写盘(有新披露)时才
+        # commit+push。本步骤位于「配置 Pages / 部署」之前, 故新数据在同一次 run
+        # 内即随 Pages 产物上线; [skip ci] 防止 push 再触发一轮冗余 deploy
+        # (G3 幂等已保证第二轮不会写盘, 双保险)。
+        run: |
+          set -euo pipefail
+          if git status --porcelain national/national.json | grep -q .; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add national/national.json
+            git commit -m "chore: national holdings refresh $(date -u +%F) [skip ci]" || echo "no changes"
+            git pull --rebase --autostash origin "${GITHUB_REF_NAME}" || { echo "WARN: rebase 失败跳过推送(下一时点会补)"; exit 0; }
+            git push || echo "WARN: push 失败(下一时点会补)"
+          else
+            echo "national.json 无变化(非披露窗口/数据一致), 跳过提交"
+          fi
+
       - name: ETF 份额日度快照（疑似国家队资金流代理, 幂等）
         # R413: 宽基 ETF 总份额每交易日披露(东财 push2 f84, 与腾讯 total_shares 双源互证),
         # 日度份额×净值=净申赎 → 国家队(汇金 2024 起宽基主战场)疑似方向参考。

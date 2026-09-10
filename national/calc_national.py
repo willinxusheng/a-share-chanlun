@@ -33,10 +33,20 @@ R418 股本变动校准: 国家队持股环比若直接用股数差, 送转/增�
   split/dilute 两类股本事件供前端提示。披露期隔季未现身的行不假装环比,
   标 reappear(隔 gap 季再现)。
 
-用法: python3 calc_national.py [--out national.json] [--pool 精简子集名]
+R419 CI 幂等/抗残缺三重守卫 (本脚本已接入 deploy.yml, 与主看板同节奏:
+  北京 16:00 起每 30 分钟一轮, 每轮全量重算 86 票约 1.5 分钟):
+  G1 失败率: 失败票 > max(3, 池 10%) → 拒写盘。云端出口 IP 被东财限流时会
+     大量拉空, 残缺产物覆盖完整产物 = 线上数据倒退; 保留上轮完整版更安全。
+  G2 体量退化: 报告期数变少 / 覆盖票数收缩 >2% → 拒写盘(历史只增不减)。
+  G3 内容幂等: 剔除 generated_at 后与旧产物逐字段一致 → 不写盘。
+     非披露窗口(如 9~10 月等三季报)数据根本不变, 无此守卫则每 30 分钟
+     提交一次 generated_at 噪音, 仓库历史被冲垮。有守卫则「每轮都跑、
+     只在真有新披露时才写盘」, 提交次数与真实数据变化次数一致。
+
+用法: python3 calc_national.py [--out national.json]
 约束: 请求间 0.22s 节流 + 单票 2 次重试; UA/Referer 齐全; 失败票进 meta.failed 不 abort。
 """
-import argparse, json, ssl, sys, time, urllib.request, collections
+import argparse, json, os, ssl, sys, time, urllib.request, collections
 
 API = "https://datacenter-web.eastmoney.com/api/data/v1/get"
 UA = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
@@ -126,6 +136,40 @@ def decide_state(mp: dict, latest: str):
         elif abs(hd) < 0.5 and rc <= -0.1 and big:
             out["cap"] = "dilute"     # 解禁类: 股数不动占比被动降
     return out
+
+# ---------- R419 写盘守卫 (CI 每 30 分钟一轮, 必须幂等且抗残缺) ----------
+GUARD_FAIL_MIN = 3          # 允许的失败票数下限
+GUARD_FAIL_RATIO = 0.10     # 失败票占比上限
+GUARD_SHRINK = 0.98         # 历史体量允许的收缩比
+
+
+def _core(d):
+    """剔除易变元数据(generated_at)后的规范化视图, 用于幂等比较。"""
+    if not isinstance(d, dict):
+        return None
+    m = dict(d.get("meta") or {})
+    m.pop("generated_at", None)
+    return {"meta": m, "series": d.get("series"),
+            "top": d.get("top"), "stocks": d.get("stocks")}
+
+
+def guard_write(out, old, failed, pool_n):
+    """返回 (是否写盘, 原因文案)。"""
+    if len(failed) > max(GUARD_FAIL_MIN, int(pool_n * GUARD_FAIL_RATIO)):
+        return False, (f"G1 失败票 {len(failed)}/{pool_n} 超阈值"
+                       f"(>max({GUARD_FAIL_MIN}, {GUARD_FAIL_RATIO:.0%})) → 拒写, 保留上轮完整产物")
+    if old:
+        o_s, n_s = old.get("series") or [], out.get("series") or []
+        o_k, n_k = old.get("stocks") or {}, out.get("stocks") or {}
+        if len(n_s) < len(o_s):
+            return False, f"G2 报告期数 {len(n_s)} < 上轮 {len(o_s)} → 拒写(历史只增不减)"
+        if o_k and len(n_k) < len(o_k) * GUARD_SHRINK:
+            return False, (f"G2 覆盖票 {len(n_k)} < 上轮 {len(o_k)}×{GUARD_SHRINK:.0%} → 拒写"
+                           f"(疑似大量拉空)")
+        if _core(old) == _core(out):
+            return False, "G3 数据与上轮完全一致(非披露窗口) → 跳过写盘"
+    return True, "写盘"
+
 
 # ---------- 核心池 (~88 只: 金融蓝筹 + 中字头能源 + 大消费医药制造 + 2015 救市重仓; SH/SZ) ----------
 POOL = {
@@ -309,14 +353,29 @@ def main():
         "top": top,
         "stocks": stocks,
     }
-    with open(args.out, "w", encoding="utf-8") as f:
-        json.dump(out, f, ensure_ascii=False, separators=(",", ":"))
     n_hit_stock = sum(1 for c in per_stock.values() if any(c["b"].values()))
     from collections import Counter
     st_cnt = Counter(r["state"] for r in top)
-    print(f"\n写入 {args.out}: pool={len(POOL)} 命中票={n_hit_stock} 报告期={len(series)} "
+    print(f"\n统计: pool={len(POOL)} 命中票={n_hit_stock} 报告期={len(series)} "
           f"最新={latest} failed={len(failed)} top_rows={len(top)} top_stocks={top_stocks}")
     print(f"R418 动作分布: " + " ".join(f"{k}={v}" for k, v in sorted(st_cnt.items())))
+
+    # ---- R419 写盘守卫: CI 每 30 分钟一轮, 无变化/残缺一律不写盘 ----
+    old = None
+    if os.path.exists(args.out):
+        try:
+            with open(args.out, encoding="utf-8") as f:
+                old = json.load(f)
+        except Exception as e:
+            print(f"[WARN] 旧产物 {args.out} 解析失败({e}), 按首次生成处理")
+    ok, why = guard_write(out, old, failed, len(POOL))
+    if not ok:
+        print(f"[skip] {why}")
+        print(f"[skip] 未改动 {args.out} → CI 无提交 (预期行为, 非错误)")
+        return 0
+    with open(args.out, "w", encoding="utf-8") as f:
+        json.dump(out, f, ensure_ascii=False, separators=(",", ":"))
+    print(f"[write] {why} → {args.out}")
     if latest and series:
         r0 = series[-1]
         print(f"最新期({latest}): 汇金投资={r0['hj_tz']/1e8:.1f}亿 汇金资管={r0['hj_zg']/1e8:.1f}亿 "
