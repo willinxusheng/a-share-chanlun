@@ -132,29 +132,105 @@ tbody tr:last-child td{border-bottom:0}
 .ebadge.dn{background:var(--down-soft);color:#0f7a52;border:1px solid #bce3d2}
 .ebadge.flat{background:#eef1f5;color:#64748b;border:1px solid #dde4ec}
 /* ===== 资金流信号面板 (R423) —— 只呈现「状态」与历史统计, 不给操作指令 ===== */
-.sigp{margin:12px 0 14px}
-.sigp .sgrid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.5fr);gap:14px}
-.sigp .slag{font-size:11px;color:#8a97aa;letter-spacing:.3px}
-.sigp .scur{border:1px solid #dbe4ef;border-radius:12px;padding:13px 15px;background:#f7fafd}
-.sigp .scur.strong{border-color:#9ad3b8;background:#f1fbf6}
-.sigp .scur.weak{border-color:#eccf9c;background:#fdfaf2}
-.sigp .scur.mute{border-color:#dbe4ef;background:#f7fafd}
-.sigp .sname{font-size:19px;font-weight:800;color:#1e4d86;margin:4px 0 1px;line-height:1.3}
-.sigp .sdesc{font-size:12px;color:#5a6b80;line-height:1.6}
-.sigp .snum{margin-top:9px;font-size:12.5px;color:#33475f;line-height:1.9;font-variant-numeric:tabular-nums}
-.sigp .snum b{color:#1e4d86;font-weight:700}
-.sigp .sverd{margin-top:9px;padding-top:8px;border-top:1px dashed #dfe8f2;font-size:12px;color:#5a6b80;line-height:1.7}
-.sigp .sqrow{display:grid;grid-template-columns:104px minmax(0,1fr);gap:10px;align-items:baseline;
-  padding:7px 11px;border-radius:8px;margin-bottom:5px;background:#f8fafc;border-left:3px solid #cfd8e3}
-.sigp .sqrow.strong{border-left-color:#1d9e75}
-.sigp .sqrow.weak{border-left-color:#e0a94f}
+.sigp{margin:14px 0 16px}
+.sigp .sgrid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.45fr);gap:16px}
+.sigp .stag{font-size:11px;color:#8a97aa;letter-spacing:.3px}
+.sigp em{font-style:normal;color:#a4b0bf}
+.sigp .scur{position:relative;display:flex;flex-direction:column;
+  border:1px solid #dbe4ef;border-radius:14px;padding:17px 17px 15px;
+  background:#fbfcfe;overflow:hidden;
+  transition:transform .22s cubic-bezier(.4,0,.2,1),box-shadow .22s,border-color .22s}
+.sigp .scur::before{content:'';position:absolute;left:0;right:0;top:0;height:3px;background:#94a3b8;
+  transition:background .22s}
+.sigp .scur.strong::before{background:#185FA5}
+.sigp .scur.weak::before{background:#BA7517}
+.sigp .scur.mute::before{background:#94a3b8}
+.sigp .scur:hover{transform:translateY(-2px);box-shadow:0 7px 20px rgba(30,77,134,.10);border-color:#b9d3ec}
+.sigp .scur.strong:hover{border-color:#7fb8e0}
+.sigp .scur.weak:hover{border-color:#e8c98a}
+.sigp .shead{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.sigp .stier{font-size:11px;font-weight:700;padding:2px 9px;border-radius:999px;white-space:nowrap;
+  background:#eef1f5;color:#64748b;border:1px solid #dde4ec;transition:background .22s,color .22s}
+.sigp .stier.strong{background:#e6f1fb;color:#0c447c;border-color:#b5d4f4}
+.sigp .stier.weak{background:#faeeda;color:#854f0b;border-color:#f0d9a8}
+.sigp .sname{font-size:21px;font-weight:800;color:#1e4d86;margin:8px 0 2px;line-height:1.25;letter-spacing:.2px}
+.sigp .sdesc{font-size:12px;color:#5a6b80;line-height:1.55}
+.sigp .mchips{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:12px 0 auto}
+.sigp .mchip{background:#f4f7fb;border:1px solid #e6edf6;border-radius:10px;padding:8px 10px;
+  transition:background .2s,border-color .2s,transform .2s}
+.sigp .mchip:hover{background:#eaf2fb;border-color:#c9dcf0;transform:translateY(-1px)}
+.sigp .mclab{display:block;font-size:11px;color:#8a97aa;line-height:1.45;white-space:nowrap}
+.sigp .mcval{display:block;font-size:16px;font-weight:700;line-height:1.4;font-variant-numeric:tabular-nums}
+.sigp .mcval.up{color:#c53030}.sigp .mcval.dn{color:#0f7a52}.sigp .mcval.dim{color:#475569}
+.sigp .mcunit{font-size:11px;color:#8a97aa;font-weight:400;margin-left:2px}
+.sigp .sflow{margin-top:13px;flex-shrink:0}
+.sigp .sflab{display:flex;justify-content:space-between;font-size:11px;color:#8a97aa;margin-bottom:7px}
+.sigp .sflab em{font-style:normal;color:#a4b0bf}
+.sigp .sflbars{position:relative;display:flex;gap:5px;height:64px}
+.sigp .sflbars::before{content:'';position:absolute;left:0;right:0;top:50%;height:1px;background:#e6edf6}
+.sigp .sfb{position:relative;flex:1;min-width:0}
+.sigp .sfb i{position:absolute;left:2px;right:2px;border-radius:2px;
+  transition:height .5s cubic-bezier(.4,0,.2,1),filter .2s,opacity .2s}
+.sigp .sfb i.up{background:#e57373;bottom:50%}
+.sigp .sfb i.dn{background:#5cb894;top:50%}
+.sigp .sfb:hover i{filter:brightness(1.15)}
+.sigp .pbarwrap{margin-top:12px}
+.sigp .pbarpos{display:flex;justify-content:space-between;font-size:11px;color:#8a97aa;margin-bottom:5px}
+.sigp .pbar{position:relative;height:8px;border-radius:5px;background:#eef2f7}
+.sigp .pbar i{position:absolute;left:0;top:0;bottom:0;border-radius:5px;background:#6fa8dc;
+  transition:width .55s cubic-bezier(.4,0,.2,1),background .22s}
+.sigp .pbar u{position:absolute;top:-3px;width:3px;height:14px;border-radius:2px;background:#1e4d86;
+  text-decoration:none;transform:translateX(-1.5px);
+  transition:height .2s,top .2s,box-shadow .2s,transform .2s}
+.sigp .pbar:hover i{background:#4a90d9}
+.sigp .pbar:hover u{height:18px;top:-5px;box-shadow:0 0 0 3px rgba(30,77,134,.14);transform:translateX(-1.5px) scaleX(1.4)}
+.sigp .pblab{display:flex;justify-content:space-between;font-size:10.5px;color:#a4b0bf;margin-top:4px}
+.sigp .sverd{margin-top:12px;padding-top:10px;border-top:1px dashed #dfe8f2;font-size:12px;color:#5a6b80;line-height:1.7}
+.sigp .sverd b{font-variant-numeric:tabular-nums}
+.sigp .svtag{display:inline-block;font-size:11px;font-weight:700;padding:1px 8px;border-radius:6px;margin-right:7px;
+  transition:background .22s}
+.sigp .svtag.on{background:#fdeaea;color:#a32d2d;border:1px solid #f3c6c6}
+.sigp .svtag.off{background:#eef1f5;color:#64748b;border:1px solid #dde4ec}
+.sigp .sqhead{font-size:11px;color:#8a97aa;letter-spacing:.3px;margin-bottom:9px;line-height:1.5}
+.sigp .sqrow{display:grid;grid-template-columns:106px minmax(0,1fr);gap:4px 12px;align-items:start;
+  padding:9px 12px 10px;border-radius:10px;margin-bottom:6px;background:#f8fafc;border-left:3px solid #cfd8e3;
+  transition:background .2s,transform .2s,box-shadow .2s,border-left-color .2s}
+.sigp .sqrow:hover{background:#eef4fb;transform:translateX(3px);
+  box-shadow:0 3px 11px rgba(30,77,134,.08);border-left-color:#7ba7d4}
+.sigp .sqrow.strong{border-left-color:#6ba3d6}
+.sigp .sqrow.weak{border-left-color:#dfb264}
 .sigp .sqrow.mute{border-left-color:#cbd5e1}
-.sigp .sqrow.on{background:#eaf3fd;box-shadow:inset 0 0 0 1px #bcd8f2}
-.sigp .sqn{font-size:12.5px;font-weight:700;color:#1e4d86}
+.sigp .sqrow.on{background:#eaf3fd;border-left-color:#185FA5;box-shadow:inset 0 0 0 1px #bcd8f2}
+.sigp .sqrow.on:hover{background:#e0eefb;border-left-color:#185FA5;
+  box-shadow:inset 0 0 0 1px #a6cbee,0 3px 11px rgba(30,77,134,.11)}
+.sigp .sqn{font-size:13px;font-weight:700;color:#1e4d86;line-height:1.5}
 .sigp .sqrow.mute .sqn{color:#7b8899}
-.sigp .sqd{font-size:12px;color:#5a6b80;line-height:1.65;font-variant-numeric:tabular-nums}
-.sigp .sqd em{font-style:normal;color:#a4b0bf}
-@media(max-width:760px){.sigp .sgrid{grid-template-columns:1fr}}
+.sigp .sqon{display:block;font-size:10.5px;font-weight:700;color:#185FA5;margin-top:2px;letter-spacing:.2px}
+.sigp .sqd{font-size:12px;color:#5a6b80;line-height:1.62;font-variant-numeric:tabular-nums}
+.sigp .sqd b.up{color:#c53030}
+.sigp .sqd b.dn{color:#0f7a52}
+.sigp .sqd b.dim{color:#7b8899;font-weight:400}
+.sigp .sqnote{display:block;font-size:11px;color:#94a3b8;margin-top:2px;line-height:1.5}
+.sigp .sqbars{display:grid;grid-template-columns:auto minmax(0,1fr);gap:3px 7px;align-items:center;margin-top:7px}
+.sigp .sqbl{font-size:10.5px;color:#a4b0bf;text-align:right;font-variant-numeric:tabular-nums}
+.sigp .sqbar{height:6px;border-radius:3px;background:#eef2f7;overflow:hidden;transition:background .2s}
+.sigp .sqrow:hover .sqbar{background:#e3eaf3}
+.sigp .sqbar i{display:block;height:100%;border-radius:3px;
+  transition:width .55s cubic-bezier(.4,0,.2,1),opacity .2s}
+.sigp .sqbar i.p{background:#e57373}
+.sigp .sqbar i.n{background:#5cb894}
+.sigp .sqbar i.z{background:#cbd5e1}
+.sigp .sqbarcap{font-size:10.5px;color:#a4b0bf;margin-top:3px;text-align:right}
+@media(max-width:760px){
+  .sigp .sgrid{grid-template-columns:1fr}
+  .sigp .mchips{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .sigp .sqrow{grid-template-columns:88px minmax(0,1fr);gap:4px 9px;padding:8px 10px 9px}
+  .sigp .sqrow:hover{transform:translateX(2px)}
+}
+@media(prefers-reduced-motion:reduce){
+  .sigp *{transition:none!important}
+  .sigp .scur:hover,.sigp .sqrow:hover,.sigp .mchip:hover{transform:none}
+}
 /* ===== 表格增强: 排序/序号/迷你条/斑马/计数 ===== */
 .tsc th.sortable{cursor:pointer;user-select:none;transition:background .15s}
 .tsc th.sortable:hover{background:#e7eef7;color:#1d4f8f}
@@ -794,6 +870,8 @@ function drawSigPanel(dates,flow,S,use,dataDate){
   var el=document.getElementById('sigPanel');if(!el)return;
   function sg(x,d){return (x>=0?'+':'')+x.toFixed(d==null?2:d);}
   function sp(p){return p<0.001?'p&lt;0.001':'p='+p.toFixed(3);}
+  /* 数值着色: 不显著一律灰, 显著才用涨跌色(与全站 .chg-up/.chg-dn 同口径) */
+  function kc(v,p){return p>=0.05?'dim':(v>=0?'up':'dn');}
   var N=dates.length;
   var px3={};(S['510300']||[]).forEach(function(r){if(r[2])px3[r[0]]=r[2];});
   if(!Object.keys(px3).length&&use.length){(S[use[0].code]||[]).forEach(function(r){if(r[2])px3[r[0]]=r[2];});}
@@ -807,32 +885,84 @@ function drawSigPanel(dates,flow,S,use,dataDate){
   var pct=null;
   if(c20!=null&&arr.length){var c=0;for(var j=0;j<arr.length;j++)if(arr[j]<c20)c++;pct=Math.round(c/arr.length*100);}
   var cur=q?SQ[q]:null;
-  var head=cur
-    ? '<div class="slag">当前资金流状态 · '+esc(dataDate)+'</div><div class="sname">'+cur.lab+
-      '</div><div class="sdesc">'+cur.desc+'</div>'
-    : '<div class="slag">当前资金流状态</div><div class="sname">数据不足</div><div class="sdesc">累计窗口尚未成型</div>';
-  var nums='<div class="snum">5 日累计 <b>'+sg(c5==null?0:c5,1)+'</b> 亿元'+
-    (r5!=null?' · 沪深300ETF 5 日 <b>'+sg(r5*100)+'%</b>':'')+'<br>'+
-    '20 日累计 <b>'+sg(c20==null?0:c20,1)+'</b> 亿元'+
-    (pct!=null?' · 历史分位 <b>'+pct+'%</b>':'')+'</div>';
+  var TIER={strong:'强信号',weak:'弱信号',mute:'无信号'};
+  /* (R425) 显著判据改为「5 日或 20 日任一显著」。旧写法只看 p20 → 会让
+     「跌中赎回」(p5=0.0006 / p20=0.7595) 在主卡被判「无统计意义」,
+     而右侧同一行的 note 却写着「全场最强偏多信号」——同屏自相矛盾。 */
+  var w5=cur?cur.p5<0.05:false, w20=cur?cur.p20<0.05:false;
+  var sig=w5||w20;
+  var sigw=sig?((w5?'5 日':'')+(w5&&w20?' 与 ':'')+(w20?'20 日':'')):'';
+  var tier=cur?cur.tier:'mute';
+  var head='<div class="shead"><span class="stag">当前资金流状态'+(dataDate?' · '+esc(dataDate):'')+'</span>'+
+    '<span class="stier '+tier+'">'+(cur?TIER[tier]:'数据不足')+'</span></div>';
+  var nm=cur
+    ? '<div class="sname">'+cur.lab+'</div><div class="sdesc">'+cur.desc+'</div>'
+    : '<div class="sname">数据不足</div><div class="sdesc">累计窗口尚未成型</div>';
+  var chips='<div class="mchips">'+
+    '<div class="mchip"><span class="mclab">5 日累计</span><span class="mcval '+(c5==null?'dim':(c5>=0?'up':'dn'))+'">'+
+      (c5==null?'—':sg(c5,1))+'<span class="mcunit">亿元</span></span></div>'+
+    '<div class="mchip"><span class="mclab">20 日累计</span><span class="mcval '+(c20==null?'dim':(c20>=0?'up':'dn'))+'">'+
+      (c20==null?'—':sg(c20,1))+'<span class="mcunit">亿元</span></span></div>'+
+    '<div class="mchip"><span class="mclab">沪深300ETF 5 日</span><span class="mcval '+(r5==null?'dim':(r5>=0?'up':'dn'))+'">'+
+      (r5==null?'—':sg(r5*100))+'<span class="mcunit">%</span></span></div>'+
+    '</div>';
+  var pbar='';
+  /* 近 8 个交易日单日净申赎迷你柱（双向: 上=净申购红 / 下=净赎回绿）——
+     把「短强长弱」的形态直接画出来, 例如 9/4 的尖峰与随后两日的回吐 */
+  var f8=flow.slice(-8), d8=dates.slice(-8), fmax=0;
+  for(var t=0;t<f8.length;t++){var av=Math.abs(f8[t]);if(av>fmax)fmax=av;}
+  var sflow='';
+  if(f8.length&&fmax>0){
+    sflow='<div class="sflow"><div class="sflab"><span>近 8 个交易日单日净申赎</span>'+
+      '<em>'+esc(String(d8[0]).slice(5))+' ~ '+esc(String(d8[d8.length-1]).slice(5))+'</em></div>'+
+      '<div class="sflbars">'+f8.map(function(v,i){
+        var h=Math.max(3,Math.abs(v)/fmax*46);
+        return '<span class="sfb" title="'+esc(String(d8[i]))+'　'+sg(v,1)+' 亿元">'+
+          '<i class="'+(v>=0?'up':'dn')+'" style="height:'+h.toFixed(1)+'%"></i></span>';
+      }).join('')+'</div></div>';
+  }
+  if(pct!=null){
+    pbar='<div class="pbarwrap">'+
+      '<div class="pbarpos"><span>20 日累计净申赎 · 历史分位</span><span>第 '+pct+' 百分位</span></div>'+
+      '<div class="pbar"><i style="width:'+pct+'%"></i><u style="left:'+pct+'%"></u></div>'+
+      '<div class="pblab"><span>← 历史最净赎回</span><span>历史最净申购 →</span></div></div>';
+  }
   var verd='';
   if(cur){
-    var sig=cur.p20<0.05;
-    verd='<div class="sverd">该状态历史：未来 20 日 <b style="color:'+(cur.exc20>=0?'#c53030':'#0f7a52')+'">'+
-      sg(cur.exc20)+'pp</b>（'+sp(cur.p20)+'）· 未来 5 日 '+sg(cur.exc5)+'pp（'+sp(cur.p5)+'）<br>'+
-      (sig?'<b>统计上显著</b> —— 可作为风险偏好的参考':'<b>无统计意义</b> —— 不构成加仓 / 减仓提示')+'</div>';
+    verd='<div class="sverd"><span class="svtag '+(sig?'on':'off')+'">'+(sig?'统计显著':'无统计意义')+'</span>'+
+      '该状态历史：未来 20 日 <b style="color:'+(cur.exc20>=0?'#c53030':'#0f7a52')+'">'+sg(cur.exc20)+'pp</b> <em>('+sp(cur.p20)+')</em>'+
+      ' · 未来 5 日 <b style="color:'+(cur.exc5>=0?'#c53030':'#0f7a52')+'">'+sg(cur.exc5)+'pp</b> <em>('+sp(cur.p5)+')</em><br>'+
+      '<span style="color:#94a3b8">'+(sig
+        ? '其中 <b style="color:#1e4d86">'+sigw+'</b> 窗口显著 —— 可作为风险偏好的参考，仍不是操作指令'
+        : '两个窗口均无统计意义 —— 不构成加仓 / 减仓提示')+'</span></div>';
+  }
+  /* 四象限横向对比条: 刻度 ±1.4pp(覆盖四象限 |超额| 最大值 1.35), 四行长度可比。
+     (R425) 配色必须与文字口径一致: 不显著(p>=0.05)一律灰。旧写法只按数值正负上色,
+     会让「顺势申购」的 +0.31pp(p=0.506) 画出红条——而同行文字已是灰的,
+     视觉上等于把「无统计意义」的四象限画成偏多信号, 与表头「灰 = 不显著」自相矛盾。 */
+  var MAXE=1.4;
+  function bar(v,p){
+    var c=(p>=0.05||Math.abs(v)<0.005)?'z':(v>=0?'p':'n');
+    var w=Math.min(100,Math.abs(v)/MAXE*100);
+    return '<span class="sqbar"><i class="'+c+'" style="width:'+w.toFixed(1)+'%"></i></span>';
   }
   var rows=['dn_red','up_red','ct_up','sync_up'].map(function(k){
-    var s=SQ[k];
-    return '<div class="sqrow '+s.tier+(k===q?' on':'')+'">'+
-      '<div class="sqn">'+s.lab+(k===q?' · 当前':'')+'</div>'+
-      '<div class="sqd">未来 5 日 <b>'+sg(s.exc5)+'pp</b> <em>('+sp(s.p5)+')</em> · '+
-      '未来 20 日 <b>'+sg(s.exc20)+'pp</b> <em>('+sp(s.p20)+')</em><br>'+
-      '<em>'+s.desc+'　'+s.note+'</em></div></div>';
+    var s=SQ[k], on=(k===q);
+    return '<div class="sqrow '+s.tier+(on?' on':'')+'">'+
+      '<div class="sqn">'+s.lab+(on?'<span class="sqon">当前状态</span>':'')+'</div>'+
+      '<div class="sqd">未来 5 日 <b class="'+kc(s.exc5,s.p5)+'">'+sg(s.exc5)+'pp</b> <em>('+sp(s.p5)+')</em>'+
+      ' · 未来 20 日 <b class="'+kc(s.exc20,s.p20)+'">'+sg(s.exc20)+'pp</b> <em>('+sp(s.p20)+')</em>'+
+      '<span class="sqnote">'+s.desc+' · '+s.note+'</span>'+
+      '<div class="sqbars">'+
+        '<span class="sqbl">5 日</span>'+bar(s.exc5,s.p5)+
+        '<span class="sqbl">20 日</span>'+bar(s.exc20,s.p20)+
+      '</div></div>'+
+      '</div>';
   }).join('');
   el.innerHTML='<div class="sgrid">'+
-    '<div class="scur '+(cur?cur.tier:'mute')+'">'+head+nums+verd+'</div>'+
-    '<div><div class="slag" style="margin-bottom:7px">四象限历史表现 · 超额收益 vs 全样本基准 · 599 个交易日实证</div>'+
+    '<div class="scur '+tier+'">'+head+nm+chips+sflow+pbar+verd+'</div>'+
+    '<div><div class="sqhead">四象限历史表现 · 超额收益 vs 全样本基准 · 599 个交易日实证<br>'+
+    '条形长度 = |超额|（刻度 ±1.4pp）· 红 = 偏多 / 绿 = 偏空 / 灰 = 不显著</div>'+
     rows+'</div></div>';
 }
 
