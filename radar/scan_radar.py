@@ -447,6 +447,68 @@ _mb_net_fail = {"n": 0}
 # main 原统计把停用短路误归「数据不足 143」, 且 WARN 前置 _mb_net and 永不触发,
 # 月线排序键整键失效线上无痕。此计数使补拉块能正确分类 down 并落 meta。
 _mb_down_fail = {"n": 0}
+# R428: 月线新浪聚合兜底成功计数 —— 腾讯月K不可得时用新浪日线聚自然月顶上。
+_mb_sina_ok = {"n": 0}
+
+
+def _macd_month_state(pairs):
+    """月K [(date, close)] -> MACD(12,26,9) 末两柱状态 dict; 不足 40 根返 None。
+
+    R428: 从 _month_macd 抽出, 腾讯 qfq 月K 与 新浪日线聚合 两条路径共用同一实现 ——
+    双实现必然漂移(本月线口径已因双路径/双守卫修过 R390/R400 两轮), 口径唯一化。
+    状态语义(前端双周期排序键, R383):
+      red          = hist>=0 月线红柱(多头背景)
+      green_shrink = hist<0 且较上月缩短(下跌动能衰减)
+      green_grow   = hist<0 且较上月加长(月线下跌中继, 沉同档尾)
+    """
+    if len(pairs) < 40:      # MACD 26+9 EMA 收敛需近 35 根月K(约3年); 不足=结构不可靠
+        return None
+    closes = [c for _d, c in pairs]
+    e12 = _ema(closes, 12)
+    e26 = _ema(closes, 26)
+    dif = [a - b for a, b in zip(e12, e26)]
+    dea = _ema(dif, 9)
+    h1, h2 = (dif[-2] - dea[-2]) * 2, (dif[-1] - dea[-1]) * 2
+    if h2 >= 0:
+        state = "red"
+    elif h2 > h1:
+        state = "green_shrink"
+    else:
+        state = "green_grow"
+    return {"state": state, "h1": round(h1, 4), "h2": round(h2, 4), "date": pairs[-1][0]}
+
+
+def _month_closes_sina(sym):
+    """(R428) 新浪日线 -> 自然月末收盘价序列 [(月末交易日, 月收盘)]; 失败返 None。
+
+    背景(09-10 CI 实况): 腾讯 fqkline 对 GitHub 境外出口被 WAF 持续限流(连续两日
+    仅 861/6695=13% 成功), 日K阶段即触发源停用; 月线补拉排在扫描末尾, 见 flag 即整块
+    跳过 -> 153 票底背驰股月线 100% 落空, 前端全员「月线—」中性。而新浪同轮 87% 可用,
+    且月线 MACD 只需月收盘序列, 可由日线聚合得到 -> 用它兜底。
+    实测(09-10, 24 只大票): 与腾讯 qfq 月K 的 MACD 状态一致率 79.2%(19/24), 5 处差异
+    全在 h2≈0 的临界态(如 sh600887 腾讯 +0.067 / 新浪 -0.020) —— 新浪为不复权裸价,
+    除权月有跳空扰动, 故临界票可能翻档。用途是"从完全不可得提升到约八成正确"。
+    口径诚实标注: 返回的 state dict 由调用方补 src="sina", 前端 tip 与 meta 落痕区分。
+    裁剪到 fd.MIN_DATE 与主链一致(67 根月K > 40 门槛)。
+    """
+    _sina_th.wait()
+    u = ("https://quotes.sina.cn/cn/api/json_v2.php/CN_MarketDataService.getKLineData"
+         "?symbol=%s&scale=240&ma=no&datalen=%d" % (sym, SINA_LEN))
+    try:
+        arr = json.loads(_get(u).decode("utf-8", "ignore")) or []
+    except Exception:   # noqa: BLE001
+        return None
+    by = {}
+    for row in arr:
+        d = row.get("day")
+        try:
+            c = float(row["close"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if not d or d < fd.MIN_DATE or c <= 0:
+            continue
+        by[d[:7]] = (d, c)     # 同月后写覆盖前写 => 天然取该自然月最后一个交易日
+    return sorted(by.values(), key=lambda x: x[0]) or None
 
 
 def _month_macd(sym):
@@ -471,53 +533,52 @@ def _month_macd(sym):
     现加同款守卫: 末根 date==今日 且北京 <15:00 时剔除末根(回落最近完整月)。CI radar-scan
     16:00 起(收盘后源给完整当月根, 保留)本无窗口, 但本地盘中调试/提前调度会踩 —— 与
     R372 教训"日线有守卫周月常漏"对称, 独立自解析路径同样要补。"""
-    if _src_down(_tx_down, _tx_lock):
-        # R400: 停用短路是「源不可用」不是「数据不足」—— 单列计数供补拉块分类/落痕
-        # (09-09 r11 实况: 143 票全被此短路, 原误归数据不足且不触发 WARN)。
-        _mb_down_fail["n"] += 1
-        return None
-    _tx_th.wait()
     pairs = None
-    for _attempt in range(2):      # 初试 + 1 次轻量重试(吸收腾讯偶发 501/超时)
-        try:
-            raw = _get(fd._tx_url(sym, "month"), timeout=15).decode("utf-8", "ignore")
-            node = (json.loads(raw).get("data") or {}).get(sym) or {}
-            kl = node.get("qfqmonth") or node.get("month") or []
-            pairs = []
-            for row in kl:
-                try:
-                    d, c = str(row[0]), float(row[2])      # 腾讯 [日期,开,收,高,低,量]
-                except (IndexError, TypeError, ValueError):
-                    continue
-                if d >= fd.MIN_DATE and c > 0:             # 对齐 2021 契约起点(与日线同源裁剪)
-                    pairs.append((d, c))
-            pairs.sort(key=lambda x: x[0])
-            # R390: 盘中剔除进行中月根(见 docstring R390 段)。_bj 显式 UTC+8,
-            # 避免 UTC runner 跨日窗口误判(与 fetch_data R167/R170 同款口径)。
-            _bj = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8)))
-            if pairs and pairs[-1][0] == _bj.date().isoformat() and _bj.hour < 15:
-                pairs = pairs[:-1]
-            break                  # 拉取+解析成功; 数据不足(<40)在下方统一返 None, 不属网络失败不重试
-        except Exception:   # noqa: BLE001
-            if _attempt == 1:      # 末次仍失败 → 计数 + 降级中性(补拉块汇总 WARN)
-                _mb_net_fail["n"] += 1
-                return None
-            _tx_th.wait()          # 重试前让出节流时隙(0.35s 自然间隔吸收瞬时 501)
-    if len(pairs) < 40:       # MACD 26+9 EMA 收敛需近 35 根月K(约3年); 不足=结构不可靠
-        return None
-    closes = [c for _d, c in pairs]
-    e12 = _ema(closes, 12)
-    e26 = _ema(closes, 26)
-    dif = [a - b for a, b in zip(e12, e26)]
-    dea = _ema(dif, 9)
-    h1, h2 = (dif[-2] - dea[-2]) * 2, (dif[-1] - dea[-1]) * 2
-    if h2 >= 0:
-        state = "red"
-    elif h2 > h1:
-        state = "green_shrink"
+    if _src_down(_tx_down, _tx_lock):
+        # R428: 腾讯整段停用 —— 不再直接弃票, 转下方新浪聚合兜底(down 计数保留供落痕区分)。
+        # R400 原此处是 `_mb_down_fail += 1; return None`, 09-09/09-10 实况 143/153 票
+        # 被短路成全中性; 兜底上线后同场景仍能给出约八成正确的月线档。
+        _mb_down_fail["n"] += 1
     else:
-        state = "green_grow"
-    return {"state": state, "h1": round(h1, 4), "h2": round(h2, 4), "date": pairs[-1][0]}
+        _tx_th.wait()
+        for _attempt in range(2):      # 初试 + 1 次轻量重试(吸收腾讯偶发 501/超时)
+            try:
+                raw = _get(fd._tx_url(sym, "month"), timeout=15).decode("utf-8", "ignore")
+                node = (json.loads(raw).get("data") or {}).get(sym) or {}
+                kl = node.get("qfqmonth") or node.get("month") or []
+                pairs = []
+                for row in kl:
+                    try:
+                        d, c = str(row[0]), float(row[2])      # 腾讯 [日期,开,收,高,低,量]
+                    except (IndexError, TypeError, ValueError):
+                        continue
+                    if d >= fd.MIN_DATE and c > 0:             # 对齐 2021 契约起点(与日线同源裁剪)
+                        pairs.append((d, c))
+                pairs.sort(key=lambda x: x[0])
+                # R390: 盘中剔除进行中月根(见 docstring R390 段)。_bj 显式 UTC+8,
+                # 避免 UTC runner 跨日窗口误判(与 fetch_data R167/R170 同款口径)。
+                _bj = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8)))
+                if pairs and pairs[-1][0] == _bj.date().isoformat() and _bj.hour < 15:
+                    pairs = pairs[:-1]
+                break          # 拉取+解析成功; 不足 40 根走下方兜底, 不属网络失败不重试
+            except Exception:   # noqa: BLE001
+                if _attempt == 1:      # 末次仍失败 → 计数 + 转兜底(补拉块汇总 WARN)
+                    _mb_net_fail["n"] += 1
+                    pairs = None
+                    break
+                _tx_th.wait()          # 重试前让出节流时隙(0.35s 自然间隔吸收瞬时 501)
+    res = _macd_month_state(pairs) if pairs else None
+    if res is not None:
+        res["src"] = "tx"
+        return res
+    # R428: 腾讯路径不可得(源停用 / 网络失败 / 月K不足) -> 新浪日线聚合兜底。
+    # 收益实测: 09-10 CI 腾讯月K 0/153 全落空 -> 兜底上线后按新浪 87% 可用率可救回约八成。
+    sp = _month_closes_sina(sym)
+    res = _macd_month_state(sp) if sp else None
+    if res is not None:
+        res["src"] = "sina"
+        _mb_sina_ok["n"] += 1
+    return res
 
 
 # ================= 2b. 当日主力资金流(东财 ulist 批量) =================
@@ -1365,8 +1426,10 @@ def main():
     # --- R383: 底背驰个股月线 MACD 状态(双周期排序键: 逆向观察池/实操信号雷达共用) ---
     # 凡有 bottom_bc 的个股补拉腾讯 qfq 月K(自然月) → st.m_macd={state,h1,h2,date}。
     # 前端 revpool pick 键链按 state 插档(red>green_shrink>无数据>green_grow沉同档尾);
-    # 无 state 的票 st["m_macd"]=null(JSON), 前端读到缺省即中性。ETF bottom_bc 只汇入
-    # ETF板块聚合无个股行、北交腾讯无可用月K(920恒假回), 一并 null 中性(不惩罚)。
+    # 取不到月线的票(非 _mb_syms: ETF/北交/无底背驰) st 里不含 m_macd 键 —— 前端用
+    # `mm==null` 宽松比较, undefined 同样命中 -> 渲染「月线—」中性徽章, 语义等价。
+    # R428 更正: 旧注释写"st[\"m_macd\"]=null"不准确, 实际是键缺失(仅 _mb_syms 被赋值);
+    # 不统一补 None 是为避免 6600+ 票各增一条键造成 radar.json 无谓膨胀。
     _mb_syms = [s for s, st in sts.items()
                 if st.get("scenario") == "背驰见底机会" and st.get("bottom_bc")
                 and not s.startswith("bj")
@@ -1376,37 +1439,54 @@ def main():
         _t_mb = time.time()
         _mb_f0 = _mb_net_fail["n"]
         _mb_d0 = _mb_down_fail["n"]
+        _mb_s0 = _mb_sina_ok["n"]
+        # R428: 批前显式复探腾讯源一次 —— 153 票 < TX_REPROBE_EVERY(300), 逐票 _src_down
+        # 永不触发 probe, 整批只有这一次机会把停用态翻回来(成功→走腾讯 qfq 月K, 失败→全批
+        # 落新浪聚合兜底)。09-10 CI 实况: 日K阶段连败停用后本块原样整块跳过 → 153 票 100%
+        # 落空(线上 meta.m_macd down=153); 现改为"探测决定路径", 不再有整块跳过分支。
         if _tx_down.get("flag"):
-            # R400: 腾讯日K源整段停用时 qfqmonth 必被状态机短路 → 逐个空转无意义,
-            # 直接跳过并明确落痕(09-09 r11 实况 143 票 0s 全"数据不足" 的根因即此短路)。
-            _mb_line = ("  月线MACD状态 %d 票跳过(腾讯日K源停用中, 月K必失败); 月线排序键整键中性"
-                        % len(_mb_syms))
-            print(_mb_line)
-            _m_macd_stat = {"tried": len(_mb_syms), "ok": 0, "short": 0,
-                            "net": 0, "down": len(_mb_syms), "warn": True}
-        else:
-            with ThreadPoolExecutor(max_workers=4) as _mb_ex:
-                _mb_res = list(_mb_ex.map(_month_macd, _mb_syms))
-            for s, mm in zip(_mb_syms, _mb_res):
-                sts[s]["m_macd"] = mm
-            _mb_net = _mb_net_fail["n"] - _mb_f0
-            _mb_down = _mb_down_fail["n"] - _mb_d0
-            _mb_none = sum(1 for mm in _mb_res if mm is None)
-            _mb_short = _mb_none - _mb_net - _mb_down
-            _mb_ok = len(_mb_syms) - _mb_none
-            # R400: 原条件前置 `_mb_net and` 只盯网络失败 —— 09-09 实况「数据不足 143/143」被
-            # 静默放过(实际全是停用短路)。改总失败率口径: 全败或任一原因失败>=20% 即 ⚠。
-            _mb_warn = (_mb_none == len(_mb_syms)
-                        or _mb_none >= max(3, len(_mb_syms) // 5))
-            _mb_line = ("  月线MACD状态 %d 票(成功 %d / 数据不足 %d / 源停用 %d / 网络失败 %d) %.0fs; null=中性"
-                        % (len(_mb_syms), _mb_ok, _mb_short, _mb_down, _mb_net,
-                           time.time() - _t_mb))
-            if _mb_warn:
-                _mb_line += ("  ⚠ 月线键失败 %d/%d(>20%%或全败), 月线排序键整键失效风险(前端全员中性)!"
-                             % (_mb_none, len(_mb_syms)))
-            print(_mb_line)
-            _m_macd_stat = {"tried": len(_mb_syms), "ok": _mb_ok, "short": _mb_short,
-                            "net": _mb_net, "down": _mb_down, "warn": _mb_warn}
+            _pr = _tx_down.get("probe")
+            _ok_pr = False
+            if _pr:
+                try:
+                    _ok_pr = bool(_pr())
+                except Exception:   # noqa: BLE001
+                    _ok_pr = False
+            if _ok_pr:
+                with _tx_lock:
+                    _tx_down["flag"] = False
+                    _tx_down["count"] = 0
+                    _tx_down["n"] = 0
+                print("[scan_radar] 月线补拉前复探腾讯源成功, 本批走腾讯月K", flush=True)
+            else:
+                print("[scan_radar] 月线补拉前复探腾讯源失败, 本批走新浪日线聚合兜底", flush=True)
+        with ThreadPoolExecutor(max_workers=4) as _mb_ex:
+            _mb_res = list(_mb_ex.map(_month_macd, _mb_syms))
+        for s, mm in zip(_mb_syms, _mb_res):
+            sts[s]["m_macd"] = mm
+        _mb_net = _mb_net_fail["n"] - _mb_f0
+        _mb_down = _mb_down_fail["n"] - _mb_d0
+        _mb_sina = _mb_sina_ok["n"] - _mb_s0
+        _mb_none = sum(1 for mm in _mb_res if mm is None)
+        _mb_ok = len(_mb_syms) - _mb_none
+        _mb_tx = _mb_ok - _mb_sina      # 腾讯 qfq 月K 命中 = 总成功 - 兜底成功
+        # R428: short 口径变更 —— 原 `_mb_none - _mb_net - _mb_down` 是"减法反推", 有兜底后
+        # 一票可既计腾讯失败(net/down)又获新浪成功(非 None), 相减会出负数。直接取最终无数据票数。
+        _mb_short = _mb_none
+        # R400 总失败率口径保留: 全败或任一原因失败>=20% 即 ⚠
+        _mb_warn = (_mb_none == len(_mb_syms)
+                    or _mb_none >= max(3, len(_mb_syms) // 5))
+        _mb_line = ("  月线MACD状态 %d 票(腾讯 %d / 新浪兜底 %d / 数据不足 %d; "
+                    "腾讯路径: 停用 %d 网络失败 %d) %.0fs"
+                    % (len(_mb_syms), _mb_tx, _mb_sina, _mb_short, _mb_down, _mb_net,
+                       time.time() - _t_mb))
+        if _mb_warn:
+            _mb_line += ("  ⚠ 月线键不完整 %d/%d(>20%%或全败), 未取到票记中性(名次未按月线校正)!"
+                         % (_mb_none, len(_mb_syms)))
+        print(_mb_line)
+        _m_macd_stat = {"tried": len(_mb_syms), "ok": _mb_ok, "tx": _mb_tx,
+                        "sina": _mb_sina, "short": _mb_short, "net": _mb_net,
+                        "down": _mb_down, "warn": _mb_warn}
 
     # --- 门禁 + 信号 + 行业聚合(同时攒成分) ---
     signals, universe, ind_members, ind_total, ind_qual = [], {}, {}, {}, {}
