@@ -290,7 +290,7 @@ footer{color:var(--muted);font-size:11.5px;line-height:1.8;padding:2px 2px 0}
     <tbody id="etfTb"></tbody>
   </table></div>
   <div class="cnt"><span>合计 <b id="etfTot">–</b> 亿份 · <b id="etfN">–</b> 只</span><span class="n">份额×收盘价口径 · 大额净申购为疑似国家队窗口</span></div>
-  <div class="chart" id="chE" style="height:230px;margin-top:12px"></div>
+  <div class="chart" id="chE" style="height:270px;margin-top:12px"></div>
   <div class="fnote" id="etfHint"></div>
   <div class="bt" id="btBox">
     <div class="bt-h">信号有效性回测 · 跟着 ETF 资金流加减仓到底有没有用</div>
@@ -633,6 +633,9 @@ function drawEtfChart(e){
   var ds={};
   use.forEach(function(p){(S[p.code]||[]).forEach(function(r){ds[r[0]]=1;});});
   var dates=Object.keys(ds).sort();
+  /* 年度分段: [{year,start,end}] 用于 markArea 背景带 + 时间轴首行年份 */
+  var yearBands=[];
+  (function(){var cy=null,st=null;for(var i=0;i<dates.length;i++){var y=dates[i].slice(0,4);if(y!==cy){if(cy)yearBands.push({year:cy,start:st,end:dates[i-1]});cy=y;st=dates[i];}}if(cy)yearBands.push({year:cy,start:st,end:dates[dates.length-1]});})();
   function at(p,dt){var a=S[p.code]||[];for(var i=a.length-1;i>=0;i--){if(a[i][0]===dt)return a[i];}return null;}
   var totS=dates.map(function(dt){var s=0;use.forEach(function(p){var v=at(p,dt);if(v)s+=v[1];});return +(s/1e8).toFixed(1);});
   var flow=dates.map(function(dt,i){if(!i)return 0;var f=0;use.forEach(function(p){var c=at(p,dt),p2=at(p,dates[i-1]);if(c&&p2)f+=(c[1]-p2[1])*(c[2]||0);});return +(f/1e8).toFixed(2);});
@@ -643,19 +646,22 @@ function drawEtfChart(e){
     return +s.toFixed(2);
   });
   var ech=window.echarts,chE=ech.init(document.getElementById('chE'));
-  var dzE=dates.length>8?zslider(dates.length>150?Math.round((1-150/dates.length)*100):0):[{type:'inside'}];
+  var dzE=dates.length>8?zslider():[{type:'inside'}];
   var oE={
     grid:{left:60,right:62,top:30,bottom:dates.length>8?42:26},
     tooltip:TT(function(v,i){return (i===0?v+' 亿份':(v==null?'-':v+' 亿元'));}),
     dataZoom:dzE,
     legend:{data:['全池份额','每日净申赎','5日累计'],top:2,textStyle:{color:'#55627a',fontSize:11},itemWidth:14,itemHeight:9},
-    xAxis:{type:'category',data:dates.map(function(d){return d.slice(5);}),axisLine:{lineStyle:{color:'#cbd5e1'}},axisLabel:{color:'#64748b',fontSize:11},axisTick:{show:false}},
+    xAxis:{type:'category',data:dates,axisLine:{lineStyle:{color:'#cbd5e1'}},axisLabel:{color:'#64748b',fontSize:11,formatter:function(v){return v.slice(5);}},axisTick:{show:false}},
     yAxis:[
       {type:'value',name:'亿份',nameTextStyle:{color:'#94a3b8',fontSize:11},splitLine:{lineStyle:{color:'#eef2f7'}},axisLabel:{color:'#64748b',fontSize:11}},
       {type:'value',name:'亿元',nameTextStyle:{color:'#94a3b8',fontSize:11},splitLine:{show:false},axisLabel:{color:'#64748b',fontSize:11}}
     ],
     series:[
-      {name:'全池份额',type:'line',data:totS,smooth:true,symbol:'none',lineStyle:{width:2.2,color:'#185FA5'},itemStyle:{color:'#185FA5'},areaStyle:{color:'rgba(24,95,165,.07)'},yAxisIndex:0},
+      {name:'全池份额',type:'line',data:totS,smooth:true,symbol:'none',lineStyle:{width:2.2,color:'#185FA5'},itemStyle:{color:'#185FA5'},areaStyle:{color:'rgba(24,95,165,.07)'},yAxisIndex:0,
+        markArea:{silent:true,
+        label:{show:true,position:'insideTop',distance:8,color:'#1e4d86',fontWeight:700,fontSize:12,align:'center'},
+        data:yearBands.map(function(b){return [{xAxis:b.start,itemStyle:{color:'rgba(43,108,176,.04)'},label:{formatter:b.year}},{xAxis:b.end}];})}},
       {name:'每日净申赎',type:'bar',data:flow,barWidth:'52%',yAxisIndex:1,itemStyle:{color:function(p){return p.value>=0?'#e54545':'#18a058';},borderRadius:[2,2,0,0]}},
       {name:'5日累计',type:'line',data:cum,smooth:true,symbol:'none',lineStyle:{width:2,color:'#d97706'},itemStyle:{color:'#d97706'},yAxisIndex:1}
     ]};
