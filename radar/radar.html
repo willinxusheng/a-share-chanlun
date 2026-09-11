@@ -317,6 +317,13 @@ h1{font-size:21px;font-weight:700;letter-spacing:.4px;line-height:1.3}   /* R323
    见 scan_radar._bc_tail)。与 revpool 剔票判据(收盘价, 有意避日内插针)刻意不同:
    收盘未破但盘中已刺穿时, 该票仍在池, 但结构上「一买已名存实亡」必须可见。 */
 .sigrad .srow .bkmini,.revpool .prow .bkmini{display:inline-block;font-size:9px;font-weight:700;color:#fff;background:#c92a2a;border-radius:3px;padding:0 4px;margin-right:4px;line-height:1.6;letter-spacing:.2px;white-space:nowrap;vertical-align:1px}
+/* R440: 详情页复用同款「已破」标 + 警示条 —— 原 R439 只覆盖 sigrad/revpool 两个列表,
+   而用户是**点进个股详情页**看永和股份(截图: 头部「场景 背驰见底机会」+ K线区空),
+   详情页压根没消费 bottom_bc.broken ⇒ 同样的结构失效在详情页完全不可见。
+   详情页是实操决策的落点(看K线/算R/定止损都在这里), 结构失效必须在此最醒目。 */
+.metric-strip .bkmini{display:inline-block;font-size:9px;font-weight:700;color:#fff;background:#c92a2a;border-radius:3px;padding:0 4px;margin-left:3px;line-height:1.6;letter-spacing:.2px;white-space:nowrap;vertical-align:1px}
+.bk-alert{display:block;font-size:12px;line-height:1.85;color:#7f1d1d;background:rgba(229,69,69,.07);border:1px solid rgba(229,69,69,.42);border-left:3px solid #c92a2a;border-radius:6px;padding:8px 12px}
+.bk-alert b{color:#c92a2a}
 /* R406: 月线 mTag 状态样式复用至 sigrad(sigrad.srow 新增第 5 列 56px) — 同样的月弱/月缩/月线— 三态, 底部信号雷达与逆向观察池同步不再「底部刚启」独占绿徽章误导用户截图实证场景 */
 .sigrad .srow .mtag{font-size:9.5px;font-weight:700;border:1px solid;padding:0 4px;border-radius:3px;line-height:1.55;white-space:nowrap;letter-spacing:.2px;display:inline-block}
 .sigrad .srow .mtag.mw{color:#c92a2a;background:rgba(229,69,69,.08);border-color:rgba(229,69,69,.45)}
@@ -1346,7 +1353,7 @@ function drawStkInto(el,sym){
     sliderDateTip(el,myChart,opt);   // R316: slider hover 跟随鼠标显示真实日期(drawStkInto 路径)
   }).catch(function(e){
     if(seq!==drawSeq)return;
-    el.innerHTML='<div class="err">实时行情拉取失败：'+esc(e.message)+'<br>（腾讯 fqkline 需在浏览器环境访问，file:// 可能被拦；可用 GitHub Pages / 本地 http 服务）</div>'});
+    el.innerHTML='<div class="err">实时行情拉取失败：'+esc(e.message)+'<br>（腾讯行情接口瞬时不可用或被限流，通常数分钟内自恢复 · 若用 file:// 打开本地文件，浏览器会拦截外部请求）<br><a href="javascript:location.reload()" style="display:inline-block;margin-top:7px;padding:3px 12px;border:1px solid rgba(229,69,69,.5);border-radius:5px;text-decoration:none;color:#c92a2a;font-weight:700">刷新重试</a></div>'});
 }
 /* ===== 行业成分股列表(点击切主图) ===== */
 var EXPAND_ALL=false;   // R295: 成分列表"其余组"展开全部状态(默认折叠前 50)
@@ -1513,6 +1520,13 @@ function showStk(sym){
   var s=u.st||{};var stk=SIG.filter(function(x){return x.sym===sym})[0]||null;
   location.hash="#stk/"+sym;
   var scen=s.scenario||"";
+  var _bbd=s.bottom_bc||{};   // R440: 详情页消费背驰端点(含 R439 新增 broken/broken_price/broken_date)
+  /* R440: 「已破」标的共用生成器 —— 口径同 R439 列表版: broken 取「背驰笔结束日之后」的 K 线
+     **最低价**击穿 end_price; 与 revpool 剔票的收盘价口径刻意并存(结构是否成立 / 是否移出池子)。 */
+  function _bkBadge(bbc,tipExtra){
+    if(!bbc||!bbc.broken||bbc.broken_price==null)return"";
+    return '<span class="bkmini" title="'+esc((bbc.broken_date||"")+' 盘中最低 '+bbc.broken_price+' 已击穿背驰低点 '+bbc.end_price+(tipExtra||"")+" —— 缠论口径该买点已失效(跌破买点低点=买点逻辑破坏, 需重新构筑底部结构)。看板按收盘价剔票(有意避开日内插针), 故仍显示原场景/仍在池, 两者回答的是不同问题")+'">已破</span>';
+  }
   var grp=(u.type==="ETF")?"ETF板块":(u.ind||"");
   var leadTag=u.lead?' <span class="lead-tag" title="'+(u.type==="ETF"?"场内规模最大的基金":"该行业总市值最大的龙头股")+'">👑 '+(u.type==="ETF"?"板块规模最大":"行业龙头")+'</span>':'';   // R283
   var _uff=u.ff||{};   // R283: 当日主力净流入(元)
@@ -1526,6 +1540,7 @@ function showStk(sym){
     '<span>场景 <b>'+esc(scen||"-")+'</b></span>'+
     '<span>趋势 <b>'+esc(s.trend||"-")+'</b></span>'+
     '<span>笔/中枢 <b>'+(s.bi_n||0)+'/'+(s.zs_n||0)+'</b></span>'+
+    (_bbd.end_price!=null?'<span>背驰低点 <b class="'+(_bbd.broken?"down":"")+'">'+_bbd.end_price+'</b>'+_bkBadge(_bbd)+'</span>':'')+
     '<span>自洽 <b>'+(s.agree!=null?(s.agree*100).toFixed(0)+"%":"-")+'</b></span>'+
     '<span>区间 <b>'+(s.first||"-")+'~'+(s.last||"-")+'</b></span>'+
     '<span>数据 <b>'+(s.n_bars||0)+'根</b> '+srcTag(u.src)+'</span></div>';   // R276: src 在后端 universe row 顶层(u.src), 不在 st 内 —— 原取 s.src 恒 undefined, 源徽标详情页永远"-"
@@ -1543,6 +1558,18 @@ function showStk(sym){
     banner='<div class="signals-box"><div class="gate-pill"><b>门禁：'+esc(u.gate)+'</b><br>'+esc(u.gd||"")+'　<span style="font-size:12px">(仍展示K线与结构，但不进信号区)</span></div></div>';
   }else if(scen){
     banner='<div class="signals-box"><div class="gate-pill">当前场景：<b>'+esc(scen)+'</b> · 趋势 '+esc(s.trend||"-")+'　<span style="font-size:12px">(非近端背驰信号，仅结构参考)</span></div></div>';
+  }
+  /* R440: 背驰端点已破警示 —— 无论有无近端 signals 都前置。永和股份正是「无 signals 但有 broken」
+     的第三分支票: 页面从头到尾写着「场景 背驰见底机会」却无一处提示底线已被刺穿。 */
+  if(_bbd.broken&&_bbd.broken_price!=null){
+    var _bkPct=(_bbd.end_price?((_bbd.broken_price/_bbd.end_price-1)*100):null);
+    banner='<div class="signals-box"><div class="bk-alert">'
+      +'<b>⚠️ 背驰低点已破</b> · '+esc(_bbd.broken_date||"近期")+' 盘中最低 <b>'+_bbd.broken_price+'</b> 击穿背驰低点 <b>'+_bbd.end_price+'</b>'
+      +(_bkPct!=null?'（低 '+Math.abs(_bkPct).toFixed(2)+'%）':'')
+      +' — 缠论口径该买点<b>已失效</b>：跌破一类买点低点即买点逻辑破坏，须等新的底分型 + 新背驰，或转二买/三买再评估。'
+      +'<br><span style="opacity:.85;font-size:11.5px">图上「底线」仍按原背驰低点画（结构参考位），但<b>已不可当有效支撑</b>；止损线按失效口径标红。'
+      +'看板按<b>收盘价</b>剔票（有意避开日内插针，见 revCand），故本页仍显示「'+esc(scen||"-")+'」场景 —— 两个判据回答的是不同问题（结构是否成立 / 今天要不要移出池子），不矛盾。</span>'
+      +'</div></div>'+banner;
   }
   var sgx=null;SIG.forEach(function(x){if(x.sym===sym)sgx=x});
   var sp=sgx?sgx.spark:null;
@@ -1582,7 +1609,7 @@ function loadStkChart(sym){
     sliderDateTip(el,ch,opt);   // R316: slider hover 跟随鼠标显示真实日期(loadStkChart 路径)
   }).catch(function(e){
     if(seq!==stkSeq)return;
-    var el=$("stkChart");if(el)el.innerHTML='<div class="err">实时行情拉取失败：'+esc(e.message)+'<br>（腾讯 fqkline 需在浏览器环境访问，file:// 可能被拦；可用 GitHub Pages / 本地 http 服务）</div>'});
+    var el=$("stkChart");if(el)el.innerHTML='<div class="err">实时行情拉取失败：'+esc(e.message)+'<br>（腾讯行情接口瞬时不可用或被限流，通常数分钟内自恢复 · 若用 file:// 打开本地文件，浏览器会拦截外部请求）<br><a href="javascript:location.reload()" style="display:inline-block;margin-top:7px;padding:3px 12px;border:1px solid rgba(229,69,69,.5);border-radius:5px;text-decoration:none;color:#c92a2a;font-weight:700">刷新重试</a></div>'});
 }
 function drawStkMini(sp){
   // R258 fix: spark 行=[open,high,low,close](close 在索引3, 与 st.close 对齐实测);
@@ -1982,10 +2009,19 @@ function addSlTpLine(opt,u){
   // R294: 收集所有参考线 → 按 yAxis 升序 → 奇偶左右错位 position, 解决 R293 加粗后多条标签挤在右侧重叠的问题
   // 策略: items=[{yAxis, lineColor, textColor, name, value, lineWidth?}]; 按价格排序; idx 偶=右上 insideEndTop, 奇=左上 insideStartTop
   var items=[];
+  var _brk=!!(((u||{}).st||{}).bottom_bc||{}).broken;   // R440: 盘中已刺穿底线(收盘未破) ⇒ 止损线标红, 且撤掉「入场参考」
   if(z){
-    items.push({yAxis:+z.sl.toFixed(2),lineColor:"#18a058",textColor:"#0e7d4a",name:"止损",value:z.sl});
-    items.push({yAxis:+z.en.toFixed(2),lineColor:"#1c7ed6",textColor:"#1864ab",name:"入场参考",value:z.en});
-    items.push({yAxis:+z.tp.toFixed(2),lineColor:"#e54545",textColor:"#c92a2a",name:"止盈参考",value:z.tp});
+    if(_brk){
+      /* R440: 一买已失效 ⇒ 只留「止损·已破」(标红加粗) 与「上方压力参考」。
+         撤掉「入场参考」: 它本质是「贴近底线的低吸位」(现价下方 R/2), 结构已破后按它低吸
+         = 用失效结构做入场, 比不画更危险。止盈参考(中枢上沿)仍有结构意义, 改称压力参考。 */
+      items.push({yAxis:+z.sl.toFixed(2),lineColor:"#c92a2a",textColor:"#c92a2a",name:"止损·已破",value:z.sl,lineWidth:1.6});
+      items.push({yAxis:+z.tp.toFixed(2),lineColor:"#e8590c",textColor:"#d9480f",name:"上方压力参考",value:z.tp});
+    }else{
+      items.push({yAxis:+z.sl.toFixed(2),lineColor:"#18a058",textColor:"#0e7d4a",name:"止损",value:z.sl});
+      items.push({yAxis:+z.en.toFixed(2),lineColor:"#1c7ed6",textColor:"#1864ab",name:"入场参考",value:z.en});
+      items.push({yAxis:+z.tp.toFixed(2),lineColor:"#e54545",textColor:"#c92a2a",name:"止盈参考",value:z.tp});
+    }
   }
   if(tz){
     if(tz.confirm!=null)items.push({yAxis:+tz.confirm.toFixed(2),lineColor:"#18a058",textColor:"#0e7d4a",name:"顶确认·破位离场",value:tz.confirm,lineWidth:1.4});
