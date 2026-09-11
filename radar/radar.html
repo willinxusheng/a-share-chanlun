@@ -769,13 +769,15 @@ function renderSigRadar(){
   var box=$("sigRadar");
   if(!box)return;
   var top=[],bot=[];
-  var nRes=0,nDiv=0,nNear=0,nTopDn=0,nBotCl=0,nBotLive=0;
+  var nRes=0,nDiv=0,nNear=0,nTopDn=0,nBotCl=0,nBotLive=0,nBotBk=0;   // R442: nBotBk=底信号中「盘中已击穿背驰低点」(缠论一买已废)的数量
   SIG.forEach(function(s){
     if(!s||!s.sym)return;
     var f=(UNI[s.sym]||{}).ff||{};
     var fn=f.net,t=s.dir==="top";
     if(fn!=null){if((!t&&fn>0)||(t&&fn<0))nRes++;else if((!t&&fn<0)||(t&&fn>0))nDiv++;}
     if((s.fresh!=null&&s.fresh<=5))nNear++;
+    // R442: 底信号「盘中已破」计数(透明账) — broken 只在 universe 侧有值(signals[].st 未同步 R439 补拉), 故必须读 UNI
+    if(!t){var _bbk=((UNI[s.sym]||{}).st||{}).bottom_bc;if(_bbk&&_bbk.broken)nBotBk++;}
     // R288b: 兑现速览(横截面口径, 现价相对信号位) — 顶信号已回落>3%=方向兑现; 底信号仍贴近低点(0~8%)=待启动
     // R289: 底 dv<0(已跌破背驰低点=结构失效)不计入"待启动"
     var dv=sigDev(s,s.st||{});
@@ -794,9 +796,17 @@ function renderSigRadar(){
     var la=leadOf(a),lb=leadOf(b);if(la!==lb)return lb-la;
     return (a.sym<b.sym?-1:1);
   };
+  /* R442: all(机会主区) 模式专用排序 —— 底信号「盘中已破」(击穿背驰低点 = 缠论一买已废) 全局沉底。
+     与 revpool 的 R442 决策同源同理(判据口径不同 / R441 实证盘中破与收盘破后续收益不可区分 /
+     避免插针致列表抖动), 且 R382 已有 botDz 守卫剔除 dv<0 —— broken 恰是它漏掉的那部分(收盘未破、盘中破过)。
+     实测 09-11: 底组主区 14 只中 5 只已破, 折叠态(SIG_MAIN=5)第 2 位即已破票(玲珑轮胎 fresh=4)。
+     仅 all 模式生效: res/div 是资金视角(破位+资金同向=骗线警示仍有价值), 保持原序不干预。
+     注: broken 只在 universe 侧有值(R439 补拉未同步 signals[].st), 故必须读 UNI。 */
+  var brokenOf=function(s){return !!((((UNI[s.sym]||{}).st||{}).bottom_bc||{}).broken);};
+  var byFreshBk=function(a,b){var ba=brokenOf(a)?1:0,bb2=brokenOf(b)?1:0;if(ba!==bb2)return ba-bb2;return byFresh(a,b);};
   // R381: P4 pick 返回全量(排序+模式过滤, 不再 slice 截断吞票 — 截断移到 grp 折叠态, >5 出展开按钮)
   var pick=function(arr){arr=arr.slice();if(curSigMode==="res")arr=arr.filter(gRes);else if(curSigMode==="div")arr=arr.filter(gDiv);
-    arr.sort(curSigMode==="all"?byFresh:function(a,b){return gf(b)-gf(a)||byFresh(a,b);});return arr;};
+    arr.sort(curSigMode==="all"?byFreshBk:function(a,b){return gf(b)-gf(a)||byFresh(a,b);});return arr;};
   // R380: 底信号三段制 — dz: 0=活跃(dv∈[0,8] 低吸参考区) 1=已走高>8%(慎追) 2=破位(dv<0 结构失效)
   //  P0: 破位不再混入"机会"主区(默认🔥最新 下沉灰显段, 防误买失效结构 — 东阿阿胶案例)
   //  P1: dev>8% 同沉非低吸区(追高) | 顶组无失效概念不受影响 | res/div 模式保留全量(资金视角, 破位+流入=骗线警示仍有价值)
@@ -820,7 +830,7 @@ function renderSigRadar(){
   if(!pt.length&&!pb.length&&curSigMode==="all"){box.style.display="none";return;}
   box.style.display="";
   var emptyTxt=curSigMode==="all"?"当前全市场近端暂无该类信号 · 有信号时自动上榜":(curSigMode==="res"?"当前筛选下无「资金共振」信号(底信号+净流入/顶信号+净流出) · 切回🔥最新查看全部":"当前筛选下无「资金背离」信号(底+流出/顶+流入) · 切回🔥最新查看全部");
-  var sortTxt=curSigMode==="all"?"按最新触发排序":(curSigMode==="res"?"按资金同向金额降序":"按背离资金量降序");
+  var sortTxt=curSigMode==="all"?"按最新触发排序 · 结构已破者沉底":(curSigMode==="res"?"按资金同向金额降序":"按背离资金量降序");
   function grp(ic,title,rows,subRows){
     if(!rows.length&&(!subRows||!subRows.length))return '<div class="sgrp"><div class="gtt"><span class="ic">'+ic+'</span>'+title+' <span class="n">0</span></div><div style="padding:14px 16px;font-size:11px;color:#b0b9c6;line-height:1.7">'+esc(emptyTxt)+'</div></div>';
     // R380: 非低吸区灰显段(破位/已走高) — 与"机会"主区视觉断开, 仅跟踪不作低吸参考
@@ -852,6 +862,7 @@ function renderSigRadar(){
       (nDiv?'<span>⚠️背离警示 <b style="color:#f59f00">'+nDiv+'</b></span>':'')+
       (nTopDn?'<span title="顶信号已从背驰高点回落超过3%的数量(横截面口径, 非时间序列回测)">顶信号已回落&gt;3% <b class="fd">'+nTopDn+'/'+top.length+'</b></span>':'')+
       (nBotCl&&nBotLive?'<span title="底信号现价仍贴近背驰低点(+8%以内, 尚未走高=待启动; 分母=未破位底信号数, 横截面口径)">底待启动 <b class="bb">'+nBotCl+'/'+nBotLive+'</b></span>':'')+
+      (nBotBk?'<span title="底信号中「盘中已击穿背驰低点」的数量 —— 缠论一类买点结构已失效(看板按收盘价剔票故仍在榜, 有意避开日内插针); all 模式已将其沉至底组末尾(非低吸参考), res/div 资金视角保留原序">底已破 <b class="fd">'+nBotBk+'</b></span>':'')+
       ((indTop.length&&indTop[0].n>=2)?'<span title="近5日背驰信号最密集的行业(顶+底合计) — 板块效应/资金合力提示">🎯 近端集中 <b>'+indTop.map(function(o){return o.k+' '+o.n;}).join(' · ')+'</b></span>':'')+
       (inTop?'<span>主力净流入 <b class="fn">'+esc(inTop.k)+' '+ffTxt(inTop.nf)+'</b></span>':'')+
       (inBot?'<span>净流出 <b class="fd">'+esc(inBot.k)+' '+ffTxt(inBot.nf)+'</b></span>':'')+
