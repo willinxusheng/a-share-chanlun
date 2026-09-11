@@ -311,6 +311,10 @@ h1{font-size:21px;font-weight:700;letter-spacing:.4px;line-height:1.3}   /* R323
 .sigrad .srow .mtag{font-size:9.5px;font-weight:700;border:1px solid;padding:0 4px;border-radius:3px;line-height:1.55;white-space:nowrap;letter-spacing:.2px;display:inline-block}
 .sigrad .srow .mtag.mw{color:#c92a2a;background:rgba(229,69,69,.08);border-color:rgba(229,69,69,.45)}
 .sigrad .srow .mtag.ms{color:#b45309;background:rgba(232,160,16,.08);border-color:rgba(232,160,16,.45)}
+/* R437b: 月线红柱(多头背景)原「不占位」(R383 省位设计) —— 该设计针对 revpool(全底背驰池, 红柱=最优无需标记),
+   R437 后 sigrad 已含 244 只顶背驰票, 其中 56 只 m_macd.state=red ⇒ 整列空白, 用户会误读成「仍无数据」,
+   且月红+顶背驰=「可能只是回调而非转势」恰是风险板块最需要的一档信息 ⇒ sigrad 补轻量徽章(revpool 保持原设计)。 */
+.sigrad .srow .mtag.mr{color:#087f5b;background:rgba(8,127,91,.07);border-color:rgba(8,127,91,.42)}
 .sigrad .srow .mtag.mnull{color:#64748b;background:rgba(100,116,139,.06);border:1px dashed rgba(100,116,139,.45)}
 /* R387: 背离强度(area_ratio MACD面积背离比, 越小越极端可靠 — 绿<0.5强/橙0.5-0.8中/红≥0.8弱) + 走势状态(右侧涨势回调/左侧盘整磨底, 仅标签不入排序键) */
 .revpool .prow .artag{font-weight:700;font-size:9.5px;white-space:nowrap}
@@ -703,6 +707,7 @@ function sigRow(s,opt){   // R380: opt.sub=true = 非低吸区灰显行(破位/�
   var mTag="";
   if(mm&&mm.state==="green_grow")mTag='<span class="mtag mw" title="月线MACD绿柱加长(h1='+mm.h1+'→h2='+mm.h2+', '+esc(mm.date||"")+') — 月线下跌中继, 日线底背驰仅撑反弹易夭折 · 底信号雷达同名次均按月线键参考此标">月弱</span>';
   else if(mm&&mm.state==="green_shrink")mTag='<span class="mtag ms" title="月线MACD绿柱缩短(h1='+mm.h1+'→h2='+mm.h2+', '+esc(mm.date||"")+') — 月线下跌动能衰减, 反转酝酿中">月缩</span>';
+  else if(mm&&mm.state==="red")mTag='<span class="mtag mr" title="月线MACD红柱(h1='+mm.h1+'→h2='+mm.h2+', '+esc(mm.date||"")+') — 月线多头背景(大方向向上): 顶背驰或仅为回调而非转势(风险相对低); 月红+底背驰则反弹延续概率高 · 双周期键最优档">月红</span>';
   else if(mm==null)mTag='<span class="mtag mnull" title="月线MACD 本次未取得数据 —— (R437) 月线只覆盖「底背驰个股」(revpool 排序键)与「信号个股」两条链路: ETF/北交不适用, 次新股月K<40根不足, 另腾讯 qfq 月K → 新浪日线聚合兜底两路同时不可用时亦记中性。该信号月线档中性, 名次未按月线校正, 「底部刚启」非全维度结论">月线—</span>';
   return '<div class="'+rowCls+'" title="'+esc(sigTip)+'" onclick="pickSigRad(\''+s.sym+'\')">'+
     '<div><div class="nm">'+(t?"⚠️ ":((opt.sub)?"🔍 ":"✅ "))+esc(nm)+lead+ffMini+'</div><div class="sub">'+esc(s.sym)+" · "+esc(indName)+'</div></div>'+
