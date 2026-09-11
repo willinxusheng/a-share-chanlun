@@ -313,6 +313,10 @@ h1{font-size:21px;font-weight:700;letter-spacing:.4px;line-height:1.3}   /* R323
    背景: 09-09 r11 全宇宙 m_macd=null, 但原 L898 对 null 不渲染 mTag → 「底部刚启」绿徽章独占显示误导用户
    (2-5 名票真实月线绿柱加长却无声)。null 徽章弱样式(灰字+虚线边)与强样式区分, 不抢主徽章视觉。 */
 .revpool .prow .mtag.mnull{color:#64748b;background:rgba(100,116,139,.06);border:1px dashed rgba(100,116,139,.45)}
+/* R439: 背驰端点击穿标 —— 后端 bottom_bc.broken(取背驰笔结束日**之后**的 K 线极值对比,
+   见 scan_radar._bc_tail)。与 revpool 剔票判据(收盘价, 有意避日内插针)刻意不同:
+   收盘未破但盘中已刺穿时, 该票仍在池, 但结构上「一买已名存实亡」必须可见。 */
+.sigrad .srow .bkmini,.revpool .prow .bkmini{display:inline-block;font-size:9px;font-weight:700;color:#fff;background:#c92a2a;border-radius:3px;padding:0 4px;margin-right:4px;line-height:1.6;letter-spacing:.2px;white-space:nowrap;vertical-align:1px}
 /* R406: 月线 mTag 状态样式复用至 sigrad(sigrad.srow 新增第 5 列 56px) — 同样的月弱/月缩/月线— 三态, 底部信号雷达与逆向观察池同步不再「底部刚启」独占绿徽章误导用户截图实证场景 */
 .sigrad .srow .mtag{font-size:9.5px;font-weight:700;border:1px solid;padding:0 4px;border-radius:3px;line-height:1.55;white-space:nowrap;letter-spacing:.2px;display:inline-block}
 .sigrad .srow .mtag.mw{color:#c92a2a;background:rgba(229,69,69,.08);border-color:rgba(229,69,69,.45)}
@@ -694,6 +698,13 @@ function sigRow(s,opt){   // R380: opt.sub=true = 非低吸区灰显行(破位/�
       devTip=(dev<=3?"现价贴近背驰低点(+"+a.toFixed(1)+"%)，底部刚启 · 最优低吸参考区":(dev<=8?"已较背驰低点反弹 "+a.toFixed(1)+"%，脱离底部 · 可分批低吸":"已较背驰低点走高 "+a.toFixed(1)+"%，追高风险大"));
       devSub='<span style="color:'+dzCol+';font-weight:700">'+(dev<=3?"底部刚启·低吸":(dev<=8?"已起涨·分批":"已走高·慎追"))+'</span>';}
   }
+  /* R439: 盘中击穿标 —— 后端 bottom_bc.broken 取「背驰笔结束日之后」的 K 线**最低价**对比
+     end_price。与 devSub 的收盘价口径并列: 收盘未破(dev>=0)但盘中已刺穿时, 该行仍在池,
+     但缠论口径「一买」已名存实亡, 必须可见(用户实例 sh605020: 盘中 30.03 破 30.44, 收 30.76)。 */
+  var _bbc=(u.st||{}).bottom_bc||{};
+  var bkTag=(!t&&dev!=null&&dev>=0&&_bbc.broken&&_bbc.broken_price!=null)
+    ?'<span class="bkmini" title="盘中最低 '+_bbc.broken_price+'（'+esc(_bbc.broken_date||"")+'）已击穿背驰低点 '+_bbc.end_price+' —— 缠论口径该一类买点已失效(跌破买点低点=买点逻辑破坏, 需重新构筑底部结构)。⚠️ 看板按**收盘价**剔票(有意避开日内插针, 见 revCand), 故本行仍留在池中; 两个判据回答的是不同问题(结构还成不成立 / 今天要不要移出池子), 不矛盾。破位后创新高前不宜按低吸对待">盘中已破</span>'
+    :'';
   var ff=(u.ff||{}).net;
   var indName=(u.type==="ETF"?"ETF板块":(s.ind&&s.ind!=="-"?s.ind:"-"));
   var spk=(s.spark&&s.spark.data)?s.spark.data:s.spark;
@@ -702,6 +713,7 @@ function sigRow(s,opt){   // R380: opt.sub=true = 非低吸区灰显行(破位/�
     "\n"+(s.bc_date||"")+"触发 · 距今"+(fr==null?"?":(fr===0?"当日":fr+"天"))+"\n类型 "+(s.bc_type||"-")+" · 强度"+(s.strong||0)+"/2"+(s.vol?" · 量缩确认":"")+" · 面积比"+(s.area!=null?s.area:"-")+   // R320: fresh=0 →"距今当日"(原"距今0天"误导)
     "\n所属 "+(indName||"-")+(u.lead?" · 行业龙头":"")+
     (dev!=null?"\n现价较信号位: "+devTxt+(devTip?" ("+devTip+")":""):"")+
+    (bkTag?"\n⚠️ 盘中已破: 背驰笔结束后最低 "+_bbc.broken_price+"（"+_bbc.broken_date+"）已击穿背驰低点 "+_bbc.end_price+"，该一类买点在**结构上已失效**（看板按收盘价剔票，故本行仍在池）": "")+
     (ff!=null?"\n当日主力净流入: "+ffTxt(ff):"")+
     ((ffNet!=null&&((!t&&ffNet<0)||(t&&ffNet>0)))?"\n⚠️ 资金背离警示: "+(t?"顶信号下主力仍净流入 "+ffTxt(ffNet)+"，警惕假顶/逼空":"底信号下主力却净流出 "+ffTxt(ffNet)+"，警惕假底不跟"):"")+
     "\n\n点击查看个股完整K线与结构";
@@ -727,7 +739,7 @@ function sigRow(s,opt){   // R380: opt.sub=true = 非低吸区灰显行(破位/�
     '<div class="st">'+(t?'<b style="color:#c92a2a">顶背驰</b>':'<b style="color:#087f5b">底背驰</b>')+'<span>强'+(s.strong||0)+'/'+(s.vol?"缩":"")+((s.area!=null&&s.area>0)?" 面"+s.area:"")+'</span></div>'+
     '<div class="st">'+(fr==null?"-":(fr===0?"当日":fr+"天前"))+frTag+'</div>'+
     '<div class="right">'+
-      '<div class="dev '+devCls+'" title="'+esc(devTip||sigTip)+'">'+(dev!=null?devTxt:"-")+'<small>'+devSub+'</small></div>'+
+      '<div class="dev '+devCls+'" title="'+esc(devTip||sigTip)+'">'+(dev!=null?devTxt:"-")+'<small>'+bkTag+devSub+'</small></div>'+
       '<div class="spk">'+(mTag?mTag+" ":"")+(spk&&spk.length>1?sparkSVG(spk.length>90?spk.slice(-90):spk,72,24):'<span style="color:#cbd5e1">-</span>')+'</div>'+
     '</div></div>';
 }
@@ -936,6 +948,12 @@ function revRow(c){
   var ffMini=(ffNet!=null)?'<span class="ffmini '+ffCls(ffNet)+'" title="当日主力净流入: '+ffTxt(ffNet)+'">'+ffTxt(ffNet)+'</span>':'';
   var amtTxt=(st.avg_amt60!=null?(st.avg_amt60>=1e4?(st.avg_amt60/1e4).toFixed(1)+"亿":st.avg_amt60.toFixed(0)+"万"):"-");   // avg_amt60=万元
   var ddCls=c.dd<=-0.5?"down":"";
+  /* R439: 盘中击穿标 —— 后端 bottom_bc.broken 按「背驰笔结束日之后」的 K 线**最低价**判定。
+     本池剔票用**收盘价**(revCand: close<endP 才剔, 有意避开日内插针), 故收盘未破但盘中
+     已刺穿者仍留在池中 —— 两个判据回答不同问题(结构是否成立 / 是否移出池子), 必须并列可见。 */
+  var bkTag=(bb.broken&&bb.broken_price!=null)
+    ?'<span class="bkmini" title="盘中最低 '+bb.broken_price+'（'+esc(bb.broken_date||"")+'）已击穿背驰低点 '+bb.end_price+' —— 缠论口径该一类买点已失效，需重新构筑底部结构；看板按收盘价剔票故本票仍在池中">已破</span>'
+    :'';
   var fdTxt=bb.bi_date_end+" 触发";
   var bcTag=bb.bc_type?('<span style="color:#94a3b8">'+esc(String(bb.bc_type))+'</span>'):'';
   // -- R317: 距背低点五档分级(旭总要实操准确性; devTag 定义见上)
@@ -984,6 +1002,7 @@ function revRow(c){
     "\n距历史高回撤 "+Math.abs(c.dd*100).toFixed(1)+"% (深跌)"+
     "\n背驰低点参考: "+bb.end_price+" · 现价距低点 "+(c.dev>=0?"+":"")+c.dev.toFixed(1)+"% · "+dt.tip+arTipL+trTipL+
     (riskPct!=null?"\n止损参考: 跌破 "+bb.end_price+" 即结构失效 (较现价再跌约 "+riskPct.toFixed(1)+"%)":"")+
+    (bkTag?"\n⚠️ 盘中已破: 背驰笔结束后最低 "+bb.broken_price+"（"+bb.broken_date+"）已刺穿背驰低点 "+bb.end_price+" —— 缠论口径一买已失效（本池按收盘价剔票，故仍在本池）":"")+
     (mm&&mm.state?"\n月线MACD("+(mm.date||"-")+", 双周期键): "+(mm.state==="red"?"红柱 "+mm.h2+" — 月线多头, 反弹延续概率高":mm.state==="green_shrink"?"绿柱缩短 "+mm.h1+"→"+mm.h2+" — 下跌动能衰减":"绿柱加长 "+mm.h1+"→"+mm.h2+" — 月线下跌中继, 反弹易夭折")+
     (mm&&mm.state==="green_grow"?" · 名次已沉同档尾":""):(mm?"\n月线MACD: 无数据(次新/月K不可得) — 中性档":""))+
     "\n60日均成交: "+amtTxt+
@@ -994,7 +1013,7 @@ function revRow(c){
     '<div><div class="nm">'+esc(nm)+pickStar+lead+ffMini+gtag+'</div><div class="sub">'+trTag+esc(c.sym)+" · "+esc(indName)+' · '+esc(st.one_word||"-")+arTag+'</div></div>'+
     '<div><div class="big '+ddCls+'">'+(c.dd*100).toFixed(1)+'%</div><div class="small">距历史高</div></div>'+
     '<div><div class="big">'+esc(st.close!=null?st.close:"-")+'</div><div class="small '+(st.chg1d>0?"up":(st.chg1d<0?"down":""))+'">'+pct(st.chg1d,2)+'</div></div>'+
-    '<div><div class="big" style="font-size:11.5px">'+(endP!=null?endP.toFixed(2):"-")+'</div><div class="small" style="font-size:10px">底线 · 止损参考</div></div>'+
+    '<div><div class="big" style="font-size:11.5px">'+(endP!=null?endP.toFixed(2):"-")+bkTag+'</div><div class="small" style="font-size:10px">'+(bkTag?"底线 · 盘中已破":"底线 · 止损参考")+'</div></div>'+
     '<div><div class="big" style="font-size:12px">'+amtTxt+'</div><div class="small">60日均额</div></div>'+
     '<div><div class="big" style="font-size:11px;color:#94a3b8">'+esc(fdTxt)+'</div><div class="small">'+c.fd+"天前 · "+bcTag+'</div></div>'+
     '<div><div class="devv">'+(c.dev>=0?"+":"")+c.dev.toFixed(1)+'% <span class="dtlbl" style="'+dtStyle+'" title="'+esc(dt.tip)+'">'+dt.lbl+'</span>'+confDot+mTag+'</div><div class="small">距背低点</div></div>'+

@@ -897,9 +897,14 @@ def _should_weekend_skip(asof, today, mkt_last="__auto__"):
     return False
 
 
-def _bc_tail(bc, bis, btype, n_last=10):
+def _bc_tail(bc, bis, btype, n_last=10, ks=None):
     """近 n_last 笔内的 type 背驰(正序最后一条), 返回 {bi_date_end, end_price, area_ratio,
-    bc_type, vol_confirm, fresh_days} 或 None"""
+    bc_type, vol_confirm, fresh_days} 或 None。
+    R439: 传 ks 时额外判「背驰端点已被击穿」—— 取背驰笔结束日**之后**的 K 线极值对比
+    end_price(bottom 比 low / top 比 high); 破则附 broken/broken_price/broken_date。
+    ⚠️ 此判据用**极值**而非收盘价, 与 revpool 的剔票判据(收盘价, 有意避开日内插针)
+    刻意不同: 前者回答「结构还成不成立」, 后者回答「今天要不要把它移出池子」——
+    两个口径必然会在「盘中刺破但收盘收回」时给出相反答案(sh605020 09-11 实证)。"""
     cands = [x for x in bc if x["type"] == btype]
     if not cands:
         return None
@@ -913,10 +918,27 @@ def _bc_tail(bc, bis, btype, n_last=10):
     fresh = _days_ago(bi["date_end"])
     if fresh > FRESH_MAX_DAYS * 4:         # 背驰发生在很久前(非当下信号)
         return None
-    return {"bi_date_end": bi["date_end"], "end_price": round(bi["end_price"], 3),
-            "area_ratio": round(x.get("area_ratio", -1), 3),
-            "bc_type": x.get("bc_type", ""), "vol_confirm": bool(x.get("vol_confirm")),
-            "fresh_days": fresh}
+    out = {"bi_date_end": bi["date_end"], "end_price": round(bi["end_price"], 3),
+           "area_ratio": round(x.get("area_ratio", -1), 3),
+           "bc_type": x.get("bc_type", ""), "vol_confirm": bool(x.get("vol_confirm")),
+           "fresh_days": fresh}
+    if ks:
+        d = bi["date_end"]
+        after = [k for k in ks if k["date"] > d]
+        if after:
+            if btype == "bottom":
+                k0 = min(after, key=lambda k: k["low"])
+                if k0["low"] < bi["end_price"]:
+                    out["broken"] = True
+                    out["broken_price"] = round(k0["low"], 3)
+                    out["broken_date"] = k0["date"]
+            else:
+                k0 = max(after, key=lambda k: k["high"])
+                if k0["high"] > bi["end_price"]:
+                    out["broken"] = True
+                    out["broken_price"] = round(k0["high"], 3)
+                    out["broken_date"] = k0["date"]
+    return out
 
 
 _KS_MIN_BARS = 30    # R271: 净化绝对底线(防字段错乱/空壳) —— 次新30~120根仍进分析, 由门禁"次新"剔除展示
@@ -1000,8 +1022,8 @@ def analyze_one(sym, ks):
         zs_last = ({"zd": round(zss[-1]["zd"], 2), "zg": round(zss[-1]["zg"], 2),
                     "date_end": zss[-1]["date_end"]} if zss else None)
         scenario = cls.get("scenario", "")
-        bottom = _bc_tail(bc, bis, "bottom")
-        top = _bc_tail(bc, bis, "top")
+        bottom = _bc_tail(bc, bis, "bottom", ks=ks)
+        top = _bc_tail(bc, bis, "top", ks=ks)
         st = {
             "n_bars": n, "first": d0, "last": d1, "span_days": span_days,
             "close": round(last["close"], 3), "chg1d": round(last["close"] / closes[-2] - 1, 4) if n >= 2 else 0,
@@ -1705,7 +1727,14 @@ def main():
         "title": "A股全市场缠论雷达",
         "asof": asof, "build_time": datetime.datetime.now(
             datetime.timezone(datetime.timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S"),
-        "version": "P3b-r15",   # r15=R438: 月线空值分因 —— 新增 st.m_macd_bars(月K不足时的实际根数),
+        "version": "P3b-r16",   # r16=R439: 背驰端点击穿标记 —— _bc_tail 加 ks 入参, 取背驰笔结束日
+                                #     **之后**的极值对比 end_price(bottom 比 low / top 比 high),
+                                #     破则附 broken/broken_price/broken_date。前端「底线」列加「已破」
+                                #     红标 + tooltip。⚠️ 判据用**极值**, 与 revpool 剔票判据(收盘价,
+                                #     有意避日内插针)**刻意不同** —— 反例 sh605020 09-11: 盘中最低
+                                #     30.03 击穿 08-25 背驰低点 30.44, 收盘 30.76 收回 ⇒ 看板口径
+                                #     仍在池、缠论口径一买已失效。两个问题不同, 故两个判据并存。
+                                # r15=R438: 月线空值分因 —— 新增 st.m_macd_bars(月K不足时的实际根数),
                                 #     前端灰徽章由「月线—」改「月K不足 n 根」(无根数=两源真取不到,
                                 #     仍显「月线—」)。判定门槛 40 根**未改**(收敛实验证边界票不可靠)。
                                 #     承用户第四次反馈「月线不齐全」—— 深查确认取数链路零缺口(416 只有键
