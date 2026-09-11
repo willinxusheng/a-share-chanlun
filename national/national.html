@@ -342,7 +342,7 @@ footer{color:var(--muted);font-size:11.5px;line-height:1.8;padding:2px 2px 0}
       <span class="chip"><i>最新报告期</i><b id="metaRp">-</b></span>
       <span class="chip" id="chipLag"><i>数据滞后</i><b id="metaLag">-</b></span>
       <span class="chip" id="chipWin"><i>披露窗口</i><b id="metaWin">-</b></span>
-      <span class="chip" title="与主看板同一条调度链：北京时间 16:00 起每 30 分钟一轮、共 12 轮（cron-job.org 外部定时 → 云端 CI 自动刷新并发布）。非披露窗口数据无变化时不重复写盘。"><i>自动刷新</i><b>盘后 16:00 起 · 每 30 分钟</b></span>
+      <span class="chip" title="与主看板同一条调度链：北京时间 16:00 起每 30 分钟一轮、共 12 轮（cron-job.org 外部定时 → 云端 CI 自动刷新并发布），另有每 4 小时的云端定时轮询（覆盖上午时段）。ETF 日度快照按交易所披露节奏补齐 —— 份额源自带权威数据日期（STAT_DATE），一经披露即写入，故盘中看到上一期属正常。非披露窗口数据无变化时不重复写盘。"><i>自动刷新</i><b>盘后每 30 分钟 · 全天另有轮询</b></span>
       <span class="chip"><i>数据版本</i><b id="metaVer">-</b></span>
     </div>
   </div>
@@ -453,7 +453,7 @@ footer{color:var(--muted);font-size:11.5px;line-height:1.8;padding:2px 2px 0}
 <div class="disc"><b>口径提示：</b>本页仅覆盖核心重仓池（金融 / 中字头 / 大市值蓝筹，非全市场），个股持股为定期报告前十大流通股东口径，非十大股东者可未显示；国家 ETF 通道持仓另计、未含在此。"社保/养老"含全国社会保障基金理事会与社保基金/基本养老保险组合。</div>
 <footer>
   数据来源：东方财富 datacenter（RPT_F10_EH_FREEHOLDERS 上市公司定期报告·前十大流通股东），季度披露天然滞后 1~2 个月，最新数据为最近已披露报告期快照；ETF 通道份额源为<b>上交所官方每日 ETF 份额披露</b>（沪市，按交易所 STAT_DATE 锚定、可回溯）/ 东财 push2（深市逐日累积）/ 天天基金定期报告（季度长史）。
-  <b>更新节奏</b>：与主看板共用同一条调度链 —— 北京时间 16:00 起每 30 分钟自动刷新一轮（共 12 轮），季度持仓、披露进度与 ETF 日度快照均随之更新；数据无实质变化时不重复写盘，故「数据更新」时刻保持不变属正常。
+  <b>更新节奏</b>：与主看板共用同一条调度链 —— 北京时间 16:00 起每 30 分钟自动刷新一轮（共 12 轮），另有每 4 小时的云端定时轮询（覆盖上午时段），季度持仓、披露进度与 ETF 日度快照均随之更新。ETF 日度快照按交易所披露节奏补齐：份额源自带权威数据日期（STAT_DATE），一经披露即写入（实测多为 T+1 上午~中午），因此盘中看到的仍是上一期属正常；数据无实质变化时不重复写盘。
   本页为数据展示，不构成投资建议。
 </footer>
 </div>
@@ -765,7 +765,7 @@ function drawEtfFresh(e){
   var h='<span class="dot"></span><span>数据日期（交易所最新已披露交易日）<b>'+esc(dd)+'</b>'+
         '<span class="sep"> · </span>'+lagTxt+'</span>'+
         '<span class="sep"> · </span>'+
-        '<span>下一交易日 <b>'+esc(nx)+'</b> 份额尚未披露，交易所披露后本页自动补齐（盘后每 30 分钟重试）</span>';
+        '<span>下一交易日 <b>'+esc(nx)+'</b> 份额尚未披露，交易所披露后本页自动补齐（系统全天轮询，实测多为次日上午到位）</span>';
   if(stale)h+='<span class="nx">⚠ 已 '+gap+' 个自然日未前进，可能是交易所停更 / 假期，或数据源异常 —— 下一轮自动重试，无需人工干预</span>';
   el.innerHTML=h;
 }

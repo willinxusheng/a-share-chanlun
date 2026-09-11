@@ -300,13 +300,24 @@ def refresh_quarter(data):
 def daily(force=False):
     """常规日更: 探测官方最新数据日期, 幂等落盘。
 
-    force=True 绕过 G5 时段守卫 (仅供本地补数/验证, CI 不传)。
+    force=True 绕过 G5 深市时段守卫 (仅供本地补数/验证, CI 不传)。
     """
     hhmm = bj_now().strftime("%H%M")
-    # ---- G5 时段守卫: 北京 15:00 前一律 no-op (官方数据盘后才发布) ----
-    if not force and hhmm < "1500":
-        print("[skip] 当前北京时间 %s 非盘后时段 (<15:00), 本轮不写盘 (G5)" % hhmm)
-        return 0
+    # ---- G5 时段守卫 (R434 重构: 由「整轮 no-op」改为「仅拦深市」) ----
+    # 旧语义: 北京 15:00 前**整轮 return 0**。理由当时写的是「官方数据盘后才发布」,
+    #   但该理由经实测不成立 —— 上交所逐日份额实为 **T+1 上午~中午**发布
+    #   (09-10 份额 09-11 12:09 已可得; 09-10 21:30 尚不可得)。
+    #   副作用: 沪市份额自带权威数据日期 (SSE STAT_DATE), 拿到即可安全落盘, 却被
+    #   这道墙连着一起拦住 ⇒ 调度窗口从 16:00 起 + 数据 T+1 才发布 = 看板最长滞后
+    #   T+2 个交易日; 用户 3 次误判「看板又没更新」(R430 已加新鲜度条仍未根治)。
+    # 新语义: **沪市任意时刻可写**(日期锚定官方 STAT_DATE, 无陈旧/无错戳风险),
+    #   深市仍限 >=15:00 —— 深市取东财 push2 f84「实时快照」(不带日期), 盘中该值
+    #   随申赎实时变动, 早写会把盘中值打上前一交易日的戳 (R425 记录的
+    #   「日期戳跨市场耦合」风险)。深市这 3 只不计入合计/图表/回测, 提前写无收益。
+    allow_sz = force or hhmm >= "1500"
+    if not allow_sz:
+        print("[info] 北京 %s < 15:00: 本轮仅写沪市(官方 STAT_DATE 锚定), 深市跳过 (G5)"
+              % hhmm)
 
     data = _load()
     series = data.setdefault("series", {})
@@ -326,6 +337,8 @@ def daily(force=False):
 
     need = []
     for sid, code, mk, name in POOL:
+        if mk != "sh" and not allow_sz:
+            continue          # G5: 15:00 前不写深市(东财实时快照, 防盘中值错戳)
         arr = series.get(code) or []
         if not arr or arr[-1][0] < dd:
             need.append((sid, code, mk, name))
@@ -334,9 +347,9 @@ def daily(force=False):
         return 0
     print("需更新 %d 只: %s" % (len(need), ", ".join(c for _, c, _, _ in need)))
 
-    # ---- 收盘价 (仅在有新数据时才拉) ----
+    # ---- 收盘价 (仅拉需要写的 code, 减少新浪请求压力) ----
     px = {}
-    for sid, code, mk, name in POOL:
+    for sid, code, mk, name in need:
         px[code] = fetch_sina_close(code, mk, n=60)
         time.sleep(0.15)
 
@@ -396,6 +409,8 @@ def daily(force=False):
     m["latest"] = dd
     m["data_date"] = dd
     m["updated_at"] = _utcnow()
+    m["version"] = "e2"
+    m["g5"] = "sh-anytime,sz>=1500"
     m["source"] = ("沪市=上交所官方 ETF 份额(万份) + 新浪收盘价; "
                    "深市=东财 push2 逐日累积")
     if q_latest:
