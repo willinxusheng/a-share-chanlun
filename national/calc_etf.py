@@ -180,6 +180,11 @@ def fetch_em(sid, tries=6):
                 return {"shr": shr, "nav": nav, "mkt": mkt}
         except Exception:
             time.sleep(0.8 + k * 0.5)
+            continue
+        # (R436) 拿到响应却没有 f84 时, 原写法**不退避**直接进下一轮 → 6 次瞬发连打,
+        # 反而更容易被 WAF 限流。实测 2026-09-11 16:00 那轮 159915 / 159949 双双
+        # [miss] 东财拉取失败(同一轮 159919 成功), 本机重试 15 次×3 只亦全败。
+        time.sleep(0.6 + k * 0.5)
     return None
 
 
@@ -354,6 +359,7 @@ def daily(force=False):
         time.sleep(0.15)
 
     written = 0
+    sz_missed = {}      # (R436) 深市本轮未写成功者 {code: 数据日期} —— 落痕用
     for sid, code, mk, name in need:
         arr = series.setdefault(code, [])
         x = None
@@ -366,6 +372,7 @@ def daily(force=False):
             x = fetch_em(sid)
             if not x:
                 print("  [miss] %s 东财拉取失败" % code)
+                sz_missed[code] = dd
                 continue
             v = x["shr"]
 
@@ -384,10 +391,15 @@ def daily(force=False):
         # (R421 修复) 旧写法用 `or 0.0` 兜底 → 新浪日K 未更新/限流时会把
         # nav=0, mkt=0 写进 series; 该日净申赎金额恒为 0 且被数据日期幂等
         # **永久锁死**(G1 认为已记录, 再也不会用正确价格重算) → 静默低估资金流。
-        p = px.get(code, {}).get(dd) or (x["nav"] if x else 0.0)
+        # (R436) 只认**带日期的**收盘价。旧写法缺当日收盘时回退 x["nav"] —— 那是东财
+        # **实时快照**(不带日期), 拿它去填一条带历史日期的记录, 日期戳与值不匹配,
+        # 与 R425 记录的「跨市场日期戳耦合」是同一类错。两个市场统一: 缺则本轮跳过。
+        p = px.get(code, {}).get(dd) or 0.0
         if not p or p <= 0:
             print("  [skip-price] %s %s 缺 %s 收盘价(新浪日K 未更新?), 本轮跳过待下轮"
                   % (code, name, dd))
+            if mk != "sh":
+                sz_missed[code] = dd
             continue
         arr.append([dd, v, round(p, 6), round(v * p, 2)])
         written += 1
@@ -400,6 +412,14 @@ def daily(force=False):
             print("  [WARN G3] %s 环比 %+.1f%% (>%d%%, 疑拆份额/折算)"
                   % (code, (v - prev) / prev * 100, int(CHG_WARN * 100)))
 
+    # (R436) 深市未写成功必须**显式留痕**: 否则 meta.data_date 已推进而 series 里
+    # 深市仍停在旧日期, 表现为「同一个产物内部日期不一致」却无任何告警。实测
+    # 2026-09-11 16:00 那轮即如此(沪市 7 只到 09-10, 深市 2 只停在 09-09)。
+    if sz_missed:
+        print("  [WARN R436] 深市 %d 只本轮未写成功: %s (目标数据日期 %s) —— "
+              "东财快照不带数据日期, 不做跨日补写; 下轮继续重试"
+              % (len(sz_missed), ", ".join(sorted(sz_missed)), dd))
+
     if not written:
         print("[skip] 无可写数据, 不写盘 (G4)")
         return 0
@@ -409,8 +429,9 @@ def daily(force=False):
     m["latest"] = dd
     m["data_date"] = dd
     m["updated_at"] = _utcnow()
-    m["version"] = "e2"
+    m["version"] = "e3"
     m["g5"] = "sh-anytime,sz>=1500"
+    m["sz_miss"] = sz_missed
     m["source"] = ("沪市=上交所官方 ETF 份额(万份) + 新浪收盘价; "
                    "深市=东财 push2 逐日累积")
     if q_latest:
