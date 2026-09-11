@@ -1426,13 +1426,19 @@ def main():
     # --- R383: 底背驰个股月线 MACD 状态(双周期排序键: 逆向观察池/实操信号雷达共用) ---
     # 凡有 bottom_bc 的个股补拉腾讯 qfq 月K(自然月) → st.m_macd={state,h1,h2,date}。
     # 前端 revpool pick 键链按 state 插档(red>green_shrink>无数据>green_grow沉同档尾);
-    # 取不到月线的票(非 _mb_syms: ETF/北交/无底背驰) st 里不含 m_macd 键 —— 前端用
+    # 取不到月线的票(非 _mb_syms) st 里不含 m_macd 键 —— 前端用
     # `mm==null` 宽松比较, undefined 同样命中 -> 渲染「月线—」中性徽章, 语义等价。
     # R428 更正: 旧注释写"st[\"m_macd\"]=null"不准确, 实际是键缺失(仅 _mb_syms 被赋值);
     # 不统一补 None 是为避免 6600+ 票各增一条键造成 radar.json 无谓膨胀。
+    # R437c: 去掉北交排除 —— 实测 revpool 全量 82 只成员含 **6 只北交**
+    #   (bj920719/920578/920405/920207/920189/920056), 它们既不在 signals(第二阶段
+    #   覆盖不到)、又被此处排除 ⇒ 月线列整列「月线—」, 是用户「月线不全」的另一处缺口;
+    #   北交月线实测可得(sina 聚合 56~69 根)。
+    #   **ETF 排除刻意保留**: 前端 revCand 首行即 `if(v.type==="ETF")return null;`
+    #   ⇒ ETF 永不进逆向观察池, 补拉无任何展示收益, 反增 49 次请求。而 signals 里的
+    #   ETF 由第二阶段(sigrad 会显示)覆盖, 不依赖此处。
     _mb_syms = [s for s, st in sts.items()
                 if st.get("scenario") == "背驰见底机会" and st.get("bottom_bc")
-                and not s.startswith("bj")
                 and uni.get(s, {}).get("type") not in ("ETF",)]
     _m_macd_stat = None   # R400: 月线补拉统计(meta.m_macd 落痕; None=无底背驰票不补拉)
     if _mb_syms:
