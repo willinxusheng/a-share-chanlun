@@ -714,7 +714,14 @@ function sigRow(s,opt){   // R380: opt.sub=true = 非低吸区灰显行(破位/�
   if(mm&&mm.state==="green_grow")mTag='<span class="mtag mw" title="月线MACD绿柱加长(h1='+mm.h1+'→h2='+mm.h2+', '+esc(mm.date||"")+') — 月线下跌中继, 日线底背驰仅撑反弹易夭折 · 底信号雷达同名次均按月线键参考此标">月弱</span>';
   else if(mm&&mm.state==="green_shrink")mTag='<span class="mtag ms" title="月线MACD绿柱缩短(h1='+mm.h1+'→h2='+mm.h2+', '+esc(mm.date||"")+') — 月线下跌动能衰减, 反转酝酿中">月缩</span>';
   else if(mm&&mm.state==="red")mTag='<span class="mtag mr" title="月线MACD红柱(h1='+mm.h1+'→h2='+mm.h2+', '+esc(mm.date||"")+') — 月线多头背景(大方向向上): 顶背驰或仅为回调而非转势(风险相对低); 月红+底背驰则反弹延续概率高 · 双周期键最优档">月红</span>';
-  else if(mm==null)mTag='<span class="mtag mnull" title="月线MACD 本次未取得数据 —— (R437c) 月线覆盖「底背驰个股」(revpool 排序键)与「信号个股」两条链路(个股 + ETF/北交均含): 仅「上市不足 40 个月」者月K<40根不足(次新股 / 新发 ETF), 另腾讯 qfq 月K → 新浪日线聚合兜底两路同时不可用时亦记中性。该信号月线档中性, 名次未按月线校正, 「底部刚启」非全维度结论">月线—</span>';
+  /* R438: 空值分因 —— 带 m_macd_bars = 月K数据在、只是不足判定门槛(上市不满 40 个月);
+     不带 = 腾讯 qfq 月K / 新浪日线聚合两路真取不到。原「月线—」把两因混成同一个灰徽章,
+     而 sigrad 顶背驰组**折叠态第 2 行**即命中(563020) ⇒ 默认视野的空白必然被读作"数据缺失",
+     是"月线不齐全"反馈反复出现的直接原因(深查证明取数链路零缺口)。 */
+  else if(mm==null){var _mab=+((u.st||{}).m_macd_bars||0);
+    mTag=_mab
+      ?'<span class="mtag mnull" title="月线MACD 数据在但月K不足 —— 该票上市约 '+_mab+' 个月, 未达判定门槛 40 根(按 MACD 26+9 EMA 收敛所需), 故月线档记中性、名次未按月线校正 · 非取数失败">月K不足 '+_mab+'</span>'
+      :'<span class="mtag mnull" title="月线MACD 本次未取得数据 —— 腾讯 qfq 月K 与 新浪日线聚合两路均失败或完全无月K, 属真取不到。该信号月线档中性, 名次未按月线校正, 「底部刚启」非全维度结论">月线—</span>';}
   return '<div class="'+rowCls+'" title="'+esc(sigTip)+'" onclick="pickSigRad(\''+s.sym+'\')">'+
     '<div><div class="nm">'+(t?"⚠️ ":((opt.sub)?"🔍 ":"✅ "))+esc(nm)+lead+ffMini+'</div><div class="sub">'+esc(s.sym)+" · "+esc(indName)+'</div></div>'+
     '<div class="st">'+(t?'<b style="color:#c92a2a">顶背驰</b>':'<b style="color:#087f5b">底背驰</b>')+'<span>强'+(s.strong||0)+'/'+(s.vol?"缩":"")+((s.area!=null&&s.area>0)?" 面"+s.area:"")+'</span></div>'+
@@ -946,7 +953,11 @@ function revRow(c){
      红柱出空串 = 整列空白 —— 与表头说明「月红柱=多头背景」自相矛盾, 用户读作「月线不全」。
      且 revpool 表头本就写明红柱含义, 说明设计意图是**要显示**的, 省位属实现遗漏。 */
   else if(mm&&mm.state==="red")mTag='<span class="mtag mr" title="月线MACD红柱(h1='+mm.h1+'→h2='+mm.h2+', '+esc(mm.date||"")+') — 月线多头背景(大方向向上): 日线级底背驰落在月线红柱中, 反弹延续概率高 · 双周期键最优档(名次已按月线校正前置)">月红</span>';
-  else if(mm==null)mTag='<span class="mtag mnull" title="月线MACD 本次未取得数据 —— (R437c) 本池为「底背驰个股」(revpool 排序键), 月线已按 40 个月门槛补拉: 仅「上市不足 40 个月」者月K不足(次新股 / 新发 ETF), 另腾讯 qfq 月K → 新浪日线聚合兜底两路同时不可用时亦记中性。该票月线档中性, 名次未按月线校正, 「底部刚启」绿徽章独占非全维度结论">月线—</span>';
+  /* R438: 与 sigrad 同款空值分因(带根数=上市不足 / 不带=两路真取不到)。 */
+  else if(mm==null){var _mab=+((c.st||{}).m_macd_bars||0);
+    mTag=_mab
+      ?'<span class="mtag mnull" title="月线MACD 数据在但月K不足 —— 该票上市约 '+_mab+' 个月, 未达判定门槛 40 根(按 MACD 26+9 EMA 收敛所需), 故该票月线档记中性、名次未按月线校正 · 非取数失败">月K不足 '+_mab+'</span>'
+      :'<span class="mtag mnull" title="月线MACD 本次未取得数据 —— 腾讯 qfq 月K 与 新浪日线聚合两路均失败或完全无月K, 属真取不到。该票月线档中性, 名次未按月线校正, 「底部刚启」绿徽章独占非全维度结论">月线—</span>';}
   // -- R387: 背离强度(area_ratio MACD面积背离比: 越小=下跌动能衰竭越彻底, 底越可靠) + 走势状态(trend: 右/左侧标签, 不入排序键)
   var arv=+(bb.area_ratio), arTag="", arWord="", arTip="", arTipL="";
   if(bb.area_ratio!=null&&bb.area_ratio!==""&&!isNaN(arv)){

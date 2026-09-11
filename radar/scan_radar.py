@@ -449,6 +449,16 @@ _mb_net_fail = {"n": 0}
 _mb_down_fail = {"n": 0}
 # R428: 月线新浪聚合兜底成功计数 —— 腾讯月K不可得时用新浪日线聚自然月顶上。
 _mb_sina_ok = {"n": 0}
+# R438: 「不足判定门槛(<40 根)」时的实际月K根数 —— 供前端灰徽章区分两类空值:
+#   有键且有根数 = 上市不足 40 个月(数据在、只是太短) → 徽章「月K不足」+ tooltip 根数
+#   无键         = 腾讯/新浪两路均失败或完全无月K      → 徽章「月线—」(真取不到)
+# 背景: 用户 09-11 第四次反馈「月线不齐全」, 深查证实取数链路零缺口 —— 26 只空值票
+# 两源独立重拉月K **全部 <40 根**(39×2/38/37/36/35/34/33/27/26/22/21/20×2/19/18/17/16×2/
+# 15/14/13×2/11/9/3), 且 sigrad 顶背驰组默认折叠态**第 2 行**即命中(563020) ⇒
+# 默认视野出现空白必然被读作"数据缺失"。本次**不动判定门槛** —— 收敛实验(16 只 69 根
+# 样本做截断对照)显示 40 根时 h2 相对全史中位偏差 0.062/最大 0.477、state 一致率 94%,
+# 边界票 君逸数码 h2=0.047 / 石油ETF国泰 0.033 属掷硬币, 必须继续排除。
+_mb_bars = {}
 
 
 def _macd_month_state(pairs):
@@ -578,7 +588,18 @@ def _month_macd(sym):
     if res is not None:
         res["src"] = "sina"
         _mb_sina_ok["n"] += 1
-    return res
+        return res
+    # R438: 两路都判不出状态 —— 若其中一路确实拿到了月K, 记根数供前端区分
+    # 「上市不足 40 个月」与「真取不到」; 两路皆空则不留键 ⇒ 前端仍显「月线—」。
+    # ⚠️ 根数取「判定所依据的那个源」: 北交 920 段腾讯恒回 **1 根假数据**(日线主链早有
+    # `tx_skip_bj` 短路, 此处自解析路径无守卫), 故 tx 根数 <=1 时改用新浪根数, 否则
+    # 北交票会显示成「月K不足 1」(实际 sina 聚合有 3~14 根)。
+    _tx_n = len(pairs) if pairs else 0
+    _sp_n = len(sp) if sp else 0
+    _nb = _tx_n if _tx_n > 1 else _sp_n
+    if _nb:
+        _mb_bars[sym] = _nb
+    return None
 
 
 # ================= 2b. 当日主力资金流(东财 ulist 批量) =================
@@ -1470,6 +1491,8 @@ def main():
             _mb_res = list(_mb_ex.map(_month_macd, _mb_syms))
         for s, mm in zip(_mb_syms, _mb_res):
             sts[s]["m_macd"] = mm
+            if mm is None and _mb_bars.get(s):      # R438: 供前端灰徽章显「月K不足 n 根」
+                sts[s]["m_macd_bars"] = _mb_bars[s]
         _mb_net = _mb_net_fail["n"] - _mb_f0
         _mb_down = _mb_down_fail["n"] - _mb_d0
         _mb_sina = _mb_sina_ok["n"] - _mb_s0
@@ -1564,6 +1587,8 @@ def main():
         _mb2_ok = 0
         for _s2, _mm2 in zip(_mb2_syms, _mb2_res):
             sts[_s2]["m_macd"] = _mm2     # 与第一阶段同款: 取不到也写 None(键存在=已尝试过)
+            if _mm2 is None and _mb_bars.get(_s2):    # R438: 同上
+                sts[_s2]["m_macd_bars"] = _mb_bars[_s2]
             if _mm2 is not None:
                 _mb2_ok += 1
         _mb2_sina = _mb_sina_ok["n"] - _b2_s0
@@ -1680,7 +1705,12 @@ def main():
         "title": "A股全市场缠论雷达",
         "asof": asof, "build_time": datetime.datetime.now(
             datetime.timezone(datetime.timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S"),
-        "version": "P3b-r14",   # r14=R437c: 第二阶段补拉放开 ETF/北交(signals 内 17 只, 实测 8 只可得,
+        "version": "P3b-r15",   # r15=R438: 月线空值分因 —— 新增 st.m_macd_bars(月K不足时的实际根数),
+                                #     前端灰徽章由「月线—」改「月K不足 n 根」(无根数=两源真取不到,
+                                #     仍显「月线—」)。判定门槛 40 根**未改**(收敛实验证边界票不可靠)。
+                                #     承用户第四次反馈「月线不齐全」—— 深查确认取数链路零缺口(416 只有键
+                                #     =补拉池 171 ∪ signals 276), 26 只空值票两源重拉月K 全部 <40 根。
+                                # r14=R437c: 第二阶段补拉放开 ETF/北交(signals 内 17 只, 实测 8 只可得,
                                 #     老 ETF 月线此前被筛选白挡) + 前端 revpool 补「月红」徽章(修 R383「红柱
                                 #     省位」致月线列整列空白, 与表头文案「月红柱=多头背景」自相矛盾)。
                                 # r13=R437: 月线补拉加第二阶段「信号个股」(顶背驰风险票可见月线) +
