@@ -1533,6 +1533,41 @@ def main():
         sig["levels"] = {"zd": zs["zd"], "zg": zs["zg"]} if zs else {}
         # R297: sig 不再内嵌 mark(与 universe.mark 重复, 前端统一从 MARKS[sym] 取)
 
+    # --- R437: 信号个股月线补拉(第二阶段) ---
+    # 背景: 第一阶段只覆盖「底背驰个股」(revpool 排序键用), 而 signals 里的**顶背驰
+    # (风险)票**没有 m_macd 键 → 前端 `mm==null` 宽松比较命中 → 整列渲染「月线—」,
+    # 风险板块看不到月线级别背景(月红=大方向向上→顶背驰或仅回调; 月绿加长=大方向
+    # 向下→顶背驰更危险)。用户 09-11 反馈「有的有月线、有的没有」即此。
+    # 范围刻意只取 signals, **不取全宇宙 top_bc 的 1352 只个股** —— 后者请求量 ×9.3,
+    # 极易触发腾讯 WAF 限流(R429「整表落空」的根因)。ETF/北交不适用月线, 不补。
+    # sig["st"] 与 universe[sym]["st"] 均为 sts[sym] 的**同一引用**, 故此处写入两处同步。
+    _mb2_syms = [sym for sym, _sg in signals
+                 if "m_macd" not in sts.get(sym, {})
+                 and not sym.startswith("bj")
+                 and uni.get(sym, {}).get("type") not in ("ETF",)]
+    _m_macd2_stat = None
+    if _mb2_syms:
+        _t2 = time.time()
+        _b2_f0, _b2_d0, _b2_s0 = _mb_net_fail["n"], _mb_down_fail["n"], _mb_sina_ok["n"]
+        with ThreadPoolExecutor(max_workers=4) as _mb2_ex:
+            _mb2_res = list(_mb2_ex.map(_month_macd, _mb2_syms))
+        _mb2_ok = 0
+        for _s2, _mm2 in zip(_mb2_syms, _mb2_res):
+            sts[_s2]["m_macd"] = _mm2     # 与第一阶段同款: 取不到也写 None(键存在=已尝试过)
+            if _mm2 is not None:
+                _mb2_ok += 1
+        _mb2_sina = _mb_sina_ok["n"] - _b2_s0
+        _m_macd2_stat = {"tried": len(_mb2_syms), "ok": _mb2_ok,
+                         "tx": _mb2_ok - _mb2_sina, "sina": _mb2_sina,
+                         "short": len(_mb2_syms) - _mb2_ok,
+                         "net": _mb_net_fail["n"] - _b2_f0,
+                         "down": _mb_down_fail["n"] - _b2_d0}
+        print("  月线MACD(信号补拉) %d 票(腾讯 %d / 新浪兜底 %d / 数据不足 %d; "
+              "腾讯路径: 停用 %d 网络失败 %d) %.0fs"
+              % (_m_macd2_stat["tried"], _m_macd2_stat["tx"], _m_macd2_stat["sina"],
+                 _m_macd2_stat["short"], _m_macd2_stat["down"], _m_macd2_stat["net"],
+                 time.time() - _t2), flush=True)
+
     # R392: area 键反转 —— 原 -area(降序) 把弱背离(面积比趋近 0.85 门槛)顶前, 与全局口径
     # (chanlun.py a_cur/a_prev 越小=动能衰竭越狠=背离越强; report.py 注释同) 相悖;
     # 升序小=强背离优先, area<=0(无值) 用 999 沉底(与前端 fresh null->999 兜底同款)。
@@ -1635,7 +1670,10 @@ def main():
         "title": "A股全市场缠论雷达",
         "asof": asof, "build_time": datetime.datetime.now(
             datetime.timezone(datetime.timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S"),
-        "version": "P3b-r12",   # r12=R429: 月线补拉批前复探腾讯源 + 新浪日线聚合兜底(修 CI 上月线 100% 落空);
+        "version": "P3b-r13",   # r13=R437: 月线补拉加第二阶段「信号个股」(顶背驰风险票可见月线) +
+                                #     meta.m_macd2 独立落痕 + 前端「月线—」归因文案改准(原称"两源不可用"
+                                #     实为"未在补拉范围", 属 R425/R436「口径须与判据一致」同类)。
+                                # r12=R429: 月线补拉批前复探腾讯源 + 新浪日线聚合兜底(修 CI 上月线 100% 落空);
                                 #     meta.m_macd 落痕加 tx/sina 维。补记 R400(落痕首版)/R403/R404(灰字「月线—」徽章)
                                 #     /R406(sigrad 同步月线徽章) 四轮改动**均未 bump 版本号**(R373 纪律漏执行) ——
                                 #     后果: 线上 version 停在 r11, 无法从产物判断跑的是哪版代码(09-10 定位月线问题时
@@ -1655,6 +1693,9 @@ def main():
         "m_macd": _m_macd_stat,                # R400: 月线补拉统计 {tried,ok,short,net,down,warn}
                                                # (09-09 r11 首扫 143 票全败曾无痕; 落痕后看门狗/前端可查
                                                # 月线排序键失效 —— warn=true 时应视同降级提示)
+        "m_macd2": _m_macd2_stat,              # R437: 信号个股月线补拉(第二阶段)独立落痕
+                                               # {tried,ok,tx,sina,short,net,down}; 与 m_macd(仅底背驰
+                                               # 个股=revpool 排序键)分开, 免污染前端 warn 文案口径
         "mkt_last": _mkt_last or "",           # R272: 市场末交易日锚(新浪探测; 空=探测失败回落窗口表)
         "sanit_drop_bars": _sanit_drop_bars,   # R275: 净化丢弃 bar 数(坏根量化诊断; 正常≈0, 激增=源数据异常)
         "ind_cnt": ind_cnt,
