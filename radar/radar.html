@@ -324,6 +324,13 @@ h1{font-size:21px;font-weight:700;letter-spacing:.4px;line-height:1.3}   /* R323
 .metric-strip .bkmini{display:inline-block;font-size:9px;font-weight:700;color:#fff;background:#c92a2a;border-radius:3px;padding:0 4px;margin-left:3px;line-height:1.6;letter-spacing:.2px;white-space:nowrap;vertical-align:1px}
 .bk-alert{display:block;font-size:12px;line-height:1.85;color:#7f1d1d;background:rgba(229,69,69,.07);border:1px solid rgba(229,69,69,.42);border-left:3px solid #c92a2a;border-radius:6px;padding:8px 12px}
 .bk-alert b{color:#c92a2a}
+/* R442: 逆向观察池「结构已破」分组分隔行 —— R439/R440 只做到「行内可见」(小红标), 但 pick 排序
+   仍把 broken 票与有效票混排: 09-11 实测精选榜首 #1(海天味业) 与 #3(永和股份) 均为已破票,
+   即用户第一眼看到的恰恰是失效结构。改为 broken 全局沉底 + 本分隔行显式分组。
+   刻意「不剔除」: ①本池剔票判据是收盘价(R336 有意避开日内插针), ②R441 事件研究实证盘中破 vs
+   收盘破后续 20 日收益不可区分(差 −1.04pp, p=0.37) ⇒ 硬剔无信息量加成, 却会丢信息 + 插针致列表抖动。 */
+.revpool .bksep{font-size:11.5px;line-height:1.75;color:#7f1d1d;background:rgba(229,69,69,.06);border:1px solid rgba(229,69,69,.34);border-left:3px solid #c92a2a;border-radius:5px;padding:5px 10px;margin:9px 0 3px}
+.revpool .bksep b{color:#c92a2a}
 /* R406: 月线 mTag 状态样式复用至 sigrad(sigrad.srow 新增第 5 列 56px) — 同样的月弱/月缩/月线— 三态, 底部信号雷达与逆向观察池同步不再「底部刚启」独占绿徽章误导用户截图实证场景 */
 .sigrad .srow .mtag{font-size:9.5px;font-weight:700;border:1px solid;padding:0 4px;border-radius:3px;line-height:1.55;white-space:nowrap;letter-spacing:.2px;display:inline-block}
 .sigrad .srow .mtag.mw{color:#c92a2a;background:rgba(229,69,69,.08);border-color:rgba(229,69,69,.45)}
@@ -445,6 +452,9 @@ a{color:var(--primary);text-decoration:none}
    K线: 行业=radar.json 内嵌合成; 个股=腾讯 fqkline (CORS 已开)
    R258: ①个股volume去/100(腾讯=手) ②行业tooltip量=成交额亿元 ③spark=[o,h,l,c]close索引修复
         ④pickInd重置curStk/tab ⑤fresh=0排序 ⑥hashchange stk真渲染 ⑦浮层/图实例清理+竞态令牌 ⑧fetch no-cache
+   R442: 逆向观察池 broken(盘中已破=缠论一买已废)全局沉底(最高优先排序键) + 分隔行显式分组(刻意不剔除:
+         收盘价口径不同 / R441 实证盘中破与收盘破后续收益不可区分 / 避免插针致列表抖动) + 已破票不给 🎯
+         + 徽章与说明栏诚实披露「含 N 只已破」 (口径纪律: 判据/文字/分隔行/徽章四处同一口径)
    ============================================================ */
 var UP="#e54545", DN="#18a058", ACC="#2b6cb0";
 var M=null, UNI={}, SIG=[], INDS={};
@@ -897,7 +907,9 @@ function confTier(c){
   var up=(c.st&&c.st.last_bi_dir===1)?1:0;
   return (vol&&up)?0:((vol||up)?1:2);
 }
-/* R375+R379+R383+R385: 实操优选比较 — ①结构档(距背低点%): 底部刚启≤3%(d1)最优 → 已起涨(3~8) → 追高(8~15) → 已错过(>15)垫底
+/* R375+R379+R383+R385+R442: 实操优选比较 — ⓪结构有效性(最高优先, R442 新增): 盘中已破(broken)=
+       缠论一买已废, 全局沉底后排 —— 结构是否成立是「能否考虑这只票」的前提, 比档位更基础(详见函数内注释)
+       ①结构档(距背低点%): 底部刚启≤3%(d1)最优 → 已起涨(3~8) → 追高(8~15) → 已错过(>15)垫底
        ②月线MACD(名次键·双周期, R385 提到确认度前): 月红柱 > 绿柱缩短 > 无月线数据(中性) > 绿柱加长沉同档尾(R383 — 月线下跌中继, 反弹易夭折; 不剔除只降序)
        —— R385 修正: R383 原键序 确认度→月线, 真实数据下"双确认+月弱"仍压过"单确认+月红/月缩"挤进 top3(R383 起因票浙能电力 conf=0 双确认
        真实复排仍居 #2), 未达成"月线绿加长不该排前"的目标。月线=大方向背景(否决级), 确认度=日线企稳细节(时机级) → 大方向先于细节。
@@ -909,6 +921,12 @@ function mTier(c){   // R383: 月线 MACD 档 — 双周期排序键(名次键�
   if(s==="red")return 0; if(s==="green_shrink")return 1; if(s==="green_grow")return 3; return 2;
 }
 function revPickCmp(a,b){
+  /* R442: ⓪结构有效性(最高优先, 先于结构档) — broken(盘中已击穿背驰低点, 缠论一类买点已废) 全局沉底。
+     09-11 实测: 不改时精选榜首 #1 即已破票(海天味业 dev=2.03%)、#3 也为已破(永和股份),
+     结构已失效却排在有效票前 ⇒ 用户第一眼恰被误导; 改后前 5 位全为有效票。
+     刻意不剔除(口径不同 + R441 实证不可区分 + 避免插针致列表抖动) —— 详见 .bksep 注释。 */
+  var _ba=(a.bb&&a.bb.broken)?1:0,_bb2=(b.bb&&b.bb.broken)?1:0;
+  if(_ba!==_bb2)return _ba-_bb2;
   function tier(c){var d=+c.dev;if(d<0)return 4;if(d<=3)return 0;if(d<=8)return 1;if(d<=15)return 2;return 3;}
   var ta=tier(a),tb=tier(b);
   if(ta!==tb)return ta-tb;
@@ -995,7 +1013,9 @@ function revRow(c){
   if(tr.indexOf("上涨")>=0){trTag='<span class="trtag rt" title="走势状态: '+esc(tr)+' — 涨势中回调形成的底背驰 = 右侧买点(顺势, 可靠性高)">右侧·涨势</span>';trTipL="\n走势状态: "+esc(tr)+" — 涨势回调背驰(右侧买点)";}
   else if(tr.indexOf("盘整")>=0){trTag='<span class="trtag lt" title="走势状态: '+esc(tr)+' — 盘整磨底中的底背驰 = 左侧埋伏(逆势抄底, 需等企稳确认)">左侧·盘整</span>';trTipL="\n走势状态: "+esc(tr)+" — 盘整磨底背驰(左侧埋伏)";}
   // -- R375: 实操优选命中标(仅 pick 模式): 底部刚启≤3% + 60日均额≥1亿 + 距历史高回撤≥50% 三条件齐
-  var pickStar=(curRevMode==="pick"&&dt.cls==="d1"&&((st.avg_amt60||0)>=1e4)&&c.dd<=-0.5)
+  /* R442: broken 票一律不给 🎯 —— 该标语义是「最优埋伏标的」, 结构已破者无埋伏价值, 徽章与结构状态
+     自相矛盾(同 R425 口径纪律: 判据/文字/条形/徽章必须同一口径)。 */
+  var pickStar=(curRevMode==="pick"&&!bb.broken&&dt.cls==="d1"&&((st.avg_amt60||0)>=1e4)&&c.dd<=-0.5)
     ?'<span class="pk" title="🎯实操优选命中: 底部刚启(距底≤3%)+60日均额≥1亿+距历史高回撤≥50% — 最优埋伏标的">🎯</span> ':'';
   var devStr=(c.dev>=0?"+":"")+c.dev.toFixed(1)+'%';
   var dtStyle='background:'+(dt.cls==="d1"?"rgba(24,160,88,.10)":dt.cls==="d2"?"rgba(232,160,16,.10)":dt.cls==="d3"?"rgba(229,69,69,.10)":dt.cls==="d4"?"rgba(120,53,120,.10)":"transparent")
@@ -1048,7 +1068,7 @@ function setRevMode(m){curRevMode=m;renderRevPool();}
 function toggleRev(){revExpanded=!revExpanded;renderRevPool();}
 function revRule(){   // R376: 排序标准常驻标注(随 chip 联动, 旭总免反复问)
   var t="";
-  if(curRevMode==="pick")t='<b class="k">🌟实操优选(默认)</b> <b>①结构档</b>: <b style="color:#18a058">底部刚启(距底≤3%)</b> 最前 → <b style="color:#b45309">已起涨(3~8%)</b> → <b style="color:#c92a2a">追高(8~15%)</b> → <b style="color:#7b2cbf">已错过(&gt;15%)</b> 垫底(破位剔除) · <b>②月线MACD(名次键·双周期, 大方向先于细节)</b>: 月红柱=多头背景 / <span style="color:#b45309">月缩</span>=下跌动能衰减 在前, <span style="color:#c92a2a">月弱</span>(绿柱加长=月线下跌中继, 反弹易夭折)沉同档尾 · <b>③确认度(名次键·非门槛)</b>: <b style="color:#18a058">双确认●</b>(放量+末笔向上) &gt; <b style="color:#2f9e44">单确认●</b> &gt; <b style="color:#94a3b8">灰●</b>(未确认沉后, 不踢出) · <b>④档内流动性</b>: 60日均额 <b>&gt;=1亿</b> &gt; <b>&gt;=5000万</b> &gt; 薄 · <b>⑤同档同额</b>: 距历史高跌得最透者前 · 行首 <b>🎯</b> = 三条件齐(≤3%+≥1亿+距高≥50%) · 行内 <b style="color:#0e7d4a">右侧·涨势</b>/<b style="color:#b45309">左侧·盘整</b>=走势状态(仅标签) · <b style="color:#0e7d4a">背离&lt;0.5</b>=背驰力度强(仅标签, 越小越可靠)';
+  if(curRevMode==="pick")t='<b class="k">🌟实操优选(默认)</b> <b>⓪结构有效性</b>: <b style="color:#c92a2a">盘中已破</b>(击穿背驰低点=一买已废) 全局沉底并单独分组(不剔除 — 本池按收盘价剔票) · <b>①结构档</b>: <b style="color:#18a058">底部刚启(距底≤3%)</b> 最前 → <b style="color:#b45309">已起涨(3~8%)</b> → <b style="color:#c92a2a">追高(8~15%)</b> → <b style="color:#7b2cbf">已错过(&gt;15%)</b> 垫底(收盘破位剔除 — R442: 判据是收盘价, 盘中破另见 ⓪) · <b>②月线MACD(名次键·双周期, 大方向先于细节)</b>: 月红柱=多头背景 / <span style="color:#b45309">月缩</span>=下跌动能衰减 在前, <span style="color:#c92a2a">月弱</span>(绿柱加长=月线下跌中继, 反弹易夭折)沉同档尾 · <b>③确认度(名次键·非门槛)</b>: <b style="color:#18a058">双确认●</b>(放量+末笔向上) &gt; <b style="color:#2f9e44">单确认●</b> &gt; <b style="color:#94a3b8">灰●</b>(未确认沉后, 不踢出) · <b>④档内流动性</b>: 60日均额 <b>&gt;=1亿</b> &gt; <b>&gt;=5000万</b> &gt; 薄 · <b>⑤同档同额</b>: 距历史高跌得最透者前 · 行首 <b>🎯</b> = 三条件齐(≤3%+≥1亿+距高≥50%) · 行内 <b style="color:#0e7d4a">右侧·涨势</b>/<b style="color:#b45309">左侧·盘整</b>=走势状态(仅标签) · <b style="color:#0e7d4a">背离&lt;0.5</b>=背驰力度强(仅标签, 越小越可靠)';
   else if(curRevMode==="dd")t='<b class="k">📉最深回撤</b>: 按 <b>距历史高点回撤幅度(dd)</b> 降序 — 负得越多(跌得最透)越靠前';
   else if(curRevMode==="dev")t='<b class="k">🎯最贴低点</b>: 按 <b>现价距背驰低点(dev%)</b> 升序 — 越贴近买点(≤3%底部区)越靠前';
   else if(curRevMode==="fr")t='<b class="k">🕐最新触发</b>: 按 <b>距触发天数(fd)</b> 升序 — 刚超实操窗(10天)的新鲜结构在前';
@@ -1064,10 +1084,22 @@ function renderRevPool(){
   box.style.display="";
   var shown=curRevMode==="pick"&&!revExpanded?all.filter(isElite):all;  // R377: pick 折叠态=高胜率精选(底部刚启≤3%+≥1亿+非低自洽); 切他模式/展开=全量档案(研究视角)
   var nEli=all.filter(isElite).length;              // 精选计数(与当前视图无关, 恒算)
+  var nEliBk=all.filter(function(c){return isElite(c)&&c.bb&&c.bb.broken}).length;   // R442: 精选内「已破」数(与视图无关, 恒算, 同 isElite 口径) — 供徽章诚实披露
   var nAll=all.length;                              // 全量档案计数
   if(!shown.length)shown=all.slice(0,REV_SHOW);     // 精选为空(极端市况)回退前 REV_SHOW
   var chipOn=function(m){return curRevMode===m?' on':'';};
-  var rowsHtml=shown.map(revRow).join('');
+  /* R442: broken 分组渲染 —— pick 模式下 revPickCmp 已把 broken 全局沉底, 故此处只需在第一只 broken
+     前插一行显式分隔(告知「以下 N 只结构已失效」), 默认首屏即是一屏干净的有效票。
+     其他模式(dev/dd/fr/fd)是研究视角, 用户显式指定维度, 既不沉底也不插分隔(否则破坏其排序意图)。 */
+  var _bkShown=shown.filter(function(c){return c.bb&&c.bb.broken}).length;
+  var rowsHtml="",_bkDone=false;
+  shown.forEach(function(c){
+    if(curRevMode==="pick"&&c.bb&&c.bb.broken&&!_bkDone){
+      rowsHtml+='<div class="bksep">⚠️ <b>以下 '+_bkShown+' 只：盘中已击穿背驰低点 · 缠论一类买点已失效</b> — 需重新构筑底部结构，<b>不建议按一买埋伏位低吸</b>；本池按收盘价剔票（有意避开日内插针）故仍在此，仅作跟踪</div>';
+      _bkDone=true;
+    }
+    rowsHtml+=revRow(c);
+  });
   // R386: collapsed 条件放宽为 nEli<nAll(原 nEli>0&& 在无精选市况下: shown 回退 REV_SHOW
   // 前12行但 moreHtml 两分支都不命中 → 后段票被吞且无展开入口, 只能靠切 chip 才可见)。
   // nEli=0 时同样折叠出「查看全量档案」展开按钮(12行预览+按钮), phint 已诚实显示"共0只"。
@@ -1076,15 +1108,15 @@ function renderRevPool(){
   // R378: 7 列表头, 与 revRow 列定义一致(浅灰底小字标注每列语义)
   var phdrHtml='<div class="phdr"><span>标的</span><span>距历史高</span><span>现价</span><span>底线·止损参考</span><span>60日均额</span><span>底背驰触发</span><span>距背低点</span></div>';
   box.innerHTML='<div class="phead"><h2>🧭 逆向观察池</h2>'+
-    (collapsed&&nEli>0?'<span class="elite-badge" title="高胜率精选=底部刚启(距底≤3%)+60日均额≥1亿+结构自洽(非低自洽/次新, 缠论样本足) · 行内红字「月弱」标=月线MACD绿柱加长(下跌中继, 双周期键沉同档尾) · 行尾色点=确认度(深绿双/浅绿单/灰无) — 均只作名次键不作门槛">🏆 高胜率精选 '+nEli+'</span>':'')+
+    (collapsed&&nEli>0?'<span class="elite-badge" title="高胜率精选=底部刚启(距底≤3%)+60日均额≥1亿+结构自洽(非低自洽/次新, 缠论样本足) · 行内红字「月弱」标=月线MACD绿柱加长(下跌中继, 双周期键沉同档尾) · 行尾色点=确认度(深绿双/浅绿单/灰无) — 均只作名次键不作门槛 · R442: 其中「盘中已破」者(击穿背驰低点=一买已废)已全局沉底并单独分组, 不参与顺序竞争, 也不给 🎯">🏆 高胜率精选 '+nEli+(nEliBk?'<span style="color:#c92a2a"> · 含'+nEliBk+'只已破</span>':'')+'</span>':'')+
     '<div class="chips">'+
-      '<span class="chip'+chipOn("pick")+'" onclick="setRevMode(\'pick\')" title="实操纪律复合排序: ①底部刚启(距底≤3%)优先 ②月线MACD双周期(红柱/绿缩在前, 绿加长「月弱」沉同档尾 — 大方向先于细节) ③确认度(双/单/无, 名次键不作门槛) ④60日均额≥1亿稳健(≥5000万次之) ⑤跌得最透优先 — 月弱标=月线下跌中继, 行尾色点=确认度">🌟 实操优选</span>'+
+      '<span class="chip'+chipOn("pick")+'" onclick="setRevMode(\'pick\')" title="实操纪律复合排序: ⓪盘中已破(击穿背驰低点=一买已废)全局沉底并单独分组(不剔除, 本池按收盘价剔票) ①底部刚启(距底≤3%)优先 ②月线MACD双周期(红柱/绿缩在前, 绿加长「月弱」沉同档尾 — 大方向先于细节) ③确认度(双/单/无, 名次键不作门槛) ④60日均额≥1亿稳健(≥5000万次之) ⑤跌得最透优先 — 月弱标=月线下跌中继, 行尾色点=确认度">🌟 实操优选</span>'+
       '<span class="chip'+chipOn("dd")+'" onclick="setRevMode(\'dd\')" title="距历史高点回撤最深的在前 — 看谁跌得最透">📉 最深回撤</span>'+
       '<span class="chip'+chipOn("dev")+'" onclick="setRevMode(\'dev\')" title="现价距背驰低点最近的在前 — 还在底部参考区(≤3%)的优先">🎯 最贴低点</span>'+
       '<span class="chip'+chipOn("fd")+'" onclick="setRevMode(\'fd\')" title="底背驰触发距今最久未破位在前 — 老结构企稳时间越久越有效, 与「最新触发」互补查新仓">⏳ 底久未破</span>'+
       '<span class="chip'+chipOn("fr")+'" onclick="setRevMode(\'fr\')" title="底背驰触发时间最近的在前 — 刚出信号, 尚有空间">🕐 最新触发</span>'+
     '</div>'+
-    (collapsed?'<span class="phint">🏆 高胜率精选 — 底部刚启(<b style="color:#18a058">距底≤3%</b>)+<b style="color:#18a058">60日均额≥1亿</b>+结构自洽(非低自洽/次新) · 共 <b style="color:#18a058">'+nEli+' 只</b> · 已滤除: 已起涨/追高/已错过档、薄流动(<1亿)、低自洽/次新结构 — <b style="color:#b45309">全量档案 '+nAll+' 只点下方按钮展开</b></span>':(revExpanded?'<span class="phint">📚 全量档案 <b style="color:#18a058">'+nAll+' 只</b> — 含全部五档(含已起涨/追高/已错过跟踪) · 🏆 高胜率精选仅 '+nEli+' 只(底部刚启≤3%+≥1亿+自洽样本足) · 标签五档：<b style="color:#18a058">绿=底部刚启(≤3%最佳埋伏)</b>/<b style="color:#b45309">橙=已起涨</b>/<b style="color:#c92a2a">红=追高风险</b>/<b style="color:#7b2cbf">紫=已错过</b> · 与顶部「实操信号雷达」(近端≤10天)互补</span>':'<span class="phint">已超实操窗的底背驰老结构 · 深跌(距历史高≥30%)+未破背驰低点 · 埋伏候选 <b style="color:#18a058">'+nAll+' 只</b> · 标签五档：<b style="color:#18a058">绿=底部刚启(≤3%最佳埋伏)</b>/<b style="color:#b45309">橙=已起涨</b>/<b style="color:#c92a2a">红=追高风险</b>/<b style="color:#7b2cbf">紫=已错过</b> · 与顶部「实操信号雷达」(近端≤10天)互补</span>'))+
+    (collapsed?'<span class="phint">🏆 高胜率精选 — 底部刚启(<b style="color:#18a058">距底≤3%</b>)+<b style="color:#18a058">60日均额≥1亿</b>+结构自洽(非低自洽/次新) · 共 <b style="color:#18a058">'+nEli+' 只</b>'+(nEliBk?'（其中 <b style="color:#c92a2a">'+nEliBk+' 只盘中已破</b>，已沉底并单独分组 — 一买已废，勿按埋伏位对待）':'')+' · 已滤除: 已起涨/追高/已错过档、薄流动(<1亿)、低自洽/次新结构 — <b style="color:#b45309">全量档案 '+nAll+' 只点下方按钮展开</b></span>':(revExpanded?'<span class="phint">📚 全量档案 <b style="color:#18a058">'+nAll+' 只</b> — 含全部五档(含已起涨/追高/已错过跟踪) · 🏆 高胜率精选仅 '+nEli+' 只(底部刚启≤3%+≥1亿+自洽样本足) · 标签五档：<b style="color:#18a058">绿=底部刚启(≤3%最佳埋伏)</b>/<b style="color:#b45309">橙=已起涨</b>/<b style="color:#c92a2a">红=追高风险</b>/<b style="color:#7b2cbf">紫=已错过</b> · 与顶部「实操信号雷达」(近端≤10天)互补</span>':'<span class="phint">已超实操窗的底背驰老结构 · 深跌(距历史高≥30%)+未破背驰低点 · 埋伏候选 <b style="color:#18a058">'+nAll+' 只</b> · 标签五档：<b style="color:#18a058">绿=底部刚启(≤3%最佳埋伏)</b>/<b style="color:#b45309">橙=已起涨</b>/<b style="color:#c92a2a">红=追高风险</b>/<b style="color:#7b2cbf">紫=已错过</b> · 与顶部「实操信号雷达」(近端≤10天)互补</span>'))+
     revRule()+'</div>'+
     '<div style="padding:6px 0 8px">'+phdrHtml+rowsHtml+moreHtml+'</div>'+
     '<div class="foot">候选=底背驰(fresh&gt;10) + 距历史高≥30% + 现价&gt;背驰低点 · 止损参考=背驰低点(跌破失效) · 数据截至 '+esc(M.asof||"-")+' · 仅供研究参考，不构成投资建议</div>';
