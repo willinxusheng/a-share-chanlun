@@ -1539,12 +1539,16 @@ def main():
     # 风险板块看不到月线级别背景(月红=大方向向上→顶背驰或仅回调; 月绿加长=大方向
     # 向下→顶背驰更危险)。用户 09-11 反馈「有的有月线、有的没有」即此。
     # 范围刻意只取 signals, **不取全宇宙 top_bc 的 1352 只个股** —— 后者请求量 ×9.3,
-    # 极易触发腾讯 WAF 限流(R429「整表落空」的根因)。ETF/北交不适用月线, 不补。
+    # 极易触发腾讯 WAF 限流(R429「整表落空」的根因)。
+    # R437c: 去掉 ETF/北交 排除 —— 实测老 ETF/北交月线完全可得(sina 聚合:
+    #   510210=69根 159880=67根 159697=41根 159731=58根 920857=56根 920770=44根
+    #   920726=65根 920021=69根, 8/17 可得), 原先排除使风险板块的老 ETF 白白缺月线;
+    #   真正不可得的只有「上市<40个月」的新 ETF(563020=34根 159201=20根 159233=16根…),
+    #   与次新股同理, _month_macd 会写 None 并如实标「月线—」。
+    #   边际成本可忽略(signals 内 ETF/北交仅 17 只 vs 个股 229 只)。
     # sig["st"] 与 universe[sym]["st"] 均为 sts[sym] 的**同一引用**, 故此处写入两处同步。
     _mb2_syms = [sym for sym, _sg in signals
-                 if "m_macd" not in sts.get(sym, {})
-                 and not sym.startswith("bj")
-                 and uni.get(sym, {}).get("type") not in ("ETF",)]
+                 if "m_macd" not in sts.get(sym, {})]
     _m_macd2_stat = None
     if _mb2_syms:
         _t2 = time.time()
@@ -1670,7 +1674,10 @@ def main():
         "title": "A股全市场缠论雷达",
         "asof": asof, "build_time": datetime.datetime.now(
             datetime.timezone(datetime.timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S"),
-        "version": "P3b-r13",   # r13=R437: 月线补拉加第二阶段「信号个股」(顶背驰风险票可见月线) +
+        "version": "P3b-r14",   # r14=R437c: 第二阶段补拉放开 ETF/北交(signals 内 17 只, 实测 8 只可得,
+                                #     老 ETF 月线此前被筛选白挡) + 前端 revpool 补「月红」徽章(修 R383「红柱
+                                #     省位」致月线列整列空白, 与表头文案「月红柱=多头背景」自相矛盾)。
+                                # r13=R437: 月线补拉加第二阶段「信号个股」(顶背驰风险票可见月线) +
                                 #     meta.m_macd2 独立落痕 + 前端「月线—」归因文案改准(原称"两源不可用"
                                 #     实为"未在补拉范围", 属 R425/R436「口径须与判据一致」同类)。
                                 # r12=R429: 月线补拉批前复探腾讯源 + 新浪日线聚合兜底(修 CI 上月线 100% 落空);

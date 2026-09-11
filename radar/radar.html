@@ -303,6 +303,12 @@ h1{font-size:21px;font-weight:700;letter-spacing:.4px;line-height:1.3}   /* R323
 .revpool .prow .mtag{font-size:9px;font-weight:700;border:1px solid;padding:0 4px;border-radius:3px;line-height:1.5;white-space:nowrap;letter-spacing:.2px;flex:0 0 auto}
 .revpool .prow .mtag.mw{color:#c92a2a;background:rgba(229,69,69,.08);border-color:rgba(229,69,69,.45)}
 .revpool .prow .mtag.ms{color:#b45309;background:rgba(232,160,16,.08);border-color:rgba(232,160,16,.45)}
+/* R437c: 逆向观察池补「月红」样式 — 与 .sigrad .srow .mtag.mr 同色(绿=最优档;
+   本系统 mtag 配色语义是「警示强度」而非涨跌: mw 红最危险 / ms 橙 / mnull 灰 / mr 绿)。
+   背景: 截图实证 revpool 前 3 名(海天味业/大参林/永和股份) m_macd.state 全为 red,
+   而 R383「红柱不占位」使 mTag 出空串 ⇒ 月线列整列空白, 与表头文案「月红柱=多头背景」
+   自相矛盾(文案说要显, 实际不显), 用户读作「月线不全」。 */
+.revpool .prow .mtag.mr{color:#087f5b;background:rgba(8,127,91,.07);border-color:rgba(8,127,91,.42)}
 /* R404: 月线数据缺失灰字徽章 — 与红/橙"月弱/月缩"明确区分, 告知"没拿到"而非"判定为空/多头"
    背景: 09-09 r11 全宇宙 m_macd=null, 但原 L898 对 null 不渲染 mTag → 「底部刚启」绿徽章独占显示误导用户
    (2-5 名票真实月线绿柱加长却无声)。null 徽章弱样式(灰字+虚线边)与强样式区分, 不抢主徽章视觉。 */
@@ -708,7 +714,7 @@ function sigRow(s,opt){   // R380: opt.sub=true = 非低吸区灰显行(破位/�
   if(mm&&mm.state==="green_grow")mTag='<span class="mtag mw" title="月线MACD绿柱加长(h1='+mm.h1+'→h2='+mm.h2+', '+esc(mm.date||"")+') — 月线下跌中继, 日线底背驰仅撑反弹易夭折 · 底信号雷达同名次均按月线键参考此标">月弱</span>';
   else if(mm&&mm.state==="green_shrink")mTag='<span class="mtag ms" title="月线MACD绿柱缩短(h1='+mm.h1+'→h2='+mm.h2+', '+esc(mm.date||"")+') — 月线下跌动能衰减, 反转酝酿中">月缩</span>';
   else if(mm&&mm.state==="red")mTag='<span class="mtag mr" title="月线MACD红柱(h1='+mm.h1+'→h2='+mm.h2+', '+esc(mm.date||"")+') — 月线多头背景(大方向向上): 顶背驰或仅为回调而非转势(风险相对低); 月红+底背驰则反弹延续概率高 · 双周期键最优档">月红</span>';
-  else if(mm==null)mTag='<span class="mtag mnull" title="月线MACD 本次未取得数据 —— (R437) 月线只覆盖「底背驰个股」(revpool 排序键)与「信号个股」两条链路: ETF/北交不适用, 次新股月K<40根不足, 另腾讯 qfq 月K → 新浪日线聚合兜底两路同时不可用时亦记中性。该信号月线档中性, 名次未按月线校正, 「底部刚启」非全维度结论">月线—</span>';
+  else if(mm==null)mTag='<span class="mtag mnull" title="月线MACD 本次未取得数据 —— (R437c) 月线覆盖「底背驰个股」(revpool 排序键)与「信号个股」两条链路(个股 + ETF/北交均含): 仅「上市不足 40 个月」者月K<40根不足(次新股 / 新发 ETF), 另腾讯 qfq 月K → 新浪日线聚合兜底两路同时不可用时亦记中性。该信号月线档中性, 名次未按月线校正, 「底部刚启」非全维度结论">月线—</span>';
   return '<div class="'+rowCls+'" title="'+esc(sigTip)+'" onclick="pickSigRad(\''+s.sym+'\')">'+
     '<div><div class="nm">'+(t?"⚠️ ":((opt.sub)?"🔍 ":"✅ "))+esc(nm)+lead+ffMini+'</div><div class="sub">'+esc(s.sym)+" · "+esc(indName)+'</div></div>'+
     '<div class="st">'+(t?'<b style="color:#c92a2a">顶背驰</b>':'<b style="color:#087f5b">底背驰</b>')+'<span>强'+(s.strong||0)+'/'+(s.vol?"缩":"")+((s.area!=null&&s.area>0)?" 面"+s.area:"")+'</span></div>'+
@@ -936,7 +942,11 @@ function revRow(c){
   var mm=c.st&&c.st.m_macd, mTag="";
   if(mm&&mm.state==="green_grow")mTag='<span class="mtag mw" title="月线MACD绿柱加长(h1='+mm.h1+'→h2='+mm.h2+', '+esc(mm.date||"")+') — 月线下跌中继, 日线级底背驰仅撑反弹易夭折 · 双周期键已沉同档尾(不剔除)">月弱</span>';
   else if(mm&&mm.state==="green_shrink")mTag='<span class="mtag ms" title="月线MACD绿柱缩短(h1='+mm.h1+'→h2='+mm.h2+', '+esc(mm.date||"")+') — 月线下跌动能衰减, 反转在酝酿">月缩</span>';
-  else if(mm==null)mTag='<span class="mtag mnull" title="月线MACD 本次未取得数据 —— (R437) 月线只覆盖「底背驰个股」(revpool 排序键)与「信号个股」两条链路: ETF/北交不适用, 次新股月K<40根不足, 另腾讯 qfq 月K → 新浪日线聚合兜底两路同时不可用时亦记中性。该票月线档中性, 名次未按月线校正, 「底部刚启」绿徽章独占非全维度结论">月线—</span>';
+  /* R437c: 补 red 分支。R383 原为「红柱省位」(不占位), 但月线列有固定表头(「月线MACD」),
+     红柱出空串 = 整列空白 —— 与表头说明「月红柱=多头背景」自相矛盾, 用户读作「月线不全」。
+     且 revpool 表头本就写明红柱含义, 说明设计意图是**要显示**的, 省位属实现遗漏。 */
+  else if(mm&&mm.state==="red")mTag='<span class="mtag mr" title="月线MACD红柱(h1='+mm.h1+'→h2='+mm.h2+', '+esc(mm.date||"")+') — 月线多头背景(大方向向上): 日线级底背驰落在月线红柱中, 反弹延续概率高 · 双周期键最优档(名次已按月线校正前置)">月红</span>';
+  else if(mm==null)mTag='<span class="mtag mnull" title="月线MACD 本次未取得数据 —— (R437c) 本池为「底背驰个股」(revpool 排序键), 月线已按 40 个月门槛补拉: 仅「上市不足 40 个月」者月K不足(次新股 / 新发 ETF), 另腾讯 qfq 月K → 新浪日线聚合兜底两路同时不可用时亦记中性。该票月线档中性, 名次未按月线校正, 「底部刚启」绿徽章独占非全维度结论">月线—</span>';
   // -- R387: 背离强度(area_ratio MACD面积背离比: 越小=下跌动能衰竭越彻底, 底越可靠) + 走势状态(trend: 右/左侧标签, 不入排序键)
   var arv=+(bb.area_ratio), arTag="", arWord="", arTip="", arTipL="";
   if(bb.area_ratio!=null&&bb.area_ratio!==""&&!isNaN(arv)){
