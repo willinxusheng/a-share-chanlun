@@ -81,8 +81,14 @@ SRC_ONLY = "auto"              # auto=腾讯qfq→东财qfq→新浪 | tx=仅腾
 # 全市场误转新浪裸价。放宽阈值给偶发抖动容错; 成段故障 15 连败也只空耗 ~5s(0.35s/票), 无损。
 TX_FAIL_MAX = 15
 EM_FAIL_MAX = 15
-TX_REPROBE_EVERY = 300
-EM_REPROBE_EVERY = 300
+# R444: 复探周期 300 → 80。09-11 实况: meta.src_fail 显示腾讯侧 tx_empty 38 + err 36 + tx_stale 2
+# = 74 次失败, 即整轮内发生了 ~5 轮「停用→复探→恢复→再停用」循环 —— 说明腾讯 WAF 限流是
+# **间歇性**的(本机实测同类限流约 10 分钟自恢复), 而不是整轮不可用。但每 300 次调用才给一次
+# 复探机会时, 全市场 6758 票仅 22 次机会, 短恢复窗口极易被整段错过 ⇒ 单轮 87% 票被迫走裸价。
+# 降到 80 后机会 22→85 次(代价: 最多多打 ~63 次单票轻量请求, 占主请求量 <1%, 且复探走 _tx_th
+# 节流不抢带宽)。阈值 TX_FAIL_MAX=15 **不动** —— 它防的是"成段故障时空耗 timeout", 与恢复无关。
+TX_REPROBE_EVERY = 80
+EM_REPROBE_EVERY = 80
 EM_TIMEOUT = 10                # 东财单请求超时(不可达时快速失败, 不拖全量)
 EM_HOSTS = ["https://push2delay.eastmoney.com", "https://push2.eastmoney.com",
             "http://82.push2.eastmoney.com", "http://push2delay.eastmoney.com"]
@@ -128,10 +134,15 @@ _sina_th = _Throttle(SINA_INTERVAL)
 # R270: 源停用状态机(腾讯/东财独立)。字段: flag=整段停用 | count=连续失败数 |
 # reasons={失败原因:次数} 供 meta.src_fail 统计 | n=停用后调用计数(复探节拍) |
 # max=停用阈值 | every=复探周期 | probe=轻量复探函数(第2节定义后回填)。
+# R444: stops=本轮内被停用次数 | resumes=复探成功次数 —— 两者之比直接量化"限流是间歇还是持续":
+# stops=1 且 resumes=0 = 整轮持续不可用(复探无意义); stops 与 resumes 都在涨 = 反复抖动
+# (正是加密复探能救的场景)。09-11 只有 src_fail 计数可查, 分不清这两种形态, 故补落痕。
 _tx_down = {"flag": False, "count": 0, "reasons": {}, "n": 0,
-            "max": TX_FAIL_MAX, "every": TX_REPROBE_EVERY, "probe": None}
+            "max": TX_FAIL_MAX, "every": TX_REPROBE_EVERY, "probe": None,
+            "stops": 0, "resumes": 0}
 _em_down = {"flag": False, "count": 0, "reasons": {}, "n": 0,
-            "max": EM_FAIL_MAX, "every": EM_REPROBE_EVERY, "probe": None}
+            "max": EM_FAIL_MAX, "every": EM_REPROBE_EVERY, "probe": None,
+            "stops": 0, "resumes": 0}
 # R272: 市场末交易日锚(probe_mkt_last 在 main 串行段探测后写入)。
 # 用于 _last_fresh/_should_weekend_skip 的新鲜度判定: 数据末根 >= 该锚 即"不比市场旧",
 # 市场无更新的日子(周末/长假/当日行情未出)旧数据即最新 —— 取代硬编码长假窗口的
@@ -139,18 +150,23 @@ _em_down = {"flag": False, "count": 0, "reasons": {}, "n": 0,
 _mkt_last = None
 
 def _src_down(d, lock):
-    """读停用状态并累计调用; 停用中每 every 次调用执行一次轻量复探, 成功则复位切回。
-    (复探为网络请求, 在锁外执行避免阻塞其他取数线程; 状态写回再取锁。)"""
+    """读停用状态并累计调用; 停用中周期执行一次轻量复探, 成功则复位切回。
+    (复探为网络请求, 在锁外执行避免阻塞其他取数线程; 状态写回再取锁。)
+    R444: 复探节拍改 `n % every == 1` —— 停用后**第一次调用**即复探(原 `== 0` 必须等到第
+    every 次), 之后每 every 次一次。停用多由瞬时抖动/短时限流触发(09-11 实测整轮内发生
+    ~5 轮停用-恢复循环), 把首次机会从"第 300 票"提前到"第 1 票", 短恢复窗口一出现就能
+    被抓住, 不必白等一整段。"""
     with lock:
         d["n"] = d.get("n", 0) + 1
         if not d["flag"]:
             return False
-        do_probe = (d["n"] % d["every"] == 0 and d["probe"])
+        do_probe = (d["n"] % d["every"] == 1 and d["probe"])
     if do_probe and d["probe"]():
         with lock:
             d["flag"] = False
             d["count"] = 0
             d["n"] = 0
+            d["resumes"] = d.get("resumes", 0) + 1     # R444: 恢复轮次落痕
         print("[scan_radar] 源复探成功, 已恢复使用", flush=True)
         return False
     return True
@@ -164,9 +180,10 @@ def _src_fail(d, lock, reason=""):
         d["count"] += 1
         if reason:
             d["reasons"][reason] = d["reasons"].get(reason, 0) + 1
-        if d["count"] >= d["max"]:
+        if d["count"] >= d["max"] and not d["flag"]:
             d["flag"] = True
             d["n"] = 0                     # R275: 复探节拍原点 = 停用时刻
+            d["stops"] = d.get("stops", 0) + 1   # R444: 停用轮次落痕(与 resumes 共同刻画间歇性)
             print("[scan_radar] 源连续失败 >=%d 次, 整段停用 (末因: %s)" % (d["max"], reason or "-"), flush=True)
 
 _tx_lock = threading.Lock()
@@ -1723,11 +1740,27 @@ def main():
         src_fail["tx"] = _tx_r
     if _em_r:
         src_fail["em"] = _em_r
+    # R444: 源停用/恢复轮次 —— 与 src_fail 联合判断降级的**形态**:
+    # stops 与 resumes 同高 = 间歇抖动(加密复探有效, 复权源能抢回来); stops=1 且 resumes=0
+    # = 整轮持续不可用(复探无意义, 该走降级预案)。09-11 只有 src_fail(累计失败数)可查,
+    # 74 次失败到底是"1 轮持续"还是"5 轮间歇"无法区分 ⇒ 补此落痕。
+    src_cycle = {}
+    for _ck, _cd in (("tx", _tx_down), ("em", _em_down)):
+        _cs, _cr = _cd.get("stops", 0), _cd.get("resumes", 0)
+        if _cs or _cr:
+            src_cycle[_ck] = {"stops": _cs, "resumes": _cr}
     meta = {
         "title": "A股全市场缠论雷达",
         "asof": asof, "build_time": datetime.datetime.now(
             datetime.timezone(datetime.timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S"),
-        "version": "P3b-r16",   # r16=R439: 背驰端点击穿标记 —— _bc_tail 加 ks 入参, 取背驰笔结束日
+        "version": "P3b-r17",   # r17=R444: ①前端新增「信号实证效力」条 —— R443 五年回测结论常驻看板
+                                #     (背驰见顶风险 −0.80pp p=0.018 唯一显著 / 底背驰机会 +0.58pp p=0.13
+                                #     未获证实), 双卡片 + 可展开证据表; ②「已破」标记补**风险维度**提示
+                                #     (20日内最大浮亏>5% 概率 72.1% vs 58.1%): 收益维度无差异(p=0.74)
+                                #     但风险维度有效 —— 覆盖 6 处消费端; ③源降级治理: 复探周期 300→80
+                                #     + 停用后首次调用即复探(抓短恢复窗口) + meta.src_cycle 落痕
+                                #     (区分"整轮持续不可用"与"间歇抖动")。
+                                # r16=R439: 背驰端点击穿标记 —— _bc_tail 加 ks 入参, 取背驰笔结束日
                                 #     **之后**的极值对比 end_price(bottom 比 low / top 比 high),
                                 #     破则附 broken/broken_price/broken_date。前端「底线」列加「已破」
                                 #     红标 + tooltip。⚠️ 判据用**极值**, 与 revpool 剔票判据(收盘价,
@@ -1762,6 +1795,8 @@ def main():
         "degraded_pct": deg_pct,               # R374: 新浪占比%(前端严重度分级渲染)
         "degraded_reason": deg_reason,         # 降级黄条文案(前端优先展示)
         "src_fail": src_fail,                  # 各源失败原因计数(诊断腾讯/东财为何不可用)
+        "src_cycle": src_cycle,                # R444: 各源停用/恢复轮次 {stops,resumes} —— 区分
+                                               #       "整轮持续不可用"与"间歇抖动"(后者加密复探可救)
         "m_macd": _m_macd_stat,                # R400: 月线补拉统计 {tried,ok,short,net,down,warn}
                                                # (09-09 r11 首扫 143 票全败曾无痕; 落痕后看门狗/前端可查
                                                # 月线排序键失效 —— warn=true 时应视同降级提示)

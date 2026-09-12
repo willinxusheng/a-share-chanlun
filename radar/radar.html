@@ -331,6 +331,30 @@ h1{font-size:21px;font-weight:700;letter-spacing:.4px;line-height:1.3}   /* R323
    收盘破后续 20 日收益不可区分(差 −1.04pp, p=0.37) ⇒ 硬剔无信息量加成, 却会丢信息 + 插针致列表抖动。 */
 .revpool .bksep{font-size:11.5px;line-height:1.75;color:#7f1d1d;background:rgba(229,69,69,.06);border:1px solid rgba(229,69,69,.34);border-left:3px solid #c92a2a;border-radius:5px;padding:5px 10px;margin:9px 0 3px}
 .revpool .bksep b{color:#c92a2a}
+/* R444: 首页「信号实证效力」条 —— R443 五年 point-in-time 回测(新浪150票/31026时点 + 腾讯前复权
+   125票复跑, 框架自校验 100票×8字段仅1处不一致)结论落地到看板:
+   背驰见顶风险是唯一跨过显著性门槛的信号(20日超额 −0.80pp, p=0.018, 5年4负, 随持有期单调增强);
+   底背驰机会无可检测超额(+0.58pp, p=0.13)。此前该结论只存在于本地报告, 用户每日打开看板仍会
+   把「底机会」当买入信号 —— 这是 R425/R436「口径须与判据一致」的延伸: 看板不只展示信号,
+   还要标注信号的**实测效力**, 否则用户无法区分「哪个该当信号用」。 */
+.efbar{display:flex;flex-wrap:wrap;gap:8px;margin:9px 0 3px}
+.efbar .efc{flex:1 1 320px;min-width:260px;font-size:11.5px;line-height:1.7;border-radius:6px;padding:7px 11px}
+.efbar .efc .efh{font-weight:700}
+.efbar .efc.warn{color:#7f1d1d;background:rgba(229,69,69,.07);border:1px solid rgba(229,69,69,.4);border-left:3px solid #c92a2a}
+.efbar .efc.neut{color:#3f4a5a;background:rgba(100,116,139,.07);border:1px solid rgba(100,116,139,.32);border-left:3px solid #94a3b8}
+.efbar .efc.warn b{color:#c92a2a}
+.efbar .efc .efn{font-size:14px;font-weight:800;margin:0 1px}
+.efbar .efc .efk{font-size:10px;font-weight:700;opacity:.9;border:1px solid currentColor;border-radius:3px;padding:0 4px;margin-left:5px;white-space:nowrap;vertical-align:1px}
+.efbar .efc .eft{display:block;font-size:10.5px;opacity:.88;margin-top:1px}
+.efbar .efd{flex:1 1 100%;font-size:11px;line-height:1.75;color:#334155;background:rgba(100,116,139,.05);border:1px solid rgba(100,116,139,.26);border-radius:6px;padding:8px 11px;display:none}
+.efbar.open .efd{display:block}
+.efbar .efd table{width:100%;border-collapse:collapse;margin:5px 0 6px}
+.efbar .efd th,.efbar .efd td{border-bottom:1px solid rgba(100,116,139,.2);padding:2px 6px;text-align:right;font-size:10.5px}
+.efbar .efd th:first-child,.efbar .efd td:first-child{text-align:left}
+.efbar .efd th{color:#64748b;font-weight:700}
+.efbar .efd .sig{color:#c92a2a;font-weight:700}
+.efbar .efd .ns{color:#64748b}
+.efbar .efd .lim{font-size:10px;color:#64748b;margin-top:3px}
 /* R406: 月线 mTag 状态样式复用至 sigrad(sigrad.srow 新增第 5 列 56px) — 同样的月弱/月缩/月线— 三态, 底部信号雷达与逆向观察池同步不再「底部刚启」独占绿徽章误导用户截图实证场景 */
 .sigrad .srow .mtag{font-size:9.5px;font-weight:700;border:1px solid;padding:0 4px;border-radius:3px;line-height:1.55;white-space:nowrap;letter-spacing:.2px;display:inline-block}
 .sigrad .srow .mtag.mw{color:#c92a2a;background:rgba(229,69,69,.08);border-color:rgba(229,69,69,.45)}
@@ -411,6 +435,8 @@ a{color:var(--primary);text-decoration:none}
   <div id="viewHome">
     <!-- 概要条: 仅 5 个核心指标(剔除旧版冗余) -->
     <div class="bar" id="barRow"></div>
+    <!-- R444: 信号实证效力条 —— R443 五年回测结论常驻(顶风险有效 / 底机会未证实), 点击展开证据表 -->
+    <div class="efbar" id="efBar" style="display:none"></div>
     <!-- R285: 实操信号雷达 — 近端全市场背驰信号, 直连个股实操 (顶风险/底机会左右分栏) -->
     <div class="sigrad" id="sigRadar" style="display:none"></div>
     <!-- R305: 逆向观察池 — 超窗(fresh>10)底背驰 + 深跌(距高≥30%) + 未破背驰低点 的老结构埋伏候选 -->
@@ -585,7 +611,8 @@ function renderBanner(){
   var b=$("dataBanner");
   if(!b){b=document.createElement("div");b.id="dataBanner";document.body.insertBefore(b,document.body.firstChild);}
   var m=M||{},msgs=[];
-  if(m.degraded)msgs.push('<b>⚠ 数据源降级</b>：'+(m.degraded_reason||'前复权源本次不可用，全市场转新浪裸价(不复权)兜底 — 除权日K线可能有假跳空，结构标注精度下降'));
+  if(m.degraded)msgs.push('<b>⚠ 数据源降级</b>：'+(m.degraded_reason||'前复权源本次不可用，全市场转新浪裸价(不复权)兜底 — 除权日K线可能有假跳空，结构标注精度下降')
+    +'<br><span style="opacity:.86">📊 <b>实测影响边界</b>：裸价除权污染为 '+(m.degraded_pct!=null?(''+m.degraded_pct):'87')+'% 票走裸价，但除权日本身极稀疏（实测 66 个除权日 / 20 万根 K 线 = <b>0.04%</b>），且 R443 五年回测以新浪源与腾讯前复权源复跑<b>结论一致</b> ⇒ 不影响信号层结论；受实际影响的是<u>临近除权日</u>个股的近端结构，已由「疑似除权·结构失真」免疫标记兜住。</span>');
   /* R403: 消费 R400 后端 meta.m_macd 落痕 —— 月线MACD排序键整键失效时前端显式警示。
      背景(09-09 r11): 腾讯月K源停用短路 → 全宇宙 m_macd=null → 前端 mTier(null)=中性,
      逆向观察池 92 只 62 只(67%)名次位移≥3(绿柱加长票未沉尾), 页面却无任何提示(用户靠盘面才发现)。
@@ -674,6 +701,59 @@ function renderBar(){
   $("barRow").innerHTML=pills.map(function(p){
     return '<div class="pill '+(p.c||"")+'"'+(p.tip?' title="'+esc(p.tip)+'"':'')+'><div class="l">'+esc(p.l)+'</div><div class="v">'+p.v+'</div></div>';
   }).join("");
+  renderEfBar();   // R444: 信号实证效力条(与概要条同源渲染; 计数取 meta.scen_cnt, 与 pill 同口径)
+}
+/* ===== R444: 信号实证效力条(R443 回测结论常驻看板) =====
+   R443 对看板信号做了五年 point-in-time 回测 —— 直接重放**生产引擎本身**(analyze_one),
+   非复刻。样本 新浪150票/31026时点/2021-11~2026-08, 另以腾讯前复权 125票/13117时点复跑;
+   框架自校验: 以 09-11 为「今天」重放 100 票, 与 CI 真实产物逐字段比对 8 字段仅 1 处不一致。
+   分层结论(20 日**横截面同日中性**超额, 事件段级检验):
+     背驰见顶风险   −0.80pp p=0.018  5年4负, 5/10/20日单调 −0.13/−0.37/−0.80  ⇐ 唯一显著
+     背驰见底机会   +0.58pp p=0.13   年度正负交替                            ⇐ 无可检测超额
+     逆向观察池     −0.05pp p=0.91                                          ⇐ 无可检测超额
+     高胜率精选     −1.30pp p=0.36 (vs 池内非精选; 两源方向相反, 均不显著)   ⇐ 无增量
+     「盘中已破」   收益 −0.32pp p=0.74 / 深亏>5% 概率 72.1% vs 58.1%(+14pp) ⇐ 风险维度有效
+   ⚠️ 局限: 横截面污染度 14.7% ⇒ 上述估计**偏乐观**; 17层×3周期未做多重比较校正(顶风险为
+   先验对照且方向/单调性/年度一致性三重齐备); 样本期未含 2015/2018 极端流动性危机。
+   存在意义: 此前结论只在本地报告里, 用户每日打开看板仍会把「底机会」当买入信号 —— 与
+   R425/R436「口径须与判据一致」同源: 展示信号的同时必须标注该信号的**实测效力**。 */
+var efOpen=false;
+function renderEfBar(){
+  var el=$("efBar");if(!el)return;
+  var scen=(M||{}).scen_cnt||{};
+  var nTop=scen["背驰见顶风险"]||0, nBot=scen["背驰见底机会"]||0;
+  var rows=[
+    ["背驰见顶风险(顶组)","−0.80pp","p=0.018","5年4负 · 5/10/20日单调增强",1],
+    ["背驰见底机会(底组)","+0.58pp","p=0.13","年度正负交替 ⇒ 无可检测超额",0],
+    ["逆向观察池(老结构埋伏)","−0.05pp","p=0.91","无可检测超额",0],
+    ["高胜率精选(vs 池内非精选)","−1.30pp","p=0.36","两源方向相反, 均不显著 ⇒ 无增量",0],
+    ["「盘中已破」标记 · 收益维度","−0.32pp","p=0.74","收益上无差异(故 R442 决定不剔除)",0],
+    ["「盘中已破」标记 · 风险维度","72.1%","vs 58.1%","20日内最大浮亏>5% 概率 +14pp ⇒ 按风险读",1]
+  ];
+  el.className="efbar"+(efOpen?" open":"");
+  el.style.display="flex";   // ⚠️ 必须显式打开: DOM 初始 inline style="display:none" 优先级高于
+                             //    .efbar{display:flex}, 只设 innerHTML 会让整条永不显示(配了没画)。
+  el.innerHTML=
+    '<div class="efc warn"><span class="efh">⚠️ 背驰见顶风险 <span class="efn">'+nTop+'</span> 只</span>'
+      +'<span class="efk">实证有效</span>'
+      +'<span class="eft">五年回测中<b>唯一</b>跨过显著性门槛的信号 — 20日超额 <b>−0.80pp</b>(p=0.018) · 5年4负 · 随持有期单调增强 ⇒ <b>当风险提示用</b></span></div>'
+    +'<div class="efc neut"><span class="efh">🟢 背驰见底机会 <span class="efn">'+nBot+'</span> 只</span>'
+      +'<span class="efk">未获证实</span>'
+      +'<span class="eft">同口径回测<b>无可检测超额</b>(+0.58pp, p=0.13, 年度正负交替) ⇒ <b>不宜直接当买入信号</b>, 需自备止损纪律</span></div>'
+    +'<div class="efd">'
+      +'<b>📊 回测实证与证据 <span style="font-weight:400;color:#64748b">(点击本行展开/收起 · 结论随看板常驻 —— 避免把未获证实的信号当信号用)</span></b>'
+      +'<table><tr><th>信号层</th><th>20日截面中性超额</th><th>p 值</th><th>一致性 / 备注</th></tr>'
+      +rows.map(function(r){
+        return '<tr><td>'+esc(r[0])+'</td><td class="'+(r[4]?'sig':'ns')+'">'+r[1]+'</td><td class="'+(r[4]?'sig':'ns')+'">'+r[2]+'</td><td>'+r[3]+'</td></tr>';
+      }).join('')
+      +'</table>'
+      +'<b>方法</b>: point-in-time 重放 — 对历史每个交易日截断 K 线后喂给<b>生产引擎本身</b>(非复刻), 只把「今天是哪天」伪装成历史日 ⇒ 无前视偏差。'
+      +'样本: 新浪 150 票 / 31026 时点 / 2021-11~2026-08; 腾讯前复权 125 票 / 13117 时点复跑, 核心结论一致。'
+      +'框架自校验: 以 09-11 为「今天」重放 100 票, 与 CI 当日真实产物逐字段比对, 8 字段仅 1 处不一致(scenario / 背驰低点 / 偏离度 / 门禁 / 均额 / 收盘价 全 0 差异)。'
+      +'基准用<b>横截面同日均值</b>, 不用沪深300 —— 后者会把 size 风格差异算成超额(实测把 +0.58pp 放大成 +2.25pp)。'
+      +'<div class="lim">⚠️ 局限: ①横截面污染度 14.7% ⇒ 上述超额估计<b>偏乐观</b>(真实值可能更低); ②17 层 × 3 周期未做多重比较校正(Bonferroni 后顶风险不再显著; 但它是先验对照, 且方向/单调性/年度一致性三重齐备); ③样本期未覆盖 2015/2018 极端流动性危机。仅供研究参考, 不构成投资建议。</div>'
+      +'</div>';
+  el.onclick=function(){efOpen=!efOpen;el.className="efbar"+(efOpen?" open":"");};
 }
 /* ===== R285: 实操信号雷达(首页顶部) =====
    选样: SIG 全市场近端背驰信号(顶风险/底机会 分栏), 各取"最新鲜优先(其次强)"5 条。
@@ -720,7 +800,7 @@ function sigRow(s,opt){   // R380: opt.sub=true = 非低吸区灰显行(破位/�
      但缠论口径「一买」已名存实亡, 必须可见(用户实例 sh605020: 盘中 30.03 破 30.44, 收 30.76)。 */
   var _bbc=(u.st||{}).bottom_bc||{};
   var bkTag=(!t&&dev!=null&&dev>=0&&_bbc.broken&&_bbc.broken_price!=null)
-    ?'<span class="bkmini" title="盘中最低 '+_bbc.broken_price+'（'+esc(_bbc.broken_date||"")+'）已击穿背驰低点 '+_bbc.end_price+' —— 缠论口径该一类买点已失效(跌破买点低点=买点逻辑破坏, 需重新构筑底部结构)。⚠️ 看板按**收盘价**剔票(有意避开日内插针, 见 revCand), 故本行仍留在池中; 两个判据回答的是不同问题(结构还成不成立 / 今天要不要移出池子), 不矛盾。破位后创新高前不宜按低吸对待">盘中已破</span>'
+    ?'<span class="bkmini" title="盘中最低 '+_bbc.broken_price+'（'+esc(_bbc.broken_date||"")+'）已击穿背驰低点 '+_bbc.end_price+' —— 缠论口径该一类买点已失效(跌破买点低点=买点逻辑破坏, 需重新构筑底部结构)。⚠️ 看板按**收盘价**剔票(有意避开日内插针, 见 revCand), 故本行仍留在池中; 两个判据回答的是不同问题(结构还成不成立 / 今天要不要移出池子), 不矛盾。破位后创新高前不宜按低吸对待。📊 R443 五年回测: 该标记在**收益**维度无可检测差异(20日 −0.32pp, p=0.74), 但在**风险**维度有效 —— 20日内最大浮亏>5% 概率 72.1%(未破样本 58.1%, +14pp) ⇒ 按风险读, 不按收益读">盘中已破</span>'
     :'';
   var ff=(u.ff||{}).net;
   var indName=(u.type==="ETF"?"ETF板块":(s.ind&&s.ind!=="-"?s.ind:"-"));
@@ -730,7 +810,7 @@ function sigRow(s,opt){   // R380: opt.sub=true = 非低吸区灰显行(破位/�
     "\n"+(s.bc_date||"")+"触发 · 距今"+(fr==null?"?":(fr===0?"当日":fr+"天"))+"\n类型 "+(s.bc_type||"-")+" · 强度"+(s.strong||0)+"/2"+(s.vol?" · 量缩确认":"")+" · 面积比"+(s.area!=null?s.area:"-")+   // R320: fresh=0 →"距今当日"(原"距今0天"误导)
     "\n所属 "+(indName||"-")+(u.lead?" · 行业龙头":"")+
     (dev!=null?"\n现价较信号位: "+devTxt+(devTip?" ("+devTip+")":""):"")+
-    (bkTag?"\n⚠️ 盘中已破: 背驰笔结束后最低 "+_bbc.broken_price+"（"+_bbc.broken_date+"）已击穿背驰低点 "+_bbc.end_price+"，该一类买点在**结构上已失效**（看板按收盘价剔票，故本行仍在池）": "")+
+    (bkTag?"\n⚠️ 盘中已破: 背驰笔结束后最低 "+_bbc.broken_price+"（"+_bbc.broken_date+"）已击穿背驰低点 "+_bbc.end_price+"，该一类买点在**结构上已失效**（看板按收盘价剔票，故本行仍在池）\n📊 R443 五年回测：该标记收益维度无可检测差异(20日 −0.32pp, p=0.74)，但风险维度有效 — 20日内最大浮亏>5% 概率 72.1%(未破 58.1%)，按风险读": "")+
     (ff!=null?"\n当日主力净流入: "+ffTxt(ff):"")+
     ((ffNet!=null&&((!t&&ffNet<0)||(t&&ffNet>0)))?"\n⚠️ 资金背离警示: "+(t?"顶信号下主力仍净流入 "+ffTxt(ffNet)+"，警惕假顶/逼空":"底信号下主力却净流出 "+ffTxt(ffNet)+"，警惕假底不跟"):"")+
     "\n\n点击查看个股完整K线与结构";
@@ -988,7 +1068,7 @@ function revRow(c){
      本池剔票用**收盘价**(revCand: close<endP 才剔, 有意避开日内插针), 故收盘未破但盘中
      已刺穿者仍留在池中 —— 两个判据回答不同问题(结构是否成立 / 是否移出池子), 必须并列可见。 */
   var bkTag=(bb.broken&&bb.broken_price!=null)
-    ?'<span class="bkmini" title="盘中最低 '+bb.broken_price+'（'+esc(bb.broken_date||"")+'）已击穿背驰低点 '+bb.end_price+' —— 缠论口径该一类买点已失效，需重新构筑底部结构；看板按收盘价剔票故本票仍在池中">已破</span>'
+    ?'<span class="bkmini" title="盘中最低 '+bb.broken_price+'（'+esc(bb.broken_date||"")+'）已击穿背驰低点 '+bb.end_price+' —— 缠论口径该一类买点已失效，需重新构筑底部结构；看板按收盘价剔票故本票仍在池中。📊 R443 五年回测: 该标记在**收益**维度无可检测差异(20日 −0.32pp, p=0.74), 但在**风险**维度有效 —— 20日内最大浮亏>5% 概率 72.1%(未破样本 58.1%, +14pp) ⇒ 按风险读, 不按收益读">已破</span>'
     :'';
   var fdTxt=bb.bi_date_end+" 触发";
   var bcTag=bb.bc_type?('<span style="color:#94a3b8">'+esc(String(bb.bc_type))+'</span>'):'';
@@ -1040,7 +1120,7 @@ function revRow(c){
     "\n距历史高回撤 "+Math.abs(c.dd*100).toFixed(1)+"% (深跌)"+
     "\n背驰低点参考: "+bb.end_price+" · 现价距低点 "+(c.dev>=0?"+":"")+c.dev.toFixed(1)+"% · "+dt.tip+arTipL+trTipL+
     (riskPct!=null?"\n止损参考: 跌破 "+bb.end_price+" 即结构失效 (较现价再跌约 "+riskPct.toFixed(1)+"%)":"")+
-    (bkTag?"\n⚠️ 盘中已破: 背驰笔结束后最低 "+bb.broken_price+"（"+bb.broken_date+"）已刺穿背驰低点 "+bb.end_price+" —— 缠论口径一买已失效（本池按收盘价剔票，故仍在本池）":"")+
+    (bkTag?"\n⚠️ 盘中已破: 背驰笔结束后最低 "+bb.broken_price+"（"+bb.broken_date+"）已刺穿背驰低点 "+bb.end_price+" —— 缠论口径一买已失效（本池按收盘价剔票，故仍在本池）\n📊 R443 五年回测：收益维度无可检测差异(20日 −0.32pp, p=0.74)，风险维度有效 — 20日内最大浮亏>5% 概率 72.1%(未破 58.1%)，按风险读":"")+
     (mm&&mm.state?"\n月线MACD("+(mm.date||"-")+", 双周期键): "+(mm.state==="red"?"红柱 "+mm.h2+" — 月线多头, 反弹延续概率高":mm.state==="green_shrink"?"绿柱缩短 "+mm.h1+"→"+mm.h2+" — 下跌动能衰减":"绿柱加长 "+mm.h1+"→"+mm.h2+" — 月线下跌中继, 反弹易夭折")+
     (mm&&mm.state==="green_grow"?" · 名次已沉同档尾":""):(mm?"\n月线MACD: 无数据(次新/月K不可得) — 中性档":""))+
     "\n60日均成交: "+amtTxt+
@@ -1051,7 +1131,7 @@ function revRow(c){
     '<div><div class="nm">'+esc(nm)+pickStar+lead+ffMini+gtag+'</div><div class="sub">'+trTag+esc(c.sym)+" · "+esc(indName)+' · '+esc(st.one_word||"-")+arTag+'</div></div>'+
     '<div><div class="big '+ddCls+'">'+(c.dd*100).toFixed(1)+'%</div><div class="small">距历史高</div></div>'+
     '<div><div class="big">'+esc(st.close!=null?st.close:"-")+'</div><div class="small '+(st.chg1d>0?"up":(st.chg1d<0?"down":""))+'">'+pct(st.chg1d,2)+'</div></div>'+
-    '<div><div class="big" style="font-size:11.5px">'+(endP!=null?endP.toFixed(2):"-")+bkTag+'</div><div class="small" style="font-size:10px">'+(bkTag?"底线 · 盘中已破":"底线 · 止损参考")+'</div></div>'+
+    '<div><div class="big" style="font-size:11.5px">'+(endP!=null?endP.toFixed(2):"-")+bkTag+'</div><div class="small" style="font-size:10px"'+(bkTag?' title="📊 R443 五年回测: 「盘中已破」在收益维度无可检测差异(20日 −0.32pp, p=0.74), 在风险维度有效 — 20日内最大浮亏>5% 概率 72.1%(未破样本 58.1%, +14pp)。该底线已被盘中击穿, 不再是有效止损参考"':'')+'>'+(bkTag?"底线 · 盘中已破":"底线 · 止损参考")+'</div></div>'+
     '<div><div class="big" style="font-size:12px">'+amtTxt+'</div><div class="small">60日均额</div></div>'+
     '<div><div class="big" style="font-size:11px;color:#94a3b8">'+esc(fdTxt)+'</div><div class="small">'+c.fd+"天前 · "+bcTag+'</div></div>'+
     '<div><div class="devv">'+(c.dev>=0?"+":"")+c.dev.toFixed(1)+'% <span class="dtlbl" style="'+dtStyle+'" title="'+esc(dt.tip)+'">'+dt.lbl+'</span>'+confDot+mTag+'</div><div class="small">距背低点</div></div>'+
@@ -1568,7 +1648,7 @@ function showStk(sym){
      **最低价**击穿 end_price; 与 revpool 剔票的收盘价口径刻意并存(结构是否成立 / 是否移出池子)。 */
   function _bkBadge(bbc,tipExtra){
     if(!bbc||!bbc.broken||bbc.broken_price==null)return"";
-    return '<span class="bkmini" title="'+esc((bbc.broken_date||"")+' 盘中最低 '+bbc.broken_price+' 已击穿背驰低点 '+bbc.end_price+(tipExtra||"")+" —— 缠论口径该买点已失效(跌破买点低点=买点逻辑破坏, 需重新构筑底部结构)。看板按收盘价剔票(有意避开日内插针), 故仍显示原场景/仍在池, 两者回答的是不同问题")+'">已破</span>';
+    return '<span class="bkmini" title="'+esc((bbc.broken_date||"")+' 盘中最低 '+bbc.broken_price+' 已击穿背驰低点 '+bbc.end_price+(tipExtra||"")+" —— 缠论口径该买点已失效(跌破买点低点=买点逻辑破坏, 需重新构筑底部结构)。看板按收盘价剔票(有意避开日内插针), 故仍显示原场景/仍在池, 两者回答的是不同问题。📊 R443 五年回测: 该标记在收益维度无可检测差异(20日 −0.32pp, p=0.74), 在风险维度有效 — 20日内最大浮亏>5% 概率 72.1%(未破样本 58.1%, +14pp) ⇒ 按风险读, 不按收益读")+'">已破</span>';
   }
   var grp=(u.type==="ETF")?"ETF板块":(u.ind||"");
   var leadTag=u.lead?' <span class="lead-tag" title="'+(u.type==="ETF"?"场内规模最大的基金":"该行业总市值最大的龙头股")+'">👑 '+(u.type==="ETF"?"板块规模最大":"行业龙头")+'</span>':'';   // R283
@@ -1612,6 +1692,7 @@ function showStk(sym){
       +' — 缠论口径该买点<b>已失效</b>：跌破一类买点低点即买点逻辑破坏，须等新的底分型 + 新背驰，或转二买/三买再评估。'
       +'<br><span style="opacity:.85;font-size:11.5px">图上「底线」仍按原背驰低点画（结构参考位），但<b>已不可当有效支撑</b>；止损线按失效口径标红。'
       +'看板按<b>收盘价</b>剔票（有意避开日内插针，见 revCand），故本页仍显示「'+esc(scen||"-")+'」场景 —— 两个判据回答的是不同问题（结构是否成立 / 今天要不要移出池子），不矛盾。</span>'
+      +'<br><span style="opacity:.85;font-size:11.5px">📊 <b>该标记怎么用（五年回测实证）</b>：<b>不要</b>按收益维度理解 —— 已破与未破样本后续 20 日收益无可检测差异（−0.32pp，p=0.74，故 R442 决定不把已破票剔出池子）。要按<b>风险维度</b>读：已破样本 20 日内最大浮亏超 5% 的概率 <b>72.1%</b>，未破样本 58.1%（高 14 个百分点），平均最大浮亏 −12.00% vs −8.34%。即它不告诉你「不会涨」，它告诉你「深亏概率更高、止损纪律必须更硬」。</span>'
       +'</div></div>'+banner;
   }
   var sgx=null;SIG.forEach(function(x){if(x.sym===sym)sgx=x});
