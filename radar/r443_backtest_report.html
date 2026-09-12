@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A股缠论雷达看板 · 深度回测报告 R443</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<style>
+  :root{
+    --bg:#14161a; --card:#1c1f24; --card2:#22262c; --bd:#2c3138; --bd2:#3a4048;
+    --tx:#e8e6e3; --tx2:#a8acb3; --tx3:#767b83;
+    --up:#e24b4a; --dn:#97c459; --blue:#378add; --amber:#ef9f27; --purple:#7f77dd;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--tx);
+    font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+    font-size:14px;line-height:1.7;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1100px;margin:0 auto;padding:40px 24px 80px}
+  h1{font-size:26px;font-weight:600;margin:0 0 8px;letter-spacing:-.3px}
+  h2{font-size:19px;font-weight:600;margin:48px 0 4px;padding-top:20px;border-top:1px solid var(--bd)}
+  h2 .n{color:var(--tx3);font-weight:400;margin-right:10px}
+  h3{font-size:15px;font-weight:600;margin:26px 0 10px;color:var(--tx)}
+  p{margin:10px 0;color:var(--tx2)}
+  .lede{color:var(--tx2);font-size:15px;margin:0 0 6px}
+  .meta{color:var(--tx3);font-size:12.5px;margin-bottom:28px}
+  .card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:20px 22px;margin:16px 0}
+  .card.warn{border-color:#5a3a1c;background:#221b14}
+  .card.ok{border-color:#2d4a2a;background:#161f16}
+  .grid{display:grid;gap:12px}
+  .g2{grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
+  .g3{grid-template-columns:repeat(auto-fit,minmax(185px,1fr))}
+  .g4{grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
+  .kpi{background:var(--card2);border-radius:10px;padding:14px 16px}
+  .kpi .lb{font-size:12.5px;color:var(--tx2);margin-bottom:4px}
+  .kpi .vl{font-size:23px;font-weight:600;letter-spacing:-.5px;line-height:1.25}
+  .kpi .sb{font-size:12px;color:var(--tx3);margin-top:3px}
+  .up{color:var(--up)} .dn{color:var(--dn)} .bl{color:var(--blue)} .am{color:var(--amber)} .pu{color:var(--purple)}
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:13px}
+  th,td{padding:8px 10px;text-align:right;border-bottom:1px solid var(--bd)}
+  th{color:var(--tx3);font-weight:500;font-size:12px;text-align:right;white-space:nowrap}
+  th:first-child,td:first-child{text-align:left}
+  tbody tr:hover{background:#20242a}
+  .sig{background:rgba(226,75,74,.13);color:#f09595;border-radius:4px;padding:1px 6px;font-size:11.5px;font-weight:600}
+  .ns{color:var(--tx3);font-size:11.5px}
+  .chart{position:relative;width:100%;margin:18px 0}
+  .lg{display:flex;flex-wrap:wrap;gap:16px;margin:0 0 10px;font-size:12.5px;color:var(--tx2)}
+  .lg i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:middle}
+  code{background:#252a31;padding:2px 6px;border-radius:4px;font-size:12.5px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#c8ccd2}
+  ul{margin:10px 0;padding-left:22px;color:var(--tx2)}
+  li{margin:6px 0}
+  .tag{display:inline-block;font-size:11.5px;padding:2px 8px;border-radius:20px;border:1px solid var(--bd2);color:var(--tx2);margin-right:6px}
+  .foot{margin-top:56px;padding-top:20px;border-top:1px solid var(--bd);color:var(--tx3);font-size:12.5px}
+  .hl{color:var(--tx);font-weight:600}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>A股缠论雷达看板 · 深度回测</h1>
+<p class="lede">用「历史每个时点只看当时已知信息」的方式重放看板信号，检验它到底有没有预测力。</p>
+<p class="meta">R443 &nbsp;·&nbsp; 样本 150 只（沪深主板/创业板/科创板/北交所/ETF 各分层） &nbsp;·&nbsp; 2021-11 ~ 2026-08 &nbsp;·&nbsp; 31,026 个信号时点 &nbsp;·&nbsp; 引擎：复用生产 <code>analyze_one</code>，非复刻</p>
+
+<div class="card warn">
+  <h3 style="margin-top:0">一句话结论</h3>
+  <p style="margin-bottom:0"><span class="hl">看板的「机会」类信号没有可检测的选股超额</span>（逆向观察池 20 日超额 −0.05pp，p=0.91；背驰见底机会 +0.58pp，p=0.13）。
+  但同一引擎的<span class="hl">看跌信号是有效的</span>（背驰见顶风险 −0.80pp，p=0.018，五年四负）—— 这不是噪声，而是
+  <span class="hl">方向性的不对称</span>：A 股的下跌延续性能被捕捉，底部反转不能。</p>
+</div>
+
+<div class="grid g4" style="margin-top:16px">
+  <div class="kpi"><div class="lb">逆向观察池 POOL</div><div class="vl dn">−0.05<span style="font-size:14px">pp</span></div><div class="sb">20日超额 · p=0.91 · n=831</div></div>
+  <div class="kpi"><div class="lb">精选 ELITE</div><div class="vl dn">−1.40<span style="font-size:14px">pp</span></div><div class="sb">20日超额 · p=0.12 · n=88</div></div>
+  <div class="kpi"><div class="lb">背驰见顶风险（对照）</div><div class="vl bl">−0.80<span style="font-size:14px">pp</span></div><div class="sb">20日超额 · p=0.018 · n=1033</div></div>
+  <div class="kpi"><div class="lb">信号后曾亏超5%概率</div><div class="vl dn">55.2<span style="font-size:14px">%</span></div><div class="sb">20日内 · 已破信号高达 72.1%</div></div>
+</div>
+
+<h2><span class="n">01</span>方法：怎么做到「不偷看未来」</h2>
+<p>回测最容易出错的地方是前视偏差。这次的做法是直接复用生产引擎，只伪装「今天是哪天」：</p>
+<ul>
+  <li>对历史每一天 <code>t</code>，把 K 线截断成 <code>ks[:t+1]</code> 喂给生产函数 <code>analyze_one(sym, seg)</code> —— 跑的是同一段源码，不是复刻的近似版。</li>
+  <li>唯一打补丁的是 <code>scan_radar._bj_today</code>：让它返回 <code>seg</code> 的最后一根 K 线日期，于是 <code>fresh_days</code>、<code>stop_days</code>、数据契约窗全部对齐到历史时点。</li>
+  <li>信号在 <code>t</code> 日盘后可知，收益从 <code>t+1</code> 起算（另有 <code>t+1</code> 开盘口径做对照）。</li>
+  <li>统计单位是<span class="hl">事件段</span>而非交易日 —— 连续命中日聚成一段、一次事件只算一票，避免日度重叠把 p 值虚高数千倍。</li>
+  <li>超额 = 个股收益 − <span class="hl">同日全样本均值</span>（横截面中性化），因为背驰信号天然聚集在大跌之后，不扣基准就是把反弹当本事。</li>
+</ul>
+
+<h3>框架自校验：重放口径是否等于生产口径</h3>
+<p>用同样的源码、同样的窗口、以 2026-09-11 为「今天」重放 100 只票，与 CI 当日真实产物逐字段对比：</p>
+<table>
+  <thead><tr><th>字段</th><th>scenario</th><th>dd</th><th>fresh_days</th><th>end_price</th><th>gate</th><th>avg_amt60</th><th>close</th><th>bi_n</th></tr></thead>
+  <tbody><tr><td>不一致数 / 100 票</td><td class="dn">0</td><td class="dn">0</td><td class="dn">0</td><td class="dn">0</td><td class="dn">0</td><td class="dn">0</td><td class="dn">0</td><td>1</td></tr></tbody>
+</table>
+<p class="ns">唯一一处差异是某票笔数 88 vs 89（该票腾讯源当日多一根 K 线），不影响任何信号判定。<span class="hl">口径对齐后，统计结论才可信。</span></p>
+
+<h2><span class="n">02</span>结果：各信号层的 20 日超额</h2>
+<div class="lg">
+  <span><i style="background:var(--up)"></i>正超额</span>
+  <span><i style="background:var(--dn)"></i>负超额</span>
+  <span><i style="background:var(--blue)"></i>对照组（看跌）</span>
+</div>
+<div class="chart" style="height:430px"><canvas id="ch1" role="img" aria-label="各信号层20日超额收益横向条形图">S1 +0.58, S1TOP -0.80, POOL -0.05, ELITE -1.40</canvas></div>
+
+<table>
+  <thead><tr><th>层</th><th>段数</th><th>5日</th><th>10日</th><th>20日</th><th>p值</th></tr></thead>
+  <tbody>
+    <tr><td>背驰见顶风险 <span class="ns">对照</span></td><td>1039</td><td>−0.13pp</td><td>−0.37pp</td><td class="bl">−0.80pp</td><td><span class="sig">0.018</span></td></tr>
+    <tr><td>被剔除·收盘破位 DROP</td><td>417</td><td>+0.05pp</td><td>+0.18pp</td><td class="up">+0.87pp</td><td class="ns">0.095</td></tr>
+    <tr><td>背驰见底机会 S1</td><td>1104</td><td>−0.13pp</td><td>+0.10pp</td><td class="up">+0.58pp</td><td class="ns">0.126</td></tr>
+    <tr><td>近端信号 SIG</td><td>637</td><td>−0.09pp</td><td>+0.11pp</td><td class="up">+0.32pp</td><td class="ns">0.472</td></tr>
+    <tr><td>近端信号·未破 SIGOK</td><td>497</td><td>−0.16pp</td><td>−0.18pp</td><td class="up">+0.20pp</td><td class="ns">0.684</td></tr>
+    <tr><td>逆向观察池 POOL</td><td>835</td><td>−0.25pp</td><td>−0.06pp</td><td class="dn">−0.05pp</td><td class="ns">0.910</td></tr>
+    <tr><td>池内非精选 POOLN</td><td>802</td><td>−0.26pp</td><td>−0.04pp</td><td class="dn">−0.10pp</td><td class="ns">0.808</td></tr>
+    <tr><td>精选 ELITE</td><td>88</td><td>−0.46pp</td><td>−1.18pp</td><td class="dn">−1.40pp</td><td class="ns">0.118</td></tr>
+  </tbody>
+</table>
+<p class="ns">p 值来自段级符号翻转置换检验（3000 次）。零假设校准：用与收益无关的伪层跑同一检验，拒绝率 2.5%~7.5%，与名义 5% 相符 —— <span class="hl">检验本身不偏乐观</span>。</p>
+
+<h2><span class="n">03</span>最重要的一张图：看跌有效、看涨无效</h2>
+<p>如果连看跌信号都没有负超额，那说明整条信号链都是噪声。结果恰恰相反：</p>
+<div class="lg">
+  <span><i style="background:var(--blue)"></i>背驰见顶风险（看跌）</span>
+  <span><i style="background:var(--amber)"></i>背驰见底机会（看涨）</span>
+</div>
+<div class="chart" style="height:330px"><canvas id="ch2" role="img" aria-label="分年度看跌与看涨信号超额对比">看跌五年四负</canvas></div>
+<div class="card">
+  <p style="margin:0 0 8px"><span class="hl bl">看跌信号</span>在 5 个完整年度中 4 年为负，且随持有期<span class="hl">单调增强</span>（−0.13 → −0.37 → −0.80pp）。</p>
+  <p style="margin:0"><span class="hl am">看涨信号</span>六年正负交替（+2.66 / −0.15 / −0.30 / +0.98 / −0.19 / +2.21），没有一致性 —— 这是「无预测力」的典型形态。</p>
+</div>
+<p>换句话说：<span class="hl">引擎对趋势方向的结构判断不是随机数</span>，它在下跌方向上确实有效；失效的是<span class="hl">底部反转</span>这一侧。这与 A 股「下跌延续性强、底部由政策与资金面决定」的特征一致。</p>
+
+<h2><span class="n">04</span>信号的价值在风险维度，不在收益维度</h2>
+<p>收益超额趋近于零，但路径差异是真实的。信号发出后 20 个交易日内的最大浮盈/最大回撤：</p>
+<div class="chart" style="height:360px"><canvas id="ch3" role="img" aria-label="各层最大浮盈与最大回撤对比">POOL +13.31/-8.08, SIGBK +11.51/-12.00</canvas></div>
+<table>
+  <thead><tr><th>层</th><th>平均最大浮盈</th><th>平均最大回撤</th><th>回撤 P10</th><th>20日内曾亏超5%</th></tr></thead>
+  <tbody>
+    <tr><td>逆向观察池 POOL</td><td class="up">+13.31%</td><td class="dn">−8.08%</td><td>−18.09%</td><td>55.2%</td></tr>
+    <tr><td>近端信号·未破 SIGOK</td><td class="up">+12.30%</td><td class="dn">−8.34%</td><td>−17.95%</td><td>58.1%</td></tr>
+    <tr><td>背驰见顶风险（对照）</td><td class="up">+11.16%</td><td class="dn">−10.01%</td><td>−20.90%</td><td>68.2%</td></tr>
+    <tr><td>精选 ELITE</td><td class="up">+9.47%</td><td class="dn">−9.58%</td><td>−20.32%</td><td>63.6%</td></tr>
+    <tr><td>近端信号·已破 SIGBK</td><td class="up">+11.51%</td><td class="dn">−12.00%</td><td>−25.33%</td><td><span class="sig">72.1%</span></td></tr>
+  </tbody>
+</table>
+<div class="card ok">
+  <p style="margin:0"><span class="hl">这条结论直接回答了一个悬而未决的问题</span>：「已破」标记到底有没有用？<br>
+  答案：<span class="hl">在收益上没有用</span>（已破 vs 未破的 20 日超额差仅 −0.32pp，p=0.74），
+  <span class="hl">在风险上有用</span> —— 已破信号 20 日内深亏超 5% 的概率是 <span class="hl">72.1%</span>，比未破信号的 58.1% 高出 14 个百分点，平均最大回撤也深了 3.7 个点。</p>
+</div>
+
+<h2><span class="n">05</span>三个附带结论</h2>
+
+<h3>「精选」没有产生正向选择</h3>
+<p>精选的条件是「距背驰低点 ≤3% + 60日均额 ≥1亿 + 非低自洽/次新」。实测它与池内非精选的差异为 −1.30pp（p=0.36），与前复权源复跑的方向相反（+1.20pp，p=0.63）——<span class="hl">两源方向不一致且均不显著，没有证据支持精选带来增量</span>。更值得注意的是：精选比<span class="hl">被剔除</span>的票还差 2.27pp（p=0.051）。</p>
+
+<h3>R442「不剔除只沉底」的决策站得住</h3>
+<p>被 revpool 剔除的「收盘破位」票，20 日超额 +0.87pp，<span class="hl">不比池内票差（−0.05pp），反而略好</span>。前复权源复跑更明显（DROP +3.08pp，p=0.002）。这意味着把这些票直接剔掉只会丢信息，沉底分组是正确处理。</p>
+
+<h3>「确认度」指标无效</h3>
+<p>双确认（量能确认 + 底分型向上）与无确认组的 20 日超额差异仅 +0.02pp（p=0.98）。<span class="hl">这个排序键没有任何区分力。</span></p>
+
+<h2><span class="n">06</span>稳健性与边界</h2>
+<table>
+  <thead><tr><th>检验项</th><th>结果</th><th>判断</th></tr></thead>
+  <tbody>
+    <tr><td>前复权源复跑（125票）</td><td>看跌 −1.00pp (p=0.012)、看涨 +0.27pp (p=0.58)</td><td>核心结论一致</td></tr>
+    <tr><td>零假设校准</td><td>伪层拒绝率 2.5%~7.5%（名义 5%）</td><td>检验可信</td></tr>
+    <tr><td>裸价除权污染</td><td>66 个除权日 / 20 万根 K 线 = 0.04%</td><td>可忽略</td></tr>
+    <tr><td>牛熊分层</td><td>看涨层在牛市/熊市均不显著</td><td>非单一 regime 驱动</td></tr>
+    <tr><td>板块分层</td><td>北交 +1.30pp / 创业板 +0.83pp / ETF −2.29pp</td><td>分散无一致方向</td></tr>
+  </tbody>
+</table>
+<h3>必须说清的局限</h3>
+<ul>
+  <li><span class="hl">基准选择会改变结论</span>：若改用沪深300 做基准，看涨层超额会变成 +2.25pp —— 但那是把「中小盘 vs 大盘」的风格差异算进了信号超额，是错误的中性化。本文一律采用横截面基准。</li>
+  <li><span class="hl">横截面污染度 14.7%</span>：同日样本票中约 15% 本身处于「见顶风险」状态，会把基准轻微拉低，因此我的估计<span class="hl">偏乐观</span>，真实超额可能更低。</li>
+  <li><span class="hl">精选样本偏小</span>：ELITE 仅 88 段，置信区间较宽（−1.40pp ±1.76），只能得出「无证据支持有增量」，不能反过来说「精选有害」。</li>
+  <li><span class="hl">看板长期在降级状态运行</span>：2026-09-11 实测 87% 的票（5754/6630）走新浪裸价源，只有 876 票拿到前复权数据。<span class="hl">这本身是数据质量隐患</span>，建议单独治理。</li>
+  <li>样本覆盖 2021-11 ~ 2026-08，包含一次完整熊市、一次政策底急涨与一段结构市，但未覆盖极端流动性危机（如 2015、2018）。</li>
+</ul>
+
+<h2><span class="n">07</span>这意味着什么</h2>
+<ol>
+  <li><span class="hl">不要把看板当买入信号用。</span>它给出的底部机会没有统计上的选股优势，20 日超额与零无法区分。</li>
+  <li><span class="hl">可以把看板的看跌信号当风险提示用。</span>「背驰见顶风险」是这批信号里唯一显著有效的，且方向一致、逐年稳定。</li>
+  <li><span class="hl">「已破」标记按风险来读，不要按收益来读。</span>它不告诉你「这票不会涨」，它告诉你「这票深亏概率 +14pp」。</li>
+  <li><span class="hl">看板的真实定位应是「结构探索工具」而非「选股工具」</span>：它的价值在于把 6600 只票的缠论结构可视化并排序，而不是替你做买卖决策。</li>
+</ol>
+
+<div class="foot">
+  R443 深度回测 · 主样本：新浪 150 票 / 31,026 时点 / 2021-11~2026-08 · 稳健性样本：腾讯前复权 125 票 / 13,117 时点<br>
+  方法：point-in-time 重放（复用生产 <code>analyze_one</code>）· 事件段级聚合 · 横截面中性化 · 置换检验 · 零假设校准<br>
+  全部数字来自本机实跑，脚本与中间产物可复现。统计显著性阈值 0.05，未做多重比较校正（17 层 × 3 周期）。
+</div>
+
+</div>
+<script>
+const TX='#a8acb3', GRID='rgba(168,172,179,.15)';
+const base={responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}}};
+
+new Chart(document.getElementById('ch1'),{
+ type:'bar',
+ data:{labels:['背驰见顶风险 (对照)','被剔除·收盘破位','背驰见底机会','近端信号 SIG','近端信号·未破','逆向观察池 POOL','池内非精选','精选 ELITE'],
+  datasets:[{data:[-0.80,0.87,0.58,0.32,0.20,-0.05,-0.10,-1.40],
+   backgroundColor:['#378add','#e24b4a','#e24b4a','#e24b4a','#e24b4a','#97c459','#97c459','#97c459'],
+   borderWidth:0,barThickness:24}]},
+ options:Object.assign({},base,{indexAxis:'y',
+  plugins:{legend:{display:false},tooltip:{callbacks:{label:(c)=>'超额 '+c.parsed.x.toFixed(2)+'pp'}}},
+  scales:{x:{grid:{color:GRID},ticks:{color:TX},title:{display:true,text:'20日超额收益（百分点）',color:TX},suggestedMin:-1.7,suggestedMax:1.2},
+   y:{grid:{display:false},ticks:{color:'#d3d1c7',font:{size:12}}}}})
+});
+
+new Chart(document.getElementById('ch2'),{
+ type:'bar',
+ data:{labels:['2021','2022','2023','2024','2025','2026'],
+  datasets:[
+   {data:[0.25,-1.18,-1.56,0.32,-0.76,-1.49],backgroundColor:'#378add',borderWidth:0,barPercentage:.75},
+   {data:[2.66,-0.15,-0.30,0.98,-0.19,2.21],backgroundColor:'#ef9f27',borderWidth:0,barPercentage:.75}]},
+ options:Object.assign({},base,{plugins:{legend:{display:false},tooltip:{callbacks:{label:(c)=>(c.datasetIndex===0?'看跌 ':'看涨 ')+c.parsed.y.toFixed(2)+'pp'}}},
+  scales:{x:{grid:{display:false},ticks:{color:TX}},
+   y:{grid:{color:GRID},ticks:{color:TX},title:{display:true,text:'20日超额收益（百分点）',color:TX}}}})
+});
+
+new Chart(document.getElementById('ch3'),{
+ type:'bar',
+ data:{labels:['逆向观察池 POOL','信号·未破 SIGOK','背驰见顶风险','精选 ELITE','信号·已破 SIGBK'],
+  datasets:[
+   {data:[13.31,12.30,11.16,9.47,11.51],backgroundColor:'#e24b4a',borderWidth:0,barPercentage:.72},
+   {data:[-8.08,-8.34,-10.01,-9.58,-12.00],backgroundColor:'#97c459',borderWidth:0,barPercentage:.72}]},
+ options:Object.assign({},base,{plugins:{legend:{display:false},tooltip:{callbacks:{label:(c)=>(c.datasetIndex===0?'最大浮盈 ':'最大回撤 ')+c.parsed.y.toFixed(2)+'%'}}},
+  scales:{x:{grid:{display:false},ticks:{color:'#d3d1c7',font:{size:12},maxRotation:18}},
+   y:{grid:{color:GRID},ticks:{color:TX,callback:(v)=>v+'%'}}}})
+});
+</script>
+</body>
+</html>
