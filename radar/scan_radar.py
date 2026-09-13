@@ -26,6 +26,7 @@
 import os
 import sys
 import json
+import math
 import time
 import datetime
 import threading
@@ -62,6 +63,19 @@ ONE_WORD_WIN = 120
 AGREE_TOTAL_MIN = 8
 AGREE_RATE_MIN = 0.6
 FRESH_MAX_DAYS = 10            # 最近背驰距今天数 <= -> 才算"近端信号"
+# R445: 行业信号计数改「规模可比」口径 —— n_sig_top/bot 是**绝对数**, 但 32 个板块的成分数
+# 从 16(综合) 到 386(机械设备) 差 **24 倍** ⇒ 绝对数排序被大板块恒定霸榜。实测(09-11):
+#   煤炭 29 只成分 / 6 个顶信号 → 绝对数仅第 15, 密度却是全市场第一 20.7%;
+#   电子 368 只 / 15 个 → 绝对数第 4, 摊薄后只剩 4.1%。
+# 判据改 **95% Wilson 置信下界**(Wilson score interval lower bound):
+#   小样本自动降权(22 只里 1 只 = 原始密度 4.5%, 下界仅 0.8% → 不误判为"集中");
+#   大样本不因规模被抬(386 只 20 个信号 → 下界 3.4%, 相对 29 只 6 个的 9.9% 落于其后);
+#   单调、无需人工设"最小样本量"门槛。**展示值仍是原始密度**(可自行按 k/n 复核),
+#   判据/排序/色条/regime 四处一律用下界 —— 前端 tooltip 与说明栏同步披露。
+SIG_LB_Z = 1.96                # Wilson 下界置信水平(95% 双侧)
+DENS_LB_STRONG = 2.5           # 「显著集中」门槛(百分点): 色条 + regime 共用同一判据
+SIG_ABS_MIN = 2                # 集中度绝对下限(1 只不算"集中", 与旧口径兼容)
+IND_POS_WIN = 250              # 行业位置窗口(根, ≈近一年): 回撤/价格分位统一用此窗口
 # R270: 新浪 datalen 实测支持 1500(2020-07 起), 扩至与腾讯qfq窗口(2021至今)同量级,
 # 避免新浪兜底时缠论结构起点(原800根≈3.2年自2023-05)与腾讯不一致导致的笔/中枢划分差异。
 SINA_LEN = 1500                # 新浪兜底K线根数(~6年, 2021至今全覆盖)
@@ -1310,7 +1324,90 @@ def _amp20(kline, win=20):
     return round((hi - lo) / o0 * 100, 2)
 
 
-def _regime_of(ist, n_top, n_bot, rsi14=None):
+def _wilson_lb(k, n, z=SIG_LB_Z):
+    """比例 k/n 的 Wilson 置信下界(百分点)。n<=0 -> 0.0。
+
+    R445: 行业"信号集中度"的判据。相比原始密度 k/n, 它在小样本上自动降权
+    (k=1,n=22 时原始密度 4.5% 但下界只有 0.8%), 在大样本上不因规模被抬高;
+    相比"设最小成分数门槛", 它不丢样本(煤炭 29 只仍能凭 6 个信号夺冠)。
+    公式: (p + z²/2n ∓ z·√(p(1-p)/n + z²/4n²)) / (1 + z²/n), 取下界。"""
+    if n <= 0:
+        return 0.0
+    p = k / n
+    d = 1 + z * z / n
+    c = (p + z * z / (2 * n)) / d
+    h = z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / d
+    return max(0.0, c - h) * 100
+
+
+def _mom(ks, win):
+    """近 win 根累计涨幅(%), 不足 win+1 根 -> None。"""
+    if len(ks) < win + 1:
+        return None
+    c1, c0 = ks[-1]["close"], ks[-1 - win]["close"]
+    if not c0:
+        return None
+    return round((c1 / c0 - 1) * 100, 2)
+
+
+def _dd_pxq(ks, win=IND_POS_WIN):
+    """区间位置: (距窗口最高价回撤%, 收盘价在窗口内的分位 0~100, 窗口高, 窗口低)。
+
+    R445: 行业此前只有 amp20(振幅=波动), 没有"跌透度"。低吸的核心是"跌得够不够透",
+    故补 距高回撤 + 价格分位。窗口固定取最近 win 根(≈近一年)且 win <= IND_KLINE_N(320),
+    使该指标可由入库的 kline 完整复算(CI 与本地/前端三处同口径, 不受 iks 实际长度影响)。
+    用窗口内 high/low 极值而非收盘, 与个股 dd(距历史高回撤)同口径。"""
+    seg = ks[-win:] if len(ks) > win else ks
+    if len(seg) < 20:
+        return None, None, None, None
+    hi = max(x["high"] for x in seg)
+    lo = min(x["low"] for x in seg)
+    c = ks[-1]["close"]
+    dd = round((c / hi - 1) * 100, 2) if hi > 0 else None
+    pxq = round((c - lo) / (hi - lo) * 100) if hi > lo else None
+    return dd, pxq, hi, lo
+
+
+def _rs_pctile(vals):
+    """横截面相对强度分位(0~100, 值越大分位越高); None 原样保留。并列取平均秩。
+
+    R443 教训: 相对强度**必须用横截面等权基准**, 不能用指数基准 —— 沪深300 会把
+    size/风格算进超额(实测 +2.25pp vs 横截面 +0.58pp)。此处直接对同批板块做分位,
+    天然不含基准污染。"""
+    ok = sorted(v for v in vals if v is not None)
+    n = len(ok)
+    if n < 2:
+        return [None] * len(vals)
+    out = []
+    for v in vals:
+        if v is None:
+            out.append(None)
+            continue
+        below = sum(1 for x in ok if x < v)
+        same = sum(1 for x in ok if x == v)
+        out.append(round((below + same / 2.0) / n * 100))
+    return out
+
+
+def _rot_quadrant(rs20, accel):
+    """行业轮动四象限标签: 相对强度(横截面分位) × 动量变化(5日 vs 20日 日均差)。
+
+    R445: 只用**描述性**口径回答"钱在往哪流"(强势是否在加速), 不含任何"该买"的
+    预测含义 —— 与 R443 回测结论(底背驰机会无统计显著性)保持一致。"""
+    if rs20 is None or accel is None:
+        return None
+    strong = rs20 >= 50
+    up = accel > 0
+    if strong and up:
+        return "领先加速"
+    if strong and not up:
+        return "领先减速"
+    if not strong and up:
+        return "落后转强"
+    return "落后加速"
+
+
+def _regime_of(ist, n_top, n_bot, rsi14, lb_top, lb_bot):
     """行业走势状态标签: 成分顶/底背驰计数 + 板块自身位置(收盘 vs 末中枢 + RSI)。
 
     [R260] 修复 2 处:
@@ -1322,7 +1419,20 @@ def _regime_of(ist, n_top, n_bot, rsi14=None):
        当板块自身已跌破末中枢下沿(close<zd)、或回落至中枢下半部且 RSI<45 时,
        成分的顶背驰预警多半已经兑现(信号后普跌), 继续标"顶背驰区"会误导逆向判断,
        故前者按末笔给"下跌趋势/震荡中", 后者给"震荡中"(除非成分底背驰显著集中)。
-       反之板块处中枢上半/上方时, 成分顶背驰计数占优 → "顶背驰区" 语义成立, 保留。"""
+       反之板块处中枢上半/上方时, 成分顶背驰计数占优 → "顶背驰区" 语义成立, 保留。
+
+    [R445] "集中"判据改规模可比口径 (lb_top/lb_bot = 95% Wilson 下界, 见 _wilson_lb):
+    原判据 n_top>=2 是**绝对数**, 使 16~29 只成分的小板块几乎不可能触发, 而 300+ 只的
+    大板块只要 2 只出信号就点亮 —— 与"集中"的语义相反。现改为「绝对数>=SIG_ABS_MIN
+    **且** 置信下界>=DENS_LB_STRONG」双条件; 实测(09-11) 5 处修正: 交通运输(5/100)、
+    传媒(3/92)、农林牧渔(4/82)、建筑材料(3/63)、石油石化(3/42) 由"顶背驰区"回落 ——
+    这 5 个的"集中"在统计上站不住(下界 1.1~2.5%), 属**虚标**。反之小板块如煤炭
+    (6/29, 下界 9.9%)、轻工制造(16/106, 9.5%) 凭密度上位, 不再被规模淹没。"""
+    # R445: 「显著集中」双条件门 —— 不达标则计数归零, 下方全部分支自动沿用
+    if not (n_top >= SIG_ABS_MIN and (lb_top or 0.0) >= DENS_LB_STRONG):
+        n_top = 0
+    if not (n_bot >= SIG_ABS_MIN and (lb_bot or 0.0) >= DENS_LB_STRONG):
+        n_bot = 0
     # 末笔方向: last_bi_dir=-1 末笔向下 / 1 末笔向上 / 0 缺省
     last_dir = {1: "up", -1: "down"}.get(ist.get("last_bi_dir"), "")
     close = ist.get("close")
@@ -1685,17 +1795,31 @@ def main():
         chg1d = round(iks[-1]["close"] / iks[-2]["close"] - 1, 4) if len(iks) >= 2 else 0
         total_cap = sum(m for _s, m in members if m)
         rsi14 = _rsi14(iks) if len(iks) >= 15 else None   # R260: regime 位置门控需 RSI 弱态信号
+        # --- R445: 规模可比口径(密度/Wilson 下界) + 多周期动量 + 距高回撤/价格分位 ---
+        nm = len(members)
+        lb_top = round(_wilson_lb(n_top, nm), 2)
+        lb_bot = round(_wilson_lb(n_bot, nm), 2)
+        mom5, mom20, mom60 = _mom(iks, 5), _mom(iks, 20), _mom(iks, 60)
+        dd, pxq, _px_hi, _px_lo = _dd_pxq(iks)
+        accel = (round(mom5 / 5.0 - mom20 / 20.0, 3)
+                 if (mom5 is not None and mom20 is not None) else None)
         industries[ind] = {
-            "n_member": len(members),
+            "n_member": nm,
             "n_total": ind_total.get(ind, len(members)),
             "n_sig_top": n_top, "n_sig_bot": n_bot,
+            "dens_top": (round(n_top * 100.0 / nm, 2) if nm else None),   # 原始密度(展示值)
+            "dens_bot": (round(n_bot * 100.0 / nm, 2) if nm else None),
+            "sig_top_lb": lb_top, "sig_bot_lb": lb_bot,                   # Wilson 下界(判据值)
+            "mom5": mom5, "mom20": mom20, "mom60": mom60,
+            "accel": accel,
+            "dd": dd, "pxq": pxq, "px_hi": _px_hi, "px_lo": _px_lo,
             "cap": round(total_cap / 1e8, 0),      # 亿元
             "chg1d": chg1d,
             "is_etf": 1 if ind == ETF_KEY else 0,
             "rsi14": rsi14,
             "amp20": _amp20(iks),
             "qual_rate": _qual_rate(ind, ind_total, ind_qual),
-            "regime": _regime_of(ist, n_top, n_bot, rsi14),
+            "regime": _regime_of(ist, n_top, n_bot, rsi14, lb_top, lb_bot),
             "leader": ind_lead.get(ind),           # R283: 行业龙头 {sym,name,mcap}(市值最大)
             "netflow": ind_ff.get(ind),            # R283: 当日主力净流入Σ(元, 全成分口径; 负=净流出)
             "netflow_n": ind_ffn.get(ind, 0),      # 参与加总的成分数(诊断口径完整性)
@@ -1708,6 +1832,19 @@ def main():
         _lu = universe.get(_ld["sym"])
         if _lu:
             _lu["lead"] = 1
+    # R445: 横截面相对强度分位 + 轮动四象限(须在全部行业算完后统一做, 故独立一趟)
+    #   rs20/rs60 = 该板块 20/60 日动量在**同批 32 个板块**中的分位(0~100);
+    #   用横截面而非上证基准 —— R443 实证指数基准会把 size/风格算进超额。
+    _ind_keys = sorted(industries.keys())
+    _rs20 = _rs_pctile([industries[k].get("mom20") for k in _ind_keys])
+    _rs60 = _rs_pctile([industries[k].get("mom60") for k in _ind_keys])
+    for _i, _k in enumerate(_ind_keys):
+        industries[_k]["rs20"] = _rs20[_i]
+        industries[_k]["rs60"] = _rs60[_i]
+        industries[_k]["rot"] = _rot_quadrant(_rs20[_i], industries[_k].get("accel"))
+    _rs_ok = sum(1 for k in _ind_keys if industries[k]["rs20"] is not None)
+    print("  行业横截面相对强度 %d/%d 个可算" % (_rs_ok, len(_ind_keys)))
+
     print("  行业合成/分析 %d 个, %.0fs" % (len(industries), time.time() - t_ind))
 
     # --- meta ---
@@ -1753,7 +1890,23 @@ def main():
         "title": "A股全市场缠论雷达",
         "asof": asof, "build_time": datetime.datetime.now(
             datetime.timezone(datetime.timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S"),
-        "version": "P3b-r17",   # r17=R444: ①前端新增「信号实证效力」条 —— R443 五年回测结论常驻看板
+        "version": "P3b-r18",   # r18=R445: 行业视图口径纠错 + 低吸/趋势地基补齐, 四处同改:
+                                #   ①**信号集中度**改规模可比口径 —— n_sig 绝对数(板块成分
+                                #     数 16~386 差 24 倍)换成 95% Wilson 置信下界(新增
+                                #     sig_top_lb/sig_bot_lb/dens_top/dens_bot), 判据/排序/
+                                #     色条/regime 四处一律用下界; 实测 5 处"顶背驰区"虚标
+                                #     回落(交运5/100 传媒3/92 农林4/82 建材3/63 石化3/42),
+                                #     小板块凭密度上位(煤炭 6/29 下界 9.9% → 全市场第一)。
+                                #   ②新增多周期动量 mom5/mom20/mom60 + 横截面相对强度分位
+                                #     rs20/rs60(32 板块内分位, 非指数基准) + 动量变化 accel
+                                #     + 轮动四象限 rot。
+                                #   ③新增"跌透度" —— 距近一年高点回撤 dd + 价格分位 pxq
+                                #     (窗口 250 根 <= IND_KLINE_N, 可由入库 kline 完整复算)。
+                                #   ④排序新增 RSI 超卖优先(设为默认)/趋势强度/相对强度/
+                                #     跌透优先; 原默认"RSI 超买优先"对逆向视角方向相反。
+                                # ⚠️ 全部新增字段均为**描述性**口径, 不含"该买"预测含义 ——
+                                #    与 R443 结论(底背驰机会无统计显著性)保持一致。
+                                # r17=R444: ①前端新增「信号实证效力」条 —— R443 五年回测结论常驻看板
                                 #     (背驰见顶风险 −0.80pp p=0.018 唯一显著 / 底背驰机会 +0.58pp p=0.13
                                 #     未获证实), 双卡片 + 可展开证据表; ②「已破」标记补**风险维度**提示
                                 #     (20日内最大浮亏>5% 概率 72.1% vs 58.1%): 收益维度无差异(p=0.74)

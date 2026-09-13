@@ -63,12 +63,16 @@ h1{font-size:21px;font-weight:700;letter-spacing:.4px;line-height:1.3}   /* R323
 .ind-panel .head h2{font-size:16px;font-weight:700;letter-spacing:.2px}
 .ind-panel .head .badge{background:var(--primary);color:#fff;font-size:11px;border-radius:20px;padding:2px 10px;font-weight:600;line-height:1.6}
 .ind-panel .head .hint{font-size:12px;color:var(--muted);margin-left:auto}
+/* R445: 口径说明条(常驻) —— 判据/色条/徽章/文案四处同口径的公开说明(仿 revpool 的 revRule) */
+.ind-rule{font-size:11.5px;line-height:1.75;color:#5b6b81;background:#f8fafc;border-bottom:1px solid #eef2f7;padding:7px 16px}
+.ind-rule b{color:var(--ink);font-weight:700}
+.ind-rule .warn{color:#b45309}
 .ind-panel .head .tabs{display:flex;gap:3px;background:#eef2f7;border-radius:9px;padding:3px}
 .ind-panel .head .tabs a{font-size:12px;padding:4.5px 11px;border-radius:7px;cursor:pointer;color:var(--muted);text-decoration:none;line-height:1.5;transition:background .15s,color .15s;white-space:nowrap}
 .ind-panel .head .tabs a:hover{color:var(--ink)}
 .ind-panel .head .tabs a.on{background:#fff;color:var(--ink);font-weight:700;box-shadow:0 1px 3px rgba(0,0,0,.08)}
-.ind-grid{display:grid;grid-template-columns:1.35fr .72fr .72fr 1.45fr .62fr .58fr 1.05fr 26px;gap:8px;align-items:center;padding:9px 16px;font-size:11px;font-weight:600;letter-spacing:.3px;background:#f8fafc;color:#5b6b81;border-bottom:1px solid #e2e8f0;border-top:1px solid #eef2f7;position:sticky;top:var(--bh,0px);z-index:30;box-shadow:0 1px 0 #fff,0 2px 6px rgba(15,23,42,.06)}   /* R323: top 让位 --bh(降级/陈旧横幅 sticky 高), 防表头被 z999 横幅整条遮住 */
-.ind-row{display:grid;grid-template-columns:1.35fr .72fr .72fr 1.45fr .62fr .58fr 1.05fr 26px;gap:8px;align-items:center;padding:10px 16px;border-top:1px solid #f1f5f9;cursor:pointer;transition:background .12s}
+.ind-grid{display:grid;grid-template-columns:1.45fr .62fr 1.00fr 1.10fr .82fr .48fr .48fr 1.20fr 26px;gap:8px;align-items:center;padding:9px 16px;font-size:11px;font-weight:600;letter-spacing:.3px;background:#f8fafc;color:#5b6b81;border-bottom:1px solid #e2e8f0;border-top:1px solid #eef2f7;position:sticky;top:var(--bh,0px);z-index:30;box-shadow:0 1px 0 #fff,0 2px 6px rgba(15,23,42,.06)}   /* R323: top 让位 --bh(降级/陈旧横幅 sticky 高), 防表头被 z999 横幅整条遮住 */
+.ind-row{display:grid;grid-template-columns:1.45fr .62fr 1.00fr 1.10fr .82fr .48fr .48fr 1.20fr 26px;gap:8px;align-items:center;padding:10px 16px;border-top:1px solid #f1f5f9;cursor:pointer;transition:background .12s}
 .ind-row:hover{background:#f4f8fc}
 .ind-row:first-of-type{border-top:0}
 .ind-row.hl{background:#e8f1fb;box-shadow:inset 3px 0 0 var(--primary)}
@@ -78,7 +82,15 @@ h1{font-size:21px;font-weight:700;letter-spacing:.4px;line-height:1.3}   /* R323
 .rsi-cell.hot{background:var(--up-soft);color:#c92a2a}
 .rsi-cell.cold{background:var(--down-soft);color:#087f5b}
 .rsi-cell.mid{background:#f1f5f9;color:#475569}
-.ind-row .nm{font-weight:700;font-size:14.5px;display:flex;align-items:center;gap:6px;line-height:1.45;letter-spacing:.2px;min-width:0;overflow:hidden}   /* R315: min-width:0+overflow:hidden 让 grid 1.35fr 列按比例缩(默认 min-content 会被 ETF 长龙头名"沪深300ETF华泰柏瑞"撑大 box 推右后续所有列); overflow hidden 给子项 ellipsis 兜底 */
+/* R315: min-width:0+overflow:hidden 让 grid 列按比例缩(默认 min-content 会被 ETF 长龙头名"沪深300ETF华泰柏瑞"撑大 box 推右后续所有列); overflow hidden 给子项 ellipsis 兜底
+   R445: 改为**块级 + 内层 flex-wrap** —— 原 display:flex 单行布局下, 徽章 .badge2 带
+   white-space:nowrap 且收缩权重高于名称, R445 徽章变宽(顶39(13.1%))后把名称挤成
+   **一字一行竖排**(实测 基础化工/有色金属 等)。现: 名称 .nmt nowrap 且不可压, 徽章放不下
+   时整块换到第二行; 龙头链接独立成行(去掉依赖 <br> 的匿名 flex 项行为)。 */
+.ind-row .nm{font-weight:700;font-size:14.5px;display:block;line-height:1.45;letter-spacing:.2px;min-width:0;overflow:hidden}
+.ind-row .nm .nmr{display:flex;flex-wrap:wrap;align-items:center;gap:2px 6px;min-width:0}
+.ind-row .nm .nmt{white-space:nowrap;flex:0 0 auto}
+.ind-row .nm .badge2{flex:0 0 auto}
 .ind-row .meta{display:inline-grid;grid-template-columns:max-content;justify-content:end;row-gap:0;font-size:11px;color:var(--muted);line-height:1.6;font-variant-numeric:tabular-nums}
 .ind-row .meta .cap,.ind-row .meta .cnt{grid-column:1;text-align:center;white-space:nowrap}   /* R306→R307→R308: meta 用 grid 列宽=max(cap,cnt 文本宽) 自适应, 两行文本**视觉重心对齐**(center), 不再 min-width 拉死短文本占满列 */
 /* R269: 数据准确性警示 — 源降级/数据陈旧(全局 sticky 横幅) + 个股行情缓存滞后(图表内黄条) */
@@ -92,6 +104,18 @@ h1{font-size:21px;font-weight:700;letter-spacing:.4px;line-height:1.3}   /* R323
 .ind-row .spark{width:100%;height:34px;display:block}
 .ind-row .spark svg{width:100%;height:34px;display:block}   /* R258: 小屏列宽不足160时 svg 跟随容器缩放 */
 .ind-row .chg{font-weight:700;font-size:13.5px;text-align:center;line-height:1.3}
+/* R445: 多周期动量 + 距高/分位 单元格(替代"当日涨跌"之外的趋势/低吸地基) */
+.ind-row .mp{font-size:10px;line-height:1.6;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
+.ind-row .mp b{font-weight:700}
+.ind-row .mp .muted{color:#94a3b8}
+.ind-row .mp .lbl{color:#8a99ab}
+/* R445: 行业轮动四象限小胶囊(reference 级信息: 强势是否在加速 / 弱势是否在转强) */
+.rotchip{line-height:1.5;margin-top:1px}
+.rc{display:inline-block;font-size:10px;padding:0 5px;border-radius:4px;font-weight:700;letter-spacing:.2px;cursor:help}
+.rc-a{background:#fdecec;color:#c92a2a;border:1px solid #f7cfcf}   /* 领先加速 */
+.rc-b{background:#fff8e6;color:#b45309;border:1px solid #f0dfae}   /* 领先减速 */
+.rc-c{background:#eaf2fb;color:#2b6cb0;border:1px solid #c9ddf2}   /* 落后转强 */
+.rc-d{background:#f1f5f9;color:#64748b;border:1px solid #dfe6ee}   /* 落后加速 */
 .ind-row .ctr{font-size:11px;color:var(--muted);text-align:center}
 .ctr-top{display:flex;align-items:center;justify-content:center;gap:5px}
 .ctr-sub{font-size:10px;color:var(--muted);margin-top:3px;text-align:center;line-height:1.4}
@@ -447,18 +471,22 @@ a{color:var(--primary);text-decoration:none}
         <h2>行业 · ETF 板块</h2>
         <span class="badge" id="indCnt">…</span>
         <span class="tabs">
-          <a id="tabSig" onclick="sortInds('sig')">📊 信号优先</a>
+          <a id="tabRsiL" class="on" onclick="sortInds('rsiL')">📉 RSI 超卖优先</a>
+          <a id="tabRsi" onclick="sortInds('rsi')">📈 RSI 超买优先</a>
+          <a id="tabSig" onclick="sortInds('sig')">📊 信号集中</a>
+          <a id="tabTrend" onclick="sortInds('trend')">🚀 趋势强度</a>
+          <a id="tabRs" onclick="sortInds('rs')">🎯 相对强度</a>
+          <a id="tabDip" onclick="sortInds('dip')">🪂 跌透优先</a>
+          <a id="tabFlow" onclick="sortInds('flow')">💵 净流入</a>
           <a id="tabCap" onclick="sortInds('cap')">💰 市值优先</a>
           <a id="tabChg" onclick="sortInds('chg')">⚡ 涨跌极端</a>
-          <a id="tabFlow" onclick="sortInds('flow')">💵 净流入</a>
-          <a id="tabRel" onclick="sortInds('rel')">🎯 跑赢沪优先</a>
-          <a id="tabRsi" class="on" onclick="sortInds('rsi')">📈 RSI 超买优先</a>
         </span>
         <span class="hint">申万一级 31 行业 + ETF 板块 · 龙头=市值最大 · 资金=主力净流入(亿, 红流入绿流出) · 点击展开</span>
       </div>
+      <div class="ind-rule" id="indRule"></div>
       <div class="ind-grid">
         <div>板块</div><div class="ta-r">市值/规模·成分</div><div>走势状态</div>
-        <div>近120日走势</div><div class="ta-r">主力净流入</div><div class="ta-r">涨跌</div><div class="ta-r">RSI·振幅·门禁</div><div></div>
+        <div>近120日走势</div><div>5/20/60日动量·位置</div><div class="ta-r">主力净流入</div><div class="ta-r">涨跌</div><div class="ta-r">RSI·振幅·门禁</div><div></div>
       </div>
       <div id="indList"><div class="loading sk">行业加载中…</div></div>
     </div>
@@ -474,7 +502,7 @@ a{color:var(--primary);text-decoration:none}
 <script>
 /* ============================================================
    全市场缠论雷达 v3 · 行业为根 + 个股K线内嵌切换
-   数据: radar/radar.json (scan_radar.py P3b-r1) · 前端 R252+R253 · R253-hotfix: 修 drawChart 不清 loading 残留 + legend 重复声明
+   数据: radar/radar.json (scan_radar.py P3b-r18) · 前端 R252+R253+R445 · R253-hotfix: 修 drawChart 不清 loading 残留 + legend 重复声明
    K线: 行业=radar.json 内嵌合成; 个股=腾讯 fqkline (CORS 已开)
    R258: ①个股volume去/100(腾讯=手) ②行业tooltip量=成交额亿元 ③spark=[o,h,l,c]close索引修复
         ④pickInd重置curStk/tab ⑤fresh=0排序 ⑥hashchange stk真渲染 ⑦浮层/图实例清理+竞态令牌 ⑧fetch no-cache
@@ -540,7 +568,7 @@ function zsTemp(){
 }
 function regimeCls(r){if(!r)return "flat";if(r.indexOf("顶")>=0)return "top";if(r.indexOf("底")>=0)return "bot";if(r.indexOf("涨")>=0)return "up";if(r.indexOf("跌")>=0)return "dn";return "flat"}
 // R260: regime 胶囊 tooltip — 说明板块标签=成分信号聚合 + 板块自身位置/RSI, 防"已深跌仍标顶背驰区"式误读
-function regimeTip(x){
+function regimeTip(x,k){
   if(!x)return "";
   var pos="";
   var st=x.st||{},zs=st.zs_last||{};
@@ -549,11 +577,16 @@ function regimeTip(x){
     else if(st.close>zs.zg)pos="收盘位于末中枢上沿之上";
     else pos="收盘于末中枢内";
   }
-  return "成分信号 顶"+((x.n_sig_top||0))+"/底"+((x.n_sig_bot||0))+
-    (pos?" · "+pos:"")+
-    (x.rsi14!=null?" · RSI14 "+(+x.rsi14.toFixed(1)):"")+
-    " · 近20日振幅"+(x.amp20!=null?(x.amp20+"%"):"-")+
-    "｜顶背驰=板块内成分见顶信号集中(非板块指数自身必跌), 底背驰同理";
+  var m=k?indM(k):null;
+  // R445: 文案与判据同口径 —— 标签改由"密度 Wilson 下界"决定, tooltip 必须同步披露当前值
+  return "成分信号 顶"+(x.n_sig_top||0)+"(密度"+(m&&m.dt!=null?m.dt.toFixed(1)+"%":"-")+")/底"+(x.n_sig_bot||0)+"(密度"+(m&&m.db!=null?m.db.toFixed(1)+"%":"-")+")"
+    +(pos?" · "+pos:"")
+    +(x.rsi14!=null?" · RSI14 "+(+x.rsi14.toFixed(1)):"")
+    +" · 近20日振幅"+(x.amp20!=null?(x.amp20+"%"):"-")
+    +"｜「背驰区」判据 = 顶/底信号**密度**的 95% Wilson 置信下界 ≥ "+DENS_LB_STRONG+"% 且只数 ≥ "+SIG_ABS_MIN
+    +(m?(" — 当前 顶"+(m.lt||0).toFixed(2)+"% / 底"+(m.lb||0).toFixed(2)+"%"):"")
+    +"(用密度而非绝对数, 防大板块靠成分多霸榜)"
+    +"｜顶背驰=板块内成分见顶信号集中(非板块指数自身必跌), 底背驰同理";
 }
 var qs=(location.hash||"").replace(/^#\/?/,"");
 function safeDec(s){try{return decodeURIComponent(s)}catch(e){return s}}   // R321: 畸形 hash(#stk/%zz 类, URL 截断粘贴) 下 decodeURIComponent 抛 URIError 击穿 handler → 安全解码回落原文
@@ -595,6 +628,7 @@ function getStkData(sym){
 }
 fxT("radar.json").then(function(r){if(!r.ok)throw new Error("HTTP "+r.status);return r.json()}).then(function(d){
   M=d.meta;UNI=d.universe||{};SIG=d.signals||[];INDS=d.industries||{};
+  INDM={};_RS=null;_RS60=null;   // R445: 行业指标缓存随数据重载失效(防跨数据集串值)
   initSearch();   // R298: 数据就绪后激活全局搜索(UNI 已加载)
   renderHeader();renderBar();renderSigRadar();renderRevPool();renderBanner();   // R269: 数据降级/陈旧警示 · R285: 实操信号雷达 · R305: 逆向观察池
   if(qs.indexOf("stk/")===0)showStk(safeDec(qs.slice(4)));
@@ -1214,22 +1248,183 @@ function renderRevPool(){
     '<div style="padding:6px 0 8px">'+phdrHtml+rowsHtml+moreHtml+'</div>'+
     '<div class="foot">候选=底背驰(fresh&gt;10) + 距历史高≥30% + 现价&gt;背驰低点 · 止损参考=背驰低点(跌破失效) · 数据截至 '+esc(M.asof||"-")+' · 仅供研究参考，不构成投资建议</div>';
 }
+var IND_TABS=["tabRsiL","tabRsi","tabSig","tabTrend","tabRs","tabDip","tabFlow","tabCap","tabChg"];
 function sortInds(mode){
   curSortMode=mode;
-  ["tabSig","tabCap","tabChg","tabFlow","tabRel","tabRsi"].forEach(function(id){$(id).classList.remove("on")});
-  $("tab"+mode.charAt(0).toUpperCase()+mode.slice(1)).classList.add("on");
+  IND_TABS.forEach(function(id){var e=$(id);if(e)e.classList.remove("on")});
+  var t=$("tab"+mode.charAt(0).toUpperCase()+mode.slice(1));if(t)t.classList.add("on");
   renderInds();
 }
-var curSortMode="rsi";
+/* R445: 默认由「RSI 超买优先」改为「RSI 超卖优先」—— 逆向视角第一屏应看到最超卖的板块,
+   原默认把全市场最超买的排在最前, 方向与用户判断框架相反。 */
+var curSortMode="rsiL";
 function indScore(mode,k){
   var x=INDS[k];if(!x)return 0;
-  if(mode==="sig")return (x.n_sig_top||0)*10+(x.n_sig_bot||0)*5+((x.st&&x.st.agree)||0);
+  if(mode==="sig"){   // R445: 信号**集中度** —— 95% Wilson 下界(规模可比), 不再用绝对数
+    // 主导方向×10 + 次方向×1: 排名答的是"哪个板块信号最集中", 故按主导方向定序,
+    // 次方向仅小幅加权。原 lt*10+lb*5 在实测中产生精确并列(煤炭 9.85/0.00 与
+    // 基础化工 9.76/0.18 同为 98.5), 次序退化为引擎排序稳定性 —— 同一份数据在不同
+    // 浏览器上可能不同, 且与离线复算无法逐行对齐。方向优劣(顶信号实证有效/底未证实)
+    // 改由徽章配色、状态标签与说明栏表达, 不再塞进排序权重。
+    var m=indM(k);
+    return Math.max(m.lt||0,m.lb||0)*10+Math.min(m.lt||0,m.lb||0);
+  }
   if(mode==="cap")return x.cap||0;
   if(mode==="chg")return Math.abs(x.chg1d||0);
   if(mode==="flow")return x.netflow||0;   // R283: 主力净流入(降序=流入最多在前, 净流出垫底)
-  if(mode==="rel")return IDX?(x.chg1d-(IDX.chg||0)):(x.chg1d||0);   // 相对强弱: 跑赢上证最多者在前
-  if(mode==="rsi")return x.rsi14!=null?x.rsi14:-1;   // 超买超卖值从大到小(降序): RSI 高(超买)在前
+  if(mode==="trend"){var mt=indM(k);return mt.mom60!=null?mt.mom60:-999;}   // R445: 60日动量降序
+  if(mode==="rs"){var mr=indM(k);return mr.rs20!=null?mr.rs20:-1;}          // R445: 20日横截面相对强度分位
+  if(mode==="dip"){var md=indM(k);return md.dd!=null?-md.dd:-999;}          // R445: 距近一年高点回撤最深在前
+  if(mode==="rsi")return x.rsi14!=null?x.rsi14:-1;   // 超买在前(降序)
+  if(mode==="rsiL")return x.rsi14!=null?(100-x.rsi14):-1;   // R445: 超卖在前(统一降序口径用 100-RSI)
   return 0;
+}
+/* ===== R445: 行业「规模可比」口径 + 多周期动量/位置 =====
+   问题: n_sig_top/bot 是**绝对数**, 但 32 个板块成分数 16(综合)~386(机械设备) 差 24 倍
+   ⇒ 绝对数排序被大板块恒定霸榜(电子 15 个顶信号排第 4, 摊薄后只有 4.1%; 煤炭 6 个
+   绝对数第 15, 密度 20.7% 实为全市场第一), 小板块则几乎点不亮色条/进不了 regime。
+   判据: 一律用 **95% Wilson 置信下界**(小样本自动降权, 无需人工设最小样本量门槛)。
+   数据: 后端 scan_radar 已算好 sig_top_lb/sig_bot_lb/mom5,20,60/dd/pxq/rs20/rot;
+        INDM() 优先取后端值, 缺字段时用本页内嵌的 320 根行业 kline **就地同源复算**
+        (mom 窗口<=60、位置窗口 250<=320 ⇒ 与后端逐位一致, 不受 iks 实际长度影响)。
+   ⚠️ 缺字段时**绝不回落**到旧的"绝对数>=2"口径 —— 那正是本轮要修的规模偏差本身。 */
+var DENS_LB_STRONG=2.5, SIG_ABS_MIN=2, IND_POS_WIN=250;   // 须与 scan_radar.py 同名常量一致
+function wilsonLB(k,n){          // 与 scan_radar._wilson_lb 同公式(返回百分点)
+  k=+k||0;n=+n||0;if(n<=0)return 0;
+  var z=1.96,p=k/n,d=1+z*z/n,c=(p+z*z/(2*n))/d,h=z*Math.sqrt(p*(1-p)/n+z*z/(4*n*n))/d;
+  return Math.max(0,(c-h))*100;
+}
+/* ⚠️ 行业 kline 元素字段名是**长名** {date,open,high,low,close,volume}
+   (实测 radar.json 32 板块 × 320 根 全为该字段集; rsiSeries 亦读 k.close) ——
+   与 spark 的 [open,high,low,close] 数组、个股 st.kline 的短名不同, 勿混。 */
+function momOf(kl,win){          // 近 win 根累计涨幅(%); 与 scan_radar._mom 同口径
+  if(!kl||kl.length<win+1)return null;
+  var c1=+kl[kl.length-1].close,c0=+kl[kl.length-1-win].close;
+  if(!c0)return null;
+  return (c1/c0-1)*100;
+}
+/* 舍入镜像: 后端 _mom/_dd_pxq/_wilson_lb 均 round(...,2)、accel round(...,3),
+   前端兜底必须走同一条舍入链, 否则四象限/集中度在 0.005 级边界上可能与后端相反。 */
+function r2(v){return v==null?null:Math.round(v*100)/100}
+function r3(v){return v==null?null:Math.round(v*1000)/1000}
+function mvTxt(v){return v==null?"-":(v>0?"+":"")+v.toFixed(1)+"%"}
+function mvCls(v){return v==null?"muted":(v>0?"up":(v<0?"down":"muted"))}
+function ddPxqOf(kl,win){        // 距窗口最高回撤(%) + 收盘在窗口内分位(0~100); 同 _dd_pxq
+  if(!kl||kl.length<20)return null;
+  var seg=kl.length>win?kl.slice(kl.length-win):kl;
+  var hi=-1e18,lo=1e18;
+  for(var i=0;i<seg.length;i++){var h=+seg[i].high,l=+seg[i].low;if(h>hi)hi=h;if(l<lo)lo=l;}
+  var c=+kl[kl.length-1].close;
+  return {dd:hi>0?(c/hi-1)*100:null,pxq:hi>lo?Math.round((c-lo)/(hi-lo)*100):null};
+}
+/* 横截面相对强度分位(同批板块内, 并列取平均秩) —— 与 scan_radar._rs_pctile 同口径。
+   用横截面而非指数基准: R443 实证指数基准会把 size/风格算进超额(+2.25pp vs +0.58pp)。 */
+function pctileRank(vals){
+  var ok=vals.filter(function(v){return v!=null}).slice().sort(function(a,b){return a-b}),n=ok.length;
+  return vals.map(function(v){
+    if(v==null)return null;
+    var below=0,same=0;
+    for(var i=0;i<n;i++){if(ok[i]<v)below++;else if(ok[i]===v)same++;}
+    return Math.round((below+same/2)/n*100);
+  });
+}
+function rotOf(rs,ac){           // 轮动四象限(仅描述"钱往哪流", 不含买卖判断); 同 _rot_quadrant
+  if(rs==null||ac==null)return null;
+  var s=rs>=50,u=ac>0;
+  return s?(u?"领先加速":"领先减速"):(u?"落后转强":"落后加速");
+}
+var _RS=null,_RS60=null;
+function calcRsPctile(){
+  var ks=Object.keys(INDS);
+  var raw=function(k,w){var x=INDS[k]||{},v=(w===20?x.mom20:x.mom60);return v!=null?v:r2(momOf(x.kline||[],w))};
+  var p20=pctileRank(ks.map(function(k){return raw(k,20)}));
+  var p60=pctileRank(ks.map(function(k){return raw(k,60)}));
+  _RS={};_RS60={};
+  ks.forEach(function(k,i){_RS[k]=p20[i];_RS60[k]=p60[i]});
+}
+var INDM={};                     // 每板块指标缓存(防 renderInds 每帧反复遍历 320 根 kline)
+function indM(k){
+  var c=INDM[k];if(c)return c;
+  var x=INDS[k]||{},m={
+    mom5:x.mom5,mom20:x.mom20,mom60:x.mom60,dd:x.dd,pxq:x.pxq,
+    rs20:x.rs20,rs60:x.rs60,accel:x.accel,rot:x.rot,
+    lt:x.sig_top_lb,lb:x.sig_bot_lb,dt:x.dens_top,db:x.dens_bot,pxhi:x.px_hi,pxlo:x.px_lo};
+  var kl=x.kline||[];
+  if(m.mom5==null)m.mom5=r2(momOf(kl,5));
+  if(m.mom20==null)m.mom20=r2(momOf(kl,20));
+  if(m.mom60==null)m.mom60=r2(momOf(kl,60));
+  if(m.dd==null||m.pxq==null){var p=ddPxqOf(kl,IND_POS_WIN);if(p){if(m.dd==null)m.dd=r2(p.dd);if(m.pxq==null)m.pxq=p.pxq;}}
+  if(m.lt==null)m.lt=r2(wilsonLB(x.n_sig_top,x.n_member));
+  if(m.lb==null)m.lb=r2(wilsonLB(x.n_sig_bot,x.n_member));
+  if(m.dt==null&&x.n_member)m.dt=r2((x.n_sig_top||0)*100/x.n_member);
+  if(m.db==null&&x.n_member)m.db=r2((x.n_sig_bot||0)*100/x.n_member);
+  if(m.accel==null&&m.mom5!=null&&m.mom20!=null)m.accel=r3(m.mom5/5-m.mom20/20);
+  if(m.rs20==null||m.rs60==null){if(!_RS)calcRsPctile();if(m.rs20==null)m.rs20=_RS[k];if(m.rs60==null)m.rs60=_RS60[k];}
+  if(m.rot==null)m.rot=rotOf(m.rs20,m.accel);
+  INDM[k]=m;return m;
+}
+/* 信号"显著集中"判据(与后端 _regime_of 入参同源): 绝对数>=SIG_ABS_MIN 且 Wilson 下界>=阈值 */
+function sigStrong(x,m){
+  var t=(x.n_sig_top||0),b=(x.n_sig_bot||0);
+  return {top:(t>=SIG_ABS_MIN&&m.lt>=DENS_LB_STRONG),bot:(b>=SIG_ABS_MIN&&m.lb>=DENS_LB_STRONG)};
+}
+function rotChip(k){
+  var m=indM(k);if(!m.rot)return"";
+  var cls=m.rot==="领先加速"?"rc-a":(m.rot==="领先减速"?"rc-b":(m.rot==="落后转强"?"rc-c":"rc-d"));
+  var tip="行业轮动四象限(仅描述, 非买卖建议)｜相对强度=20日动量在 "+Object.keys(INDS).length+" 个板块中的分位 "
+    +(m.rs20==null?"-":m.rs20+"%")+"(≥50%=强于半数板块)｜动量变化=近5日日均涨幅 − 近20日日均涨幅 = "
+    +(m.accel==null?"-":(m.accel>0?"+":"")+m.accel.toFixed(2)+"pp/日")+"｜"+m.rot;
+  return '<div class="rotchip"><span class="rc '+cls+'" title="'+tip+'">'+esc(m.rot)+'</span></div>';
+}
+/* 多周期动量 + 距高/分位 单元格(R445)。动量按 A 股习惯着色(红涨绿跌);
+   距高回撤与价格分位是**位置**描述, 不说明方向, 故意不着色(避免被读成"该买")。 */
+function mpCell(m){
+  function num(v){
+    if(v==null)return '<span class="muted">-</span>';
+    return '<b class="'+(v>0?"up":(v<0?"down":"muted"))+'">'+(v>0?"+":"")+v.toFixed(1)+'%</b>';
+  }
+  // 紧凑排版(列宽 ~120px): 标签与数值间不留空格, 否则 5日/20日 同行会被挤到第二行
+  return '<div><span class="lbl">5日</span>'+num(m.mom5)+' <span class="lbl">20日</span>'+num(m.mom20)+'</div>'+
+         '<div><span class="lbl">60日</span>'+num(m.mom60)+'</div>'+
+         '<div><span class="lbl">距高</span>'+(m.dd==null?'<span class="muted">-</span>':m.dd.toFixed(1)+'%')+
+         ' <span class="lbl">分位</span>'+(m.pxq==null?'<span class="muted">-</span>':m.pxq+'%')+'</div>';
+}
+/* R445: 口径一致性自检 —— 「走势状态」标签由后端按**同一判据**生成, 但若线上 radar.json
+   仍是 R445 之前的构建(旧格式无 sig_*_lb 字段), 标签仍按旧"绝对数>=2"生成, 会与前端
+   新口径(密度 Wilson 下界)冲突(实测 5 处: 交运/传媒/农林牧渔/建筑材料/石油石化)。
+   新判据是旧判据的子集(多了密度门槛), 故冲突只可能是"标签说背驰区、新判据不达标"单向。
+   此处如实列出冲突名单而非静默 —— 下一次全市场重扫产出 P3b-r18 数据后自动归零。
+   注: 这是**检测**而非重算, 前端不复刻后端 regime 的位置门控逻辑(避免双份实现漂移)。 */
+function regimeMismatch(){
+  var bad=[];
+  Object.keys(INDS).forEach(function(k){
+    var r=INDS[k].regime||"",s=sigStrong(INDS[k],indM(k));
+    if(r.indexOf("顶背驰区")>=0&&!s.top)bad.push(k+"(顶)");
+    else if(r.indexOf("底背驰区")>=0&&!s.bot)bad.push(k+"(底)");
+  });
+  return bad;
+}
+/* R445: 口径说明条 —— 判据/色条/徽章/文案四处同一口径的公开说明(含达标数, 可自证) */
+function indRuleHtml(){
+  var ks=Object.keys(INDS),n=ks.length,lit=0;
+  ks.forEach(function(k){var s=sigStrong(INDS[k],indM(k));if(s.top||s.bot)lit++;});
+  var mm=regimeMismatch();
+  var mmHtml=mm.length?('<br><span class="warn">⚠ <b>口径待对齐</b>: 「走势状态」标签仍由后端按<b>旧判据(绝对数≥2)</b>生成, '
+    +'其中 <b>'+mm.join("、")+'</b> 共 '+mm.length+' 个在新判据(密度下界≥'+DENS_LB_STRONG+'%)下不成立 —— '
+    +'当前线上数据为 R445 之前的构建。密度/排序/色条已按新判据生效; '
+    +'下一交易日全市场重扫产出 P3b-r18 数据后本提示自动消失。</span>'):'';
+  return '📊 <b>信号集中度</b> = 顶/底背驰<b>只数 ÷ 该板块过门禁成分数</b>; '
+    +'<b>排序、左侧色条、走势状态标签四处同一判据</b>: <b>95% Wilson 置信下界 ≥ '+DENS_LB_STRONG+'%</b> 且 <b>只数 ≥ '+SIG_ABS_MIN+'</b>。'
+    +'用下界而非只数的原因: 成分数 16~386 差 24 倍, 绝对数排序被大板块恒定霸榜'
+    +'(电子 15 只排第 4 但摊薄后仅 4.1%, 煤炭 6 只绝对第 15 却是密度第一 20.7%); '
+    +'下界对小样本自动降权(22 只成分里 1 只信号原始密度 4.5%, 下界只有 0.8%, 不会霸榜)。'
+    +'徽章括号内显示<b>原始密度%</b>(可自行复核)。当前 <b>'+lit+'/'+n+'</b> 个板块达「显著集中」。'
+    +'「📊 信号集中」排序 = 主导方向下界×10 + 次方向下界×1(并列时成分多者在前, 次序确定可复现)。'
+    +'<br>🚀 <b>趋势强度</b> = 60日动量 · 🎯 <b>相对强度</b> = 20日动量在 '+n+' 个板块中的<b>横截面分位</b>'
+    +'(不用指数基准 —— R443 实证指数基准会把 size/风格算进超额) · 🪂 <b>跌透度</b> = 距近一年高点回撤 / 收盘价近一年区间分位'
+    +' · <b>四象限</b> = 相对强度 × 动量变化(仅描述"钱往哪流")。'
+    +'<br><span class="warn">以上全部为<b>描述性</b>指标(位置/动量/密度), 不含买卖判断 —— 与 R443 回测结论一致: 顶背驰风险维度有效(−0.80pp, p=0.018), 底背驰机会未获证实(+0.58pp, p=0.13)。</span>'
+    +mmHtml;
 }
 /* ===== 行业迷你SVG ===== */
 function sparkSVG(d,w,h){
@@ -1279,7 +1474,8 @@ function ctrBlock(x){
   return '<div class="ctr-top">'+
     '<span class="rsi-cell '+rsiCls+'">RSI '+rsiTxt+'</span>'+rsiBarHtml(rv)+'</div>'+
     '<div class="ctr-sub">'+
-    (pp==null?"60日-":"60日"+pp+"%分位")+' · 振'+ampTxt+' · 门禁'+qrtTxt+'</div>';
+    // R445: 分隔符去空格 —— 新增一列后 RSI 列被压缩, ' · ' 版本在部分行折行("门禁88%" 掉到第二行)
+    (pp==null?"60日-":"60日"+pp+"%分位")+'·振'+ampTxt+'·门禁'+qrtTxt+'</div>';
 }
 /* ===== 板块异动统计(大涨≥5%/大跌≤-5%, 领涨/领跌; 缓存) ===== */
 var MOV={};
@@ -1307,9 +1503,25 @@ function detailStrip(ind,k){
   h+='<span>60日'+(pp==null?"分位 -":pp+"% 分位")+'</span>';
   h+='<span>20日振幅 '+(ind.amp20!=null?ind.amp20.toFixed(1)+"%":"-")+'</span>';
   h+='<span>门禁通过 '+(ind.qual_rate!=null?ind.qual_rate.toFixed(0)+"%":"-")+'</span>';
-  h+='<span class="bc">顶背驰 <b class="up">'+(ind.n_sig_top||0)+'</b><span class="dsep">/</span>底背驰 <b class="down">'+(ind.n_sig_bot||0)+'</b></span>';
+  // R445: 背驰计数补**密度**(括号) —— 与列表徽章同口径; 判据(Wilson 下界)也在 tooltip 披露
+  var dm=k?indM(k):{};
+  h+='<span class="bc" title="顶/底背驰 = 近端(≤10日)成分信号只数; 括号内为该板块原始密度(只数÷过门禁成分数)。排序/色条/状态标签的统一判据是密度的 95% Wilson 置信下界 —— 当前 顶'+(dm.lt||0).toFixed(2)+'% / 底'+(dm.lb||0).toFixed(2)+'%, 集中门槛 '+DENS_LB_STRONG+'% 且 ≥'+SIG_ABS_MIN+'只">顶背驰 <b class="up">'+(ind.n_sig_top||0)+'</b>'
+    +(dm.dt!=null?'<span class="muted">('+dm.dt.toFixed(1)+'%)</span>':'')+'<span class="dsep">/</span>底背驰 <b class="down">'+(ind.n_sig_bot||0)+'</b>'
+    +(dm.db!=null?'<span class="muted">('+dm.db.toFixed(1)+'%)</span>':'')+'</span>';
   h+='<span>'+(ind.is_etf?"总规模 ":"总市值 ")+capTxt+'</span>';
   h+='<span>指数 '+pct(ind.chg1d,2)+'</span>';
+  // R445: 多周期动量 + 距高/价格分位 + 轮动四象限(与列表新列同口径)
+  if(dm.mom5!=null||dm.mom20!=null||dm.mom60!=null){
+    h+='<span>动量 <b class="'+mvCls(dm.mom5)+'">5日'+mvTxt(dm.mom5)+'</b><span class="dsep">·</span>'
+      +'<b class="'+mvCls(dm.mom20)+'">20日'+mvTxt(dm.mom20)+'</b><span class="dsep">·</span>'
+      +'<b class="'+mvCls(dm.mom60)+'">60日'+mvTxt(dm.mom60)+'</b></span>';
+  }
+  if(dm.dd!=null||dm.pxq!=null){
+    h+='<span title="距高=距近一年(250根)最高价回撤; 价格分位=收盘价在近一年最低~最高区间中的位置(0%=最低, 100%=最高)。位置类描述, 不含方向判断">距近一年高 <b>'+(dm.dd==null?"-":dm.dd.toFixed(1)+"%")+'</b><span class="dsep"> · </span>价格分位 <b>'+(dm.pxq==null?"-":dm.pxq+"%")+'</b></span>';
+  }
+  if(dm.rs20!=null){
+    h+='<span title="相对强度=20日动量在全部板块中的横截面分位(不用指数基准, 避免 size/风格混入超额); 四象限=相对强度×动量变化, 仅描述钱往哪流">相对强度 <b>'+esc(dm.rot||"-")+'</b><span class="muted">(20日分位 '+dm.rs20+'%)</span></span>';
+  }
   if(ind.netflow!=null)h+='<span>主力净流入 <b class="'+ffCls(ind.netflow)+'">'+ffTxt(ind.netflow)+'</b></span>';   // R283
   if(ind.leader)h+='<span title="行业内总市值最大的成分股">'+(ind.is_etf?"规模最大基金":"行业龙头")+' <b class="ld-name">'+esc(ind.leader.name)+'</b></span>';   // R283
   h+='<span>缠论 <b>笔 '+(stx.bi_n||0)+'</b><span class="dsep">·</span><b>中枢 '+(stx.zs_n||0)+'</b><span class="dsep">·</span><b>背驰 '+(stx.bc_n||0)+'</b></span>';
@@ -1330,31 +1542,50 @@ var indExpanded=false;          // true=全部展开
 function toggleInds(){indExpanded=!indExpanded;renderInds()}
 function renderInds(){
   var keys=Object.keys(INDS).slice().sort(function(a,b){
-    return indScore(curSortMode,b)-indScore(curSortMode,a);  // 统一降序(极端度大者在前)
+    var d=indScore(curSortMode,b)-indScore(curSortMode,a);  // 统一降序(极端度大者在前)
+    if(d)return d;
+    // R445: 并列时的**确定性兜底** —— 原仅比分数, 并列(见 indScore sig 分支注释)时次序
+    //   由 Array.sort 的引擎稳定性决定 ⇒ 同一份数据在不同浏览器/版本下可能给出不同次序,
+    //   看板次序不可复现、无法与离线复算逐行对齐。补"成分多者在前, 再按名称"的显式次序。
+    var sa=((INDS[a]||{}).n_member||0), sb=((INDS[b]||{}).n_member||0);
+    if(sa!==sb)return sb-sa;
+    return a<b?-1:(a>b?1:0);
   });
   var html="";
   keys.forEach(function(k,i){
     var x=INDS[k];
+    var m=indM(k), ss=sigStrong(x,m);
     var sg=(x.n_sig_top||0)+(x.n_sig_bot||0);
     var hl = curInd===k?" hl":"";
     var rCls=regimeCls(x.regime);
     var capLbl=x.is_etf?"规模":"市值";
     var capTxt=(x.cap==null)?"-":(x.cap>=10000?(x.cap/10000).toFixed(2)+"万亿":x.cap.toFixed(0)+"亿");
-    // 强信号行业: 顶信号>=2 红色左侧条 / 底信号>=2 绿色左侧条
+    // R445: 强信号行业左侧色条改**规模可比口径** —— 与排序/regime 同一判据(Wilson 下界≥2.5%
+    //   且只数≥2), 原"绝对数>=2"使 386 只的机械设备凭 2 只信号即点亮、16~29 只的小板块
+    //   几乎不可能点亮(实测 32 个板块里 25 个点亮 = 色条失去选择性)。
     var strongCls="";
-    if((x.n_sig_top||0)>=2)strongCls=" strong-top";
-    else if((x.n_sig_bot||0)>=2)strongCls=" strong-bot";
+    if(ss.top)strongCls=" strong-top";
+    else if(ss.bot)strongCls=" strong-bot";
     if(!indExpanded&&i>=IND_SHOW&&!hl)return;   // 折叠: 高亮行业恒显示
     var mv=indMovers(k);   // 板块异动(涨跌≥5%家数) — 申万与 ETF 同口径, ETF 即便 0/0 也渲染以保结构对称
     var mvLine=x.is_etf
       ?'<span class="mvmini"><span class="up">▲'+(mv.up||0)+'</span> <span class="down">▼'+(mv.down||0)+'</span> ≥5%</span>'
       :((mv.up||mv.down)?'<span class="mvmini">'+(mv.up?'<span class="up">▲'+mv.up+'</span>':'')+(mv.up&&mv.down?' ':'')+(mv.down?'<span class="down">▼'+mv.down+'</span>':'')+' ≥5%</span>':'');
+    // R445: 徽章补**原始密度%**(展示值) —— 括号内 % 可自行按 只数÷成分数 复核;
+    //   判据(排序/色条/状态标签)用 Wilson 下界, 见 tooltip 与 #indRule
+    var bt=(x.n_sig_top||0),bb=(x.n_sig_bot||0);
+    var bTxt=(bt?("顶"+bt+(m.dt!=null?"("+m.dt.toFixed(1)+"%)":"")):"")+(bt&&bb?" ":"")
+            +(bb?("底"+bb+(m.db!=null?"("+m.db.toFixed(1)+"%)":"")):"");
+    var bTip="该板块近端背驰信号(≤10日)｜顶="+bt+"只 · 底="+bb+"只｜原始密度=只数÷过门禁成分数("+(x.n_member||0)+"只): 顶"
+      +(m.dt==null?"-":m.dt.toFixed(2)+"%")+" / 底"+(m.db==null?"-":m.db.toFixed(2)+"%")+"｜95% Wilson 置信下界(排序/色条/状态标签的唯一判据, 小样本自动降权): 顶"
+      +(m.lt||0).toFixed(2)+"% / 底"+(m.lb||0).toFixed(2)+"%｜显著集中门槛=下界≥"+DENS_LB_STRONG+"% 且只数≥"+SIG_ABS_MIN+"(达标才有左侧色条)";
     html+='<div class="ind-row'+hl+strongCls+'" onclick="pickInd(\''+esc(k)+'\')">'+
-      '<div class="nm">'+esc(k)+(sg?' <span class="badge2 '+(x.n_sig_top?(x.n_sig_bot?'y':'r'):'g')+'" title="该行业成分股近端背驰信号｜顶='+(x.n_sig_top||0)+'(动能减弱·防回落)｜底='+(x.n_sig_bot||0)+'(动能衰竭·关注企稳)｜≥2只时左侧色条=集中风险/机会">顶 '+(x.n_sig_top||0)+' / 底 '+(x.n_sig_bot||0)+'</span>':'')+
-      (x.leader?'<br><a class="indlead" title="'+(x.is_etf?"场内规模最大的基金 · 点击直达":"该行业总市值最大的龙头股 · 点击直达")+'" onclick="event.stopPropagation();prevStkSrc=\'home\';showStk(\''+esc(x.leader.sym)+'\')">👑 '+esc(x.leader.name)+'</a>':'')+'</div>'+
+      '<div class="nm"><div class="nmr"><span class="nmt">'+esc(k)+'</span>'+(sg?'<span class="badge2 '+(x.n_sig_top?(x.n_sig_bot?'y':'r'):'g')+'" title="'+bTip+'">'+bTxt+'</span>':'')+'</div>'+
+      (x.leader?'<a class="indlead" title="'+(x.is_etf?"场内规模最大的基金 · 点击直达":"该行业总市值最大的龙头股 · 点击直达")+'" onclick="event.stopPropagation();prevStkSrc=\'home\';showStk(\''+esc(x.leader.sym)+'\')">👑 '+esc(x.leader.name)+'</a>':'')+'</div>'+
       '<div class="meta ta-r"><span class="cap">'+capTxt+'</span><br><span class="cnt">'+(x.is_etf?(x.n_member||0)+"/"+(x.n_total||0)+"只":(x.n_member||0)+"只")+'</span>'+(mvLine?'<br>'+mvLine:'')+'</div>'+
-      '<div><span class="regime '+rCls+'" title="'+regimeTip(x)+'">'+esc(x.regime||"-")+'</span>'+zsPosBadge(x)+'</div>'+
+      '<div><span class="regime '+rCls+'" title="'+regimeTip(x,k)+'">'+esc(x.regime||"-")+'</span>'+zsPosBadge(x)+rotChip(k)+'</div>'+
       '<div class="spark">'+sparkSVG(x.spark,160,34)+'</div>'+
+      '<div class="mp" title="多周期动量(该板块合成指数近5/20/60根累计涨幅)｜距高=距近一年(250根)最高价回撤｜分位=收盘价在近一年 [最低, 最高] 区间中的位置(0%=区间最低, 100%=区间最高)">'+mpCell(m)+'</div>'+
       '<div class="ffv '+ffCls(x.netflow)+'" title="当日主力净流入(超大+大单) · '+(x.netflow_n||0)+'只成分加总, 正=流入 负=流出">'+ffTxt(x.netflow)+'</div>'+
       '<div class="chg '+(x.chg1d>0?"up":(x.chg1d<0?"down":""))+'">'+pct(x.chg1d,1)+
       (IDX&&x.chg1d!=null?'<div class="vsub '+(x.chg1d>=IDX.chg?"up":"down")+'">'+(x.chg1d>=IDX.chg?"强":"弱")+'于沪 '+Math.abs((x.chg1d-IDX.chg)*100).toFixed(1)+'pp</div>':'')+'</div>'+   // R289: chg1d 空值不渲染相对强弱(null-IDX.chg=NaNpp)
@@ -1362,6 +1593,7 @@ function renderInds(){
       '<div class="arrow">›</div></div>';
   });
   if(!keys.length){html='<div class="loading">暂无行业数据</div>';}
+  var _rule=$("indRule");if(_rule&&keys.length)_rule.innerHTML=indRuleHtml();   // R445: 口径说明条(含达标数, 可自证)
   $("indList").innerHTML=html;
   // 折叠/展开按钮 — 实际显示行数(折叠时高亮 curInd 若排 8 名后仍恒显示, 文案按真实剩余数)
   if(keys.length>IND_SHOW){
