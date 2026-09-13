@@ -2206,7 +2206,13 @@ function showStk(sym){
      **最低价**击穿 end_price; 与 revpool 剔票的收盘价口径刻意并存(结构是否成立 / 是否移出池子)。 */
   function _bkBadge(bbc,tipExtra){
     if(!bbc||!bbc.broken||bbc.broken_price==null)return"";
-    return '<span class="bkmini" title="'+esc((bbc.broken_date||"")+' 盘中最低 '+bbc.broken_price+' 已击穿背驰低点 '+bbc.end_price+(tipExtra||"")+" —— 缠论口径该买点已失效(跌破买点低点=买点逻辑破坏, 需重新构筑底部结构)。看板按收盘价剔票(有意避开日内插针), 故仍显示原场景/仍在池, 两者回答的是不同问题。📊 R443 五年回测: 该标记在收益维度无可检测差异(20日 −0.32pp, p=0.74), 在风险维度有效 — 20日内最大浮亏>5% 概率 72.1%(未破样本 58.1%, +14pp) ⇒ 按风险读, 不按收益读")+'">已破</span>';
+    /* R451: 「是否仍在池」两类票相反 —— 收盘也破(close<=endP)的票 revCand 已按收盘价剔出观察池/信号列表;
+       仅盘中刺穿(close>endP)的才仍在池。原文案对两类都写"仍在池", 对前者是错的(实测 sz002352 dev=−1.33% 已出局却写仍在池)。 */
+    var _closed=(s.close!=null&&bbc.end_price!=null&&+s.close<=+bbc.end_price);
+    return '<span class="bkmini" title="'+esc((bbc.broken_date||"")+' 盘中最低 '+bbc.broken_price+' 已击穿背驰低点 '+bbc.end_price+(tipExtra||"")+" —— 缠论口径该买点已失效(跌破买点低点=买点逻辑破坏, 需重新构筑底部结构)。"
+      +(_closed?"⚠️ 现价已按收盘价跌破背驰低点, 该票已被移出观察池与信号列表(revCand 剔票口径=收盘价跌破), 此处为结构存档; 且图上已不再画该买点的任何参考线。"
+               :"看板按收盘价剔票(有意避开日内插针), 故仍显示原场景且仍在池中, 两者回答的是不同问题。")
+      +"📊 R443 五年回测: 该标记在收益维度无可检测差异(20日 −0.32pp, p=0.74), 在风险维度有效 — 20日内最大浮亏>5% 概率 72.1%(未破样本 58.1%, +14pp) ⇒ 按风险读, 不按收益读")+'">已破</span>';
   }
   var grp=(u.type==="ETF")?"ETF板块":(u.ind||"");
   /* R448: 面包屑的 grp 是**导航目标**, 必须恒等于行业树节点名(点击走 pickIndFromStk), 不能动。
@@ -2274,9 +2280,18 @@ function showStk(sym){
           对照 dev>0 的 sh601668 正常出 5 条、sz002701 出 3 条)。
          底信号 32 只里 16 只(50%) 处于此状态 ⇒ 一半详情页的文案都在说谎。 */
       +'<br><span style="opacity:.85;font-size:11.5px">'+((s.close==null||+s.close<=+_bbd.end_price)
-        ? '图上<b>已不画任何参考线</b>：现价 <b>'+s.close+'</b> 已低于背驰低点 <b>'+_bbd.end_price+'</b>，结构失效 —— 此时再画「止损 / 入场参考 / 止盈参考」等于用失效结构指引操作，比不画更危险，故本页只保留结构标注（笔 / 中枢 / 背驰点）。须等<b>新的底分型 + 新背驰</b>重新构筑底部结构后再评估。'
+        /* R451: 不能说"不画任何参考线" —— 已破票若**同时**有顶背驰结构, topRefOf 仍会画出
+           「反抽减仓参考」。实测 77 只走本分支的票里有 10 只(珠海冠宇/顺丰控股/东方雨虹/海天…
+           等)图上仍有 1 条线, 故文案收敛到"该买点的三条线已撤下", 并按 topRefOf 实况补注。 */
+        ? '图上<b>该买点的三条参考线（止损 / 入场参考 / 止盈参考）已全部撤下</b>：现价 <b>'+s.close+'</b> 已低于背驰低点 <b>'+_bbd.end_price+'</b>，结构失效 —— 此时再按失效结构画线指引操作，比不画更危险，故本页只保留结构标注（笔 / 中枢 / 背驰点）。须等<b>新的底分型 + 新背驰</b>重新构筑底部结构后再评估。'
+          +((typeof topRefOf==="function"&&topRefOf(u))?'<br><b>注意</b>：该票另有<b>顶背驰</b>结构，图上仍会显示它的「反抽减仓参考」线 —— 那是另一套结构，与本次底背驰失效无关，勿与止损位混看。':'')
         : '图上「底线」仍按原背驰低点画（结构参考位），但<b>已不可当有效支撑</b>；止损线按失效口径标红。')
-      +'看板按<b>收盘价</b>剔票（有意避开日内插针，见 revCand），故本页仍显示「'+esc(scen||"-")+'」场景 —— 两个判据回答的是不同问题（结构是否成立 / 今天要不要移出池子），不矛盾。</span>'
+      /* R451: 「在不在池」两类票相反 —— 收盘也破的票 revCand 已剔除, 仅盘中刺穿的才仍在池。
+         原句对两类都写"仍在池", 对前者是错的(实测 sz002352 dev=−1.33% 已出局)。 */
+      +((s.close==null||+s.close<=+_bbd.end_price)
+        ? '该票已按<b>收盘价</b>跌破背驰低点，<b>已被移出</b>观察池与信号列表（revCand 的剔除口径就是收盘价跌破）—— 本页展示场景「'+esc(scen||"-")+'」仅供结构回溯。'
+        : '看板按<b>收盘价</b>剔票（有意避开日内插针，见 revCand），故本票<b>仍在池中</b>，本页仍显示「'+esc(scen||"-")+'」场景 —— 两个判据回答的是不同问题（结构是否成立 / 今天要不要移出池子），不矛盾。')
+      +'</span>'
       +'<br><span style="opacity:.85;font-size:11.5px">📊 <b>该标记怎么用（五年回测实证）</b>：<b>不要</b>按收益维度理解 —— 已破与未破样本后续 20 日收益无可检测差异（−0.32pp，p=0.74，故 R442 决定不把已破票剔出池子）。要按<b>风险维度</b>读：已破样本 20 日内最大浮亏超 5% 的概率 <b>72.1%</b>，未破样本 58.1%（高 14 个百分点），平均最大浮亏 −12.00% vs −8.34%。即它不告诉你「不会涨」，它告诉你「深亏概率更高、止损纪律必须更硬」。</span>'
       +'</div></div>'+banner;
   }
@@ -2289,7 +2304,7 @@ function showStk(sym){
       '<br>· 近60日均额 '+(s.avg_amt60!=null?(s.avg_amt60>=1e4?(s.avg_amt60/1e4).toFixed(1)+"亿":s.avg_amt60.toFixed(0)+"万")+"/日":"-")+' · 振幅中位 '+(s.med_amp!=null?s.med_amp+"%":"-")+'<br>· 一字板 '+(s.one_word||0)+'日 · 距高点回撤 '+(s.dd!=null?(s.dd*100).toFixed(1)+"%":"-")+'</div>';
   var stkHtml=banner+
     '<div class="panel"><div class="chart-note"><span class="legend-tag"><i style="background:#e54545"></i>涨</span><span class="legend-tag"><i style="background:#18a058"></i>跌</span><span class="legend-tag"><i style="background:#7f77dd"></i>笔</span><span class="legend-tag"><i style="background:rgba(127,119,221,.25)"></i>中枢</span><span class="legend-tag"><i style="background:#c92a2a"></i>顶背驰(红▼)</span><span class="legend-tag"><i style="background:#087f5b"></i>底背驰(绿▲)</span></div><div id="stkChart" style="width:100%;height:620px"><div class="loading sk">行情加载中…</div></div></div>'+
-    '<div class="chart-note" style="line-height:1.85;text-align:left;color:#475569;margin-top:6px">图上 <b>止损 / 入场参考 / 止盈参考</b> 三条线是<b>结构位</b>（背驰低点 / 现价下方 R/2 / 中枢上沿或 2R），<b>不是经实证优化的离场位</b>。R449 五年回测（292 票 · 73,054 个观察点 · 2022-01~2026-08）：63 条「止盈 × 止损 × 持有期」组合<b>无一条</b>产生可检测超额（最高 +0.07pp，p=0.45；0 条通过 Bonferroni α=0.00079），且<b>无规则持有的平均收益 +2.37% 高于任何组合</b>。原因：收益几乎全部来自头部 5% 的段（贡献 114%），止盈线的本质是砍右尾。<b>读法</b>：当结构参考位用，别当卖点。⚠️ <b>若现价已跌破背驰低点（结构失效），本页不画任何参考线</b> —— 三条线都不会出现，属预期行为，不是加载失败（见上方警示条）。</div>'+
+    '<div class="chart-note" style="line-height:1.85;text-align:left;color:#475569;margin-top:6px">图上 <b>止损 / 入场参考 / 止盈参考</b> 三条线是<b>结构位</b>（背驰低点 / 现价下方 R/2 / 中枢上沿或 2R），<b>不是经实证优化的离场位</b>。R449 五年回测（292 票 · 73,054 个观察点 · 2022-01~2026-08）：63 条「止盈 × 止损 × 持有期」组合<b>无一条</b>产生可检测超额（最高 +0.07pp，p=0.45；0 条通过 Bonferroni α=0.00079），且<b>无规则持有的平均收益 +2.37% 高于任何组合</b>。原因：收益几乎全部来自头部 5% 的段（贡献 114%），止盈线的本质是砍右尾。<b>读法</b>：当结构参考位用，别当卖点。⚠️ <b>若现价已跌破背驰低点（结构失效），则不再画该买点的止损 / 入场参考 / 止盈参考三条线</b> —— 它们都不会出现，属预期行为，不是加载失败（见上方警示条）；若该票另有顶背驰结构，那套线不受影响、仍会照常显示。</div>'+
     '<div class="sec-t">结构明细 <span class="cnt">来自扫描快照(截至 '+esc(s.last||"")+')</span></div>'+
     '<div class="panel" style="padding:10px 16px"><div class="chart-sec">'+miniCol+infoCol+'</div></div>'+
     '<div class="foot">行情为浏览器实时拉取(腾讯前复权)；缠论标注按扫描时结构对齐日期。研究参考，不构成投资建议。</div>';
@@ -2738,6 +2753,16 @@ function addSlTpLine(opt,u){
     if(tz.ref!=null)items.push({yAxis:+tz.ref.toFixed(2),lineColor:"#e8590c",textColor:"#d9480f",name:"反抽减仓参考",value:tz.ref});
   }
   if(!items.length)return;
+  /* R451: 同值去重 —— z.tp 与 tz.ref 都取 zs_last.zg, 满足各自门槛时会在**同一价格** push
+     两条完全重合的线(实测 18 只: sh603288 37.64 / sh601668 4.42 / sh561980 0.77 等),
+     视觉上是一条虚线配两个标签(position 错位后不重叠), 会被读成"两个不同的位"。
+     同值只保留先入项(z 系列: 止盈参考 / 上方压力参考) —— 价格相同、语义同为"上方位", 信息不丢。 */
+  var _seenY={};
+  items=items.filter(function(it){
+    var k=it.yAxis.toFixed(2);
+    if(_seenY[k])return false;
+    _seenY[k]=1;return true;
+  });
   items.sort(function(a,b){return a.yAxis-b.yAxis;});
   // R294: 4 象限循环 position 错位 —— 右上/左上/右下/左下, 即使相邻 yAxis 像素差极小也不会重叠
   var POS=["insideEndTop","insideStartTop","insideEndBottom","insideStartBottom"];
