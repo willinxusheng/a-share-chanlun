@@ -809,7 +809,9 @@ function renderEfBar(){
     ["逆向观察池(老结构埋伏)","−0.05pp","p=0.91","无可检测超额",0],
     ["高胜率精选(vs 池内非精选)","−1.30pp","p=0.36","两源方向相反, 均不显著 ⇒ 无增量",0],
     ["「盘中已破」标记 · 收益维度","−0.32pp","p=0.74","收益上无差异(故 R442 决定不剔除)",0],
-    ["「盘中已破」标记 · 风险维度","72.1%","vs 58.1%","20日内最大浮亏>5% 概率 +14pp ⇒ 按风险读",1]
+    ["「盘中已破」标记 · 风险维度","72.1%","vs 58.1%","20日内最大浮亏>5% 概率 +14pp ⇒ 按风险读",1],
+    ["离场规则(R449 · 63 条止盈×止损×持有期)","最高 +0.07pp","p=0.45","0 条过 Bonferroni(α=0.00079) ⇒ 退出规则不产生超额",0],
+    ["无规则 20 日持有(vs 全部离场组合)","+2.37%","最高","任何组合都更低(+0.57~+1.77%); 头部 5% 段贡献 114% 收益 ⇒ 止盈=砍收益源",1]
   ];
   el.className="efbar"+(efOpen?" open":"");
   el.style.display="flex";   // ⚠️ 必须显式打开: DOM 初始 inline style="display:none" 优先级高于
@@ -821,6 +823,9 @@ function renderEfBar(){
     +'<div class="efc neut"><span class="efh">🟢 背驰见底机会 <span class="efn">'+nBot+'</span> 只</span>'
       +'<span class="efk">未获证实</span>'
       +'<span class="eft">同口径回测<b>无可检测超额</b>(+0.58pp, p=0.13, 年度正负交替) ⇒ <b>不宜直接当买入信号</b>, 需自备止损纪律</span></div>'
+    +'<div class="efc neut"><span class="efh">🎯 离场位(止损/止盈)</span>'
+      +'<span class="efk">未获证实</span>'
+      +'<span class="eft">63 条「止盈×止损×持有期」组合<b>无一条</b>产生可检测超额(最高 +0.07pp, p=0.45) · <b>无规则持有 +2.37% 反而最高</b> · 收益几乎全靠头部 5% 的段(贡献 114%) ⇒ <b>止损/止盈线是结构参考位, 不是优化卖点</b></span></div>'
     +'<div class="efd">'
       +'<b>📊 回测实证与证据 <span style="font-weight:400;color:#64748b">(点击本行展开/收起 · 结论随看板常驻 —— 避免把未获证实的信号当信号用)</span></b>'
       +'<table><tr><th>信号层</th><th>20日截面中性超额</th><th>p 值</th><th>一致性 / 备注</th></tr>'
@@ -832,8 +837,11 @@ function renderEfBar(){
       +'样本: 新浪 150 票 / 31026 时点 / 2021-11~2026-08; 腾讯前复权 125 票 / 13117 时点复跑, 核心结论一致。'
       +'框架自校验: 以 09-11 为「今天」重放 100 票, 与 CI 当日真实产物逐字段比对, 8 字段仅 1 处不一致(scenario / 背驰低点 / 偏离度 / 门禁 / 均额 / 收盘价 全 0 差异)。'
       +'基准用<b>横截面同日均值</b>, 不用沪深300 —— 后者会把 size 风格差异算成超额(实测把 +0.58pp 放大成 +2.25pp)。'
+      +'<br><b>R449 退出规则</b>: 在同一重放资产上(292 票 / 73,054 观察点 / 2022-01~2026-08)跑「止盈 × 止损 × 持有期」63 条网格 + 6 条预注册规则, 事件段级 + <b>同日同类型</b>基准 + Bonferroni 校正。逐规则 200 轮零假设校准(同日随机同伴, 构造上真值=0)实测拒绝率 3.5%~8.0%(名义 5%, t 的 sd 0.95~1.06) ⇒ <b>检验未失灵, 负结论成立</b>。'
+      +'<br><b>可执行性</b>: 20 日内触及 +8% 的段占比 — 个股 44.4% / <b>ETF 30.3%</b> / 北交 62.5%(+10% 时分别 35.8% / <b>22.4%</b> / 55.0%) ⇒ <b>在 ETF 上挂 8~10% 止盈线, 七成以上永不触发</b>。'
       +'<div class="lim">⚠️ 局限: ①横截面污染度 14.7% ⇒ 上述超额估计<b>偏乐观</b>(真实值可能更低); ②17 层 × 3 周期未做多重比较校正(Bonferroni 后顶风险不再显著; 但它是先验对照, 且方向/单调性/年度一致性三重齐备); ③样本期未覆盖 2015/2018 极端流动性危机。仅供研究参考, 不构成投资建议。</div>'
       +'<div style="margin-top:7px"><a href="r443_backtest_report.html" target="_blank" rel="noopener" style="font-weight:700">📄 查看完整回测报告（含分层数据表与三张图表）↗</a>'
+      +'<a href="r449_exit_rules_report.md" target="_blank" rel="noopener" style="font-weight:700;margin-left:14px">📄 R449 退出规则实证报告（含 63 条网格全表与校准）↗</a>'
       +'<span style="font-size:10px;color:#64748b;margin-left:8px">数字可自查 —— 报告与本节同源, 含全部局限</span></div>'
       +'</div>';
   el.onclick=function(){efOpen=!efOpen;el.className="efbar"+(efOpen?" open":"");};
@@ -2273,6 +2281,7 @@ function showStk(sym){
       '<br>· 近60日均额 '+(s.avg_amt60!=null?(s.avg_amt60>=1e4?(s.avg_amt60/1e4).toFixed(1)+"亿":s.avg_amt60.toFixed(0)+"万")+"/日":"-")+' · 振幅中位 '+(s.med_amp!=null?s.med_amp+"%":"-")+'<br>· 一字板 '+(s.one_word||0)+'日 · 距高点回撤 '+(s.dd!=null?(s.dd*100).toFixed(1)+"%":"-")+'</div>';
   var stkHtml=banner+
     '<div class="panel"><div class="chart-note"><span class="legend-tag"><i style="background:#e54545"></i>涨</span><span class="legend-tag"><i style="background:#18a058"></i>跌</span><span class="legend-tag"><i style="background:#7f77dd"></i>笔</span><span class="legend-tag"><i style="background:rgba(127,119,221,.25)"></i>中枢</span><span class="legend-tag"><i style="background:#c92a2a"></i>顶背驰(红▼)</span><span class="legend-tag"><i style="background:#087f5b"></i>底背驰(绿▲)</span></div><div id="stkChart" style="width:100%;height:620px"><div class="loading sk">行情加载中…</div></div></div>'+
+    '<div class="chart-note" style="line-height:1.85;text-align:left;color:#475569;margin-top:6px">图上 <b>止损 / 入场参考 / 止盈参考</b> 三条线是<b>结构位</b>（背驰低点 / 现价下方 R/2 / 中枢上沿或 2R），<b>不是经实证优化的离场位</b>。R449 五年回测（292 票 · 73,054 个观察点 · 2022-01~2026-08）：63 条「止盈 × 止损 × 持有期」组合<b>无一条</b>产生可检测超额（最高 +0.07pp，p=0.45；0 条通过 Bonferroni α=0.00079），且<b>无规则持有的平均收益 +2.37% 高于任何组合</b>。原因：收益几乎全部来自头部 5% 的段（贡献 114%），止盈线的本质是砍右尾。<b>读法</b>：当结构参考位用，别当卖点。</div>'+
     '<div class="sec-t">结构明细 <span class="cnt">来自扫描快照(截至 '+esc(s.last||"")+')</span></div>'+
     '<div class="panel" style="padding:10px 16px"><div class="chart-sec">'+miniCol+infoCol+'</div></div>'+
     '<div class="foot">行情为浏览器实时拉取(腾讯前复权)；缠论标注按扫描时结构对齐日期。研究参考，不构成投资建议。</div>';
