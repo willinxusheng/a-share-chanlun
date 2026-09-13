@@ -116,6 +116,14 @@ h1{font-size:21px;font-weight:700;letter-spacing:.4px;line-height:1.3}   /* R323
 .rc-b{background:#fff8e6;color:#b45309;border:1px solid #f0dfae}   /* 领先减速 */
 .rc-c{background:#eaf2fb;color:#2b6cb0;border:1px solid #c9ddf2}   /* 落后转强 */
 .rc-d{background:#f1f5f9;color:#64748b;border:1px solid #dfe6ee}   /* 落后加速 */
+/* R446: 贴线标记(|动量变化| < 0.10pp/日, 几乎不动却被硬切进某一象限) —— 虚线边框 + 降透明度,
+   不增宽(上一轮 9 列布局刚修过挤压, 任何加宽都会复发), 含义见 title 与说明条图例 */
+.rc.line{border-style:dashed;opacity:.8}
+/* R446: 四象限图例(说明条内) —— 让"这四个标签什么意思"页面自带答案, 不必悬停/追问 */
+.rotleg{margin-top:2px;display:flex;flex-wrap:wrap;gap:2px 16px;line-height:1.9}
+.rotleg .lg{white-space:nowrap}
+.rotleg .rc{cursor:default}
+.rotleg .us{color:#8a99ab}
 .ind-row .ctr{font-size:11px;color:var(--muted);text-align:center}
 .ctr-top{display:flex;align-items:center;justify-content:center;gap:5px}
 .ctr-sub{font-size:10px;color:var(--muted);margin-top:3px;text-align:center;line-height:1.4}
@@ -501,7 +509,7 @@ a{color:var(--primary);text-decoration:none}
       </div>
       <div class="ind-rule" id="indRule"></div>
       <div class="ind-grid">
-        <div>板块</div><div class="ta-r">市值/规模·成分</div><div>走势状态</div>
+        <div>板块</div><div class="ta-r">市值/规模·成分</div><div title="走势状态 = 后端走势标签(顶背驰区/上涨趋势/下跌趋势/震荡中) + 轮动四象限胶囊(领先/落后 × 加速/减速)。四个象限的含义见上方说明条图例; 悬停胶囊可看该板块当前的相对强度与动量变化数值。">走势状态</div>
         <div>近120日走势</div><div>5/20/60日动量·位置</div><div class="ta-r">主力净流入</div><div class="ta-r">涨跌</div><div class="ta-r">RSI·振幅·门禁</div><div></div>
       </div>
       <div id="indList"><div class="loading sk">行业加载中…</div></div>
@@ -518,7 +526,7 @@ a{color:var(--primary);text-decoration:none}
 <script>
 /* ============================================================
    全市场缠论雷达 v3 · 行业为根 + 个股K线内嵌切换
-   数据: radar/radar.json (scan_radar.py P3b-r18) · 前端 R252+R253+R445 · R253-hotfix: 修 drawChart 不清 loading 残留 + legend 重复声明
+   数据: radar/radar.json (scan_radar.py P3b-r18) · 前端 R252+R253+R445+R446 · R253-hotfix: 修 drawChart 不清 loading 残留 + legend 重复声明
    K线: 行业=radar.json 内嵌合成; 个股=腾讯 fqkline (CORS 已开)
    R258: ①个股volume去/100(腾讯=手) ②行业tooltip量=成交额亿元 ③spark=[o,h,l,c]close索引修复
         ④pickInd重置curStk/tab ⑤fresh=0排序 ⑥hashchange stk真渲染 ⑦浮层/图实例清理+竞态令牌 ⑧fetch no-cache
@@ -1384,13 +1392,44 @@ function sigStrong(x,m){
   var t=(x.n_sig_top||0),b=(x.n_sig_bot||0);
   return {top:(t>=SIG_ABS_MIN&&m.lt>=DENS_LB_STRONG),bot:(b>=SIG_ABS_MIN&&m.lb>=DENS_LB_STRONG)};
 }
+// R446: 四象限**口径与含义的单一事实源** —— 页面自带解释, 免"这四个标签什么意思"的反复追问。
+// ⚠️ 判据必须与后端 scan_radar.py::_rot_quadrant 逐字一致: rs20>=50 为「领先」, accel>0 为「加速」;
+//    accel = mom5/5 - mom20/20 (日均涨幅之差, pp/日)。
+// ⚠️ us(怎么读)只是**方位语言**, 不含买卖建议 —— 与 R443 结论(底背驰机会未获统计证实)保持一致。
+var ROT_LINE=0.10;   // |accel| 低于此值 = 贴线: 几乎不动却被硬切进某象限 ⇒ 区分度低(仅影响提示, 不改判据)
+var ROT_DEF={
+  "领先加速":{c:"rc-a",r:"强, 且在变强",us:"趋势跟随的入场区(有动能)"},
+  "领先减速":{c:"rc-b",r:"强, 但动能熄火",us:"高位减仓 / 警戒区"},
+  "落后转强":{c:"rc-c",r:"弱, 但开始提速",us:"低吸观察区(未获统计证实)"},
+  "落后加速":{c:"rc-d",r:"弱, 且跌得更快",us:"下跌在加速, 别急着抄"}
+};
+var ROT_ORDER=["领先加速","领先减速","落后转强","落后加速"];
+function rotTip(m){
+  if(!m||!m.rot)return"";
+  var d=ROT_DEF[m.rot];
+  var t=m.rot+(d?" —— "+d.r+"\n":"");
+  if(d)t+="怎么读: "+d.us+"\n";
+  t+="纵轴 相对强度 = 20日动量在全场板块中的分位 "+(m.rs20==null?"-":m.rs20+"%")+"(≥50% 为「领先」)\n";
+  t+="横轴 动量变化 = 近5日日均涨幅 − 近20日日均涨幅 = "
+    +(m.accel==null?"-":(m.accel>0?"+":"")+m.accel.toFixed(2)+"pp/日")+"(>0 为「加速」)";
+  if(m.accel!=null&&Math.abs(m.accel)<ROT_LINE)
+    t+="\n⚠ 贴着分界线(|动量变化| "+Math.abs(m.accel).toFixed(2)+" < "+ROT_LINE.toFixed(2)
+      +"), 本象限归属区分度低";
+  t+="\n仅描述「钱往哪流」, 是方位语言, 不含买卖建议";
+  return t;
+}
+function rotLegendHtml(){
+  return '<div class="rotleg">'+ROT_ORDER.map(function(k){
+    var d=ROT_DEF[k];
+    return '<span class="lg" title="'+esc(d.r+" · "+d.us)+'"><span class="rc '+d.c+'">'+k
+      +'</span> '+d.r+' <span class="us">· '+d.us+'</span></span>';
+  }).join("")+'</div>';
+}
 function rotChip(k){
   var m=indM(k);if(!m.rot)return"";
-  var cls=m.rot==="领先加速"?"rc-a":(m.rot==="领先减速"?"rc-b":(m.rot==="落后转强"?"rc-c":"rc-d"));
-  var tip="行业轮动四象限(仅描述, 非买卖建议)｜相对强度=20日动量在 "+Object.keys(INDS).length+" 个板块中的分位 "
-    +(m.rs20==null?"-":m.rs20+"%")+"(≥50%=强于半数板块)｜动量变化=近5日日均涨幅 − 近20日日均涨幅 = "
-    +(m.accel==null?"-":(m.accel>0?"+":"")+m.accel.toFixed(2)+"pp/日")+"｜"+m.rot;
-  return '<div class="rotchip"><span class="rc '+cls+'" title="'+tip+'">'+esc(m.rot)+'</span></div>';
+  var d=ROT_DEF[m.rot];
+  var cls=(d?d.c:"rc-d")+((m.accel!=null&&Math.abs(m.accel)<ROT_LINE)?" line":"");
+  return '<div class="rotchip"><span class="rc '+cls+'" title="'+esc(rotTip(m))+'">'+esc(m.rot)+'</span></div>';
 }
 /* 多周期动量 + 距高/分位 单元格(R445)。动量按 A 股习惯着色(红涨绿跌);
    距高回撤与价格分位是**位置**描述, 不说明方向, 故意不着色(避免被读成"该买")。 */
@@ -1438,7 +1477,12 @@ function indRuleHtml(){
     +'「📊 信号集中」排序 = 主导方向下界×10 + 次方向下界×1(并列时成分多者在前, 次序确定可复现)。'
     +'<br>🚀 <b>趋势强度</b> = 60日动量 · 🎯 <b>相对强度</b> = 20日动量在 '+n+' 个板块中的<b>横截面分位</b>'
     +'(不用指数基准 —— R443 实证指数基准会把 size/风格算进超额) · 🪂 <b>跌透度</b> = 距近一年高点回撤 / 收盘价近一年区间分位'
-    +' · <b>四象限</b> = 相对强度 × 动量变化(仅描述"钱往哪流")。'
+    +'。'
+    +'<br>🧭 <b>行业轮动四象限</b>(走势状态列的小胶囊) = <b>相对强度</b>(纵轴, 20日动量横截面分位, ≥50% 为「领先」)'
+    +' × <b>动量变化</b>(横轴, 近5日日均涨幅 − 近20日日均涨幅, 单位 pp/日, >0 为「加速」):'
+    +rotLegendHtml()
+    +'<span class="us">贴着分界线的板块(|动量变化| &lt; '+ROT_LINE.toFixed(2)+'pp/日)用<b>虚线边框</b>标出, 其象限归属区分度低。'
+    +'四个名字都只是<b>方位</b>(强/弱 × 加速/减速), 不是评级, 也不含买卖建议。</span>'
     +'<br><span class="warn">以上全部为<b>描述性</b>指标(位置/动量/密度), 不含买卖判断 —— 与 R443 回测结论一致: 顶背驰风险维度有效(−0.80pp, p=0.018), 底背驰机会未获证实(+0.58pp, p=0.13)。</span>'
     +mmHtml;
 }
@@ -1536,7 +1580,11 @@ function detailStrip(ind,k){
     h+='<span title="距高=距近一年(250根)最高价回撤; 价格分位=收盘价在近一年最低~最高区间中的位置(0%=最低, 100%=最高)。位置类描述, 不含方向判断">距近一年高 <b>'+(dm.dd==null?"-":dm.dd.toFixed(1)+"%")+'</b><span class="dsep"> · </span>价格分位 <b>'+(dm.pxq==null?"-":dm.pxq+"%")+'</b></span>';
   }
   if(dm.rs20!=null){
-    h+='<span title="相对强度=20日动量在全部板块中的横截面分位(不用指数基准, 避免 size/风格混入超额); 四象限=相对强度×动量变化, 仅描述钱往哪流">相对强度 <b>'+esc(dm.rot||"-")+'</b><span class="muted">(20日分位 '+dm.rs20+'%)</span></span>';
+    // R446: 详情页也内联含义 —— 不依赖悬停(手机/触屏无 native title)
+    var _rd=ROT_DEF[dm.rot];
+    h+='<span title="'+esc(rotTip(dm))+'">相对强度 <b>'+esc(dm.rot||"-")+'</b>'
+      +'<span class="muted">(20日分位 '+dm.rs20+'%'+(dm.accel!=null?" · 动量变化 "+(dm.accel>0?"+":"")+dm.accel.toFixed(2)+"pp/日":"")
+      +(_rd?" · "+_rd.r:"")+')</span></span>';
   }
   if(ind.netflow!=null)h+='<span>主力净流入 <b class="'+ffCls(ind.netflow)+'">'+ffTxt(ind.netflow)+'</b></span>';   // R283
   if(ind.leader)h+='<span title="行业内总市值最大的成分股">'+(ind.is_etf?"规模最大基金":"行业龙头")+' <b class="ld-name">'+esc(ind.leader.name)+'</b></span>';   // R283
