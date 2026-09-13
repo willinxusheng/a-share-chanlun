@@ -2267,7 +2267,15 @@ function showStk(sym){
       +'<b>⚠️ 背驰低点已破</b> · '+esc(_bbd.broken_date||"近期")+' 盘中最低 <b>'+_bbd.broken_price+'</b> 击穿背驰低点 <b>'+_bbd.end_price+'</b>'
       +(_bkPct!=null?'（低 '+Math.abs(_bkPct).toFixed(2)+'%）':'')
       +' — 缠论口径该买点<b>已失效</b>：跌破一类买点低点即买点逻辑破坏，须等新的底分型 + 新背驰，或转二买/三买再评估。'
-      +'<br><span style="opacity:.85;font-size:11.5px">图上「底线」仍按原背驰低点画（结构参考位），但<b>已不可当有效支撑</b>；止损线按失效口径标红。'
+      /* R450: 文案必须与 slTpOf() 的实际行为一致 —— 该函数在 close<=end_price 时**直接 return null**,
+        连 R440 的「止损·已破」标红分支都不会执行 ⇒ 图上一条参考线都没有。
+         原文案无条件宣称"图上仍画着底线、止损线按失效口径标红", 与实现**完全相反**
+         (实测: sz159880 dev=−0.85%、sh688068 dev=−8.01% 两只已破票 markLine=无;
+          对照 dev>0 的 sh601668 正常出 5 条、sz002701 出 3 条)。
+         底信号 32 只里 16 只(50%) 处于此状态 ⇒ 一半详情页的文案都在说谎。 */
+      +'<br><span style="opacity:.85;font-size:11.5px">'+((s.close==null||+s.close<=+_bbd.end_price)
+        ? '图上<b>已不画任何参考线</b>：现价 <b>'+s.close+'</b> 已低于背驰低点 <b>'+_bbd.end_price+'</b>，结构失效 —— 此时再画「止损 / 入场参考 / 止盈参考」等于用失效结构指引操作，比不画更危险，故本页只保留结构标注（笔 / 中枢 / 背驰点）。须等<b>新的底分型 + 新背驰</b>重新构筑底部结构后再评估。'
+        : '图上「底线」仍按原背驰低点画（结构参考位），但<b>已不可当有效支撑</b>；止损线按失效口径标红。')
       +'看板按<b>收盘价</b>剔票（有意避开日内插针，见 revCand），故本页仍显示「'+esc(scen||"-")+'」场景 —— 两个判据回答的是不同问题（结构是否成立 / 今天要不要移出池子），不矛盾。</span>'
       +'<br><span style="opacity:.85;font-size:11.5px">📊 <b>该标记怎么用（五年回测实证）</b>：<b>不要</b>按收益维度理解 —— 已破与未破样本后续 20 日收益无可检测差异（−0.32pp，p=0.74，故 R442 决定不把已破票剔出池子）。要按<b>风险维度</b>读：已破样本 20 日内最大浮亏超 5% 的概率 <b>72.1%</b>，未破样本 58.1%（高 14 个百分点），平均最大浮亏 −12.00% vs −8.34%。即它不告诉你「不会涨」，它告诉你「深亏概率更高、止损纪律必须更硬」。</span>'
       +'</div></div>'+banner;
@@ -2281,7 +2289,7 @@ function showStk(sym){
       '<br>· 近60日均额 '+(s.avg_amt60!=null?(s.avg_amt60>=1e4?(s.avg_amt60/1e4).toFixed(1)+"亿":s.avg_amt60.toFixed(0)+"万")+"/日":"-")+' · 振幅中位 '+(s.med_amp!=null?s.med_amp+"%":"-")+'<br>· 一字板 '+(s.one_word||0)+'日 · 距高点回撤 '+(s.dd!=null?(s.dd*100).toFixed(1)+"%":"-")+'</div>';
   var stkHtml=banner+
     '<div class="panel"><div class="chart-note"><span class="legend-tag"><i style="background:#e54545"></i>涨</span><span class="legend-tag"><i style="background:#18a058"></i>跌</span><span class="legend-tag"><i style="background:#7f77dd"></i>笔</span><span class="legend-tag"><i style="background:rgba(127,119,221,.25)"></i>中枢</span><span class="legend-tag"><i style="background:#c92a2a"></i>顶背驰(红▼)</span><span class="legend-tag"><i style="background:#087f5b"></i>底背驰(绿▲)</span></div><div id="stkChart" style="width:100%;height:620px"><div class="loading sk">行情加载中…</div></div></div>'+
-    '<div class="chart-note" style="line-height:1.85;text-align:left;color:#475569;margin-top:6px">图上 <b>止损 / 入场参考 / 止盈参考</b> 三条线是<b>结构位</b>（背驰低点 / 现价下方 R/2 / 中枢上沿或 2R），<b>不是经实证优化的离场位</b>。R449 五年回测（292 票 · 73,054 个观察点 · 2022-01~2026-08）：63 条「止盈 × 止损 × 持有期」组合<b>无一条</b>产生可检测超额（最高 +0.07pp，p=0.45；0 条通过 Bonferroni α=0.00079），且<b>无规则持有的平均收益 +2.37% 高于任何组合</b>。原因：收益几乎全部来自头部 5% 的段（贡献 114%），止盈线的本质是砍右尾。<b>读法</b>：当结构参考位用，别当卖点。</div>'+
+    '<div class="chart-note" style="line-height:1.85;text-align:left;color:#475569;margin-top:6px">图上 <b>止损 / 入场参考 / 止盈参考</b> 三条线是<b>结构位</b>（背驰低点 / 现价下方 R/2 / 中枢上沿或 2R），<b>不是经实证优化的离场位</b>。R449 五年回测（292 票 · 73,054 个观察点 · 2022-01~2026-08）：63 条「止盈 × 止损 × 持有期」组合<b>无一条</b>产生可检测超额（最高 +0.07pp，p=0.45；0 条通过 Bonferroni α=0.00079），且<b>无规则持有的平均收益 +2.37% 高于任何组合</b>。原因：收益几乎全部来自头部 5% 的段（贡献 114%），止盈线的本质是砍右尾。<b>读法</b>：当结构参考位用，别当卖点。⚠️ <b>若现价已跌破背驰低点（结构失效），本页不画任何参考线</b> —— 三条线都不会出现，属预期行为，不是加载失败（见上方警示条）。</div>'+
     '<div class="sec-t">结构明细 <span class="cnt">来自扫描快照(截至 '+esc(s.last||"")+')</span></div>'+
     '<div class="panel" style="padding:10px 16px"><div class="chart-sec">'+miniCol+infoCol+'</div></div>'+
     '<div class="foot">行情为浏览器实时拉取(腾讯前复权)；缠论标注按扫描时结构对齐日期。研究参考，不构成投资建议。</div>';
