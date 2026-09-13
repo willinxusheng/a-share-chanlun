@@ -399,7 +399,23 @@ h1{font-size:21px;font-weight:700;letter-spacing:.4px;line-height:1.3}   /* R323
 .gate-tag.g1{background:#fff3cd;color:#92400e}.gate-tag.g2{background:#fde2e2;color:#c92a2a}.gate-tag.g3{background:#e0f2fe;color:#075985}
 .chart-sec{display:grid;grid-template-columns:1fr 1fr;gap:14px}
 @media(max-width:980px){.chart-sec{grid-template-columns:1fr}}
-@media(max-width:980px){.ind-grid,.ind-row{grid-template-columns:1fr .7fr .7fr 1.2fr .6fr .6fr .9fr 22px}}
+/* R445: 原为 8 列(1fr .7fr .7fr 1.2fr .6fr .6fr .9fr 22px) —— R445 新增第 5 列
+   「5/20/60日动量·位置」后行/表头各变 9 个子元素, 但本规则未同步 ⇒ 窄屏下 9 个格子
+   塞进 8 条轨道, 末列「›」被挤到隐式第二行(实测 900px 行高 203px, 表头 113px 竖排)。
+   同步为 9 列; ≤760 手机屏另见下方列裁剪规则。 */
+@media(max-width:980px){.ind-grid,.ind-row{grid-template-columns:1fr .62fr .72fr 1fr .85fr .55fr .55fr .85fr 20px}}
+@media(max-width:760px){
+  /* R445: 手机屏 9 列不可读 —— 沿用 .stk-grid(R393)先例, 隐藏非关键列:
+     市值/规模·成分(2) · 近120日走势(4) · 主力净流入(6), 保留
+     板块(1) · 走势状态(3) · 动量·位置(5) · 涨跌(7) · RSI·振幅·门禁(8) + 箭头(9)。
+     nth-child 序号按 DOM 计, display:none 不改变序号 ⇒ 6 条轨道对应 1/3/5/7/8/9。 */
+  .ind-grid,.ind-row{grid-template-columns:minmax(70px,1.3fr) minmax(58px,.78fr) minmax(86px,1fr) minmax(40px,.5fr) minmax(66px,.86fr) 14px;gap:4px;padding:8px 10px}
+  .ind-grid>*:nth-child(2),.ind-row>*:nth-child(2),
+  .ind-grid>*:nth-child(4),.ind-row>*:nth-child(4),
+  .ind-grid>*:nth-child(6),.ind-row>*:nth-child(6){display:none}
+  .ind-row .nm{font-size:13px}
+  .ind-row .mp{font-size:9.5px}
+}
 /* R393: .stk-grid(行业成分信号列表 名称/信号/趋势/末中枢/笔/中枢/自洽/涨跌/净流入/回撤/›) 窄屏适配
    —— 全文件唯一无 980 变体的 grid 列表: 11列 min 宽约 650px(150+9×40+20+gap), 手机容器(约340px)
       overflow:hidden 直裁右侧 4-5 列(净流入/回撤等关键列不可见且无横滚)。760 以下保留 5 个实操关键列
