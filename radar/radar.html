@@ -216,6 +216,18 @@ h1{font-size:21px;font-weight:700;letter-spacing:.4px;line-height:1.3}   /* R323
 .stk-head-float.show{display:grid}
 .stk-head-float .arr{display:none}
 .stk-grid .nm{font-weight:700;color:var(--ink);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px;line-height:1.5}
+/* R448: 成分表名称格改 flex —— 上面那条 `nowrap + overflow:hidden + ellipsis` 是**单行整体裁切**:
+   把「细分领域 ×N」徽章放进 .nm 会被整块吃掉(实测徽章右缘 524px vs .nm 可视宽 184px ⇒ 用户完全看不见,
+   属典型"CSS 配了、渲染没画")。改为: 名称 .nmtx 可压缩+省略号, 徽章 flex:0 0 auto 永不被裁。
+   注: 长名称在改前就已被省略(实测内容宽 269 > 可视 184), 本改动只是让带徽章的行省略得更早一点。 */
+.stk-grid .nm{display:flex;align-items:center}
+.stk-grid .nm>.nmtx{flex:0 1 auto;min-width:84px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.stk-grid .nm>.lead-tag,.stk-grid .nm>.trk{flex:0 0 auto}
+/* 徽章在本格内上限 96px(全局 .trk 是 150px): 名称格实测仅 184px, 徽章吃满 150px 会把名称压到 30px
+   (不足 3 个字) ⇒ 两边都要留可读下限。且**文案顺序为「×N 在前、领域在后」**: 该格一旦放不下,
+   CSS 省略号切的是**尾部**, 若领域在前会把最关键的「×5」吃掉 —— 宁可让领域名被截(全文在 title 里),
+   也不能让「同指数只数」这个判据消失。 */
+.stk-grid .nm>.trk{max-width:96px}
 .stk-grid .cd{color:var(--muted);font-size:10.5px;line-height:1.4;margin-top:1px}
 .stk-grid .val{text-align:right}
 .stk-grid .vhl{font-weight:700}
@@ -359,6 +371,8 @@ h1{font-size:21px;font-weight:700;letter-spacing:.4px;line-height:1.3}   /* R323
 /* R447: revpool 放开 ETF —— 类型标记 + 同指数折叠徽章(同指数只列一只, 其余折叠并披露只数) */
 .etag{display:inline-block;font-size:9.5px;font-weight:700;background:#eef2ff;color:#3730a3;border:1px solid #c7d2fe;border-radius:3px;padding:0 4px;margin-left:4px;line-height:1.6;vertical-align:1px;letter-spacing:.2px}
 .twtag{display:inline-block;font-size:9.5px;font-weight:700;background:#f5f3ff;color:#6d28d9;border:1px dashed #c4b5fd;border-radius:3px;padding:0 4px;margin-left:4px;line-height:1.6;vertical-align:1px;cursor:help;letter-spacing:.2px}
+/* R448: ETF 细分领域标(取官方「跟踪标的」的短名) —— 实心青, 与 etag(蓝实心, 表"是ETF")、twtag(紫虚线, 表"有多少同指数") 三分色相, 一眼区分三类信息 */
+.trk{display:inline-block;font-size:9.5px;font-weight:700;background:#e6f7f6;color:#0f766e;border:1px solid #99e5e0;border-radius:3px;padding:0 4px;margin-left:4px;line-height:1.6;vertical-align:1px;cursor:help;letter-spacing:.2px;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .fold-badge{display:inline-block;font-size:11px;font-weight:700;background:#f5f3ff;color:#6d28d9;border:1px dashed #c4b5fd;border-radius:999px;padding:2px 10px;line-height:1.6;cursor:help;white-space:nowrap}
 /* R442: 逆向观察池「结构已破」分组分隔行 —— R439/R440 只做到「行内可见」(小红标), 但 pick 排序
    仍把 broken 票与有效票混排: 09-11 实测精选榜首 #1(海天味业) 与 #3(永和股份) 均为已破票,
@@ -438,6 +452,10 @@ h1{font-size:21px;font-weight:700;letter-spacing:.4px;line-height:1.3}   /* R323
   .stk-grid>*:nth-child(3),.stk-grid>*:nth-child(4),.stk-grid>*:nth-child(5),
   .stk-grid>*:nth-child(6),.stk-grid>*:nth-child(7),.stk-grid>*:nth-child(11){display:none}
   .stk-grid .nm{font-size:12px;max-width:92px}
+  /* R448: 手机端名称格仅 92px —— 名称(≥3 字)与徽章(≥60px)无法并存, 硬挤会把两者都压到不可读。
+     取舍: 此处隐去领域徽章, 信息不丢失 —— ① 行的 title 完整含领域/费率/规模/同指数选优;
+     ② 点进详情页有「跟踪 · 费率 · 规模」独立条目; ③ .cd 行仍显费率与规模。桌面(>760px)不受影响。 */
+  .stk-grid .nm>.trk{display:none}
   .stk-head-float{padding:8px 10px;font-size:11px}
 }
 /* 折叠展开按钮 + 空态 */
@@ -868,7 +886,7 @@ function sigRow(s,opt){   // R380: opt.sub=true = 非低吸区灰显行(破位/�
     ?'<span class="bkmini" title="盘中最低 '+_bbc.broken_price+'（'+esc(_bbc.broken_date||"")+'）已击穿背驰低点 '+_bbc.end_price+' —— 缠论口径该一类买点已失效(跌破买点低点=买点逻辑破坏, 需重新构筑底部结构)。⚠️ 看板按**收盘价**剔票(有意避开日内插针, 见 revCand), 故本行仍留在池中; 两个判据回答的是不同问题(结构还成不成立 / 今天要不要移出池子), 不矛盾。破位后创新高前不宜按低吸对待。📊 R443 五年回测: 该标记在**收益**维度无可检测差异(20日 −0.32pp, p=0.74), 但在**风险**维度有效 —— 20日内最大浮亏>5% 概率 72.1%(未破样本 58.1%, +14pp) ⇒ 按风险读, 不按收益读">盘中已破</span>'
     :'';
   var ff=(u.ff||{}).net;
-  var indName=(u.type==="ETF"?"ETF板块":(s.ind&&s.ind!=="-"?s.ind:"-"));
+  var indName=indLabelOf(u,s.sym,s.ind||u.ind);   // R448: ETF 改显官方跟踪标的短领域(无则回落「ETF板块」)
   /* R447: ETF 类型标 + 同指数折叠标 —— 与 revpool 同款徽章。s.twn 由 revFoldTwins 在 grp() 里挂上,
      故只有「本组确有多只同指数且本行是保留的那只」才显示; 未参与判定者不挂键 ⇒ 自然不显示。 */
   var _isEtf=(u.type==="ETF");
@@ -996,7 +1014,7 @@ function renderSigRadar(){
     var nAll=rows.length;
     var main=sigExpanded?rows:rows.slice(0,SIG_MAIN);
     var moreHtml=(nAll>SIG_MAIN)?'<div class="sigmore"><a onclick="toggleSig()">'+(sigExpanded?'▲ 收起 · 只留前 '+SIG_MAIN+' 只':'▼ 展开全部 '+nAll+' 只')+'</a></div>':'';
-    return '<div class="sgrp"><div class="gtt"><span class="ic">'+ic+'</span>'+title+' <span class="n">'+nAll+'</span>'+(_nF?'<span class="fold-badge" style="font-size:10px;padding:1px 7px" title="★ R447 同指数 ETF 折叠: 一个指数常有十几家公司各发一只产品跟踪, 信号天然重复计数(实测 11 只顶信号里 6 只是「自由现金流」系列、3 只石油系 ⇒ 实际仅 3~4 个独立标的)。本组同一指数只列 1 只 —— 保留的是**当前排序下最优的那只**, 其余 '+_nF+' 只折叠。判定: 60 日日收益相关系数 ≥0.99(同指数组内实测 0.994~0.999、跨赛道最高 0.819); 名称不可靠(「科创AIETF」与「科创人工智能ETF」实为同一指数); 宁漏不误并。悬停带「同指数 ×N」徽章的行可见完整成员清单。'+twinMetaLine()+'">同指数折叠 '+_nF+' 只</span>':'')+'<span style="color:#b0b9c6;font-weight:400;margin-left:auto">'+sortTxt+'</span></div>'+main.map(sigRow).join('')+moreHtml+subHtml+'</div>';
+    return '<div class="sgrp"><div class="gtt"><span class="ic">'+ic+'</span>'+title+' <span class="n">'+nAll+'</span>'+(_nF?'<span class="fold-badge" style="font-size:10px;padding:1px 7px" title="★ R447 同指数 ETF 折叠: 一个指数常有十几家公司各发一只产品跟踪, 信号天然重复计数(实测 11 只顶信号里 6 只是「自由现金流」系列、3 只石油系 ⇒ 实际仅 3~4 个独立标的)。本组同一指数只列 1 只 —— 保留的是**当前排序下最优的那只**, 其余 '+_nF+' 只折叠。判定(R448, 换过判据): 官方「跟踪标的」精确匹配 = **主判据**(零漏并零误并), 60 日日收益相关 ≥0.99 = **补漏**(缓存尚无该代码的新基金兜底); 元数据缓存缺失时自动退回相关法单判据(等价 R447)。名称与代码都不可靠(「科创AIETF」与「科创人工智能ETF」名称不同、实为同一指数); 宁漏不误并。悬停带「同指数 ×N」徽章的行可见完整成员清单 + **同指数选优**(费率/规模/流动性对比)。'+twinMetaLine()+'">同指数折叠 '+_nF+' 只</span>':'')+'<span style="color:#b0b9c6;font-weight:400;margin-left:auto">'+sortTxt+'</span></div>'+main.map(sigRow).join('')+moreHtml+subHtml+'</div>';
   }
   // R287: 盘面自动摘要(顶/底近端 + 资金共振/背离 + 板块净流入Top)
   var smark='';
@@ -1140,11 +1158,18 @@ var ETFG={};
    (无 st.etf_grp), 该窗口内放开 ETF 会出现 10 只同指数候选且无法折叠 ⇒ 无该键时沿用
    R305 旧行为(ETF 不进池)。 */
 function etfTwinOn(){return !!(M&&M.etf_twin);}
-/* 本轮去重的真实统计(数据驱动, 不硬编码测量值) */
+/* 本轮去重的真实统计(数据驱动, 不硬编码测量值)。
+   R448: 判据由「相关法单判据」升级为「官方跟踪标的(主) + 相关法(补漏)」, 故措辞随之改为
+   如实证两种判据的贡献 —— 旧 JSON(无 track_* 字段)自动退回单判据措辞, 零回归。 */
 function twinMetaLine(){
   var t=(M||{}).etf_twin;if(!t)return"";
-  return "本轮实跑: 参与判定 "+t.judged+" 只 ETF → 识别出 "+t.groups+" 个同指数组、"
-    +"合计可折叠 "+t.folded+" 只(窗口 "+t.win+" 日收益, 阈值 corr≥"+t.corr+")。";
+  if(t.track_groups==null)
+    return "本轮实跑: 参与判定 "+t.judged+" 只 ETF → 识别出 "+t.groups+" 个同指数组、"
+      +"合计可折叠 "+t.folded+" 只(窗口 "+t.win+" 日收益, 阈值 corr≥"+t.corr+")。";
+  return "本轮实跑: 参与判定 "+t.judged+" 只 ETF → 官方「跟踪标的」识别出 **"+t.track_groups
+    +" 个同指数组**(覆盖 "+t.track_members+" 只), 相关法另行补漏 "+t.corr_only_groups+" 组"
+    +"(缓存尚无该代码的新基金); **相关法漏判 "+t.missed_by_corr+" 组、官方判据额外并入 "
+    +t.extra_merged+" 只**。元数据缓存 "+t.meta_n+" 只(命中 track "+(t.tracked||0)+")。";
 }
 function buildEtfGroups(){
   ETFG={};
@@ -1156,19 +1181,106 @@ function buildEtfGroups(){
 function etfGrpOf(sym){return ((UNI[sym]||{}).st||{}).etf_grp||null;}
 function etfGnOf(sym){return ((UNI[sym]||{}).st||{}).etf_gn||1;}
 function _amtW(v){return v==null?"-":(v>=1e4?(v/1e4).toFixed(1)+"亿":v.toFixed(0)+"万");}
-function twinTip(c){
-  var g=etfGrpOf(c.sym);if(!g)return"";
+/* ===== R448: ETF 官方元数据(跟踪标的 / 合计费率 / 净资产规模)=====
+   后端 row.etf_track / row.etf_fee / row.etf_nav 注入(源: 天天基金 fundf10 基本信息页)。
+   缺失一律降级: 无 track ⇒ 退回 R447 展示; 无 fee/nav ⇒ 该处显 "-"。**绝不因缺失而少显示行**。 */
+function trkOf(sym){return ((UNI[sym]||{}).etf_track)||"";}
+function feeOf(sym){var v=(UNI[sym]||{}).etf_fee;return (v==null?null:+v);}
+function navOf(sym){var v=(UNI[sym]||{}).etf_nav;return (v==null?null:+v);}
+/* 跟踪标的 -> 短领域标签(仅展示, 不改任何判据)。
+   ① 先剥括号注释(「创业板指数(价格)」-> 「创业板指数」); ② 去尾部「指数/全收益指数/收益率」;
+   ③ 去首部「中证/国证」—— 但**仅当剩余 ≥6 字**才去, 否则「中证1000」会被削成「1000」、
+      「中证A500」削成「A500」, 反而丢失信息(「上证/深证/科创/创业板/恒生/标普」等有区分
+      价值的前缀一律保留)。 */
+function trkShort(t){
+  if(!t)return"";
+  var s=String(t).trim().replace(/[（(][^）)]*[）)]/g,"");
+  s=s.replace(/(全收益|净收益)?指数(收益率)?$/,"").replace(/收益率$/,"");
+  var m=/^(中证|国证)(.+)$/.exec(s);
+  if(m&&m[2].length>=6)s=m[2];
+  return s.length>14?s.slice(0,13)+"…":s;
+}
+function feeTxt(v){return v==null?"-":v.toFixed(2)+"%";}
+function navTxt(v){return v==null?"-":(v>=100?v.toFixed(0):v.toFixed(2))+"亿";}
+/* R448: 标的归类短名 —— ETF 用**官方跟踪标的的短领域**(「ETF · 云计算与大数据主题」)替代泛指
+   的「ETF板块」: 1282 只 ETF 挤在一个「ETF板块」里, 用户看不出这只到底是宽基/行业/主题/债/商品。
+   取不到 track ⇒ 回落「ETF板块」(与 R447 完全一致, 零回归)。
+   ⚠️ 刻意**不动**详情页面包屑的 grp(=「ETF板块」) —— 那是 pickInd() 的**跳转键**,
+      换成领域名会导航失效(键不存在 → alert「无行业 数据」)。 */
+function indLabelOf(u,sym,indFallback){
+  var uu=u||{};
+  if(uu.type==="ETF"){var k=trkShort(trkOf(sym));return k?("ETF · "+k):"ETF板块";}
+  var v=indFallback||uu.ind;
+  return (v&&v!=="-")?v:"-";
+}
+/* 同指数组的**选优**信息(纯计算, 不含预测)。
+   判据来自全量 1282 只 ETF 的实测(2026-09-13):
+     · 组内费率极差 ≥0.20pp 的组 96/194, 最大 0.20%~1.10%(0.90pp/年) = **确定**的成本差;
+     · 「费率最低」≠「规模最大」的组 132/194 = 68% ⇒ "挑最大的买"三分之二的指数上是错的;
+     · 但唯费率会踩坑(中证A50 组费率最低者规模仅 0.2 亿) ⇒ 必须双约束。
+   ⚠️ 只比成本, 不比"哪个涨得好": 同指数产品净值走势相同, K 线层看不出小 ETF 价格更差
+      (同指数日均振幅 4.47~4.62%, 与规模相关 +0.045) —— 选大的理由是执行成本 + 清盘风险。 */
+function twinInfo(c){
+  var g=etfGrpOf(c.sym);if(!g)return null;
   var mem=(ETFG[g]||[]).slice().sort();
-  var lines=mem.map(function(s){
+  var rows=mem.map(function(s){
     var u=UNI[s]||{},st=u.st||{};
-    return "  • "+s+" "+(u.name||"")+(s===c.sym?"  ← 本行":"")+"  现价"+(st.close!=null?st.close:"-")+" 60日均额"+_amtW(st.avg_amt60);
+    return {sym:s,name:(u.name||s),fee:feeOf(s),nav:navOf(s),
+            amt:(st.avg_amt60==null?null:+st.avg_amt60),trk:trkOf(s)};
   });
-  return "\n\n【同指数 ×"+mem.length+"】本指数共有 "+mem.length+" 只 ETF 产品在池中, 本列表只列 1 只以免刷屏。\n"
-    +"判定口径: 60 日日收益相关系数 ≥0.99 —— 实测同指数组内 0.994~0.999、跨赛道最高仅 0.819(余量极大)。\n"
-    +"名称不可靠: 「科创AIETF」与「科创人工智能ETF」名称不同, 实测相关 0.995~0.998 = 同一指数。\n"
-    +"宁漏不误并: 阈值取 0.99 是有意的安全侧 —— 6 只「自由现金流/全指现金流/现金流」系列两两仅 0.9175~0.9886, 但它们跟踪的**不是同一指数**, 阈值一降就会误并。\n"
-    +"⚠️ 已知假阴性: sz159527 与 sz159739 实为同一指数(中证云计算与大数据主题 930851), 60 日相关仅 0.9800 ⇒ 未并组。相关法在同指数异基金上有下限, 根治须引入官方拟合指数代码。\n"
-    +"完整清单:\n"+lines.join("\n");
+  var byFee=rows.filter(function(r){return r.fee!=null}).sort(function(a,b){return a.fee-b.fee||(b.amt||0)-(a.amt||0)});
+  var byNav=rows.filter(function(r){return r.nav!=null}).sort(function(a,b){return b.nav-a.nav});
+  var byAmt=rows.filter(function(r){return r.amt!=null}).sort(function(a,b){return b.amt-a.amt});
+  var _t=(M||{}).etf_twin||{};
+  return {g:g,rows:rows,mem:mem,
+          fee:(byFee[0]||null),feeMax:(byFee.length?byFee[byFee.length-1]:null),
+          nav:(byNav[0]||null),amt:(byAmt[0]||null),
+          track:(rows.filter(function(r){return r.trk})[0]||{}).trk||"",
+          clear:(_t.clear_yi!=null?_t.clear_yi:0.5),
+          thin:(_t.thin_amt!=null?_t.thin_amt:1000)};
+}
+function twinTip(c){
+  var ti=twinInfo(c);if(!ti)return"";
+  var n=ti.mem.length,_L=[];
+  _L.push("");
+  _L.push("【同指数 ×"+n+"】"+(ti.track?("官方跟踪标的「"+ti.track+"」"):"未能取到官方跟踪标的(按相关法判定)"));
+  _L.push("本指数共有 "+n+" 只 ETF 产品在池中, 本列表只列 1 只以免刷屏。");
+  _L.push("判定口径(R448): 官方「跟踪标的」精确匹配 = **主判据**(零漏并零误并); 60 日日收益相关 ≥"+((M||{}).etf_twin||{}).corr+" = **补漏**(缓存尚无该代码的新基金兜底)。");
+  _L.push("  ★ 换判据的原因 —— **阈值在本问题上被证明不可分**(实测反例, 非估计):");
+  _L.push("     · 同指数最松的一对: 159527~159890(同跟踪「中证云计算与大数据主题指数」)相关仅 **0.9818**;");
+  _L.push("     · 不同指数最紧的一组: 「现金流」系列最高 **0.9886** —— 而这族名字几乎一样的产品官方确认横跨 **6 个不同指数**(国证自由现金流 / 中证800自由现金流 / 中证全指自由现金流 / 沪深300自由现金流 / 中证500自由现金流 / 富时中国A股自由现金流聚焦), 共 31 只。");
+  _L.push("     · **0.9818 < 0.9886 ⇒ 同指数与不同指数的相关区间重叠 ⇒ 任何阈值都分不开**(降必误并、升必漏并)。");
+  _L.push("     ⇒ 这不是调参能解决的, 是判据本身缺信息。官方「跟踪标的」是唯一无歧义判据。");
+  _L.push("  ★ 名称不但不可靠, 还会系统性误导: 「云计算ETF」这一族名字看着是一回事, 官方是 **3 个不同指数**(中证云计算与大数据主题 / 中证沪港深云计算产业人民币 / 中证云计算50); 反向地, 「科创AIETF」与「科创人工智能ETF」名字不同却是同一指数。");
+  _L.push("  ★ 官方判据还解锁了相关法**永远无法判定**的一类: K线不足 62 根的新 ETF(实测 159099 仅 32 根)没有可比的收益序列, 相关法无从下手; 官方 track 直接按指数名并组 —— 实测 159099 与 560660 同跟踪「中证云计算50指数」, 相关法只能放任它们重复出现。");
+  _L.push("");
+  _L.push("成员对比(按费率升序, 费率=管理+托管):");
+  var show=ti.rows.slice().sort(function(a,b){return (a.fee==null?9:a.fee)-(b.fee==null?9:b.fee)||(b.amt||0)-(a.amt||0)}).slice(0,10);
+  show.forEach(function(r){
+    /* R448: 两个警示**并列**而非 if/else-if —— 它们回答的是两个独立问题(会不会被清盘 /
+       大额进出打不打滑), 一只既小又冷的基金**两个问题同时存在**, 只显示前者会漏掉后者。
+       (此缺陷由前端单测抓出: 合成样本 规模0.4亿+60日均额200万 只出了"清盘风险") */
+    var warn="";
+    if(r.nav!=null&&r.nav<ti.clear)warn+=" ⚠️规模"+navTxt(r.nav)+"(<"+ti.clear+"亿·清盘风险)";
+    if(r.amt!=null&&r.amt<ti.thin)warn+=" ⚠️60日均额"+_amtW(r.amt)+"(<"+ti.thin+"万·执行偏难)";
+    _L.push("  • "+r.sym+" "+r.name+(r.sym===c.sym?"  ← 本行":"")+"  费率"+feeTxt(r.fee)+"  规模"+navTxt(r.nav)+"  60日均额"+_amtW(r.amt)+warn);
+  });
+  if(n>show.length)_L.push("  … 另 "+(n-show.length)+" 只同指数产品(此处只列前 10, 余量同源不再展开)");
+  _L.push("");
+  _L.push("选优 —— 只比**确定的成本**, 不预测收益(同指数产品净值走势相同):");
+  if(ti.fee)_L.push("  ◆ 费率最低: "+ti.fee.sym+" "+ti.fee.name+" ("+feeTxt(ti.fee.fee)+")"+(ti.fee.nav!=null?"  规模"+navTxt(ti.fee.nav):"")+(ti.fee.amt!=null?"  60日均额"+_amtW(ti.fee.amt):""));
+  if(ti.nav)_L.push("  ◆ 规模最大: "+ti.nav.sym+" "+ti.nav.name+" ("+navTxt(ti.nav.nav)+")  费率"+feeTxt(ti.nav.fee));
+  if(ti.amt)_L.push("  ◆ 成交最活跃: "+ti.amt.sym+" "+ti.amt.name+" ("+_amtW(ti.amt.amt)+"/日)  费率"+feeTxt(ti.amt.fee));
+  if(ti.fee&&ti.feeMax&&ti.feeMax.fee!=null&&ti.fee.fee!=null&&ti.feeMax.fee>ti.fee.fee)
+    _L.push("  ⇒ 组内费率极差 "+(ti.feeMax.fee-ti.fee.fee).toFixed(2)+"pp/年 = **确定的**持有成本差。资金量不大且不需日内进出 → 看费率; 需大额一次进出 → 看流动性。");
+  var _cw=(ti.fee&&ti.nav&&ti.fee.sym!==ti.nav.sym);
+  if(_cw)_L.push("  ⚠️ 「费率最低」与「规模最大」**不是同一只** —— 全市场实测这种冲突占 68%(132/194 组) ⇒ 必须两列并看, 不能默认「挑最大的买」—— 那是错的。");
+  var _clears=ti.rows.filter(function(r){return r.nav!=null&&r.nav<ti.clear});
+  if(_clears.length)_L.push("  ⚠️ 清盘风险("+ti.clear+"亿以下): "+_clears.map(function(r){return r.sym+" "+navTxt(r.nav)}).join(" / ")+" —— 清盘前会强制赎回, 长期持有者应避开。");
+  _L.push("");
+  _L.push("⚠️ 反证边界(必须同时读, 否则是夸大): K 线层**看不出**小 ETF 价格更差 —— 同指数 10 只日均振幅 4.47~4.62%(corr(振幅, 规模) 仅 +0.045), 仅跟踪偏差与成交额弱负相关(−0.442, n=10)。⇒ 选大的理由是**执行成本 + 清盘尾部风险**, **不是价格质量**。");
+  _L.push(twinMetaLine());
+  return _L.join("\n");
 }
 /* ===== R447: 全池「多周期动量 / 可比组内相对强度」的单一措辞源 =====
    列表悬浮(list)与详情页(span)两处共用, 避免同一口径两处措辞漂移(R445 通法: 同一含义被追问 ≥2 次
@@ -1228,7 +1340,7 @@ function revRow(c){
   if(v.gate==="低自洽")gtag='<span class="gate-tag g2" title="缠论结构自洽度低于门禁, 参考价值打折">低自洽</span>';
   else if(v.gate==="次新")gtag='<span class="gate-tag g1" title="上市较新, 结构样本少">次新</span>';
   else if(v.gate==="低流动性")gtag='<span class="gate-tag g3" title="60日均成交额偏低">低流动</span>';
-  var indName=(v.type==="ETF")?"ETF板块":(v.ind&&v.ind!=="-"?v.ind:"-");   // R447: ETF 无申万归属, 显「ETF板块」(与详情页同口径)
+  var indName=indLabelOf(v,c.sym,v.ind);   // R448: ETF 改显官方跟踪标的短领域(无则回落「ETF板块」)
   var ffNet=(v.ff||{}).net;
   var ffMini=(ffNet!=null)?'<span class="ffmini '+ffCls(ffNet)+'" title="当日主力净流入: '+ffTxt(ffNet)+'">'+ffTxt(ffNet)+'</span>':'';
   var amtTxt=(st.avg_amt60!=null?(st.avg_amt60>=1e4?(st.avg_amt60/1e4).toFixed(1)+"亿":st.avg_amt60.toFixed(0)+"万"):"-");   // avg_amt60=万元
@@ -1370,7 +1482,7 @@ function renderRevPool(){
   // R378: 7 列表头, 与 revRow 列定义一致(浅灰底小字标注每列语义)
   var phdrHtml='<div class="phdr"><span>标的</span><span>距历史高</span><span>现价</span><span>底线·止损参考</span><span>60日均额</span><span>底背驰触发</span><span>距背低点</span></div>';
   box.innerHTML='<div class="phead"><h2>🧭 逆向观察池</h2>'+
-    (nFolded?'<span class="fold-badge" title="★ R447 本池已放开 ETF。一个指数常有十几家公司各发一只 ETF 跟踪 ⇒ 信号天然重复计数 (实测本池候选 15 只里 10 只是同一个「科创人工智能」指数)。为免刷屏, 同一指数只列 1 只 —— 保留的是**当前排序下最优的那只**(不是固定某只), 其余 '+nFolded+' 只折叠。判定口径: 60 日日收益相关系数 ≥0.99 (实测同指数组内 0.994~0.999、跨赛道最高仅 0.819, 余量极大); 名称不可靠(「科创AIETF」与「科创人工智能ETF」名称不同、实为同一指数); 宁漏不误并。⚠️ 已知假阴性: sz159527 与 sz159739 实为**同一指数**(中证云计算与大数据主题 930851, 广发官方申赎清单「拟合指数代码: 930851」)但 60 日相关仅 0.9800 ⇒ 未并组; 之所以不降阈值, 是因为 0.98 档同时混着**不同指数**的近似产品(6 只「自由现金流/全指现金流/现金流」两两仅 0.9175~0.9886 却属不同指数), 降阈值必误并 ⇒ 0.99 是有意的安全侧, 根治须引入官方拟合指数代码。悬停任意带「同指数 ×N」徽章的行可见完整成员清单。'+twinMetaLine()+'">同指数已折叠 '+nFolded+' 只</span>':'')+
+    (nFolded?'<span class="fold-badge" title="★ R447 本池已放开 ETF。一个指数常有十几家公司各发一只 ETF 跟踪 ⇒ 信号天然重复计数 (实测本池候选 15 只里 10 只是同一个「科创人工智能」指数)。为免刷屏, 同一指数只列 1 只 —— 保留的是**当前排序下最优的那只**(不是固定某只), 其余 '+nFolded+' 只折叠。判定口径(R448 已换判据): 官方「跟踪标的」精确匹配 = **主判据**(零漏并零误并); 60 日日收益相关 ≥0.99 = **补漏**(缓存尚无该代码的新基金兜底); 缓存缺失时自动退回相关法单判据。名称与代码均不可靠(「科创AIETF」与「科创人工智能ETF」名称不同、实为同一指数)。**R447 的已知假阴性已根治**: sz159527 与 sz159739 官方跟踪标的字面相同(中证云计算与大数据主题指数)、60 日相关仅 0.9800 曾被漏并, 现由官方判据并组; 之所以**不降相关阈值**, 是因为 0.98 档同时混着**不同指数**的近似产品(6 只「自由现金流/全指现金流/现金流」两两仅 0.9175~0.9886 却属不同指数) ⇒ 阈值降必误并 —— 问题不在阈值, 在判据。悬停任意带「同指数 ×N」徽章的行可见完整成员清单 + **同指数选优**(费率/规模/流动性, 只比确定成本, 不预测收益)。'+twinMetaLine()+'">同指数已折叠 '+nFolded+' 只</span>':'')+
     (collapsed&&nEli>0?'<span class="elite-badge" title="高胜率精选=底部刚启(距底≤3%)+60日均额≥1亿+结构自洽(非低自洽/次新, 缠论样本足) · 行内红字「月弱」标=月线MACD绿柱加长(下跌中继, 双周期键沉同档尾) · 行尾色点=确认度(深绿双/浅绿单/灰无) — 均只作名次键不作门槛 · R442: 其中「盘中已破」者(击穿背驰低点=一买已废)已全局沉底并单独分组, 不参与顺序竞争, 也不给 🎯">🏆 高胜率精选 '+nEli+(nEliBk?'<span style="color:#c92a2a"> · 含'+nEliBk+'只已破</span>':'')+'</span>':'')+
     '<div class="chips">'+
       '<span class="chip'+chipOn("pick")+'" onclick="setRevMode(\'pick\')" title="实操纪律复合排序: ⓪盘中已破(击穿背驰低点=一买已废)全局沉底并单独分组(不剔除, 本池按收盘价剔票) ①底部刚启(距底≤3%)优先 ②月线MACD双周期(红柱/绿缩在前, 绿加长「月弱」沉同档尾 — 大方向先于细节) ③确认度(双/单/无, 名次键不作门槛) ④60日均额≥1亿稳健(≥5000万次之) ⑤跌得最透优先 — 月弱标=月线下跌中继, 行尾色点=确认度">🌟 实操优选</span>'+
@@ -1892,6 +2004,18 @@ function drawStkInto(el,sym){
 var EXPAND_ALL=false;   // R295: 成分列表"其余组"展开全部状态(默认折叠前 50)
 var EXPAND_IND=null;    // R299: 展开态归属板块(切板块自动折叠防残留)
 function toggleRestAll(){EXPAND_ALL=!EXPAND_ALL;EXPAND_IND=curInd;if(curInd)renderIndStkList(curInd)}
+/* R448: 单只 ETF 的领域/成本脚注 —— 已在同指数组里的走 twinTip(含成员对比+选优), 否则给一条
+   轻量说明。供行业成分表(ETF 板块 1282 只的浏览入口)使用: 那张表是用户**逐只挑 ETF 的主战场**,
+   但表格列宽固定(11 列 grid, R445 教训: 加列会失配), 故信息全部经由 in-cell 徽章 + title 承载。 */
+function trkTip(x){
+  var t=twinTip(x);
+  if(t)return t;
+  var k=trkOf(x.sym);if(!k)return"";
+  var st=(UNI[x.sym]||{}).st||{};
+  return "\n\n【细分领域】官方跟踪标的「"+k+"」—— 该指数在池中只有这 1 只 ETF 产品(无同指数重复)。\n"
+    +"费率"+feeTxt(feeOf(x.sym))+"(管理+托管) · 规模"+navTxt(navOf(x.sym))+" · 60日均额"+_amtW(st.avg_amt60)+"。\n"
+    +"源: 天天基金 fundf10 基本信息页(基金官方披露, 非估算) —— 费率是最确定的一项持有成本。";
+}
 function renderIndStkList(k){
   var isETF=(INDS[k]||{}).is_etf===1;
   if(EXPAND_ALL&&EXPAND_IND!==k)EXPAND_ALL=false;   // R299: 展开态只属于当前板块, 切板块即折叠(ETF/股票行业通用)
@@ -1942,9 +2066,25 @@ function renderIndStkList(k){
       else if(s.scenario&&s.scenario.indexOf("见")>=0)tag='<span class="badge2 '+(s.scenario.indexOf("见底")>=0?"g":"r")+'">'+esc(s.scenario)+'</span>';
       else if(s.scenario)tag='<span class="badge2 z">'+esc(s.scenario)+'</span>';
       else tag='<span class="badge2 o">震荡</span>';
-      var tip=esc((u.name||"")+" | "+(x.sg?(x.sg.dir==="top"?"顶背驰":"底背驰")+" "+x.sg.bc_date+" "+x.sg.bc_type+" 强度"+(x.sg.strong||0)+"/2"+(x.sg.vol?" 量缩确认":"")+" 距今"+(x.sg.fresh!=null?(x.sg.fresh===0?"当日":x.sg.fresh+"天"):" ?") :(s.scenario||"震荡"))+(s.trend?" | 趋势"+s.trend:"")+(s.agree!=null?" | 自洽"+(s.agree*100).toFixed(0)+"%":""));   // R321: fresh=0 → "距今当日"(同 R320 口径, 原"距今0天"误导)
+      var tip=esc((u.name||"")+" | "+(x.sg?(x.sg.dir==="top"?"顶背驰":"底背驰")+" "+x.sg.bc_date+" "+x.sg.bc_type+" 强度"+(x.sg.strong||0)+"/2"+(x.sg.vol?" 量缩确认":"")+" 距今"+(x.sg.fresh!=null?(x.sg.fresh===0?"当日":x.sg.fresh+"天"):" ?") :(s.scenario||"震荡"))+(s.trend?" | 趋势"+s.trend:"")+(s.agree!=null?" | 自洽"+(s.agree*100).toFixed(0)+"%":""))+trkTip(x);   // R321: fresh=0 → "距今当日"(同 R320 口径, 原"距今0天"误导) · R448: 附 ETF 领域/费率/同指数选优
+      /* R448: ETF 徽章 —— **表内只承载「同指数只数」这一个判据**, 领域名交给①基金名本身
+         (「云计算ETF华夏」已含主题) ②行的 title(含官方跟踪标的全名)。原因(实测, 非审美):
+         名称格仅 184px, 「名称 + 👑规模最大标(60px) + 领域徽章(96px)」三者并存会把名称压到
+         **34px(不足 3 字)** —— 名称是首要标识, 不能为了修饰性信息牺牲它。
+         N=1(无同指数重复)时反而显领域名: 此时无「×N」可显, 领域是唯一增量信息且无冲突。
+         ×N 的实操含义: 这 N 只净值走势相同, 差异只在费率/规模 ⇒ 该比成本而不是比名字。 */
+      var _tk=trkShort(trkOf(x.sym)), _tgn=etfGnOf(x.sym);
+      var _tlbl=(u.type==="ETF")?((_tgn>1)?("×"+_tgn):_tk):"";
+      var trkTag=_tlbl?(' <span class="trk" title="'+esc(trkTip(x))+'">'+esc(_tlbl)+'</span>'):"";
+      var _fee=(u.type==="ETF")?feeOf(x.sym):null, _nav=(u.type==="ETF")?navOf(x.sym):null;
+      var _cdTxt=esc(x.sym)+(u.type==="ETF"?(' · 费率'+( _fee!=null?feeTxt(_fee):"-")+( _nav!=null?' · '+navTxt(_nav):"")):"");
       return '<div class="stk-grid'+hl+'" title="'+tip+'" onclick="pickStkInInd(\''+x.sym+'\')">'+
-        '<div><div class="nm">'+esc(u.name)+(u.lead?' <span class="lead-tag" title="'+(u.type==="ETF"?"场内规模最大的基金":"该行业总市值最大的龙头股")+'">👑 '+(u.type==="ETF"?"规模最大":"行业龙头")+'</span>':'')+'</div><div class="cd">'+esc(x.sym)+'</div></div>'+
+        /* R448: 名称格里的 👑 标**只留图标不留文字** —— 名称格实测仅 184px, 「长名称(113px) +
+           👑 规模最大(60px) + ×N 徽章(23px)」三者并存会把名称压到 84px(实测「中证A500ETF国泰」
+           被切 29px)。名称是首要标识、不可牺牲; 👑 的语义由自身 title 与板块表头承载, 图标已足够
+           识别(全站 👑 统指"该组规模最大/行业龙头")。其它位置(sigRow/revRow/详情页)宽度充裕,
+           文字保留不变。 */
+        '<div><div class="nm"><span class="nmtx">'+esc(u.name)+'</span>'+(u.lead?' <span class="lead-tag" title="'+(u.type==="ETF"?"场内规模最大的基金":"该行业总市值最大的龙头股")+'">👑</span>':'')+trkTag+'</div><div class="cd">'+_cdTxt+'</div></div>'+
         '<div class="val">'+tag+fsub+'</div>'+
         '<div class="val">'+esc(s.trend||"-")+'</div>'+
         '<div class="val">'+(s.zs_last?("["+s.zs_last.zd+"~"+s.zs_last.zg+"]"):"-")+'</div>'+
@@ -2061,6 +2201,12 @@ function showStk(sym){
     return '<span class="bkmini" title="'+esc((bbc.broken_date||"")+' 盘中最低 '+bbc.broken_price+' 已击穿背驰低点 '+bbc.end_price+(tipExtra||"")+" —— 缠论口径该买点已失效(跌破买点低点=买点逻辑破坏, 需重新构筑底部结构)。看板按收盘价剔票(有意避开日内插针), 故仍显示原场景/仍在池, 两者回答的是不同问题。📊 R443 五年回测: 该标记在收益维度无可检测差异(20日 −0.32pp, p=0.74), 在风险维度有效 — 20日内最大浮亏>5% 概率 72.1%(未破样本 58.1%, +14pp) ⇒ 按风险读, 不按收益读")+'">已破</span>';
   }
   var grp=(u.type==="ETF")?"ETF板块":(u.ind||"");
+  /* R448: 面包屑的 grp 是**导航目标**, 必须恒等于行业树节点名(点击走 pickIndFromStk), 不能动。
+     副标题里再写一遍「ETF板块」既与前面的「类型 ETF」重复、又浪费了官方跟踪标的 ⇒ 展示口径另起:
+     取 indLabelOf 的**同一数据源**(trkShort(trkOf(sym))), 但不带 "ETF · " 前缀 —— 因为该行前一段
+     已经打印了 u.type("… · ETF · …"), 再加前缀会变成「ETF · ETF · 云计算与大数据主题」。
+     无元数据时回落「ETF板块」⇒ 与改前逐字一致, 零回归。 */
+  var grpLabel=(u.type==="ETF")?(trkShort(trkOf(sym))||"ETF板块"):(u.ind||"");
   var leadTag=u.lead?' <span class="lead-tag" title="'+(u.type==="ETF"?"场内规模最大的基金":"该行业总市值最大的龙头股")+'">👑 '+(u.type==="ETF"?"板块规模最大":"行业龙头")+'</span>':'';   // R283
   var _uff=u.ff||{};   // R283: 当日主力净流入(元)
   // R303: 返回按钮视觉完全一致(胶囊样式 + 文案「← 返回」), 行为 gotoPrev() 按 prevStkSrc 分发回 sigrad / home
@@ -2069,7 +2215,7 @@ function showStk(sym){
   /* R447: ETF 类型标 + 同指数折叠标 —— 详情页也披露, 否则用户从池子点进来后看不到"这只是若干同指数产品中的一只" */
   var etfTitleTag=(u.type==="ETF")?'<span class="etag" title="场内 ETF(一篮子成分股): 无个股暴雷/退市风险, 但仍有指数系统性风险">ETF</span>':'';
   var twTitleTag=(s.etf_gn>1)?'<span class="twtag" title="'+esc(twinTip({sym:sym}))+'">同指数 ×'+s.etf_gn+'</span>':'';
-  titleHtml+='<div class="big-title"><h2>'+esc(u.name)+leadTag+etfTitleTag+twTitleTag+'</h2><span class="cd">'+esc(sym)+' · '+esc(u.code)+' · '+esc(u.type)+' · '+esc(grp||"-")+'</span></div>';
+  titleHtml+='<div class="big-title"><h2>'+esc(u.name)+leadTag+etfTitleTag+twTitleTag+'</h2><span class="cd">'+esc(sym)+' · '+esc(u.code)+' · '+esc(u.type)+' · '+esc(grpLabel||"-")+'</span></div>';
   titleHtml+='<div class="metric-strip">'+
     '<span>现价 <b class="'+(s.chg1d>0?"up":(s.chg1d<0?"down":""))+'">'+(s.close!=null?s.close:"-")+'</b>'+pct(s.chg1d,2)+'</span>'+
     '<span>主力净流入 <b class="'+ffCls(_uff.net)+'">'+ffTxt(_uff.net)+'</b>'+( _uff.pct!=null?'<span class="'+ffCls(_uff.pct)+'">'+(_uff.pct>0?"+":"")+_uff.pct+'%</span>':'')+'</span>'+
@@ -2080,6 +2226,11 @@ function showStk(sym){
        动量只回答"现在处在什么位置", 不回答"该不该买"。 */
     ((s.mom5!=null||s.mom20!=null||s.mom60!=null)?'<span title="近 N 个交易日的累计涨幅(前复权收盘价)。三条并列看方向一致性: 5日与60日同向=趋势延续, 反向=短期反转/回调。纯描述, 不含预测。">多周期动量 <b class="'+mvCls(s.mom5)+'">5日'+mvTxt(s.mom5)+'</b><span class="dsep">·</span><b class="'+mvCls(s.mom20)+'">20日'+mvTxt(s.mom20)+'</b><span class="dsep">·</span><b class="'+mvCls(s.mom60)+'">60日'+mvTxt(s.mom60)+'</b></span>':'')+
     ((s.rsind!=null)?'<span title="'+esc(rsTip(s,u))+'">'+(u.type==="ETF"?"ETF池内":"行业内")+'相对强度 <b>'+s.rsind+'%</b><span class="muted">('+(u.type==="ETF"?"全 ETF 池":"同申万一级")+' '+(s.rsn||0)+' 只中)</span></span>':'')+
+    /* R448: ETF 官方元数据(跟踪标的 / 合计费率 / 净资产规模) —— 详情页就地给数值, 不依赖悬停。
+       这三项回答的是「同指数产品之间该选哪只」, 与涨跌判断无关(同指数净值走势相同)。 */
+    ((u.type==="ETF"&&trkOf(sym))?'<span title="'+esc(trkTip({sym:sym}))+'">跟踪 <b>'+esc(trkShort(trkOf(sym)))+'</b></span>':'')+
+    ((u.type==="ETF"&&feeOf(sym)!=null)?'<span title="管理费 + 托管费合计(天天基金 fundf10 官方披露, 非估算)。同指数 ETF 之间净值走势相同 ⇒ 费率是最**确定**的一项差异。全市场实测(2026-09-13): 194 个同指数组里 96 组费率极差 ≥0.20pp/年, 最大 0.90pp/年(0.20% vs 1.10%)。">费率 <b>'+feeTxt(feeOf(sym))+'</b></span>':'')+
+    ((u.type==="ETF"&&navOf(sym)!=null)?'<span title="净资产规模(基金定期报告披露)。低于 '+((((M||{}).etf_twin||{}).clear_yi)||0.5)+' 亿有清盘风险(会强制赎回, 长期持有者应避开)。⚠️ 反证边界: K 线层**看不出**小 ETF 价格更差 —— 同指数 10 只日均振幅 4.47~4.62%, 与规模相关仅 +0.045, 仅跟踪偏差与成交额弱负相关(−0.442, n=10) ⇒ 规模的意义是**执行成本 + 清盘尾部风险**, 不是价格质量。">规模 <b>'+navTxt(navOf(sym))+'</b></span>':'')+
     '<span>笔/中枢 <b>'+(s.bi_n||0)+'/'+(s.zs_n||0)+'</b></span>'+
     (_bbd.end_price!=null?'<span>背驰低点 <b class="'+(_bbd.broken?"down":"")+'">'+_bbd.end_price+'</b>'+_bkBadge(_bbd)+'</span>':'')+
     '<span>自洽 <b>'+(s.agree!=null?(s.agree*100).toFixed(0)+"%":"-")+'</b></span>'+

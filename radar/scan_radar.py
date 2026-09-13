@@ -99,6 +99,51 @@ ETF_TWIN_WIN = 60              # 同指数判定窗口(日收益根数)
 ETF_TWIN_CORR = 0.99           # 同指数判定阈值(正向相关下限; 反向ETF天然负相关, 不得并组)
 ETF_TWIN_PREF = 1.5            # 预筛: 窗口累计收益差上限(百分点) —— 免 O(n²) 全量两两算相关
 ETF_TWIN_MINBARS = 61          # 参与判定的最少 K 线根数
+# R448: ETF **官方「跟踪标的」** —— 上面相关法的根治手段(相关法作补漏保留)。
+# 为什么相关法必须让位(实证, 非推测): 相关法对「同指数异基金」有**假阴性下限** ——
+#   sz159527(云计算ETF广发) 与 sz159739(云计算ETF鹏华) 官方跟踪标的**字面完全相同**
+#   「中证云计算与大数据主题指数」, 但 60 日相关仅 **0.9800** ⇒ 未并组。而 0.98 档同时混着
+#   **不同指数**的近似产品(6 只「自由现金流/全指现金流/现金流」两两 0.9175~0.9886 却属不同指数)
+#   ⇒ **阈值无处可调**(降必误并, 升则漏并更多) —— 下面是**实测反例**, 把"无处可调"从判断变成证明:
+#     · 同指数最松的一对: 159527~159890(同跟踪「中证云计算与大数据主题指数」, 官方确认)相关 **0.9818**;
+#       且 159527 与组内**每一只**都在 0.9818~0.9854(其余两两 0.9935~0.9977) —— 不是"某两只之间
+#       的问题", 而是**该基金跟踪偏松**(规模 3.09 亿, 组内最小) ⇒ 只测一对会误判成偶发。
+#     · 不同指数最紧的一组: 「现金流」系列最高 **0.9886** —— 这族 31 只名字几乎一样的产品经官方
+#       跟踪标的核实横跨 **6 个不同指数**(国证/中证800/中证全指/沪深300/中证500 自由现金流 +
+#       富时中国A股自由现金流聚焦) ⇒ R447「两两 0.9175~0.9886 却属不同指数」**已由官方数据证实**。
+#     · **0.9818(同指数) < 0.9886(不同指数) ⇒ 两区间重叠 ⇒ 任何阈值都分不开**(降必误并/升必漏并)。
+#       这不是"阈值没调好", 是**判据本身缺信息** ⇒ 只能换判据(R442 同源: 先怀疑口径, 再怀疑数据)。
+#     · 名称同样不可靠且会**系统性误导**: 「云计算ETF」一族名字像一回事, 官方是 **3 个不同指数**
+#       (中证云计算与大数据主题 / 中证沪港深云计算产业人民币 / 中证云计算50); 反向地
+#       「科创AIETF」与「科创人工智能ETF」名字不同却是同一指数。
+#     · 官方判据还解锁了相关法**永远无法判定**的一类: K线不足 62 根的新 ETF(实测 159099 仅 32 根)
+#       没有可比收益序列 ⇒ `_rets` 返回 None, 相关法无从下手; 官方 track 直接按指数名并组。
+#       (单测已证: 159099/560660 同跟踪「中证云计算50指数」⇒ 零收益序列也能并组)
+# 数据源: 天天基金 fundf10 基本信息页(公开静态页, 无需鉴权), 一页同给
+#   跟踪标的 / 管理费率 / 托管费率 / 净资产规模 / 成立日期 ⇒ 一次抓取同时解决三件事。
+#   实测(2026-09-13) 全量 1282 只 ETF: **1282 成功 0 失败, 跟踪标的/费率/规模三项 100% 覆盖**,
+#   用时 10 分 12 秒(串行 0.2s 间隔; 并发会触发 WAF) ⇒ 缓存入库可长期复用, 仅需低频刷新。
+# 双判据分工(刻意**并存**而不是替换):
+#   官方 track = **主判据**(精确, 零漏并零误并; 194 个同指数组 / 覆盖 1103 只)
+#   相关法 corr = **补漏**(本轮新上市、缓存尚无该代码的 ETF 兜底; 旧行为不回退)
+# ⚠️ 缓存缺失 / 代码不在缓存 / track 字段为空 → **一律回落相关法** —— 绝不因元数据缺失而漏并。
+ETF_META_JSON = os.path.join(os.path.dirname(os.path.abspath(__file__)), "etf_meta.json")
+# 同指数「选优」的判据(实证支撑, 见 2026-09-13 全量统计):
+#   ① 组内费率极差 **96/194 组 ≥ 0.20pp**, 最大 0.20%~1.10%(0.90pp/年) —— 这是**确定**的成本差。
+#   ② 「费率最低」≠「规模最大」的组 **132/194(68%)**, 即"挑最大的买"在三分之二的指数上是错的。
+#   ③ 但唯费率也会踩坑: 中证A50 组费率最低者 512240(0.20%) 规模仅 **0.2 亿**、60日均额 287 万
+#      ⇒ 低于清盘线、流动性也差。故选优必须**双约束**: 费率优先 + 规模/流动性硬否决。
+ETF_CLEAR_YI = 0.5             # 规模硬否决线(亿元): 低于此记「清盘风险」(行业惯例 5000 万清盘线)
+ETF_THIN_AMT = 1000.0          # 60日均额硬否决线(万元): 低于此记「流动性偏弱」(一次进出会打滑)
+# 官方 track 组内的**反向/杠杆否决线** —— 这是官方判据唯一的已知失效模式: 反向产品声明了与
+# 正向产品**相同的指数名**(A 股现存极少, 分级基金 2020 年底已清理)。反向产品的日收益
+# ≈ −1×(指数收益) ⇒ 两者相关**≈ −0.99**, 特征极强。
+# ⚠️ 阈值取 −0.6 而非 0 —— **绝不能取 0**: 同指数异基金的正常相关是 0.98~0.99, 但
+#   ①QDII/港股通 ETF 交易日历与 A 股不同, 序列按各自末 61 根对齐会**错位** ⇒ 相关塌向 0 甚至
+#     小幅为负; ②个别基金申赎冲击/现金替代会让短期相关破位。以 0 为门槛 ⇒ 系统性**误拆官方组**,
+#     破坏面比它想防的还大(单元自测: 同指数随机收益对 → 867 对被否决、194 组被拆成 163 组)。
+#   取 −0.6 后, 只有真实反向关系才会命中; 宁漏不误并(误拆 = 退回 R447 行为, 误并 = 藏掉真标的)。
+ETF_TRACK_VETO = -0.6
 # R270: 新浪 datalen 实测支持 1500(2020-07 起), 扩至与腾讯qfq窗口(2021至今)同量级,
 # 避免新浪兜底时缠论结构起点(原800根≈3.2年自2023-05)与腾讯不一致导致的笔/中枢划分差异。
 SINA_LEN = 1500                # 新浪兜底K线根数(~6年, 2021至今全覆盖)
@@ -1467,18 +1512,102 @@ def _corr(x, y):
     return sxy / math.sqrt(sxx * syy)
 
 
-def _etf_twin_groups(rets_map, mcap_map):
-    """R447: ETF 同指数分组(union-find)。返回 {sym: (代表sym, 组内只数)}, **仅多成员组**落键。
+def _load_etf_meta(path=ETF_META_JSON):
+    """R448: 读官方 ETF 元数据缓存 -> {6位代码: {"t":跟踪标的, "f":合计费率%, "v":规模亿, "n":简称}}。
 
-    两层筛选:
-      预筛 —— 窗口累计收益差 > ETF_TWIN_PREF(1.5pp) 必非同指数(跟踪误差不会累积到 1.5pp),
-              直接跳过。**先按累计收益排序再比**, 超出即 break ⇒ 无效比较从 O(n²) 降到
-              O(n·k)(k=落在窗口内的平均只数; 随机收益实测 0.69s vs 全量两两)。
-      确认 —— corr >= ETF_TWIN_CORR(0.99, **正向**; 反向ETF天然负相关, 绝不能并组)。
-    代表 —— 组内 mcap 最大者(流动性最优, 适合实操); mcap 缺失时按 sym 兜底保证确定性。
-    阈值标定与「宁漏不误并」原则见常量块注释。
-    ⚠️ 性能实测(1282 只 ETF): 常规 0.69s; **最坏**「全部同指数」8.2s(预筛失效、需全量算相关),
-       相对首扫 20~60min 可忽略; 已在主流程打印耗时便于回归监视。"""
+    **任何异常一律返回 {}** —— 文件缺失/JSON 损坏/结构变更都不应影响扫描主流程;
+    调用方据"空字典"自然回落 R447 相关法(即今天的行为), 不产生新的失败模式。"""
+    try:
+        with open(path, encoding="utf-8") as f:
+            d = json.load(f)
+        data = d.get("data") if isinstance(d, dict) else None
+        return data if isinstance(data, dict) else {}
+    except Exception:                                            # noqa: BLE001
+        return {}
+
+
+def _etf_track_groups(track_of, rets_map, mcap_map):
+    """R448: 按官方「跟踪标的」**精确**分组(与 _etf_twin_groups 同输出契约)。
+
+    返回 (out, stat):
+      out  = {sym: (代表sym, 组内只数)} —— 仅多成员组落键
+      stat = {"groups": 同指数组数, "members": 落键只数, "veto_neg": 被反向相关否决的对数}
+
+    ⚠️ 唯一的**已知失效模式**: 反向/杠杆产品声明了与正向产品**相同的指数名**(A 股现存极少,
+       且清盘/转型多年)。故组内再加一道**正向相关否决** —— 双方都有收益序列且 corr<0 时
+       不并入。track 相同但**缺收益序列**者照并(新上市 ETF 与老产品同指数, 不能因缺序列而漏)。
+    ⚠️ 与相关法**刻意不同**: 本函数**不做**「窗口累计收益差 ≤1.5pp」预筛 —— 该预筛的前提是
+       "跟踪误差不会累积到 1.5pp", 而实测同指数异基金的相关可以低到 0.98(见常量块),
+       说明跟踪偏差比预想的大 ⇒ 预筛对同指数对存在**误杀**。官方 track 已是精确判据,
+       再加收益预筛只会引入假阴性。"""
+    by = {}
+    for s, t in (track_of or {}).items():
+        if t and str(t).strip():
+            by.setdefault(str(t).strip(), []).append(s)
+    out, n_grp, vneg = {}, 0, 0
+    for _t, mem in by.items():
+        if len(mem) < 2:
+            continue
+        mem = sorted(mem)
+        par = {s: s for s in mem}
+
+        def find(a, par=par):
+            while par[a] != a:
+                par[a] = par[par[a]]
+                a = par[a]
+            return a
+
+        for i in range(len(mem)):
+            for j in range(i + 1, len(mem)):
+                a, b = mem[i], mem[j]
+                ra, rb = find(a), find(b)
+                if ra == rb:
+                    continue
+                x, y = rets_map.get(a), rets_map.get(b)
+                if x and y:
+                    c = _corr(x, y)
+                    if c is not None and c < ETF_TRACK_VETO:     # 反向/杠杆同指数名 -> 否决
+                        vneg += 1
+                        continue
+                par[rb] = ra
+        grp = {}
+        for s in mem:
+            grp.setdefault(find(s), []).append(s)
+        for _r, ms in grp.items():
+            if len(ms) < 2:
+                continue
+            n_grp += 1
+            rep = max(ms, key=lambda x: (mcap_map.get(x) or 0, x))
+            for s in ms:
+                out[s] = (rep, len(ms))
+    return out, {"groups": n_grp, "members": len(out), "veto_neg": vneg}
+
+
+def _etf_twin_groups(rets_map, mcap_map, track_of=None):
+    """R448: ETF 同指数分组 = **官方跟踪标的(主判据)** ∪ **60 日日收益相关(补漏)**。
+
+    返回 (out, stat):
+      out  = {sym: (代表sym, 组内只数)}, 仅多成员组落键
+      stat = {"track_groups","track_members","veto_neg","corr_only_groups",
+              "missed_by_corr","judged","groups","members","folded"}
+
+    ★ 为什么要双判据(R448 定案, 实证):
+      R447 只用相关法。相关法对**同指数异基金**存在假阴性下限 —— sz159527/sz159739 官方
+      跟踪标的**字面完全相同**(中证云计算与大数据主题指数), 60 日相关仅 **0.9800** ⇒ 未并组。
+      而 0.98 档同时混着**不同指数**的近似产品(6 只「现金流」系列 0.9175~0.9886) ⇒ 阈值
+      **无处可调**: 降必误并、升则漏并更多。「表现像阈值不准」实为「判据本身有信息上限」。
+      ⇒ 判据换成官方 track(精确), 相关法**保留作补漏**(本轮新上市、缓存尚无代码的 ETF 兜底),
+        缓存缺失时相关法自动成为唯一判据 = 精确等于今天的行为(**零行为回退风险**)。
+
+    ★ missed_by_corr 是**自证字段**: 官方 track 找出的同指数组里, 相关法**没找全**的组数。
+      它把"相关法漏了多少"从口口相传变成一个每日随扫描刷新的数字 —— 无此字段, 改进幅度
+      只能靠一次性人工比对(不可持续)。实测口径见 meta.etf_twin。
+
+    ⚠️ 性能: 官方 track 先并 parent 后, 相关法**仍跑全量两两**(不做"已并则跳过"的优化)——
+       因为 skipped 的对会同时从 corr-only 视图里消失, 使 missed_by_corr **虚高**(把"官方
+       找全了、相关法也找全了"的对误记成"相关法漏了")。宁可多花 0.7s, 不制造假证据。
+       预筛(累计收益差 >ETF_TWIN_PREF)与相关阈值的标定见常量块。"""
+    track_of = track_of or {}
     syms = [s for s in rets_map if rets_map.get(s) and len(rets_map[s]) >= 5]
     cum = {}
     for s in syms:
@@ -1487,14 +1616,35 @@ def _etf_twin_groups(rets_map, mcap_map):
             c *= (1.0 + r)
         cum[s] = (c - 1.0) * 100.0
     syms.sort(key=lambda s: (cum[s], s))       # 升序: 内层可提前 break
-    parent = {s: s for s in syms}
 
-    def find(a):
-        while parent[a] != a:
-            parent[a] = parent[parent[a]]
-            a = parent[a]
-        return a
+    # ---- 1) 官方跟踪标的(主判据) ----
+    trk_out, trk_stat = _etf_track_groups(track_of, rets_map, mcap_map)
+    trk_groups = {}
+    for s, (rep, _n) in trk_out.items():
+        trk_groups.setdefault(rep, []).append(s)
+    all_syms = list(syms)
+    for s in trk_out:                          # 官方组里可能含无收益序列的成员(新上市) -> 也入并查集
+        if s not in cum:
+            all_syms.append(s)
+    parent = {s: s for s in all_syms}
+    pc = {s: s for s in all_syms}              # 仅相关法视图(用于如实统计相关法的假阴性)
 
+    def _mk_find(par):
+        def find(a):
+            while par[a] != a:
+                par[a] = par[par[a]]
+                a = par[a]
+            return a
+        return find
+
+    find, findc = _mk_find(parent), _mk_find(pc)
+    for _rep, ms in trk_groups.items():
+        for s in ms[1:]:
+            ra, rb = find(ms[0]), find(s)
+            if ra != rb:
+                parent[rb] = ra
+
+    # ---- 2) 相关法补漏(全量两两, 不做跳过优化 — 见 docstring 性能说明) ----
     ns = len(syms)
     for i in range(ns):
         a = syms[i]
@@ -1510,17 +1660,42 @@ def _etf_twin_groups(rets_map, mcap_map):
             ra, rb = find(a), find(b)
             if ra != rb:
                 parent[rb] = ra
+            rc, rd = findc(a), findc(b)
+            if rc != rd:
+                pc[rd] = rc
+
+    # ---- 3) 组装输出 + 自证统计 ----
+    missed = sum(1 for _rep, ms in trk_groups.items() if len(set(findc(s) for s in ms)) > 1)
     grp = {}
-    for s in syms:
+    for s in all_syms:
         grp.setdefault(find(s), []).append(s)
     out = {}
+    corr_only = 0
     for _root, members in grp.items():
         if len(members) < 2:
             continue
+        if not any(s in trk_out for s in members):
+            corr_only += 1                         # 完全靠相关法成组(官方缓存无这些代码)
         rep = max(members, key=lambda x: (mcap_map.get(x) or 0, x))
         for s in members:
             out[s] = (rep, len(members))
-    return out
+    _gn = {}
+    for _rep, _n in out.values():
+        _gn[_rep] = _n
+    # 「官方判据额外并入了几只」= 最终同指数只数 − 单靠相关法能并到的只数(只级口径)。
+    # 与 missed_by_corr(组级口径)并列: 组级说明"漏了几组", 只级说明"少盖了几只标的" —— 用户
+    # 感知到的是后者(池子里多出几只重复标的), 数据自查靠前者。
+    _cgn = {}
+    for s in all_syms:
+        _cgn.setdefault(findc(s), []).append(s)
+    corr_members = sum(len(ms) for ms in _cgn.values() if len(ms) >= 2)
+    stat = {"track_groups": trk_stat["groups"], "track_members": trk_stat["members"],
+            "veto_neg": trk_stat["veto_neg"], "corr_only_groups": corr_only,
+            "missed_by_corr": missed, "extra_merged": len(out) - corr_members,
+            "judged": len(rets_map),
+            "groups": len(_gn), "members": len(out),
+            "folded": sum(_n - 1 for _n in _gn.values())}
+    return out, stat
 
 
 def _regime_of(ist, n_top, n_bot, rsi14, lb_top, lb_bot):
@@ -1814,8 +1989,26 @@ def main():
                 sts[_s]["rsn"] = _nn
                 _n_rs += 1
     # ETF 同指数分组(仅多成员组落 st.etf_grp/etf_gn, 单只不落 ⇒ 前端只需查键存在)
+    # R448: **官方「跟踪标的」为主判据**(精确; 根治相关法对同指数异基金的假阴性 0.9800),
+    #   相关法**保留作补漏**(缓存尚无该代码的新 ETF) ⇒ 缓存缺失时行为精确等于 R447, 零回退风险。
+    #   判据细节、假阴性实证、missed_by_corr 自证字段见 _etf_twin_groups docstring。
+    _etf_meta = _load_etf_meta()
+    _track_of, _fee_of, _nav_of, _mcap_of = {}, {}, {}, {}
+    for sym in sts:
+        _u = uni.get(sym)
+        if not _u or _u.get("type") != "ETF":
+            continue
+        _mcap_of[sym] = _u.get("mcap")       # **全 ETF** 都记: 官方组内可能含无收益序列的新基金
+        _m = _etf_meta.get(str(_u.get("code") or sym[-6:]))
+        if not _m:                           # 非 ETF 元数据(如 F10 页面结构变更) -> 不落键, 前端降级
+            continue
+        if _m.get("t"):
+            _track_of[sym] = _m["t"]
+        if _m.get("f") is not None:
+            _fee_of[sym] = _m["f"]
+        if _m.get("v") is not None:
+            _nav_of[sym] = _m["v"]
     _etf_rets = {}
-    _mcap_of = {}
     for sym in sts:
         _u = uni.get(sym)
         if not _u or _u.get("type") != "ETF":
@@ -1826,15 +2019,17 @@ def main():
         _r = _rets(_g[0])
         if _r:
             _etf_rets[sym] = _r
-            _mcap_of[sym] = _u.get("mcap")
-    _twins = _etf_twin_groups(_etf_rets, _mcap_of)
+    _twins, _tw_stat = _etf_twin_groups(_etf_rets, _mcap_of, _track_of)
     for _s, (_rep, _n) in _twins.items():
         sts[_s]["etf_grp"] = _rep
         sts[_s]["etf_gn"] = _n
-    print("  全池地基: 动量 %d 票 / 可比组分位 %d 票(%d 组) / ETF 同指数合并 %d 只"
-          "(涉 %d 组) %.0fs"
+    print("  全池地基: 动量 %d 票 / 可比组分位 %d 票(%d 组) / ETF 同指数 %d 只"
+          "(涉 %d 组; 官方跟踪标的 %d 组 + 相关法补漏 %d 组, **相关法漏 %d 组**)"
+          " 元数据缓存 %d 只(命中 track %d) %.0fs"
           % (sum(1 for s in sts if sts[s].get("mom20") is not None), _n_rs, len(_rs_grp),
-             len(_twins), len(set(v[0] for v in _twins.values())), time.time() - _t_rs),
+             _tw_stat["members"], _tw_stat["groups"], _tw_stat["track_groups"],
+             _tw_stat["corr_only_groups"], _tw_stat["missed_by_corr"],
+             len(_etf_meta), len(_track_of), time.time() - _t_rs),
           flush=True)
     # R447: ETF 同指数去重的**能力声明** —— 前端 revpool 放开 ETF 以此开关为条件。
     # 静态站 HTML 与 radar.json 是**独立部署**的: 新 HTML 上线后、下一次 CI 扫描前, 线上仍是
@@ -1854,6 +2049,16 @@ def main():
         "groups": len(_grp_n),
         "members": len(_twins),
         "folded": sum(_n - 1 for _n in _grp_n.values()),
+        # R448: 双判据**贡献数**(如实声明, 供前端说明口径与自查"官方判据到底多修了多少")
+        "src": "track+corr",
+        "track_groups": _tw_stat["track_groups"], "track_members": _tw_stat["track_members"],
+        "corr_only_groups": _tw_stat["corr_only_groups"],
+        "missed_by_corr": _tw_stat["missed_by_corr"], "veto_neg": _tw_stat["veto_neg"],
+        "extra_merged": _tw_stat["extra_merged"], "veto_line": ETF_TRACK_VETO,
+        # R448: 官方元数据覆盖率(缓存有多少、本轮命中多少) + 选优判据的硬否决线
+        "meta_n": len(_etf_meta), "tracked": len(_track_of),
+        "fee_n": len(_fee_of), "nav_n": len(_nav_of),
+        "clear_yi": ETF_CLEAR_YI, "thin_amt": ETF_THIN_AMT,
     }
 
     # --- 门禁 + 信号 + 行业聚合(同时攒成分) ---
@@ -1879,6 +2084,16 @@ def main():
                "code": uni[sym]["code"], "src": st.pop("src", ""),
                "gate": gate, "gd": gdesc, "ind": uind,
                "mcap": uni[sym].get("mcap", 0)}
+        # R448: ETF 官方元数据(跟踪标的/合计费率/净资产规模) —— 前端「细分领域标注 + 同指数选优」
+        #   的唯一数据源(universe 无价格序列, 前端算不出这些)。仅 ETF 且命中缓存才落键;
+        #   未命中 ⇒ 键缺失 ⇒ 前端按缺失降级为旧展示(R447 版), **零回归**。
+        if uni[sym]["type"] == "ETF":
+            if sym in _track_of:
+                row["etf_track"] = _track_of[sym]
+            if sym in _fee_of:
+                row["etf_fee"] = _fee_of[sym]
+            if sym in _nav_of:
+                row["etf_nav"] = _nav_of[sym]
         row["st"] = st
         if sym in marks:
             row["mark"] = marks[sym]
@@ -2080,7 +2295,40 @@ def main():
         "title": "A股全市场缠论雷达",
         "asof": asof, "build_time": datetime.datetime.now(
             datetime.timezone(datetime.timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S"),
-        "version": "P3b-r19",   # r19=R447: 行业地基下沉到个股/ETF 层 —— 三件事, 口径全部与行业**同源
+        "version": "P3b-r20",   # r20=R448: ETF 同指数去重**换判据** + 官方元数据上屏(三件事)。
+                                #   ★ 触发点 = R447 留下的**已知假阴性**: sz159527(云计算ETF广发)
+                                #     与 sz159739(云计算ETF鹏华) 官方跟踪标的**字面完全相同**
+                                #     「中证云计算与大数据主题指数」, 但 60 日收益相关仅 **0.9800**
+                                #     ⇒ 未并组。而 0.98 档同时混着**不同指数**的近似产品(6 只
+                                #     「现金流」系列两两 0.9175~0.9886 却属不同指数) ⇒ 阈值
+                                #     **无处可调**(降必误并/升则漏并更多)。这不是"阈值不准",
+                                #     是"判据本身有信息上限" ⇒ 换判据, 不调参。
+                                #   ①**官方「跟踪标的」为主判据** —— 数据源 = 天天基金 fundf10
+                                #     基本信息页(公开静态页免鉴权)。实测全量 1282 只 ETF:
+                                #     **1282 成功 0 失败, track/费率/规模 100% 覆盖**, 10m12s
+                                #     (串行 0.2s; 并发触发 WAF)。落 radar/etf_meta.json(132KB,
+                                #     tracked) + radar/fetch_etf_meta.py(增量刷新/--force 全量)。
+                                #     结果: 194 个同指数组 / 覆盖 1103 只(相关法只找到 0 组同规模)。
+                                #   ②**相关法保留作补漏**(缓存尚无代码的新 ETF 兜底) ⇒ 缓存缺失
+                                #     时行为**精确等于 R447, 零回退风险**; 加**自证字段**
+                                #     meta.etf_twin.{missed_by_corr, extra_merged, corr_only_groups}
+                                #     把"相关法漏了多少"变成每日刷新的数字, 而非一次性人工比对。
+                                #   ③**同指数选优**上屏 —— 上游注入 row.etf_track/etf_fee/etf_nav。
+                                #     实证支撑(全量 1282 只统计, 非估计):
+                                #       · 组内费率极差 **96/194 组 ≥0.20pp**, 最大 0.20%~1.10%
+                                #         (0.90pp/年) = **确定的**持有成本差;
+                                #       · 「费率最低」≠「规模最大」的组 **132/194 = 68%**
+                                #         ⇒ "挑最大的买"在三分之二的指数上是错的;
+                                #       · 但唯费率会踩坑: 中证A50 组费率最低者 512240(0.20%)
+                                #         规模仅 **0.2 亿**、60日均额 287 万 ⇒ 低于清盘线
+                                #         ⇒ 选优必须**双约束**(费率优先 + 规模/流动性硬否决)。
+                                #     ⚠️ 反证边界(必须同时上屏, 否则是夸大): K 线层**看不出**
+                                #     小 ETF 价格更差 —— 同指数 10 只日均振幅 4.47~4.62%
+                                #     (corr(振幅,规模) 仅 +0.045)。选大的理由是**执行成本 +
+                                #     清盘尾部风险**, **不是价格质量**。
+                                #     ⚠️ 官方判据唯一失效模式 = 反向产品声明同指数名, 故组内设
+                                #     **强负相关否决**(<−0.6; 单元自测证实阈值取 0 会误拆 194→163 组)。
+                                # r19=R447: 行业地基下沉到个股/ETF 层 —— 三件事, 口径全部与行业**同源
                                 #   同实现**(_mom/_rs_pctile 直接复用, 零复刻):
                                 #   ①**多周期动量** mom5/mom20/mom60 落全池 st(universe 6630 只
                                 #     此前**零价格序列** ⇒ 前端无法兜底复算, 必须后端出字段)。
@@ -2204,9 +2452,15 @@ def main():
            # R319: 白名单补 "src"(票级K线源 tx/em/sina) —— 此前漏写导致前端 srcTag(u.src)
            # 恒 undefined, R271 票级源徽标从未生效(R276 注释"已在顶层"系假修复, 后端从未写出)。
            # src 值域见 _src_degraded: tx/em=复权(绿标), sina=新浪裸价(橙标⚠, 除权日假跳空风险)。
+           # ⚠️⚠️ R448 血泪: 白名单是**静默剥离**, row 里写对了也照样不落盘 —— 本轮
+           #   etf_track/etf_fee/etf_nav 已在 L2078-2083 正确注入, 但**实跑产物里三者全 None**,
+           #   而 meta.etf_twin.tracked/fee_n 却是 10(证明上游逻辑没错, 只错在这一行)。
+           #   **给 universe row 加任何新字段, 必须同改此处**; 只读代码不实跑抓不到(R319 同款坑)。
            "universe": {s: {k: v for k, v in row.items()
                             if k in ("name", "type", "code", "gate", "gd", "ind", "mcap",
-                                     "st", "ff", "lead", "src")}
+                                     "st", "ff", "lead", "src",
+                                     # R448: ETF 官方元数据(前端「细分领域标注 + 同指数选优」)
+                                     "etf_track", "etf_fee", "etf_nav")}
                         for s, row in universe.items()}}
     # R275: 显式 UTF-8 —— 读侧(L1002)已带 encoding, 写侧遗漏; CI runner 若 locale 非 UTF-8
     # (如 C/POSIX), ensure_ascii=False 写中文 meta 文案会 UnicodeEncodeError 崩掉全量 run 无产物。
