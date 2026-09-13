@@ -356,6 +356,10 @@ h1{font-size:21px;font-weight:700;letter-spacing:.4px;line-height:1.3}   /* R323
 .metric-strip .bkmini{display:inline-block;font-size:9px;font-weight:700;color:#fff;background:#c92a2a;border-radius:3px;padding:0 4px;margin-left:3px;line-height:1.6;letter-spacing:.2px;white-space:nowrap;vertical-align:1px}
 .bk-alert{display:block;font-size:12px;line-height:1.85;color:#7f1d1d;background:rgba(229,69,69,.07);border:1px solid rgba(229,69,69,.42);border-left:3px solid #c92a2a;border-radius:6px;padding:8px 12px}
 .bk-alert b{color:#c92a2a}
+/* R447: revpool 放开 ETF —— 类型标记 + 同指数折叠徽章(同指数只列一只, 其余折叠并披露只数) */
+.etag{display:inline-block;font-size:9.5px;font-weight:700;background:#eef2ff;color:#3730a3;border:1px solid #c7d2fe;border-radius:3px;padding:0 4px;margin-left:4px;line-height:1.6;vertical-align:1px;letter-spacing:.2px}
+.twtag{display:inline-block;font-size:9.5px;font-weight:700;background:#f5f3ff;color:#6d28d9;border:1px dashed #c4b5fd;border-radius:3px;padding:0 4px;margin-left:4px;line-height:1.6;vertical-align:1px;cursor:help;letter-spacing:.2px}
+.fold-badge{display:inline-block;font-size:11px;font-weight:700;background:#f5f3ff;color:#6d28d9;border:1px dashed #c4b5fd;border-radius:999px;padding:2px 10px;line-height:1.6;cursor:help;white-space:nowrap}
 /* R442: 逆向观察池「结构已破」分组分隔行 —— R439/R440 只做到「行内可见」(小红标), 但 pick 排序
    仍把 broken 票与有效票混排: 09-11 实测精选榜首 #1(海天味业) 与 #3(永和股份) 均为已破票,
    即用户第一眼看到的恰恰是失效结构。改为 broken 全局沉底 + 本分隔行显式分组。
@@ -653,6 +657,7 @@ function getStkData(sym){
 fxT("radar.json").then(function(r){if(!r.ok)throw new Error("HTTP "+r.status);return r.json()}).then(function(d){
   M=d.meta;UNI=d.universe||{};SIG=d.signals||[];INDS=d.industries||{};
   INDM={};_RS=null;_RS60=null;   // R445: 行业指标缓存随数据重载失效(防跨数据集串值)
+  buildEtfGroups();              // R447: ETF 同指数分组索引(revpool/sigrad 折叠共用)随数据重载重建
   initSearch();   // R298: 数据就绪后激活全局搜索(UNI 已加载)
   renderHeader();renderBar();renderSigRadar();renderRevPool();renderBanner();   // R269: 数据降级/陈旧警示 · R285: 实操信号雷达 · R305: 逆向观察池
   if(qs.indexOf("stk/")===0)showStk(safeDec(qs.slice(4)));
@@ -864,11 +869,17 @@ function sigRow(s,opt){   // R380: opt.sub=true = 非低吸区灰显行(破位/�
     :'';
   var ff=(u.ff||{}).net;
   var indName=(u.type==="ETF"?"ETF板块":(s.ind&&s.ind!=="-"?s.ind:"-"));
+  /* R447: ETF 类型标 + 同指数折叠标 —— 与 revpool 同款徽章。s.twn 由 revFoldTwins 在 grp() 里挂上,
+     故只有「本组确有多只同指数且本行是保留的那只」才显示; 未参与判定者不挂键 ⇒ 自然不显示。 */
+  var _isEtf=(u.type==="ETF");
+  var etfTag=_isEtf?'<span class="etag" title="场内 ETF(一篮子成分股): 无个股暴雷/退市风险, 但仍有指数系统性风险">ETF</span>':'';
+  var twTag=(s.twn>1)?'<span class="twtag" title="'+esc(twinTip(s))+'">同指数 ×'+s.twn+'</span>':'';
   var spk=(s.spark&&s.spark.data)?s.spark.data:s.spark;
   var nm=(u.name||s.name||s.sym);
   var sigTip=(t?"顶背驰·风险":"底背驰·机会")+" | "+nm+" "+(s.sym||"")+
     "\n"+(s.bc_date||"")+"触发 · 距今"+(fr==null?"?":(fr===0?"当日":fr+"天"))+"\n类型 "+(s.bc_type||"-")+" · 强度"+(s.strong||0)+"/2"+(s.vol?" · 量缩确认":"")+" · 面积比"+(s.area!=null?s.area:"-")+   // R320: fresh=0 →"距今当日"(原"距今0天"误导)
     "\n所属 "+(indName||"-")+(u.lead?" · 行业龙头":"")+
+    momRsTip(st,u)+   // R447: 多周期动量 + 行业内相对强度(纯描述)
     (dev!=null?"\n现价较信号位: "+devTxt+(devTip?" ("+devTip+")":""):"")+
     (bkTag?"\n⚠️ 盘中已破: 背驰笔结束后最低 "+_bbc.broken_price+"（"+_bbc.broken_date+"）已击穿背驰低点 "+_bbc.end_price+"，该一类买点在**结构上已失效**（看板按收盘价剔票，故本行仍在池）\n📊 R443 五年回测：该标记收益维度无可检测差异(20日 −0.32pp, p=0.74)，但风险维度有效 — 20日内最大浮亏>5% 概率 72.1%(未破 58.1%)，按风险读": "")+
     (ff!=null?"\n当日主力净流入: "+ffTxt(ff):"")+
@@ -892,7 +903,7 @@ function sigRow(s,opt){   // R380: opt.sub=true = 非低吸区灰显行(破位/�
       ?'<span class="mtag mnull" title="月线MACD 数据在但月K不足 —— 该票上市约 '+_mab+' 个月, 未达判定门槛 40 根(按 MACD 26+9 EMA 收敛所需), 故月线档记中性、名次未按月线校正 · 非取数失败">月K不足 '+_mab+'</span>'
       :'<span class="mtag mnull" title="月线MACD 本次未取得数据 —— 腾讯 qfq 月K 与 新浪日线聚合两路均失败或完全无月K, 属真取不到。该信号月线档中性, 名次未按月线校正, 「底部刚启」非全维度结论">月线—</span>';}
   return '<div class="'+rowCls+'" title="'+esc(sigTip)+'" onclick="pickSigRad(\''+s.sym+'\')">'+
-    '<div><div class="nm">'+(t?"⚠️ ":((opt.sub)?"🔍 ":"✅ "))+esc(nm)+lead+ffMini+'</div><div class="sub">'+esc(s.sym)+" · "+esc(indName)+'</div></div>'+
+    '<div><div class="nm">'+(t?"⚠️ ":((opt.sub)?"🔍 ":"✅ "))+esc(nm)+lead+ffMini+etfTag+twTag+'</div><div class="sub">'+esc(s.sym)+" · "+esc(indName)+'</div></div>'+   // R447: +etfTag/twTag
     '<div class="st">'+(t?'<b style="color:#c92a2a">顶背驰</b>':'<b style="color:#087f5b">底背驰</b>')+'<span>强'+(s.strong||0)+'/'+(s.vol?"缩":"")+((s.area!=null&&s.area>0)?" 面"+s.area:"")+'</span></div>'+
     '<div class="st">'+(fr==null?"-":(fr===0?"当日":fr+"天前"))+frTag+'</div>'+
     '<div class="right">'+
@@ -972,6 +983,12 @@ function renderSigRadar(){
   var emptyTxt=curSigMode==="all"?"当前全市场近端暂无该类信号 · 有信号时自动上榜":(curSigMode==="res"?"当前筛选下无「资金共振」信号(底信号+净流入/顶信号+净流出) · 切回🔥最新查看全部":"当前筛选下无「资金背离」信号(底+流出/顶+流入) · 切回🔥最新查看全部");
   var sortTxt=curSigMode==="all"?"按最新触发排序 · 结构已破者沉底":(curSigMode==="res"?"按资金同向金额降序":"按背离资金量降序");
   function grp(ic,title,rows,subRows){
+    /* R447: ETF 同指数折叠 —— 顶/底两组各自折叠(同指数只列一只, 保留组内当前排序最优者)。
+       一个指数常有十几家公司各发一只 ETF 跟踪 ⇒ 信号天然重复计数(实测 11 只顶信号里
+       6 只是「自由现金流」系列、3 只石油系 ⇒ 实际仅 3~4 个独立标的)。折叠数如实披露在标题。 */
+    var _r2=revFoldTwins(rows),_s2=subRows?revFoldTwins(subRows):subRows;
+    var _nF=(_r2.folded||0)+((_s2&&_s2.folded)||0);
+    rows=_r2;subRows=_s2;
     if(!rows.length&&(!subRows||!subRows.length))return '<div class="sgrp"><div class="gtt"><span class="ic">'+ic+'</span>'+title+' <span class="n">0</span></div><div style="padding:14px 16px;font-size:11px;color:#b0b9c6;line-height:1.7">'+esc(emptyTxt)+'</div></div>';
     // R380: 非低吸区灰显段(破位/已走高) — 与"机会"主区视觉断开, 仅跟踪不作低吸参考
     var subHtml=(subRows&&subRows.length)?'<div class="sdead-sep" title="已跌破背驰低点(破位·结构失效)或已较背驰低点走高超过8%(追高)—— 已沉出「机会」主区, 仅作失效/追高跟踪, 不属低吸参考">🔍 非低吸区 · 破位/已走高 '+subRows.length+' 只 · 跟踪不参与</div>'+subRows.map(function(s){return sigRow(s,{sub:true});}).join(''):'';
@@ -979,7 +996,7 @@ function renderSigRadar(){
     var nAll=rows.length;
     var main=sigExpanded?rows:rows.slice(0,SIG_MAIN);
     var moreHtml=(nAll>SIG_MAIN)?'<div class="sigmore"><a onclick="toggleSig()">'+(sigExpanded?'▲ 收起 · 只留前 '+SIG_MAIN+' 只':'▼ 展开全部 '+nAll+' 只')+'</a></div>':'';
-    return '<div class="sgrp"><div class="gtt"><span class="ic">'+ic+'</span>'+title+' <span class="n">'+nAll+'</span><span style="color:#b0b9c6;font-weight:400;margin-left:auto">'+sortTxt+'</span></div>'+main.map(sigRow).join('')+moreHtml+subHtml+'</div>';
+    return '<div class="sgrp"><div class="gtt"><span class="ic">'+ic+'</span>'+title+' <span class="n">'+nAll+'</span>'+(_nF?'<span class="fold-badge" style="font-size:10px;padding:1px 7px" title="★ R447 同指数 ETF 折叠: 一个指数常有十几家公司各发一只产品跟踪, 信号天然重复计数(实测 11 只顶信号里 6 只是「自由现金流」系列、3 只石油系 ⇒ 实际仅 3~4 个独立标的)。本组同一指数只列 1 只 —— 保留的是**当前排序下最优的那只**, 其余 '+_nF+' 只折叠。判定: 60 日日收益相关系数 ≥0.99(同指数组内实测 0.994~0.999、跨赛道最高 0.819); 名称不可靠(「科创AIETF」与「科创人工智能ETF」实为同一指数); 宁漏不误并。悬停带「同指数 ×N」徽章的行可见完整成员清单。'+twinMetaLine()+'">同指数折叠 '+_nF+' 只</span>':'')+'<span style="color:#b0b9c6;font-weight:400;margin-left:auto">'+sortTxt+'</span></div>'+main.map(sigRow).join('')+moreHtml+subHtml+'</div>';
   }
   // R287: 盘面自动摘要(顶/底近端 + 资金共振/背离 + 板块净流入Top)
   var smark='';
@@ -1021,14 +1038,25 @@ function renderSigRadar(){
 }
 /* ===== R305: 逆向观察池(首页中部) — 老结构埋伏候选 =====
    选样: 全量 UNI 中 scenario=背驰见底机会 + 有 bottom_bc + fresh>10(已超实操窗, 归老结构)
-         + 距历史高回撤≥30%(深跌) + 现价>背驰低点 end_price(未破位, 结构仍有效) + 剔除 ETF(dd 失真/埋伏对象=个股)
+         + 距历史高回撤≥30%(深跌) + 现价>背驰低点 end_price(未破位, 结构仍有效)
+   R447: **放开 ETF**(原 R305 剔除, 理由「dd 失真/埋伏对象=个股」; 实测 ETF 候选 dd 分布正常
+         -0.31~-0.74 与个股同量级, 「失真」未复现; 且旭总主买 ETF, 低吸埋伏恰在 ETF 上更适用)。
+         同指数多产品刷屏由 revFoldTwins() 折叠解决 —— 15 只候选里 10 只是同一指数。
    语义: 与顶部"实操信号雷达"(近端 fresh≤10)互补 — 近端管"当下", 观察池管"提前埋伏/跟踪"
    操作参考: 止损参考=end_price(跌破结构失效) · 埋伏区=现价贴近 end_price 时(dev 小) · 勿追 dev>8% */
 var REV_SHOW=12;            // 折叠态默认展示行数
 var revExpanded=false;
 var curRevMode="pick";      // R375: 默认实操优选(底部刚启≤3%→档内流动性→跌得最透) | dd=最深回撤 | dev=最贴低点 | fr=最新触发 | fd=底久未破
 function revCand(sym,v){
-  if(v.type==="ETF")return null;                 // R305: ETF 剔除
+  /* R447: **解除 ETF 剔除**, 但受**能力开关**约束。原 R305 理由「dd 失真/埋伏对象=个股」——
+     实测 ETF 候选的 dd 分布正常(-0.31~-0.74, 与个股同量级), 「失真」未复现; 而旭总主买 ETF,
+     低吸埋伏恰在 ETF 上更适用(一篮子股份, 无个股暴雷/退市风险)。放开后同指数多产品会刷屏
+     (实测 15 只候选里 10 只是同一个「科创人工智能」指数) ⇒ 由 revFoldTwins() 折叠。
+     ⚠️ 折叠依赖后端 st.etf_grp, 而 HTML 与 radar.json 是**独立部署**的: 新 HTML 上线到下次
+     CI 扫描之间线上仍是旧 JSON ⇒ 此窗口内若照常放开, 会出现 10 只同指数 ETF 且**无法折叠**
+     (ETF 在 universe 里没有价格序列, 前端算不出相关) —— 比不放开更糟。故以 meta.etf_twin
+     这个**能力声明**为条件: 后端本轮确实做过去重才放开。 */
+  if(v.type==="ETF"&&!etfTwinOn())return null;
   var st=v.st||{};
   if(st.scenario!=="背驰见底机会")return null;
   var bb=st.bottom_bc||{};
@@ -1101,6 +1129,83 @@ function revList(){
   else out.sort(function(a,b){return a.dd-b.dd});   // dd: 最深回撤(最负)先行
   return out;
 }
+/* ===== R447: ETF 同指数折叠 =====
+   后端为同指数 ETF 落 st.etf_grp(组标识 = 组内 mcap 最大的产品代码) + st.etf_gn(组只数)。
+   折叠点选在**排序之后** —— 保留组内当前排序最前的一只(尊重排序意图), 而非固定保留后端那个
+   代表(它只是组 ID; 用它作 ID 图的是稳定可读)。这样"按距背低点排"留下的就是最贴低点的那只。
+   不静默丢弃: 保留行挂「同指数 ×N」徽章, tooltip 列全同指数成员及各自规模。 */
+var ETFG={};
+/* R447: ETF 同指数去重的**能力开关** —— 由后端 meta.etf_twin 声明(有键 = 本轮确实做过判定)。
+   静态站的 HTML 与 radar.json 独立部署: 新 HTML 上线到下次 CI 扫描之间线上仍是旧 JSON
+   (无 st.etf_grp), 该窗口内放开 ETF 会出现 10 只同指数候选且无法折叠 ⇒ 无该键时沿用
+   R305 旧行为(ETF 不进池)。 */
+function etfTwinOn(){return !!(M&&M.etf_twin);}
+/* 本轮去重的真实统计(数据驱动, 不硬编码测量值) */
+function twinMetaLine(){
+  var t=(M||{}).etf_twin;if(!t)return"";
+  return "本轮实跑: 参与判定 "+t.judged+" 只 ETF → 识别出 "+t.groups+" 个同指数组、"
+    +"合计可折叠 "+t.folded+" 只(窗口 "+t.win+" 日收益, 阈值 corr≥"+t.corr+")。";
+}
+function buildEtfGroups(){
+  ETFG={};
+  Object.keys(UNI).forEach(function(s){
+    var st=(UNI[s]||{}).st||{};
+    if(st.etf_grp)(ETFG[st.etf_grp]=ETFG[st.etf_grp]||[]).push(s);
+  });
+}
+function etfGrpOf(sym){return ((UNI[sym]||{}).st||{}).etf_grp||null;}
+function etfGnOf(sym){return ((UNI[sym]||{}).st||{}).etf_gn||1;}
+function _amtW(v){return v==null?"-":(v>=1e4?(v/1e4).toFixed(1)+"亿":v.toFixed(0)+"万");}
+function twinTip(c){
+  var g=etfGrpOf(c.sym);if(!g)return"";
+  var mem=(ETFG[g]||[]).slice().sort();
+  var lines=mem.map(function(s){
+    var u=UNI[s]||{},st=u.st||{};
+    return "  • "+s+" "+(u.name||"")+(s===c.sym?"  ← 本行":"")+"  现价"+(st.close!=null?st.close:"-")+" 60日均额"+_amtW(st.avg_amt60);
+  });
+  return "\n\n【同指数 ×"+mem.length+"】本指数共有 "+mem.length+" 只 ETF 产品在池中, 本列表只列 1 只以免刷屏。\n"
+    +"判定口径: 60 日日收益相关系数 ≥0.99 —— 实测同指数组内 0.994~0.999、跨赛道最高仅 0.819(余量极大)。\n"
+    +"名称不可靠: 「科创AIETF」与「科创人工智能ETF」名称不同, 实测相关 0.995~0.998 = 同一指数。\n"
+    +"宁漏不误并: 阈值取 0.99 是有意的安全侧 —— 6 只「自由现金流/全指现金流/现金流」系列两两仅 0.9175~0.9886, 但它们跟踪的**不是同一指数**, 阈值一降就会误并。\n"
+    +"⚠️ 已知假阴性: sz159527 与 sz159739 实为同一指数(中证云计算与大数据主题 930851), 60 日相关仅 0.9800 ⇒ 未并组。相关法在同指数异基金上有下限, 根治须引入官方拟合指数代码。\n"
+    +"完整清单:\n"+lines.join("\n");
+}
+/* ===== R447: 全池「多周期动量 / 可比组内相对强度」的单一措辞源 =====
+   列表悬浮(list)与详情页(span)两处共用, 避免同一口径两处措辞漂移(R445 通法: 同一含义被追问 ≥2 次
+   就把口径刻到页面上)。两处都**不依赖悬停**地给出数值, tooltip 只解释口径与边界。 */
+function _grpLabel(u){return ((u||{}).type==="ETF")?"全 ETF 池":"同申万一级「"+(((u||{}).ind)||"-")+"」"}
+function momRsTip(st,u){
+  st=st||{};
+  var t="";
+  if(st.mom5!=null||st.mom20!=null||st.mom60!=null)
+    t+="\n多周期动量(近 N 个交易日累计涨幅, 前复权收盘价): 5日"+mvTxt(st.mom5)+" · 20日"+mvTxt(st.mom20)+" · 60日"+mvTxt(st.mom60)
+      +" —— 三条并列看方向一致性(5日与60日同向=趋势延续, 反向=短期反转/回调)。纯描述, 不含预测。";
+  if(st.rsind!=null)
+    t+="\n"+((( u||{}).type==="ETF")?"ETF 池内":"行业内")+"相对强度: "+st.rsind+"% 分位("+_grpLabel(u)+"共 "+(st.rsn||0)+" 只可比标的) —— 20日动量的同类内排名, 0%=垫底 / 100%=最强。";
+  return t;
+}
+function rsTip(st,u){
+  var isEtf=((u||{}).type==="ETF");
+  var n=(st&&st.rsn)||0;
+  return "相对强度 = 近 20 个交易日累计涨幅在**可比组内**的分位(0%=垫底, 100%=最强)。\n"
+    +"本次可比组 = "+(isEtf?"全 ETF 池(场内基金, 共 "+n+" 只)":"申万一级行业「"+(u.ind||"-")+"」全部可比标的(共 "+n+" 只)")+"。\n"
+    +(isEtf
+      ? "⚠️ ETF 池是全市场所有场内基金(含债券/黄金/跨境/货币), 赛道之间波动水平不可直接比 ⇒ 这一列只宜当作「在全体 ETF 里 20 日动量的相对位置」粗看, 不构成同赛道比较。\n"
+      : "⚠️ 为什么不用全市场分位: 全市场含微盘与大盘, 微盘 20 日涨 30% 是常态、大盘涨 10% 就顶尖 ⇒ 用全市场分位会把 size/风格算成实力。R443 实证: 同一事件用沪深300 基准得 +2.25pp, 换横截面基准仅 +0.58pp。\n")
+    +"纯描述性上下文, 不含预测 —— 本看板依 R443 五年回测证据, 不做个股低吸评分/排名(看涨类无可检测超额, S1 +0.58pp p=0.13); 也刻意未加「按动量排序」(个股按 60日动量降序 = 追涨视角, 与逆向观察池方向相反)。";
+}
+function revFoldTwins(list){
+  var seen={},out=[],folded=0;
+  list.forEach(function(c){
+    if(((UNI[c.sym]||{}).type||"")!=="ETF"){out.push(c);return;}
+    var g=etfGrpOf(c.sym);
+    if(!g){out.push(c);return;}                 // 未参与判定(根数不足或组内单只) → 原样保留
+    if(seen[g]){folded++;return;}               // 同指数已列过一只 → 折叠
+    seen[g]=1;c.twn=etfGnOf(c.sym);out.push(c);
+  });
+  out.folded=folded;
+  return out;
+}
 /* dev 距背驰低点% 五档分级 — 旭总实操口径 */
 function devTag(dev){
   if(dev==null||isNaN(dev))return {cls:"",lbl:"-",tip:""};
@@ -1114,12 +1219,16 @@ function revRow(c){
   var v=UNI[c.sym]||{},u=v||{};
   var st=c.st,bb=c.bb;
   var nm=u.name||c.sym;
-  var lead=u.lead?' <span class="lead-tag" title="该行业总市值最大的龙头股">👑龙头</span>':'';
+  var _isEtf=(v.type==="ETF");
+  var lead=u.lead?' <span class="lead-tag" title="'+(_isEtf?"ETF板块内场内规模最大的基金":"该行业总市值最大的龙头股")+'">👑'+(_isEtf?"规模最大":"龙头")+'</span>':'';
+  /* R447: ETF 类型标 + 同指数折叠标(折叠后仅列一只, 徽章披露全组只数, 悬停见完整清单) */
+  var etfTag=_isEtf?'<span class="etag" title="场内 ETF(一篮子成分股): 无个股暴雷/退市风险, 但仍有指数系统性风险">ETF</span>':'';
+  var twTag=(c.twn>1)?'<span class="twtag" title="'+esc(twinTip(c))+'">同指数 ×'+c.twn+'</span>':'';
   var gtag="";
   if(v.gate==="低自洽")gtag='<span class="gate-tag g2" title="缠论结构自洽度低于门禁, 参考价值打折">低自洽</span>';
   else if(v.gate==="次新")gtag='<span class="gate-tag g1" title="上市较新, 结构样本少">次新</span>';
   else if(v.gate==="低流动性")gtag='<span class="gate-tag g3" title="60日均成交额偏低">低流动</span>';
-  var indName=(v.ind&&v.ind!=="-"?v.ind:"-");
+  var indName=(v.type==="ETF")?"ETF板块":(v.ind&&v.ind!=="-"?v.ind:"-");   // R447: ETF 无申万归属, 显「ETF板块」(与详情页同口径)
   var ffNet=(v.ff||{}).net;
   var ffMini=(ffNet!=null)?'<span class="ffmini '+ffCls(ffNet)+'" title="当日主力净流入: '+ffTxt(ffNet)+'">'+ffTxt(ffNet)+'</span>':'';
   var amtTxt=(st.avg_amt60!=null?(st.avg_amt60>=1e4?(st.avg_amt60/1e4).toFixed(1)+"亿":st.avg_amt60.toFixed(0)+"万"):"-");   // avg_amt60=万元
@@ -1183,12 +1292,13 @@ function revRow(c){
     (bkTag?"\n⚠️ 盘中已破: 背驰笔结束后最低 "+bb.broken_price+"（"+bb.broken_date+"）已刺穿背驰低点 "+bb.end_price+" —— 缠论口径一买已失效（本池按收盘价剔票，故仍在本池）\n📊 R443 五年回测：收益维度无可检测差异(20日 −0.32pp, p=0.74)，风险维度有效 — 20日内最大浮亏>5% 概率 72.1%(未破 58.1%)，按风险读":"")+
     (mm&&mm.state?"\n月线MACD("+(mm.date||"-")+", 双周期键): "+(mm.state==="red"?"红柱 "+mm.h2+" — 月线多头, 反弹延续概率高":mm.state==="green_shrink"?"绿柱缩短 "+mm.h1+"→"+mm.h2+" — 下跌动能衰减":"绿柱加长 "+mm.h1+"→"+mm.h2+" — 月线下跌中继, 反弹易夭折")+
     (mm&&mm.state==="green_grow"?" · 名次已沉同档尾":""):(mm?"\n月线MACD: 无数据(次新/月K不可得) — 中性档":""))+
+    momRsTip(st,v)+   // R447: 多周期动量 + 行业内相对强度(纯描述)
     "\n60日均成交: "+amtTxt+
     (ffNet!=null?"\n当日主力净流入: "+ffTxt(ffNet):"")+
-    "\n\n点击查看个股完整 K 线与缠论结构";
+    "\n\n点击查看完整 K 线与缠论结构"+twinTip(c);
   // -- R317: 行 6 列: 名/距历史高/现价/背驰底线/60日均额/背驰触发/(距背%分级)
   return '<div class="prow" title="'+esc(tip)+'" onclick="pickRev(\''+c.sym+'\')">'+
-    '<div><div class="nm">'+esc(nm)+pickStar+lead+ffMini+gtag+'</div><div class="sub">'+trTag+esc(c.sym)+" · "+esc(indName)+' · '+esc(st.one_word||"-")+arTag+'</div></div>'+
+    '<div><div class="nm">'+esc(nm)+pickStar+lead+ffMini+etfTag+gtag+twTag+'</div><div class="sub">'+trTag+esc(c.sym)+" · "+esc(indName)+' · '+esc(st.one_word||"-")+arTag+'</div></div>'+
     '<div><div class="big '+ddCls+'">'+(c.dd*100).toFixed(1)+'%</div><div class="small">距历史高</div></div>'+
     '<div><div class="big">'+esc(st.close!=null?st.close:"-")+'</div><div class="small '+(st.chg1d>0?"up":(st.chg1d<0?"down":""))+'">'+pct(st.chg1d,2)+'</div></div>'+
     '<div><div class="big" style="font-size:11.5px">'+(endP!=null?endP.toFixed(2):"-")+bkTag+'</div><div class="small" style="font-size:10px"'+(bkTag?' title="📊 R443 五年回测: 「盘中已破」在收益维度无可检测差异(20日 −0.32pp, p=0.74), 在风险维度有效 — 20日内最大浮亏>5% 概率 72.1%(未破样本 58.1%, +14pp)。该底线已被盘中击穿, 不再是有效止损参考"':'')+'>'+(bkTag?"底线 · 盘中已破":"底线 · 止损参考")+'</div></div>'+
@@ -1229,7 +1339,8 @@ function revRule(){   // R376: 排序标准常驻标注(随 chip 联动, 旭总�
 function renderRevPool(){
   var box=$("revPool");
   if(!box)return;
-  var all=revList();
+  var all=revFoldTwins(revList());   // R447: ETF 同指数折叠(排序后保留组内当前排序最优者)
+  var nFolded=all.folded||0;         // 被折叠的同指数 ETF 只数(用于如实披露, 不静默丢弃)
   var n=all.length;
   if(!n){box.style.display="none";return;}
   box.style.display="";
@@ -1259,6 +1370,7 @@ function renderRevPool(){
   // R378: 7 列表头, 与 revRow 列定义一致(浅灰底小字标注每列语义)
   var phdrHtml='<div class="phdr"><span>标的</span><span>距历史高</span><span>现价</span><span>底线·止损参考</span><span>60日均额</span><span>底背驰触发</span><span>距背低点</span></div>';
   box.innerHTML='<div class="phead"><h2>🧭 逆向观察池</h2>'+
+    (nFolded?'<span class="fold-badge" title="★ R447 本池已放开 ETF。一个指数常有十几家公司各发一只 ETF 跟踪 ⇒ 信号天然重复计数 (实测本池候选 15 只里 10 只是同一个「科创人工智能」指数)。为免刷屏, 同一指数只列 1 只 —— 保留的是**当前排序下最优的那只**(不是固定某只), 其余 '+nFolded+' 只折叠。判定口径: 60 日日收益相关系数 ≥0.99 (实测同指数组内 0.994~0.999、跨赛道最高仅 0.819, 余量极大); 名称不可靠(「科创AIETF」与「科创人工智能ETF」名称不同、实为同一指数); 宁漏不误并。⚠️ 已知假阴性: sz159527 与 sz159739 实为**同一指数**(中证云计算与大数据主题 930851, 广发官方申赎清单「拟合指数代码: 930851」)但 60 日相关仅 0.9800 ⇒ 未并组; 之所以不降阈值, 是因为 0.98 档同时混着**不同指数**的近似产品(6 只「自由现金流/全指现金流/现金流」两两仅 0.9175~0.9886 却属不同指数), 降阈值必误并 ⇒ 0.99 是有意的安全侧, 根治须引入官方拟合指数代码。悬停任意带「同指数 ×N」徽章的行可见完整成员清单。'+twinMetaLine()+'">同指数已折叠 '+nFolded+' 只</span>':'')+
     (collapsed&&nEli>0?'<span class="elite-badge" title="高胜率精选=底部刚启(距底≤3%)+60日均额≥1亿+结构自洽(非低自洽/次新, 缠论样本足) · 行内红字「月弱」标=月线MACD绿柱加长(下跌中继, 双周期键沉同档尾) · 行尾色点=确认度(深绿双/浅绿单/灰无) — 均只作名次键不作门槛 · R442: 其中「盘中已破」者(击穿背驰低点=一买已废)已全局沉底并单独分组, 不参与顺序竞争, 也不给 🎯">🏆 高胜率精选 '+nEli+(nEliBk?'<span style="color:#c92a2a"> · 含'+nEliBk+'只已破</span>':'')+'</span>':'')+
     '<div class="chips">'+
       '<span class="chip'+chipOn("pick")+'" onclick="setRevMode(\'pick\')" title="实操纪律复合排序: ⓪盘中已破(击穿背驰低点=一买已废)全局沉底并单独分组(不剔除, 本池按收盘价剔票) ①底部刚启(距底≤3%)优先 ②月线MACD双周期(红柱/绿缩在前, 绿加长「月弱」沉同档尾 — 大方向先于细节) ③确认度(双/单/无, 名次键不作门槛) ④60日均额≥1亿稳健(≥5000万次之) ⑤跌得最透优先 — 月弱标=月线下跌中继, 行尾色点=确认度">🌟 实操优选</span>'+
@@ -1954,12 +2066,20 @@ function showStk(sym){
   // R303: 返回按钮视觉完全一致(胶囊样式 + 文案「← 返回」), 行为 gotoPrev() 按 prevStkSrc 分发回 sigrad / home
   var titleHtml='<div class="subcrumb">'+'<a class="subcrumb-back" href="javascript:gotoPrev()" title="返回上一页">← 返回</a>'+
     ' <span class="arr">›</span> '+(grp?'<a href="javascript:pickIndFromStk(\''+esc(grp)+'\')">'+esc(grp)+'</a> <span class="arr">›</span> ':'')+'<span style="color:var(--ink)">'+esc(u.name)+'</span></div>';
-  titleHtml+='<div class="big-title"><h2>'+esc(u.name)+leadTag+'</h2><span class="cd">'+esc(sym)+' · '+esc(u.code)+' · '+esc(u.type)+' · '+esc(grp||"-")+'</span></div>';
+  /* R447: ETF 类型标 + 同指数折叠标 —— 详情页也披露, 否则用户从池子点进来后看不到"这只是若干同指数产品中的一只" */
+  var etfTitleTag=(u.type==="ETF")?'<span class="etag" title="场内 ETF(一篮子成分股): 无个股暴雷/退市风险, 但仍有指数系统性风险">ETF</span>':'';
+  var twTitleTag=(s.etf_gn>1)?'<span class="twtag" title="'+esc(twinTip({sym:sym}))+'">同指数 ×'+s.etf_gn+'</span>':'';
+  titleHtml+='<div class="big-title"><h2>'+esc(u.name)+leadTag+etfTitleTag+twTitleTag+'</h2><span class="cd">'+esc(sym)+' · '+esc(u.code)+' · '+esc(u.type)+' · '+esc(grp||"-")+'</span></div>';
   titleHtml+='<div class="metric-strip">'+
     '<span>现价 <b class="'+(s.chg1d>0?"up":(s.chg1d<0?"down":""))+'">'+(s.close!=null?s.close:"-")+'</b>'+pct(s.chg1d,2)+'</span>'+
     '<span>主力净流入 <b class="'+ffCls(_uff.net)+'">'+ffTxt(_uff.net)+'</b>'+( _uff.pct!=null?'<span class="'+ffCls(_uff.pct)+'">'+(_uff.pct>0?"+":"")+_uff.pct+'%</span>':'')+'</span>'+
     '<span>场景 <b>'+esc(scen||"-")+'</b></span>'+
     '<span>趋势 <b>'+esc(s.trend||"-")+'</b></span>'+
+    /* R447: 多周期动量 + 可比组内相对强度 —— 均为**纯描述性上下文**, 详情页就地给数值(不依赖悬停)。
+       刻意不给「按动量排序」入口, 也不并入任何门槛/名次键: R443 五年回测证明看涨类无可检测超额,
+       动量只回答"现在处在什么位置", 不回答"该不该买"。 */
+    ((s.mom5!=null||s.mom20!=null||s.mom60!=null)?'<span title="近 N 个交易日的累计涨幅(前复权收盘价)。三条并列看方向一致性: 5日与60日同向=趋势延续, 反向=短期反转/回调。纯描述, 不含预测。">多周期动量 <b class="'+mvCls(s.mom5)+'">5日'+mvTxt(s.mom5)+'</b><span class="dsep">·</span><b class="'+mvCls(s.mom20)+'">20日'+mvTxt(s.mom20)+'</b><span class="dsep">·</span><b class="'+mvCls(s.mom60)+'">60日'+mvTxt(s.mom60)+'</b></span>':'')+
+    ((s.rsind!=null)?'<span title="'+esc(rsTip(s,u))+'">'+(u.type==="ETF"?"ETF池内":"行业内")+'相对强度 <b>'+s.rsind+'%</b><span class="muted">('+(u.type==="ETF"?"全 ETF 池":"同申万一级")+' '+(s.rsn||0)+' 只中)</span></span>':'')+
     '<span>笔/中枢 <b>'+(s.bi_n||0)+'/'+(s.zs_n||0)+'</b></span>'+
     (_bbd.end_price!=null?'<span>背驰低点 <b class="'+(_bbd.broken?"down":"")+'">'+_bbd.end_price+'</b>'+_bkBadge(_bbd)+'</span>':'')+
     '<span>自洽 <b>'+(s.agree!=null?(s.agree*100).toFixed(0)+"%":"-")+'</b></span>'+

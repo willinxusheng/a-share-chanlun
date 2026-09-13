@@ -76,6 +76,29 @@ SIG_LB_Z = 1.96                # Wilson 下界置信水平(95% 双侧)
 DENS_LB_STRONG = 2.5           # 「显著集中」门槛(百分点): 色条 + regime 共用同一判据
 SIG_ABS_MIN = 2                # 集中度绝对下限(1 只不算"集中", 与旧口径兼容)
 IND_POS_WIN = 250              # 行业位置窗口(根, ≈近一年): 回撤/价格分位统一用此窗口
+# R447: 个股/ETF 层补「低吸/趋势地基」—— 与行业同源实现(_mom/_rs_pctile 直接复用),
+# 但**口径必须换**: 行业(32 个板块)用「同批板块横截面分位」是因其天然可比; 个股若照搬
+# 「全市场 5016 只横截面」会被 size/风格主导(微盘 20 日涨 30% 是常态, 大盘涨 10% 就顶尖)
+# —— 正是 R443 踩过的坑(沪深300 基准把 size 算进超额 +2.25pp vs 横截面 +0.58pp)。
+# 故个股/北交一律用 **同行业内分位**, ETF 单独用 **ETF 池**(ETF 的 ind 恒为 '-', 无申万归属)。
+# 只落**描述性**字段(动量 + 分位), **不加**「按动量排序」的 tab —— 个股按 mom60 降序 =
+# 追涨视角, 与 revpool 的逆向哲学方向相反。四象限也不做: 单票 5 日波动绝大部分是噪声
+# (行业是成分平均, 天然平滑), 且标签会暗示预测力, 与 R443「底背驰无可检测超额」自相矛盾。
+MOM_WINS = (5, 20, 60)         # 多周期动量窗口(根)
+IND_RS_MIN = 5                 # 可比组内相对强度的最小成员数(不足则不落分位, 防 2~4 只的假分位)
+# R447: ETF **同指数去重** —— ETF 板块 11 只顶信号里 6 只是「自由现金流」系列;
+# revpool 候选 15 只里 10 只是「科创人工智能」同一指数 ⇒ 一屏刷屏、真标的被淹没。
+# 判定用 **60 日日收益相关系数** —— 名称不可靠: "科创AIETF银华" 与 "科创人工智能ETF"
+# 名称不同, 实测相关 0.995~0.998 = 同一指数; 涨跌方向指纹法实测 17 只**无一相同**
+# (对跟踪误差过于敏感) ⇒ 不可用。
+# 阈值实测标定(17 只真实 ETF, 数据截至 2026-09-11):
+#   同指数组内(科创人工智能 ×10) 0.994~0.999; 跨赛道(对宽基/券商/黄金/纳指/货币) -0.397~0.819
+#   ⇒ **0.99 余量极大, 零误合并风险**。
+# 宁漏不误并: 实测两只「云计算ETF」(0.980) **不合并** —— 无法确证同指数, 宁可留着。
+ETF_TWIN_WIN = 60              # 同指数判定窗口(日收益根数)
+ETF_TWIN_CORR = 0.99           # 同指数判定阈值(正向相关下限; 反向ETF天然负相关, 不得并组)
+ETF_TWIN_PREF = 1.5            # 预筛: 窗口累计收益差上限(百分点) —— 免 O(n²) 全量两两算相关
+ETF_TWIN_MINBARS = 61          # 参与判定的最少 K 线根数
 # R270: 新浪 datalen 实测支持 1500(2020-07 起), 扩至与腾讯qfq窗口(2021至今)同量级,
 # 避免新浪兜底时缠论结构起点(原800根≈3.2年自2023-05)与腾讯不一致导致的笔/中枢划分差异。
 SINA_LEN = 1500                # 新浪兜底K线根数(~6年, 2021至今全覆盖)
@@ -1407,6 +1430,99 @@ def _rot_quadrant(rs20, accel):
     return "落后加速"
 
 
+def _rets(ks, win=ETF_TWIN_WIN):
+    """最近 win 日简单收益率序列(小数); 不足 win+1 根 -> None。
+
+    R447: 供 ETF 同指数判定。用**日收益**而非价格: 价格序列非平稳(共同趋势会虚高相关),
+    收益序列才能反映"同一篮子"的同步性。"""
+    if len(ks) < win + 1:
+        return None
+    seg = ks[-(win + 1):]
+    out = []
+    for i in range(1, len(seg)):
+        a = seg[i - 1]["close"]
+        b = seg[i]["close"]
+        if not a:
+            return None
+        out.append(b / a - 1.0)
+    return out
+
+
+def _corr(x, y):
+    """皮尔逊相关系数; 长度不符或任一序列无波动 -> None。"""
+    n = len(x)
+    if n < 5 or n != len(y):
+        return None
+    mx = sum(x) / n
+    my = sum(y) / n
+    sxy = sxx = syy = 0.0
+    for a, b in zip(x, y):
+        da = a - mx
+        db = b - my
+        sxy += da * db
+        sxx += da * da
+        syy += db * db
+    if sxx <= 0 or syy <= 0:
+        return None
+    return sxy / math.sqrt(sxx * syy)
+
+
+def _etf_twin_groups(rets_map, mcap_map):
+    """R447: ETF 同指数分组(union-find)。返回 {sym: (代表sym, 组内只数)}, **仅多成员组**落键。
+
+    两层筛选:
+      预筛 —— 窗口累计收益差 > ETF_TWIN_PREF(1.5pp) 必非同指数(跟踪误差不会累积到 1.5pp),
+              直接跳过。**先按累计收益排序再比**, 超出即 break ⇒ 无效比较从 O(n²) 降到
+              O(n·k)(k=落在窗口内的平均只数; 随机收益实测 0.69s vs 全量两两)。
+      确认 —— corr >= ETF_TWIN_CORR(0.99, **正向**; 反向ETF天然负相关, 绝不能并组)。
+    代表 —— 组内 mcap 最大者(流动性最优, 适合实操); mcap 缺失时按 sym 兜底保证确定性。
+    阈值标定与「宁漏不误并」原则见常量块注释。
+    ⚠️ 性能实测(1282 只 ETF): 常规 0.69s; **最坏**「全部同指数」8.2s(预筛失效、需全量算相关),
+       相对首扫 20~60min 可忽略; 已在主流程打印耗时便于回归监视。"""
+    syms = [s for s in rets_map if rets_map.get(s) and len(rets_map[s]) >= 5]
+    cum = {}
+    for s in syms:
+        c = 1.0
+        for r in rets_map[s]:
+            c *= (1.0 + r)
+        cum[s] = (c - 1.0) * 100.0
+    syms.sort(key=lambda s: (cum[s], s))       # 升序: 内层可提前 break
+    parent = {s: s for s in syms}
+
+    def find(a):
+        while parent[a] != a:
+            parent[a] = parent[parent[a]]
+            a = parent[a]
+        return a
+
+    ns = len(syms)
+    for i in range(ns):
+        a = syms[i]
+        for j in range(i + 1, ns):
+            b = syms[j]
+            if cum[b] - cum[a] > ETF_TWIN_PREF:
+                break                          # 已排序 ⇒ 其后只会更大
+            c = _corr(rets_map[a], rets_map[b])
+            if c is None or c < ETF_TWIN_CORR:
+                continue
+            # ⚠️ 必须在循环内取根: a 可能在别的 i 迭代里作为 b 被并入别组,
+            #    外层缓存的根会失效(虽不致错, 但会让树退化成链)。
+            ra, rb = find(a), find(b)
+            if ra != rb:
+                parent[rb] = ra
+    grp = {}
+    for s in syms:
+        grp.setdefault(find(s), []).append(s)
+    out = {}
+    for _root, members in grp.items():
+        if len(members) < 2:
+            continue
+        rep = max(members, key=lambda x: (mcap_map.get(x) or 0, x))
+        for s in members:
+            out[s] = (rep, len(members))
+    return out
+
+
 def _regime_of(ist, n_top, n_bot, rsi14, lb_top, lb_bot):
     """行业走势状态标签: 成分顶/底背驰计数 + 板块自身位置(收盘 vs 末中枢 + RSI)。
 
@@ -1666,6 +1782,80 @@ def main():
                         "sina": _mb_sina, "short": _mb_short, "net": _mb_net,
                         "down": _mb_down, "warn": _mb_warn}
 
+    # --- R447: 全池「低吸/趋势地基」—— 多周期动量 + 可比组内相对强度 + ETF 同指数分组 ---
+    #   `_mom`/`_rs_pctile` 与行业**同源同实现**(零复刻); 基准换为「同行业 / ETF池」(见常量块)。
+    #   mom 直接落 st(与 st.close 等同级), 随 universe/signals 两处同引用带走。
+    _t_rs = time.time()
+    for sym, st in sts.items():
+        _g = got.get(sym)
+        if not _g:
+            continue
+        for _w in MOM_WINS:
+            st["mom%d" % _w] = _mom(_g[0], _w)
+    # 可比组划分: 个股/北交按申万一级(ind 为 '-' 的 14 只弃牌不入组); ETF 单独一池
+    _rs_grp = {}
+    for sym in sts:
+        _u = uni.get(sym)
+        if not _u:
+            continue
+        if _u.get("type") == "ETF":
+            _rs_grp.setdefault(ETF_KEY, []).append(sym)
+        elif _u.get("ind") not in ("", "-"):
+            _rs_grp.setdefault(_u["ind"], []).append(sym)
+    _n_rs = 0
+    for _g, _syms in _rs_grp.items():
+        if len(_syms) < IND_RS_MIN:
+            continue
+        _pct = _rs_pctile([sts[s].get("mom20") for s in _syms])
+        _nn = sum(1 for s in _syms if sts[s].get("mom20") is not None)
+        for _s, _p in zip(_syms, _pct):
+            if _p is not None:
+                sts[_s]["rsind"] = _p
+                sts[_s]["rsn"] = _nn
+                _n_rs += 1
+    # ETF 同指数分组(仅多成员组落 st.etf_grp/etf_gn, 单只不落 ⇒ 前端只需查键存在)
+    _etf_rets = {}
+    _mcap_of = {}
+    for sym in sts:
+        _u = uni.get(sym)
+        if not _u or _u.get("type") != "ETF":
+            continue
+        _g = got.get(sym)
+        if not _g or len(_g[0]) < ETF_TWIN_MINBARS:
+            continue
+        _r = _rets(_g[0])
+        if _r:
+            _etf_rets[sym] = _r
+            _mcap_of[sym] = _u.get("mcap")
+    _twins = _etf_twin_groups(_etf_rets, _mcap_of)
+    for _s, (_rep, _n) in _twins.items():
+        sts[_s]["etf_grp"] = _rep
+        sts[_s]["etf_gn"] = _n
+    print("  全池地基: 动量 %d 票 / 可比组分位 %d 票(%d 组) / ETF 同指数合并 %d 只"
+          "(涉 %d 组) %.0fs"
+          % (sum(1 for s in sts if sts[s].get("mom20") is not None), _n_rs, len(_rs_grp),
+             len(_twins), len(set(v[0] for v in _twins.values())), time.time() - _t_rs),
+          flush=True)
+    # R447: ETF 同指数去重的**能力声明** —— 前端 revpool 放开 ETF 以此开关为条件。
+    # 静态站 HTML 与 radar.json 是**独立部署**的: 新 HTML 上线后、下一次 CI 扫描前, 线上仍是
+    # 旧 JSON(无 st.etf_grp)。此窗口内若照常放开 ETF, revpool 会冒出 15 只候选、其中 10 只是
+    # 同一「科创人工智能」指数而**无法折叠**(ETF 在 universe 里没有价格序列, 前端算不出相关性)。
+    # 故用能力开关而非版本号字符串比较: 有 etf_twin 键 = 本轮确实做过去重, 才允许放开。
+    # ⚠️ _twins 是 {每个成员: (rep, n)} —— 同一组有 n 个成员就有 n 条记录。组数与可折叠数
+    #    必须**按组去重**后再算: 直接 sum(n-1 for v in _twins.values()) 会把每组算 n 次
+    #    (实测 1 组 5 只 ⇒ 错得 20, 正确 4)。此坑由产物核对(ck_artifact)自洽项抓出。
+    _grp_n = {}
+    for _rep, _n in _twins.values():
+        _grp_n[_rep] = _n
+    etf_twin_meta = {
+        "win": ETF_TWIN_WIN, "corr": ETF_TWIN_CORR,
+        "pref": ETF_TWIN_PREF, "minbars": ETF_TWIN_MINBARS,
+        "judged": len(_etf_rets),
+        "groups": len(_grp_n),
+        "members": len(_twins),
+        "folded": sum(_n - 1 for _n in _grp_n.values()),
+    }
+
     # --- 门禁 + 信号 + 行业聚合(同时攒成分) ---
     signals, universe, ind_members, ind_total, ind_qual = [], {}, {}, {}, {}
     for sym, st in sts.items():
@@ -1890,7 +2080,40 @@ def main():
         "title": "A股全市场缠论雷达",
         "asof": asof, "build_time": datetime.datetime.now(
             datetime.timezone(datetime.timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S"),
-        "version": "P3b-r18",   # r18=R445: 行业视图口径纠错 + 低吸/趋势地基补齐, 四处同改:
+        "version": "P3b-r19",   # r19=R447: 行业地基下沉到个股/ETF 层 —— 三件事, 口径全部与行业**同源
+                                #   同实现**(_mom/_rs_pctile 直接复用, 零复刻):
+                                #   ①**多周期动量** mom5/mom20/mom60 落全池 st(universe 6630 只
+                                #     此前**零价格序列** ⇒ 前端无法兜底复算, 必须后端出字段)。
+                                #   ②**可比组内相对强度** rsind/rsn —— 基准**不是**全市场横截面:
+                                #     个股照搬全市场会被 size/风格主导(微盘 20 日涨 30% 是常态),
+                                #     正是 R443 踩过的坑(沪深300 基准 +2.25pp vs 横截面 +0.58pp);
+                                #     故个股/北交用**同申万一级内分位**(31 组), ETF 单独一池
+                                #     (ETF 的 ind 恒为 '-')。组内 <IND_RS_MIN(5) 只不落分位。
+                                #   ③**ETF 同指数去重** etf_grp/etf_gn —— ETF板块 11 只顶信号里 6 只
+                                #     是「自由现金流」系列、revpool 候选 15 只里 10 只是「科创人工
+                                #     智能」同一指数 ⇒ 一屏刷屏、真标的被淹。判定用 60 日日收益
+                                #     相关系数 >=0.99: 名称**不可靠**("科创AIETF银华" 与 "科创人工
+                                #     智能ETF" 名称不同、实测相关 0.995~0.998 同指数); 涨跌方向
+                                #     指纹法实测 17 只**无一相同**(对跟踪误差过敏感)已弃用。
+                                #     阈值标定(17 只真实 ETF 09-11): 同指数组内 0.994~0.999、
+                                #     跨赛道 -0.397~0.819 ⇒ 余量极大零误合并。
+                                #     ⚠️ **已知假阴性(实测)**: sz159527 与 sz159739 **同跟踪
+                                #     中证云计算与大数据主题指数 930851**(广发官方申赎清单「拟合
+                                #     指数代码: 930851」), 但 60 日相关仅 **0.9800** ⇒ 不合并。
+                                #     相关法在同指数异基金上存在下限(申赎/现金替代/仓位偏离
+                                #     会吃掉相关性), 而 0.98 档同时混着**不同指数**的近似产品
+                                #     (6 只「自由现金流/全指现金流/现金流」两两 0.9175~0.9886 却是
+                                #     不同指数) ⇒ 降阈值必误并。**根治须引入官方拟合指数代码**,
+                                #     不能靠相关法(记为待议)。0.99 是有意的安全侧。
+                                #   ④**能力开关 meta.etf_twin** —— 前端 revpool 放开 ETF 以此为
+                                #     条件。HTML 与 radar.json **独立部署**: 新 HTML 上线到下次
+                                #     CI 扫描之间线上仍是旧 JSON(无 etf_grp), 此窗口若照常放开会
+                                #     冒出 10 只同指数 ETF 且**无法折叠**(universe 无价格序列,
+                                #     前端算不出相关) ⇒ 有该键才放开。
+                                #   ⚠️ 刻意**不加**「按动量排序」tab(个股按 mom60 降序 = 追涨视角,
+                                #     与 revpool 逆向哲学方向相反), 也**不做**个股四象限(单票 5 日
+                                #     波动绝大部分是噪声, 且会暗示预测力与 R443 自相矛盾)。
+                                # r18=R445: 行业视图口径纠错 + 低吸/趋势地基补齐, 四处同改:
                                 #   ①**信号集中度**改规模可比口径 —— n_sig 绝对数(板块成分
                                 #     数 16~386 差 24 倍)换成 95% Wilson 置信下界(新增
                                 #     sig_top_lb/sig_bot_lb/dens_top/dens_bot), 判据/排序/
@@ -1957,6 +2180,11 @@ def main():
                                                # {tried,ok,tx,sina,short,net,down}; 与 m_macd(仅底背驰
                                                # 个股=revpool 排序键)分开, 免污染前端 warn 文案口径
         "mkt_last": _mkt_last or "",           # R272: 市场末交易日锚(新浪探测; 空=探测失败回落窗口表)
+        "etf_twin": etf_twin_meta,             # R447: ETF 同指数去重的**能力声明**(win/corr/pref/
+                                               # minbars/judged/groups/folded)。前端 revpool 放开
+                                               # ETF 以此为条件 —— HTML 与 radar.json 独立部署,
+                                               # 旧 JSON(无 etf_grp)窗口内不能放开(会冒出 10 只
+                                               # 同指数 ETF 且无法折叠)。有该键 = 本轮确实去重过。
         "sanit_drop_bars": _sanit_drop_bars,   # R275: 净化丢弃 bar 数(坏根量化诊断; 正常≈0, 激增=源数据异常)
         "ind_cnt": ind_cnt,
         "excl_st": excl.get("st", 0),
