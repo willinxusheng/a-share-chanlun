@@ -414,9 +414,18 @@ h1{font-size:21px;font-weight:700;letter-spacing:.4px;line-height:1.3}   /* R323
    且月红+顶背驰=「可能只是回调而非转势」恰是风险板块最需要的一档信息 ⇒ sigrad 补轻量徽章(revpool 保持原设计)。 */
 .sigrad .srow .mtag.mr{color:#087f5b;background:rgba(8,127,91,.07);border-color:rgba(8,127,91,.42)}
 .sigrad .srow .mtag.mnull{color:#64748b;background:rgba(100,116,139,.06);border:1px dashed rgba(100,116,139,.45)}
-/* R387: 背离强度(area_ratio MACD面积背离比, 越小越极端可靠 — 绿<0.5强/橙0.5-0.8中/红≥0.8弱) + 走势状态(右侧涨势回调/左侧盘整磨底, 仅标签不入排序键) */
+/* R387+R452: 背离强度(area_ratio MACD面积背离比, 越小越极端可靠 — 绿<0.5强/橙0.5-0.8中/红≥0.8弱)
+   + 走势状态(右侧涨势回调/左侧盘整磨底, 仅标签不入排序键)
+   ★ R452: area_ratio<=0 是**退化情形**, 不是"最强背离" —— 该笔区间内此方向无 MACD 柱(面积=0),
+   使 find_beichi 的 `a_cur < a_prev*0.85` 构造上**恒成立** ⇒ 该背驰由结构条件(新低/新高)独立触发,
+   不含力度证据。原渲染按 `arv<0.5 → 强背离/力度极端` 出**绿色 a1 标**, 把"无信息"读成"最优";
+   而排序层(scan_radar.py 与 byFresh 均 `area>0 else 999`)却把它**沉底** ⇒ 同字段两处相反解读。
+   实测: bottom_bc 38/278=13.7%、top_bc 28/1635=1.7%。R452 统一为中性灰标「面积退化」, 与沉底同口径。 */
 .revpool .prow .artag{font-weight:700;font-size:9.5px;white-space:nowrap}
 .revpool .prow .artag.a1{color:#0e7d4a}.revpool .prow .artag.a2{color:#b45309}.revpool .prow .artag.a3{color:#c92a2a}
+.revpool .prow .artag.adeg{color:#64748b}
+/* R452: 信号雷达行的「面积退化」标 —— .artag 的被限定在 .revpool 内, 此处需独立类 */
+.area-deg{color:#64748b;font-weight:700;font-size:9.5px;white-space:nowrap}
 .revpool .prow .trtag{display:inline-block;font-size:9.5px;font-weight:700;border-radius:3px;padding:0 4px;margin-right:4px;line-height:1.6;white-space:nowrap;vertical-align:1px;letter-spacing:.2px}
 .revpool .prow .trtag.rt{color:#0e7d4a;background:rgba(24,160,88,.10)}
 .revpool .prow .trtag.lt{color:#b45309;background:rgba(232,160,16,.10)}
@@ -903,7 +912,7 @@ function sigRow(s,opt){   // R380: opt.sub=true = 非低吸区灰显行(破位/�
   var spk=(s.spark&&s.spark.data)?s.spark.data:s.spark;
   var nm=(u.name||s.name||s.sym);
   var sigTip=(t?"顶背驰·风险":"底背驰·机会")+" | "+nm+" "+(s.sym||"")+
-    "\n"+(s.bc_date||"")+"触发 · 距今"+(fr==null?"?":(fr===0?"当日":fr+"天"))+"\n类型 "+(s.bc_type||"-")+" · 强度"+(s.strong||0)+"/2"+(s.vol?" · 量缩确认":"")+" · 面积比"+(s.area!=null?s.area:"-")+   // R320: fresh=0 →"距今当日"(原"距今0天"误导)
+    "\n"+(s.bc_date||"")+"触发 · 距今"+(fr==null?"?":(fr===0?"当日":fr+"天"))+"\n类型 "+(s.bc_type||"-")+" · 强度"+(s.strong||0)+"/2"+(s.vol?" · 量缩确认":"")+(s.area==null?" · 面积比 -":" · "+(s.area>0?"面积比 "+s.area:"面积 0(退化: 该笔区间内此方向无 MACD 柱 ⇒ 判据「本笔面积<前笔×0.85」构造上恒成立, 不含力度证据)"))+   // R320: fresh=0 →"距今当日"(原"距今0天"误导) · R452: area=0 显式标退化(原静默) 
     "\n所属 "+(indName||"-")+(u.lead?" · 行业龙头":"")+
     momRsTip(st,u)+   // R447: 多周期动量 + 行业内相对强度(纯描述)
     (dev!=null?"\n现价较信号位: "+devTxt+(devTip?" ("+devTip+")":""):"")+
@@ -930,7 +939,7 @@ function sigRow(s,opt){   // R380: opt.sub=true = 非低吸区灰显行(破位/�
       :'<span class="mtag mnull" title="月线MACD 本次未取得数据 —— 腾讯 qfq 月K 与 新浪日线聚合两路均失败或完全无月K, 属真取不到。该信号月线档中性, 名次未按月线校正, 「底部刚启」非全维度结论">月线—</span>';}
   return '<div class="'+rowCls+'" title="'+esc(sigTip)+'" onclick="pickSigRad(\''+s.sym+'\')">'+
     '<div><div class="nm">'+(t?"⚠️ ":((opt.sub)?"🔍 ":"✅ "))+esc(nm)+lead+ffMini+etfTag+twTag+'</div><div class="sub">'+esc(s.sym)+" · "+esc(indName)+'</div></div>'+   // R447: +etfTag/twTag
-    '<div class="st">'+(t?'<b style="color:#c92a2a">顶背驰</b>':'<b style="color:#087f5b">底背驰</b>')+'<span>强'+(s.strong||0)+'/'+(s.vol?"缩":"")+((s.area!=null&&s.area>0)?" 面"+s.area:"")+'</span></div>'+
+    '<div class="st">'+(t?'<b style="color:#c92a2a">顶背驰</b>':'<b style="color:#087f5b">底背驰</b>')+'<span>强'+(s.strong||0)+'/'+(s.vol?"缩":"")+(s.area==null?"":(s.area>0?" 面"+s.area:' <span class="area-deg" title="面积 0 = 退化: 该背驰笔区间内此方向无 MACD 柱 ⇒ 判据「本笔面积 &lt; 前笔×0.85」构造上恒成立, 不含力度证据 —— 别读成「最强背离」">面积退化</span>'))+'</span></div>'+
     '<div class="st">'+(fr==null?"-":(fr===0?"当日":fr+"天前"))+frTag+'</div>'+
     '<div class="right">'+
       '<div class="dev '+devCls+'" title="'+esc(devTip||sigTip)+'">'+(dev!=null?devTxt:"-")+'<small>'+bkTag+devSub+'</small></div>'+
@@ -1384,10 +1393,20 @@ function revRow(c){
   // -- R387: 背离强度(area_ratio MACD面积背离比: 越小=下跌动能衰竭越彻底, 底越可靠) + 走势状态(trend: 右/左侧标签, 不入排序键)
   var arv=+(bb.area_ratio), arTag="", arWord="", arTip="", arTipL="";
   if(bb.area_ratio!=null&&bb.area_ratio!==""&&!isNaN(arv)){
-    arWord=arv<0.5?"强背离":arv<0.8?"中背离":"弱背离";
-    arTip=arv<0.5?"力度极端, 反弹可靠性高":arv<0.8?"力度中等":"力度不足, 反弹易失败";
-    arTag=' <span class="artag '+(arv<0.5?"a1":arv<0.8?"a2":"a3")+'" title="底背驰MACD面积背离比 '+arv.toFixed(2)+' ('+arWord+', '+arTip+') — 越小=下杀动能衰竭越彻底">背离'+arv.toFixed(2)+'</span>';
-    arTipL="\n背驰力度: MACD面积背离比 "+arv.toFixed(2)+" ("+arWord+" — "+arTip+")";
+    if(arv<=0){
+      /* R452: area_ratio=0 是**退化**不是"最强背离" —— 该笔区间内此方向无 MACD 柱(面积=0),
+         使 find_beichi 的 `a_cur < a_prev*0.85` 构造上恒成立 ⇒ 只由结构条件(价格新低)触发,
+         不含力度证据。原渲染落进 `arv<0.5` ⇒ 绿色 a1「强背离·力度极端, 反弹可靠性高」= 把
+         "无信息"读成"最优"; 而排序层(`area>0 else 999`)却沉底 ⇒ 同字段两处相反解读。
+         实测 bottom_bc 38/278=13.7%。今统一为中性灰标, 与沉底同口径。 */
+      arTag=' <span class="artag adeg" title="底背驰MACD面积背离比 0.00 —— 该背驰笔区间内**无负向 MACD 柱**(面积=0), 使判据「本笔面积 &lt; 前笔×0.85」构造上恒成立 ⇒ 这个背驰只由结构条件(价格创新低)触发, **不含力度证据**。看板排序已按「无有效面积」沉底处理(与 scan_radar.py 同源), 故本标为中性提示: 既非强也非弱, 请结合结构(笔/中枢)与月线档自行判断。">面积退化</span>';
+      arTipL="\n背驰力度: MACD面积 0(退化 — 本笔无负向柱, 面积判据恒成立, 不含力度证据)";
+    }else{
+      arWord=arv<0.5?"强背离":arv<0.8?"中背离":"弱背离";
+      arTip=arv<0.5?"力度极端, 反弹可靠性高":arv<0.8?"力度中等":"力度不足, 反弹易失败";
+      arTag=' <span class="artag '+(arv<0.5?"a1":arv<0.8?"a2":"a3")+'" title="底背驰MACD面积背离比 '+arv.toFixed(2)+' ('+arWord+', '+arTip+') — 越小=下杀动能衰竭越彻底">背离'+arv.toFixed(2)+'</span>';
+      arTipL="\n背驰力度: MACD面积背离比 "+arv.toFixed(2)+" ("+arWord+" — "+arTip+")";
+    }
   }
   var tr=st.trend||"", trTag="", trTipL="";
   if(tr.indexOf("上涨")>=0){trTag='<span class="trtag rt" title="走势状态: '+esc(tr)+' — 涨势中回调形成的底背驰 = 右侧买点(顺势, 可靠性高)">右侧·涨势</span>';trTipL="\n走势状态: "+esc(tr)+" — 涨势回调背驰(右侧买点)";}
@@ -2280,11 +2299,10 @@ function showStk(sym){
           对照 dev>0 的 sh601668 正常出 5 条、sz002701 出 3 条)。
          底信号 32 只里 16 只(50%) 处于此状态 ⇒ 一半详情页的文案都在说谎。 */
       +'<br><span style="opacity:.85;font-size:11.5px">'+((s.close==null||+s.close<=+_bbd.end_price)
-        /* R451: 不能说"不画任何参考线" —— 已破票若**同时**有顶背驰结构, topRefOf 仍会画出
-           「反抽减仓参考」。实测 77 只走本分支的票里有 10 只(珠海冠宇/顺丰控股/东方雨虹/海天…
-           等)图上仍有 1 条线, 故文案收敛到"该买点的三条线已撤下", 并按 topRefOf 实况补注。 */
-        ? '图上<b>该买点的三条参考线（止损 / 入场参考 / 止盈参考）已全部撤下</b>：现价 <b>'+s.close+'</b> 已低于背驰低点 <b>'+_bbd.end_price+'</b>，结构失效 —— 此时再按失效结构画线指引操作，比不画更危险，故本页只保留结构标注（笔 / 中枢 / 背驰点）。须等<b>新的底分型 + 新背驰</b>重新构筑底部结构后再评估。'
-          +((typeof topRefOf==="function"&&topRefOf(u))?'<br><b>注意</b>：该票另有<b>顶背驰</b>结构，图上仍会显示它的「反抽减仓参考」线 —— 那是另一套结构，与本次底背驰失效无关，勿与止损位混看。':'')
+        /* R452: 图上行为已从 R450/R451 的"一条线都不画"改为"只画一条灰色点线标出失效位",
+           文案必须同步 —— 同一件事在判据/图形/文案/徽章四处只能有一种说法。 */
+        ? '图上<b>该买点的三条行动参考线（止损 / 入场参考 / 止盈参考）已全部撤下</b> —— 现价 <b>'+s.close+'</b> 已低于背驰低点 <b>'+_bbd.end_price+'</b>，按失效结构画线指引操作比不画更危险。图上仅保留一条<b>灰色点线「背驰低点·已失效 '+_bbd.end_price+'」</b>，作用是把失效位标出来供你判断<b>反抽到哪算结构修复</b>，<b>它不是支撑位、更不是入场位</b>。须等<b>新的底分型 + 新背驰</b>重新构筑底部结构后再评估。'
+          +((typeof topRefOf==="function"&&topRefOf(u))?'<br><b>注意</b>：该票另有<b>顶背驰</b>结构，图上仍会显示它的「反抽减仓参考」线 —— 那是另一套结构，与本次底背驰失效无关，勿与失效底线混看。':'')
         : '图上「底线」仍按原背驰低点画（结构参考位），但<b>已不可当有效支撑</b>；止损线按失效口径标红。')
       /* R451: 「在不在池」两类票相反 —— 收盘也破的票 revCand 已剔除, 仅盘中刺穿的才仍在池。
          原句对两类都写"仍在池", 对前者是错的(实测 sz002352 dev=−1.33% 已出局)。 */
@@ -2304,7 +2322,7 @@ function showStk(sym){
       '<br>· 近60日均额 '+(s.avg_amt60!=null?(s.avg_amt60>=1e4?(s.avg_amt60/1e4).toFixed(1)+"亿":s.avg_amt60.toFixed(0)+"万")+"/日":"-")+' · 振幅中位 '+(s.med_amp!=null?s.med_amp+"%":"-")+'<br>· 一字板 '+(s.one_word||0)+'日 · 距高点回撤 '+(s.dd!=null?(s.dd*100).toFixed(1)+"%":"-")+'</div>';
   var stkHtml=banner+
     '<div class="panel"><div class="chart-note"><span class="legend-tag"><i style="background:#e54545"></i>涨</span><span class="legend-tag"><i style="background:#18a058"></i>跌</span><span class="legend-tag"><i style="background:#7f77dd"></i>笔</span><span class="legend-tag"><i style="background:rgba(127,119,221,.25)"></i>中枢</span><span class="legend-tag"><i style="background:#c92a2a"></i>顶背驰(红▼)</span><span class="legend-tag"><i style="background:#087f5b"></i>底背驰(绿▲)</span></div><div id="stkChart" style="width:100%;height:620px"><div class="loading sk">行情加载中…</div></div></div>'+
-    '<div class="chart-note" style="line-height:1.85;text-align:left;color:#475569;margin-top:6px">图上 <b>止损 / 入场参考 / 止盈参考</b> 三条线是<b>结构位</b>（背驰低点 / 现价下方 R/2 / 中枢上沿或 2R），<b>不是经实证优化的离场位</b>。R449 五年回测（292 票 · 73,054 个观察点 · 2022-01~2026-08）：63 条「止盈 × 止损 × 持有期」组合<b>无一条</b>产生可检测超额（最高 +0.07pp，p=0.45；0 条通过 Bonferroni α=0.00079），且<b>无规则持有的平均收益 +2.37% 高于任何组合</b>。原因：收益几乎全部来自头部 5% 的段（贡献 114%），止盈线的本质是砍右尾。<b>读法</b>：当结构参考位用，别当卖点。⚠️ <b>若现价已跌破背驰低点（结构失效），则不再画该买点的止损 / 入场参考 / 止盈参考三条线</b> —— 它们都不会出现，属预期行为，不是加载失败（见上方警示条）；若该票另有顶背驰结构，那套线不受影响、仍会照常显示。</div>'+
+    '<div class="chart-note" style="line-height:1.85;text-align:left;color:#475569;margin-top:6px">图上 <b>止损 / 入场参考 / 止盈参考</b> 三条线是<b>结构位</b>（背驰低点 / 现价下方 R/2 / 中枢上沿或 2R），<b>不是经实证优化的离场位</b>。R449 五年回测（292 票 · 73,054 个观察点 · 2022-01~2026-08）：63 条「止盈 × 止损 × 持有期」组合<b>无一条</b>产生可检测超额（最高 +0.07pp，p=0.45；0 条通过 Bonferroni α=0.00079），且<b>无规则持有的平均收益 +2.37% 高于任何组合</b>。原因：收益几乎全部来自头部 5% 的段（贡献 114%），止盈线的本质是砍右尾。<b>读法</b>：当结构参考位用，别当卖点。<br>⚠️ <b>结构失效时怎么画（R452）</b>：若现价已跌破背驰低点，则<b>撤下该买点的三条行动线</b>（止损 / 入场参考 / 止盈参考），<b>只改画一条灰色点线「背驰低点·已失效」</b> —— 它只把失效位标出来供你判断<b>反抽到哪算结构修复</b>，<b>不是支撑、不是入场位</b>（见上方警示条）；若该票另有顶背驰结构，那套线不受影响、仍会照常显示。<br>⚠️ <b>同价合线（R451/R452）</b>：当两个体系的参考位落在<b>同一个价</b>时（最常见：底背驰的止盈参考 = 顶背驰的反抽位 = 末中枢上沿），图上只画一条，并在标签里用「<b>·亦X</b>」标出<b>被合并那条的来源</b> —— 如「止盈参考·亦中枢上沿」，或「止损·亦中枢下沿」（= 背驰低点与中枢下沿重合，双支撑）。<b>不是漏画</b>。</div>'+
     '<div class="sec-t">结构明细 <span class="cnt">来自扫描快照(截至 '+esc(s.last||"")+')</span></div>'+
     '<div class="panel" style="padding:10px 16px"><div class="chart-sec">'+miniCol+infoCol+'</div></div>'+
     '<div class="foot">行情为浏览器实时拉取(腾讯前复权)；缠论标注按扫描时结构对齐日期。研究参考，不构成投资建议。</div>';
@@ -2675,13 +2693,22 @@ function chanMarkOption(mark,dates,kmin,kmax,klForMatch){
    TP 止盈参考 = 自适应(结构参考位, 非保证到价):
      · 末中枢上沿 zs_last.zg 高于现价且空间>=0.3R → 用 zg(中枢上沿=压力概率位, 反弹到可减仓分批)
      · 否则(已收复中枢/无上方空间) → 现价+2R 盈亏比兜底
-   R = 现价-止损(假设现价附近入场). 红线=止盈参考/蓝线=入场参考/绿线=止损位(虚线), 图例自带数值 */
+   R = 现价-止损(假设现价附近入场). 红线=止盈参考/蓝线=入场参考/绿线=止损位(虚线), 图例自带数值
+   ★ R452 失效口径: close<=end_price 时返回 {dead:true,sl,close}(不再 null) —— 调用方
+     (addSlTpLine)据此**只画一条灰色点线**「背驰低点·已失效」, 不画上述三条行动线。 */
 function slTpOf(u){
   if(!u)return null;
   var st=u.st||{};var bbc=st.bottom_bc;
   if(!bbc||bbc.end_price==null)return null;      // 仅最近底背驰结构存在时画
   var sl=+bbc.end_price, close=(st.close==null?null:+st.close);
-  if(close==null||close<=sl)return null;          // 现价已破背驰低点: 结构已失效, 不误导画线
+  if(close==null)return null;
+  /* R452: 现价已跌破背驰低点 ⇒ 结构失效。原实现在此**直接 return null**(一条线都不画),
+     后果是底信号里 50% 的详情页打开后图上空白, 用户无法区分"程序不画"与"没加载出来"
+     —— 沉默不是诚实, 是信息缺失(用户首次反馈 sz159880 即此: "点进去没有买入价/止盈止损")。
+     今改为返回 **dead 标记**: 图上只画一条**灰色虚线**标出失效位(结构参考 —— 用以判断
+     "反抽到哪算结构修复"), 但**不画**止损/入场/止盈任何**行动指引**线 —— 那才是原设计
+     要避免的"用失效结构指引操作"。 */
+  if(close<=sl)return {dead:true,sl:sl,close:close};
   var R=close-sl;
   var en=close-R/2;                               // R266: 入场参考=现价下方 R/2(次低吸位, 介于 SL 与现价之间)
   var zg=(st.zs_last&&st.zs_last.zg!=null)?+st.zs_last.zg:null;
@@ -2736,33 +2763,47 @@ function addSlTpLine(opt,u){
   var items=[];
   var _brk=!!(((u||{}).st||{}).bottom_bc||{}).broken;   // R440: 盘中已刺穿底线(收盘未破) ⇒ 止损线标红, 且撤掉「入场参考」
   if(z){
-    if(_brk){
+    if(z.dead){
+      /* R452: 结构已失效 ⇒ 只画一条**灰色虚线**标出失效位(供判断"反抽到哪算结构修复"),
+         不画止损/入场/止盈(见 slTpOf 注释)。pri=1: 若与顶背驰线同价则**让位** ——
+         有效的结构线信息量更大(有行动含义), 失效线只作背景标注。 */
+      items.push({yAxis:+z.sl.toFixed(2),lineColor:"#94a3b8",textColor:"#64748b",
+        name:"背驰低点·已失效",value:z.sl,lineWidth:1.4,ltype:"dotted",pri:1,sys:"z",geo:"背驰低点"});
+    }else if(_brk){
       /* R440: 一买已失效 ⇒ 只留「止损·已破」(标红加粗) 与「上方压力参考」。
          撤掉「入场参考」: 它本质是「贴近底线的低吸位」(现价下方 R/2), 结构已破后按它低吸
          = 用失效结构做入场, 比不画更危险。止盈参考(中枢上沿)仍有结构意义, 改称压力参考。 */
-      items.push({yAxis:+z.sl.toFixed(2),lineColor:"#c92a2a",textColor:"#c92a2a",name:"止损·已破",value:z.sl,lineWidth:1.6});
-      items.push({yAxis:+z.tp.toFixed(2),lineColor:"#e8590c",textColor:"#d9480f",name:"上方压力参考",value:z.tp});
+      items.push({yAxis:+z.sl.toFixed(2),lineColor:"#c92a2a",textColor:"#c92a2a",name:"止损·已破",value:z.sl,lineWidth:1.6,pri:0,sys:"z",geo:"背驰低点"});
+      items.push({yAxis:+z.tp.toFixed(2),lineColor:"#e8590c",textColor:"#d9480f",name:"上方压力参考",value:z.tp,pri:0,sys:"z",geo:"中枢上沿"});
     }else{
-      items.push({yAxis:+z.sl.toFixed(2),lineColor:"#18a058",textColor:"#0e7d4a",name:"止损",value:z.sl});
-      items.push({yAxis:+z.en.toFixed(2),lineColor:"#1c7ed6",textColor:"#1864ab",name:"入场参考",value:z.en});
-      items.push({yAxis:+z.tp.toFixed(2),lineColor:"#e54545",textColor:"#c92a2a",name:"止盈参考",value:z.tp});
+      items.push({yAxis:+z.sl.toFixed(2),lineColor:"#18a058",textColor:"#0e7d4a",name:"止损",value:z.sl,pri:0,sys:"z",geo:"背驰低点"});
+      items.push({yAxis:+z.en.toFixed(2),lineColor:"#1c7ed6",textColor:"#1864ab",name:"入场参考",value:z.en,pri:0,sys:"z",geo:"R/2 位"});
+      items.push({yAxis:+z.tp.toFixed(2),lineColor:"#e54545",textColor:"#c92a2a",name:"止盈参考",value:z.tp,pri:0,sys:"z",geo:"中枢上沿"});
     }
   }
   if(tz){
-    if(tz.confirm!=null)items.push({yAxis:+tz.confirm.toFixed(2),lineColor:"#18a058",textColor:"#0e7d4a",name:"顶确认·破位离场",value:tz.confirm,lineWidth:1.4});
-    if(tz.ref!=null)items.push({yAxis:+tz.ref.toFixed(2),lineColor:"#e8590c",textColor:"#d9480f",name:"反抽减仓参考",value:tz.ref});
+    if(tz.confirm!=null)items.push({yAxis:+tz.confirm.toFixed(2),lineColor:"#18a058",textColor:"#0e7d4a",name:"顶确认·破位离场",value:tz.confirm,lineWidth:1.4,pri:0,sys:"t",geo:"中枢下沿"});
+    if(tz.ref!=null)items.push({yAxis:+tz.ref.toFixed(2),lineColor:"#e8590c",textColor:"#d9480f",name:"反抽减仓参考",value:tz.ref,pri:0,sys:"t",geo:"中枢上沿"});
   }
   if(!items.length)return;
   /* R451: 同值去重 —— z.tp 与 tz.ref 都取 zs_last.zg, 满足各自门槛时会在**同一价格** push
      两条完全重合的线(实测 18 只: sh603288 37.64 / sh601668 4.42 / sh561980 0.77 等),
      视觉上是一条虚线配两个标签(position 错位后不重叠), 会被读成"两个不同的位"。
-     同值只保留先入项(z 系列: 止盈参考 / 上方压力参考) —— 价格相同、语义同为"上方位", 信息不丢。 */
-  var _seenY={};
+     同值只保留一条 —— 价格相同、语义同为"上方位", 信息不丢。
+     R452 两点细化:
+       ① 保留**有效线**优先(pri 小者胜): 失效灰线同价时让位给顶背驰的有效线, 而非反过来;
+       ② 被合并的若来自**另一体系**(z=底背驰位 / t=顶背驰位), 在标签里补标这个位的**实际几何
+          来源**(geo: 中枢上沿/中枢下沿/背驰低点/R/2 位) —— 先写成死字符串"中枢上沿"是错的:
+          实测 sh600968 的「止损(=背驰低点)」与「顶确认(zs_last.ZD 中枢下沿)」同价, 标成
+          "中枢上沿"把方位说反了。按 geo 标出的"止损·亦中枢下沿"才是真信息(双支撑重合)。 */
+  items.sort(function(a,b){return (a.pri||0)-(b.pri||0);});   // 有效线先占位
+  var _seenY={}, _dualY={};
   items=items.filter(function(it){
     var k=it.yAxis.toFixed(2);
-    if(_seenY[k])return false;
-    _seenY[k]=1;return true;
+    if(_seenY[k]){if(_seenY[k]!==it.sys)_dualY[k]=it.geo;return false;}   // 跨体系同值 ⇒ 记被合并者的几何来源
+    _seenY[k]=it.sys;return true;
   });
+  items.forEach(function(it){var g=_dualY[it.yAxis.toFixed(2)];if(g)it.name=it.name+"·亦"+g;});
   items.sort(function(a,b){return a.yAxis-b.yAxis;});
   // R294: 4 象限循环 position 错位 —— 右上/左上/右下/左下, 即使相邻 yAxis 像素差极小也不会重叠
   var POS=["insideEndTop","insideStartTop","insideEndBottom","insideStartBottom"];
@@ -2770,6 +2811,7 @@ function addSlTpLine(opt,u){
     var pos=POS[idx%4];
     var ls={color:it.lineColor};
     if(it.lineWidth)ls.width=it.lineWidth;
+    if(it.ltype)ls.type=it.ltype;   // R452: 失效底线用 dotted(比 markLine 全局 dashed 更弱, 一眼区分"这不是有效位")
     return {yAxis:it.yAxis,lineStyle:ls,
       label:{formatter:it.name+" "+it.value.toFixed(2),color:it.textColor,fontSize:11,position:pos,
         backgroundColor:"rgba(255,255,255,.96)",borderColor:it.lineColor,borderWidth:1,borderRadius:4,padding:[2,5],
