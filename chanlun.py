@@ -799,19 +799,44 @@ def _date_diff(d1, d2):
         return 99999   # R324: 畸形日期(旁路校验数据脏)不击穿整链, 返回大数使该对不算一致
 
 
+def _to_ord(s):
+    """R461: 日期字符串 → ordinal(整数)。与 _date_diff 同语义：畸形/非字符串
+    返回 None（= 该对永不满足 <=2），对应旧版返回 99999 的判据效果。"""
+    from datetime import datetime
+    try:
+        return datetime.strptime(s, "%Y-%m-%d").toordinal()
+    except (ValueError, TypeError):
+        return None
+
+
 def bi_agreement(bis_a, bis_b):
     """两套笔识别的一致性：按结束日期对齐，误差<=2交易日记为一致。
     R326: 方向必须一致——同窗内若另一套端点方向相反(顶/底矛盾，如幅度笔
     end=顶 vs 严格笔同窗 end=底)，说明两套算法对该局部结构方向判断分歧，
     不应计一致。真实 data.json 5 指数实测每指数 3~5 例方向矛盾被误计，
     一致率被系统性高估约 2~3 个百分点。
-    返回 (一致笔数, 总笔数, 一致率)。一致率越高，划分越稳健。"""
-    anchors_b = [(b["date_end"], b["dir"]) for b in bis_b]
+    返回 (一致笔数, 总笔数, 一致率)。一致率越高，划分越稳健。
+
+    R461 性能（等价加速，输出不变）：原实现对**每一对** (b, d) 都调 _date_diff
+    ⇒ 每次 2 次 strptime。bis×bis_strict 是全笛卡尔积（单票实测 17,963 次
+    _date_diff / 35,926 次 strptime），占单票墙钟 **92.7%**（20 只 718,514 次
+    strptime = 13.54s of 14.60s；见 _dbg/r460/bench_hotspot.py）。
+    日期只需各自解析一次 ⇒ 改为**预解析**为 ordinal（n+m 次），内层改整数差
+    （(a-b).days ≡ toordinal 之差）。循环顺序 / break 时点 / dir 判据 /
+    畸形日期语义逐条保留 ⇒ 输出完全等价。
+    验收：939 只逐票完整输出签名 0 差异 + 正控有效 + 24,649 日期对穷举一致；
+    加速 8.93x（197→24 ms/票）。若将来改动此函数，必须重跑 dump_sigs.py 对照。
+    """
+    anchors_b = [(_to_ord(b["date_end"]), b["dir"]) for b in bis_b]
     n = len(bis_a)
     ok = 0
     for b in bis_a:
-        for d, bd in anchors_b:
-            if abs(_date_diff(b["date_end"], d)) <= 2 and bd == b["dir"]:
+        oa = _to_ord(b["date_end"])
+        if oa is None:      # 旧版此路径 _date_diff 返回 99999 ⇒ 内层恒不满足 ⇒ 等价
+            continue
+        for ob, bd in anchors_b:
+            # 条件顺序保持与旧版一致(abs(...) <= 2 在前, b["dir"] 后取)
+            if ob is not None and abs(oa - ob) <= 2 and bd == b["dir"]:
                 ok += 1
                 break
     return ok, n, (ok / n if n else 0)
@@ -833,8 +858,14 @@ KNOWN_PIVOTS = {
 def known_pivot_capture(r):
     captured = []
     # dir==1 的笔为 底->顶，终点落在“顶”；dir==-1 为 顶->底，终点落在“底”
-    top_dates = {r["merged"][b["end"]]["date"] for b in r["bis"] if b["dir"] == 1}
-    bottom_dates = {r["merged"][b["end"]]["date"] for b in r["bis"] if b["dir"] == -1}
+    # R461: 这两个集合原来是 set，而下方是「取第一个满足 <=12 的日期再 break」——
+    #   set 的迭代顺序受 PYTHONHASHSEED 影响，导致同一份 K 线在不同进程可能匹配到
+    #   不同日期（实测两次独立进程分别给出 2024-10-08 / 2024-10-15，同一标签）。
+    #   改 sorted 使结果确定（等价于「取最早的那个，差 <=12 交易日」）。
+    #   影响面：report.py 只消费标签 c[0]、radar 不消费 captured ⇒ 零产物影响；
+    #   但修复后「逐票字节签名 diff」这类零回归手法恢复可用（此前会被噪声掩盖）。
+    top_dates = sorted({r["merged"][b["end"]]["date"] for b in r["bis"] if b["dir"] == 1})
+    bottom_dates = sorted({r["merged"][b["end"]]["date"] for b in r["bis"] if b["dir"] == -1})
     for d, (label, direction) in KNOWN_PIVOTS.items():
         pool = top_dates if direction == "top" else bottom_dates
         for pd in pool:
