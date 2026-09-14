@@ -2364,6 +2364,11 @@ def main():
     #     该优化只在"部分主机长期不可用"时才有增益。真相由线上首轮 run 的
     #     `meta.tx_host` / `meta.src_cycle` / `meta.tx_stage2` 给出。
     got, fails = {}, {}
+    # R463: 取数前**重置模块级游标表** —— `_SHALLOW_RESUME` 存的是"浅取末页首根 −1 天"。
+    #   若同一进程里跑第二次 `main()`(测试脚本 / 批量重跑), 残留的旧游标会让阶段二
+    #   从**过期的 end** 起翻页 ⇒ 少取一段历史(去重合并会掩盖重复, 但掩盖不了缺失)。
+    #   生产是"一进程一 run"(无实际影响), 但重置成本为 0 ⇒ 不留"只在复用容器时才炸"的隐性状态。
+    _SHALLOW_RESUME.clear()
     t_f = time.time()
     with ThreadPoolExecutor(max_workers=CONCURRENCY) as ex:
         for n_done, (sym, res) in enumerate(ex.map(_fetch_one_shallow, syms), 1):
