@@ -2572,7 +2572,9 @@ def main():
         "asof": asof, "build_time": datetime.datetime.now(
             datetime.timezone(datetime.timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S"),
         "version": "P3b-r23",   # r23=R458: **K线源主机级回退 + qfq 真伪守卫**。三件事:
-                                #   (a) 腾讯两同源主机(ifzq / web.ifzq)由 WAF **来回翻** —— R249 只修了
+                                #   (a) 腾讯两同源主机(ifzq / web.ifzq)**各自独立限流**, 谁被拦取决于
+                                #       "这台最近被打得多少"(详见 fetch_data.TX_KLINE_HOSTS 的 R458c 更正:
+                                #       原"WAF 来回翻、非限流"属**过度归因**)。R249 只修了
                                 #       一半(硬编码单主机), 导致 09-11 线上 src_cnt={tx:876, sina:5821}
                                 #       = **87% 走不复权裸价**, 且 _probe_tx 直连同一主机 ⇒ 复探
                                 #       永远失败、状态机再无法恢复(死锁)。改 TX_KLINE_HOSTS 按序
