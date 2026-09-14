@@ -49,8 +49,28 @@ SYMBOLS = {
 #   ⇒ 整整一周 87% 的票在跑**不复权裸价**, 除权日假跳空直接污染笔/中枢/背驰结构。
 #   ⇒ 改为「按序试多主机 + 进程内记忆可用主机」, 与 EM_KLINE_HOSTS/push2his 镜像同范式:
 #     记忆命中时只需 1 次请求(与改前同开销); 单主机被限时多试一次即自动恢复, 无需再改代码。
-TX_KLINE_HOSTS = ["ifzq.gtimg.cn", "web.ifzq.gtimg.cn"]
+TX_KLINE_HOSTS = ["ifzq.gtimg.cn", "web.ifzq.gtimg.cn", "proxy.finance.qq.com"]
 _TX_HOST_OK = [None]      # 进程内记忆: 上次成功的主机; None=未定(按 TX_KLINE_HOSTS 顺序)
+# R463(2026-09-14): 第 3 台 `proxy.finance.qq.com` —— 腾讯把 ifzq 挂在 proxy 下的**同源镜像**
+#   (路径前缀 `/ifzqgtimg`), 由下表给前缀。★ 为什么值得加: 全市场取数耗时 = 请求数 / **聚合 rps**,
+#   而聚合 rps = 主机数 × 单主机安全 rps(按主机独立节流, 见 TX_INTERVAL 注释) ⇒ 多一台镜像
+#   就是**线性提速**, 且**请求数不变** ⇒ 零正确性风险(与"降页数/降深度"那种拿数据换速度的路子
+#   性质完全不同)。
+#   ★★ 准入证据(`_dbg/r463/verify_mirror3.py`, 6 次请求实测, 不是推断):
+#     C1 **同源同基准**: 同一 end 窗口下三台的 `qfqday` **逐根同价** ——
+#          end=(空)       : 共同 641 日期, 价格差 **0** 个, 单边日期 0
+#          end=2023-12-31 : 共同 640 日期, 价格差 **0** 个, 单边日期 0
+#        (只比 qfqday 数组: 响应里的 `qt`/`prec` 是实时快照, 会随时间变, 不可作判据)
+#     C2 **游标语义同款**: end 游标产生的窗口边界三台完全一致 ——
+#          end=(空)       : 三台均 641 根 / 首根 2024-01-22
+#          end=2023-12-31 : 三台均 640 根 / 首根 2021-05-18
+#       ⇒ 按页轮流 prefer 时**不会**出现某页落到不同窗口(那会造成序列缺口/重叠)。
+#     R460 已证的"2797 个(日期×窗口)对 0 漂移"因此对第 3 台自动继承 —— 它本就是同一份数据。
+#   ⚠ 未实证项(如实记): 第 3 台的**限流是否与另两台独立**没有单独做过"打挂一台看另一台"的
+#     实验(那违反探针纪律: 自伤会延长冷却, R458 踩过)。本改动依赖的是 R458 已证的
+#     "同源镜像各自独立限流"这一**家族性**结论 + 下面的实跑观测量; 若线上首轮出现
+#     `src_fail.tx` 新原因键或 `src_cycle.tx.stops` 上升, 第一嫌疑即此处。
+_TX_URL_PREFIX = {"proxy.finance.qq.com": "/ifzqgtimg"}
 
 # R460: **按主机独立**节流 —— R458 的实证是"单主机被打到限流、而镜像仍干净"(两主机是独立
 #   镜像, 各自独立限流) ⇒ 限速必须**按主机**而非全局: 全局节流会把两台镜像的吞吐绑成一台,
@@ -64,7 +84,11 @@ TX_INTERVAL = 0.35        # 单主机 ~2.9 rps(R458 的 P0 实证值: 突发连�
 #     87% 裸价的失败签名一致。而 R458b 注释里那个"6630 票 × 0.35s ≈ 39 分钟"的算式说明
 #     **设计意图本来就是每票节流**, 只是从未落到日线路径上。
 #   ⇒ 现把节流点放进 tx_get 自身(跟着最容易漏的地方走, 而不是依赖每个调用方记得 wait)。
-#     翻页时按页轮流 prefer 两主机 ⇒ 聚合 ~5.7 rps, 与新浪(0.18s, ~5.5 rps, 线上长期稳定)同量级。
+#     翻页时按页轮流 prefer 各主机 ⇒ R460 用 2 台时聚合 ~5.7 rps(与新浪 0.18s ~5.5 rps 同量级);
+#   ★ R463 加入第 3 台同源镜像后 ⇒ **3 × 2.9 ≈ 8.6 rps**(+50%), 见 TX_KLINE_HOSTS 的 R463 段。
+#     单主机速率**刻意不动**(0.35s 是 R458 的实证安全值, 且 R460 的 152 只 × 3 页实跑已验证):
+#     提高吞吐走"加独立镜像"而不是"压单主机间隔" —— 前者不增加任何单台的压力, 后者会把
+#     单台打到限流并触发源状态机整段停用(那正是 R460 要修的那个故障)。
 
 
 class _Throttle:
@@ -104,8 +128,12 @@ def _tx_url(symbol, period, host=None, count=None, end=None):
     # 验证页), 当时切到同源 ifzq.gtimg.cn(无 web. 前缀); R458 起不再硬编码单主机, 见上方常量。
     # R460: 补 `end` 游标槽(param 语义 = code,period,start_date,end_date,count,fq) ——
     #   原实现只填 count、start/end 留空 ⇒ 永远只能取到"最新 640 根"(见 fetch_tx_qfq_paged)。
-    return ("https://%s/appstock/app/fqkline/get?param=%s,%s,,%s,%d,qfq") % (
-        host or _TX_HOST_OK[0] or TX_KLINE_HOSTS[0], symbol, period, end or "",
+    # R463: 主机 → URL 前缀查表(第 3 台镜像走 /ifzqgtimg)。节流器与主机记忆的 key 仍是
+    #   **裸主机名**(见 _tx_pace / _TX_HOST_OK), 故新主机自动获得**独立**节流器与落痕,
+    #   无需改动节流/回退/落痕三处逻辑。
+    _h = host or _TX_HOST_OK[0] or TX_KLINE_HOSTS[0]
+    return ("https://%s%s/appstock/app/fqkline/get?param=%s,%s,,%s,%d,qfq") % (
+        _h, _TX_URL_PREFIX.get(_h, ""), symbol, period, end or "",
         count if count else 1700 + _b)
 
 
@@ -132,8 +160,8 @@ def tx_get(symbol, period, count=None, timeout=30, end=None, prefer=None):
       ① **每次尝试前按主机节流** `_tx_pace(_h)` —— 见上方 TX_INTERVAL 注释: 日线路径此前
          完全没有 tx 节流, 无节流突发会把记忆主机打到限流, 进而触发源状态机整段停用
          (实测 600 只: tx 仅 79/599、src_cycle.tx.stops=1、degraded_pct=87)。
-      ② `prefer` = **本轮首选主机**(翻页时按页轮流给两主机) —— 记忆主机优先会让一台吸收
-         全部翻页流量; 轮流 prefer 才能用满两个独立镜像的额度(各 2.9 rps ⇒ 聚合 ~5.7 rps)。
+      ② `prefer` = **本轮首选主机**(翻页时按页轮流给各主机) —— 记忆主机优先会让一台吸收
+         全部翻页流量; 轮流 prefer 才能用满各独立镜像的额度(R463 起 3 台 × 2.9 rps ≈ 8.6 rps)。
          prefer 不改变回退语义: 它只是把顺序从 [memo, ...] 变成 [prefer, memo, ...]。
     """
     memo = _TX_HOST_OK[0]
@@ -266,7 +294,8 @@ def fetch_tx_qfq_paged(symbol, period="day", min_date=MIN_DATE, min_bars=None, m
         "最新 640 根"。实测填 end 游标:
           · end=2021-01-01~2023-12-31 → 640 根, 首根 2021-05-18   (窗口内**最后** 640 根)
           · end=2019-01-01~2021-12-31 → 640 根, 首根 2019-05-21
-        两个主机(ifzq / web.ifzq)同款, count 槽给多少都只影响"取窗口最后多少根"。
+        三个主机(ifzq / web.ifzq / proxy.finance.qq.com, 见 TX_KLINE_HOSTS 的 R463 段)同款,
+        count 槽给多少都只影响"取窗口最后多少根"。
     · ★ 拼接**安全性已实证**(这是本方案唯一的致命风险点): 若各页以**各自窗口末日**为前复权
       基准, 拼接处就会出现**假跳空** —— 而假跳空正是要消灭的东西。判据 = 同一历史日期用
       6 个不同 end 窗口去取, 价格是否漂移:
@@ -290,8 +319,8 @@ def fetch_tx_qfq_paged(symbol, period="day", min_date=MIN_DATE, min_bars=None, m
     end = None
     _nl = max(1, len(TX_KLINE_HOSTS))
     for _i in range(max(1, int(max_pages))):
-        # R460: 按页**轮流**首选两主机 —— 见 TX_INTERVAL 注释②: 记忆主机优先会让一台吸收
-        #   全部翻页流量(3 页/票), 轮流 prefer 才用满两个独立镜像的额度(各 2.9 rps)。
+        # R460: 按页**轮流**首选各主机 —— 见 TX_INTERVAL 注释②: 记忆主机优先会让一台吸收
+        #   全部翻页流量(3 页/票), 轮流 prefer 才用满各独立镜像的额度(R463 起 3 台 × 2.9 rps)。
         try:
             data = json.loads(tx_get(symbol, period, count=_TX_PAGE_CAP, end=end,
                                      prefer=TX_KLINE_HOSTS[_i % _nl]))["data"][symbol]
