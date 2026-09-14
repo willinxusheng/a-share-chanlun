@@ -571,6 +571,17 @@ a{color:var(--primary);text-decoration:none}
          同时补「临界贴住」态: close==endP 时判据上仍归 dead(不画三条行动线, 因 R=close-sl=0 ⇒
          en/tp 与现价同值无意义), 但标签不再称"已失效"(过度断言), 改「背驰低点·临界贴住」。
          另: broken 字段缺失但收盘已破时, 灰线不得无解释(补拉/剥字段/源漂移都会造成该缺口)。
+   R454: 顶背驰侧失效语义(与 R452/R453 底侧对称, 顶侧一直是缺口)。判据 = 现价**向上突破**顶背驰
+         高点(close > top_bc.end_price) ⇒ 该见顶判据被证伪(价格续创新高)。原实现此时**仍照画**
+         「顶确认·破位离场」「反抽减仓参考」两条"减仓/离场"行动线 ⇒ 用已失效结构指引操作
+         (实测线上 09-11 产物 219 只命中, 其中 **219 只全部至少画一条**, 最极端 sh605577 龙版传媒
+          close 18.67 / 顶背驰高点 10.93 = +70.8%, 图上照样给「破位离场」)。
+         改法同 R452: 撤两条行动线, 只画 1 条灰点线「顶背驰高点·已失效」(pri=1 让位有效线)。
+         ⚠️ 判据**刻意不同于底侧的 <=** —— 底侧把 close==endP 也归 dead 是因为 R=close-sl=0 会让
+         en/tp 与现价同值(数学退化, 与结构无关); 顶侧两条线取 zs_last.zd/zg, **与 endP 无关**,
+         close==endP(贴住前高未突破)时顶背驰仍成立 ⇒ 线照画。两侧判据不同是**正确**的, 别"统一"。
+         (后端 top_bc.broken 自 R439 起就按同一判据产出, 极值口径比 high; 线上为 0 纯属
+          产物时点早于代码(09-11 17:21 主扫 vs 20:25 代码)且手补拉只补底侧 —— 非逻辑缺陷, 已实跑证实。)
    ============================================================ */
 var UP="#e54545", DN="#18a058", ACC="#2b6cb0";
 var M=null, UNI={}, SIG=[], INDS={};
@@ -894,7 +905,17 @@ function sigRow(s,opt){   // R380: opt.sub=true = 非低吸区灰显行(破位/�
     var a=Math.abs(dev);
     devTxt=(dev>=0?"▲ +":"▼ ")+a.toFixed(1)+"%";
     devCls=dev>=0?"up":"down";
-    if(t){devTip=(dev>=0?"现价仍高于背驰高点 "+a.toFixed(1)+"%，警惕回落":"已从背驰高点回落 "+a.toFixed(1)+"%，观察企稳信号");devSub=(dev>=0?"高于高点·警惕":"已回落"+a.toFixed(1)+"%");}
+    if(t){
+      /* R454: 顶侧补三态 —— 与底侧(dev<0 结构失效 / 0~8 低吸区 / >8 已走高)对齐:
+         dev>0 = **已上破顶背驰高点** ⇒ 看跌判据被证伪。原文案对 dev>=0 一律写"现价仍高于背驰
+         高点，警惕回落", 把"价格续创新高"读成"风险未释放" —— 与结构事实相反(判据恰恰是被
+         创新高否掉的), 且图上此时已撤下两条减仓线, 文案与图不一致。
+         dev==0 = 恰好回到高点(**尚未上破**) ⇒ 判据仍成立; 原措辞"高于"在 ==0 时也不准, 改中性描述。
+         dev<0 = 已回落, 顶背驰正在兑现 —— 原文案正确, 不动。 */
+      if(dev>0){devTip="已上破顶背驰高点 "+a.toFixed(1)+"%，该见顶判据被证伪（价格续创新高，须重新构筑顶部结构）· 图上已撤下「顶确认·破位离场」「反抽减仓参考」两条减仓/离场行动线，仅留一条灰色判据锚点";devSub="已破·判据失效";}
+      else if(dev<0){devTip="已从背驰高点回落 "+a.toFixed(1)+"%，观察企稳信号";devSub="已回落"+a.toFixed(1)+"%";}
+      else{devTip="现价已回到顶背驰高点（尚未上破），该见顶判据仍成立";devSub="贴住高点·未破";}
+    }
     // R289: 底信号 dev<0 = 现价已跌破背驰低点(结构失效) —— 原逻辑落入 dev<=8 分支误标"低吸参考区"(反向误导)
     else if(dev<0){devTip="已跌破背驰低点 "+a.toFixed(1)+"%，底背驰结构失效 · 暂不低吸，等重新企稳再评估";devSub="破位·结构失效";}
     // R381: P6 dev 三档分级复用 revpool devTag 口径(0~3 底部刚启绿/3~8 已起涨橙/>8 已走高红) — 原 8% 一刀切
@@ -908,6 +929,18 @@ function sigRow(s,opt){   // R380: opt.sub=true = 非低吸区灰显行(破位/�
   var _bbc=(u.st||{}).bottom_bc||{};
   var bkTag=(!t&&dev!=null&&dev>=0&&_bbc.broken&&_bbc.broken_price!=null)
     ?'<span class="bkmini" title="盘中最低 '+_bbc.broken_price+'（'+esc(_bbc.broken_date||"")+'）已击穿背驰低点 '+_bbc.end_price+' —— 缠论口径该一类买点已失效(跌破买点低点=买点逻辑破坏, 需重新构筑底部结构)。⚠️ 看板按**收盘价**剔票(有意避开日内插针, 见 revCand), 故本行仍留在池中; 两个判据回答的是不同问题(结构还成不成立 / 今天要不要移出池子), 不矛盾。破位后创新高前不宜按低吸对待。📊 R443 五年回测: 该标记在**收益**维度无可检测差异(20日 −0.32pp, p=0.74), 但在**风险**维度有效 —— 20日内最大浮亏>5% 概率 72.1%(未破样本 58.1%, +14pp) ⇒ 按风险读, 不按收益读">盘中已破</span>'
+    :'';
+  /* R454: 顶侧对标徽章 —— 判据**严格 dev>0**(close>top_endP; dev==0 是"贴住未上破", 顶背驰仍成立,
+     不该标失效, 见 topRefOf 注释)。只在**顶信号行**出(与底侧 bkTag 的 !t 守卫对称):
+     底信号行的主题是底背驰, 其顶侧状态不在该行表达。文案用「顶失效」而非「已破」—— 方向相反
+     (底=买点被向下跌破 / 顶=看跌判据被向上否掉), 同名会引起误读。 */
+  var _tbbc=(u.st||{}).top_bc||{};
+  var topBkTag=(t&&dev!=null&&dev>0)
+    ?'<span class="bkmini" title="'+(
+        (_tbbc.broken&&_tbbc.broken_price!=null)
+          ?('盘中最高 '+_tbbc.broken_price+'（'+esc(_tbbc.broken_date||"")+'）已上破顶背驰高点 '+_tbbc.end_price+' —— 缠论口径该**看跌判据已被证伪**(价格续创新高)。 ')
+          :('现价已上破顶背驰高点 '+_tbbc.end_price+' —— 缠论口径该**看跌判据已被证伪**(价格续创新高); 本轮产物未携带该点的盘中上破价/上破日(后端 broken 字段缺失: 产物时点早于 R439 代码 / 白名单剥字段 / 源漂移跳过), 失效结论不受影响。 ')
+      )+'图上已撤下「顶确认·破位离场」与「反抽减仓参考」两条减仓/离场行动线, 仅留一条灰色「顶背驰高点·已失效」判据锚点(它不是压力位、更不是做空位)。这只是"不能按见顶结构减仓", 不等于风险解除 —— 是否有新的见顶结构须按新顶背驰重新评估。">顶失效</span>'
     :'';
   var ff=(u.ff||{}).net;
   var indName=indLabelOf(u,s.sym,s.ind||u.ind);   // R448: ETF 改显官方跟踪标的短领域(无则回落「ETF板块」)
@@ -924,6 +957,7 @@ function sigRow(s,opt){   // R380: opt.sub=true = 非低吸区灰显行(破位/�
     momRsTip(st,u)+   // R447: 多周期动量 + 行业内相对强度(纯描述)
     (dev!=null?"\n现价较信号位: "+devTxt+(devTip?" ("+devTip+")":""):"")+
     (bkTag?"\n⚠️ 盘中已破: 背驰笔结束后最低 "+_bbc.broken_price+"（"+_bbc.broken_date+"）已击穿背驰低点 "+_bbc.end_price+"，该一类买点在**结构上已失效**（看板按收盘价剔票，故本行仍在池）\n📊 R443 五年回测：该标记收益维度无可检测差异(20日 −0.32pp, p=0.74)，但风险维度有效 — 20日内最大浮亏>5% 概率 72.1%(未破 58.1%)，按风险读": "")+
+    (topBkTag?"\n⚠️ 顶背驰已失效: 现价已上破顶背驰高点 "+_tbbc.end_price+"（"+(dev!=null?(dev>0?"高":"持平")+Math.abs(dev).toFixed(1)+"%":"")+"）—— 缠论口径该**看跌判据已被证伪**(价格续创新高)。图上已撤下「顶确认·破位离场」「反抽减仓参考」两条减仓/离场行动线, 仅留一条灰色「顶背驰高点·已失效」判据锚点(不是压力位、不是做空位)。⚠️ 判据失效 ≠ 风险解除: 只说明不能按见顶结构减仓, 是否有新的见顶结构须按新顶背驰重新评估": "")+
     (ff!=null?"\n当日主力净流入: "+ffTxt(ff):"")+
     ((ffNet!=null&&((!t&&ffNet<0)||(t&&ffNet>0)))?"\n⚠️ 资金背离警示: "+(t?"顶信号下主力仍净流入 "+ffTxt(ffNet)+"，警惕假顶/逼空":"底信号下主力却净流出 "+ffTxt(ffNet)+"，警惕假底不跟"):"")+
     "\n\n点击查看个股完整K线与结构";
@@ -949,7 +983,7 @@ function sigRow(s,opt){   // R380: opt.sub=true = 非低吸区灰显行(破位/�
     '<div class="st">'+(t?'<b style="color:#c92a2a">顶背驰</b>':'<b style="color:#087f5b">底背驰</b>')+'<span>强'+(s.strong||0)+'/'+(s.vol?"缩":"")+(s.area==null?"":(s.area>0?" 面"+s.area:' <span class="area-deg" title="面积 0 = 退化: 该背驰笔区间内此方向无 MACD 柱 ⇒ 判据「本笔面积 &lt; 前笔×0.85」构造上恒成立, 不含力度证据 —— 别读成「最强背离」">面积退化</span>'))+'</span></div>'+
     '<div class="st">'+(fr==null?"-":(fr===0?"当日":fr+"天前"))+frTag+'</div>'+
     '<div class="right">'+
-      '<div class="dev '+devCls+'" title="'+esc(devTip||sigTip)+'">'+(dev!=null?devTxt:"-")+'<small>'+bkTag+devSub+'</small></div>'+
+      '<div class="dev '+devCls+'" title="'+esc(devTip||sigTip)+'">'+(dev!=null?devTxt:"-")+'<small>'+bkTag+topBkTag+devSub+'</small></div>'+
       '<div class="spk">'+(mTag?mTag+" ":"")+(spk&&spk.length>1?sparkSVG(spk.length>90?spk.slice(-90):spk,72,24):'<span style="color:#cbd5e1">-</span>')+'</div>'+
     '</div></div>';
 }
@@ -2253,6 +2287,28 @@ function showStk(sym){
     }
     return "";
   }
+  /* R454: 顶侧对标 —— 「顶背驰已被向上突破」徽章。与底侧 `_bkBadge` 对称, 但两个口径**刻意不同**:
+     底侧判据是 `close<=endP`(含 `==`, 因 R=0 时行动线数学退化); 顶侧是**严格 `>`**
+     (`close==endP` = 贴住前高未破 ⇒ 顶背驰仍成立, 不该标失效)。理由见 topRefOf 注释。
+     徽章文案用「顶失效」而非复用「已破」—— 底侧"已破"读作"买点被向下跌破", 顶侧是"看跌判据被
+     向上否掉", 方向相反, 同名会引起误读。 */
+  var _tbd=s.top_bc||{};
+  function _bkBadgeTop(tbc,tipExtra){
+    if(!tbc||tbc.end_price==null)return"";
+    var _up=(s.close!=null&&+s.close>+tbc.end_price);
+    if(tbc.broken&&tbc.broken_price!=null){
+      return '<span class="bkmini" title="'+esc((tbc.broken_date||"")+' 盘中最高 '+tbc.broken_price+' 已上破顶背驰高点 '+tbc.end_price+(tipExtra||"")+" —— 缠论口径该**看跌判据已被证伪**(价格续创新高, 需重新构筑顶部结构)。"
+        +(_up?"⚠️ 现价 "+s.close+" 已站上该高点, 图上已撤下「顶确认·破位离场」「反抽减仓参考」两条减仓/离场行动线, 仅留一条灰色「顶背驰高点·已失效」判据锚点(供理解这个看跌结论在哪个价位被否掉 —— 它不是压力位、更不是做空位)。"
+              :"看板按收盘价口径, 故本票现价仍在该高点下方, 两个判据回答的是不同问题(结构是否已被否掉 / 今天收盘是否已站上)。"))+'">顶失效</span>';
+    }
+    if(_up){
+      /* R454: 与 R453 ③ 同款兜底 —— broken 明细缺失也必须给解释(产物时点早于 R439 代码 / 剥字段 /
+         源漂移跳过三类成因), 只给结论、不编造上破价与上破日。 */
+      return '<span class="bkmini" title="'+("⚠️ 现价 "+s.close+" 已上破顶背驰高点 "+tbc.end_price+" —— 该看跌判据已被证伪(价格续创新高); 图上已撤下「顶确认·破位离场」「反抽减仓参考」两条行动线, 仅留一条灰色「顶背驰高点·已失效」判据锚点。"
+        +"本轮产物未携带该顶背驰点的盘中上破价/上破日(broken 字段缺失: 产物时点早于 R439 代码 / 产物白名单剥字段 / 本地补拉时源漂移跳过), 故不显示上破细节 —— 失效结论不受影响(收盘价已站上, 强于盘中刺穿)。")+'">顶失效</span>';
+    }
+    return "";
+  }
   var grp=(u.type==="ETF")?"ETF板块":(u.ind||"");
   /* R448: 面包屑的 grp 是**导航目标**, 必须恒等于行业树节点名(点击走 pickIndFromStk), 不能动。
      副标题里再写一遍「ETF板块」既与前面的「类型 ETF」重复、又浪费了官方跟踪标的 ⇒ 展示口径另起:
@@ -2286,6 +2342,13 @@ function showStk(sym){
     ((u.type==="ETF"&&navOf(sym)!=null)?'<span title="净资产规模(基金定期报告披露)。低于 '+((((M||{}).etf_twin||{}).clear_yi)||0.5)+' 亿有清盘风险(会强制赎回, 长期持有者应避开)。⚠️ 反证边界: K 线层**看不出**小 ETF 价格更差 —— 同指数 10 只日均振幅 4.47~4.62%, 与规模相关仅 +0.045, 仅跟踪偏差与成交额弱负相关(−0.442, n=10) ⇒ 规模的意义是**执行成本 + 清盘尾部风险**, 不是价格质量。">规模 <b>'+navTxt(navOf(sym))+'</b></span>':'')+
     '<span>笔/中枢 <b>'+(s.bi_n||0)+'/'+(s.zs_n||0)+'</b></span>'+
     (_bbd.end_price!=null?'<span>背驰低点 <b class="'+(_bbd.broken?"down":"")+'">'+_bbd.end_price+'</b>'+_bkBadge(_bbd)+'</span>':'')+
+    /* R454: 顶侧对标 —— 原 metric-strip 只披露「背驰低点」, 顶背驰高点**从不显示**, 于是"价格已站上
+       顶背驰高点"这件事在整条指标带上无任何痕迹(只有图上的线在悄悄变)。补同款披露 + 徽章。
+       ⚠️ 徽章触发用严格 `>`(见 _bkBadgeTop); 底侧 `_bbd.broken?"down"` 的变色在顶侧不适用 ——
+       顶侧"被上破"是**利空判据失效**, 不是价格下跌, 故 high 不高亮涨跌色。
+       ⚠️ 刻意**不**给 close==endP 加任何高亮/徽章: 那会引入"临界预警"语义(属未拍板项⑤), 本轮只做
+          「已失效」这一件事; 相等时该票与普通票在指标带上看不出差别。 */
+    (_tbd.end_price!=null?'<span>背驰高点 <b>'+_tbd.end_price+'</b>'+_bkBadgeTop(_tbd)+'</span>':'')+
     '<span>自洽 <b>'+(s.agree!=null?(s.agree*100).toFixed(0)+"%":"-")+'</b></span>'+
     '<span>区间 <b>'+(s.first||"-")+'~'+(s.last||"-")+'</b></span>'+
     '<span>数据 <b>'+(s.n_bars||0)+'根</b> '+srcTag(u.src)+'</span></div>';   // R276: src 在后端 universe row 顶层(u.src), 不在 st 内 —— 原取 s.src 恒 undefined, 源徽标详情页永远"-"
@@ -2298,11 +2361,33 @@ function showStk(sym){
     banner+='<div class="signals-box"><div class="signal-pill '+(t?"t":"b")+'"><b>'+(t?"⚠️ 顶背驰风险":"✅ 底背驰机会")+'</b> · '+(stk.bc_date||"")+'触发('+(stk.fresh==null?"?":(stk.fresh===0?"当日":stk.fresh+"天前"))+') · '+(stk.bc_type||"")+' · 强度'+(stk.strong||0)+'/2'+(stk.vol?" · 量缩确认":"")+   // R320: fresh=0 →"当日"(原"0天前"误导)
       // R313-fix: 底信号 dv<0(现价已跌破背驰低点=结构失效)不能再当"低吸参考区"引导 — R289 sigRow 已修, showStk banner 漏修同源
       (_dvTxt?' · <b style="'+(t?(_dv<0?"color:#0e7d4a":"color:#c92a2a"):(!t&&_dv<0?"color:#c92a2a":(_dv<=8?"color:#0e7d4a":"color:#c92a2a")))+'">'+_dvTxt+'</b>':'')+
-      '<br><span style="opacity:.85;font-size:12px">'+(t?( _dv!=null&&_dv<0?"已从顶背驰高点回落 "+Math.abs(_dv).toFixed(1)+"%，风险有所释放，仍防反抽遇压":(_dv!=null?"现价仍高于顶背驰高点，回落风险未解除":"上攻动能减弱，注意中枢上沿/前高压力")):( _dv!=null&&_dv<0?"已跌破背驰低点 "+Math.abs(_dv).toFixed(1)+"%，底背驰结构失效 · 暂不低吸，等重新企稳再评估":(_dv!=null&&_dv<=8?"现价仍贴近背驰低点(+"+_dv.toFixed(1)+"%)，属低吸参考区，跌破"+((s.bottom_bc&&s.bottom_bc.end_price)!=null?s.bottom_bc.end_price:"背驰低点")+"则结构失效":(_dv!=null&&_dv>8?"已较背驰低点走高 "+_dv.toFixed(1)+"%，追高风险 · 勿追高，等回踩企稳再看":"下跌动能衰竭，关注中枢下沿支撑与企稳信号"))))+'</span></div></div>';
+      '<br><span style="opacity:.85;font-size:12px">'+(t?( _dv!=null&&_dv<0?"已从顶背驰高点回落 "+Math.abs(_dv).toFixed(1)+"%，风险有所释放，仍防反抽遇压":(_dv!=null&&_dv>0?"已上破顶背驰高点 "+_dv.toFixed(1)+"%，该见顶判据被证伪 · 图上两条减仓/离场行动线已撤下（详见下方警示），别再按见顶结构减仓":(_dv!=null?"现价已回到顶背驰高点（尚未上破），该见顶判据仍成立":"上攻动能减弱，注意中枢上沿/前高压力"))):( _dv!=null&&_dv<0?"已跌破背驰低点 "+Math.abs(_dv).toFixed(1)+"%，底背驰结构失效 · 暂不低吸，等重新企稳再评估":(_dv!=null&&_dv<=8?"现价仍贴近背驰低点(+"+_dv.toFixed(1)+"%)，属低吸参考区，跌破"+((s.bottom_bc&&s.bottom_bc.end_price)!=null?s.bottom_bc.end_price:"背驰低点")+"则结构失效":(_dv!=null&&_dv>8?"已较背驰低点走高 "+_dv.toFixed(1)+"%，追高风险 · 勿追高，等回踩企稳再看":"下跌动能衰竭，关注中枢下沿支撑与企稳信号"))))+'</span></div></div>';
   }else if(u.gate){
     banner='<div class="signals-box"><div class="gate-pill"><b>门禁：'+esc(u.gate)+'</b><br>'+esc(u.gd||"")+'　<span style="font-size:12px">(仍展示K线与结构，但不进信号区)</span></div></div>';
   }else if(scen){
     banner='<div class="signals-box"><div class="gate-pill">当前场景：<b>'+esc(scen)+'</b> · 趋势 '+esc(s.trend||"-")+'　<span style="font-size:12px">(非近端背驰信号，仅结构参考)</span></div></div>';
+  }
+  /* R454: 顶背驰失效警示（与底侧并联, 两个结构互不相干, 同一只票可能两条都在）。
+     口径 = **严格 >**（close==endP 属"贴住前高未突破" ⇒ 顶背驰仍成立 ⇒ 不出此条, 见 topRefOf 注释）。
+     原实现完全没有此提示 —— 图上会悄悄撤/换线, 而页面文字仍写着「背驰见顶风险」+「破位离场」,
+     用户无从知道这个看跌判据已经被价格否掉了。前缀置于此处 ⇒ 底侧块随后 prepend, 顺序为
+     [底侧警示] → [顶侧警示] → [场景/门禁 pill], 底侧(本页主结构面)仍居首。 */
+  var _tbdUp=(_tbd.end_price!=null&&s.close!=null&&+s.close>+_tbd.end_price);
+  if(_tbdUp){
+    var _tPct=((s.close/_tbd.end_price-1)*100).toFixed(1);
+    var _tBk=(_tbd.broken&&_tbd.broken_price!=null)
+      ? '<br><span style="opacity:.85;font-size:11.5px">上破明细：该顶背驰高点于 <b>'+esc(_tbd.broken_date||"")+'</b> 被盘中最高 <b>'+_tbd.broken_price+'</b> 上破（较高点高 <b>'+((_tbd.broken_price/_tbd.end_price-1)*100).toFixed(1)+'%</b>）。</span>'
+      : '<br><span style="opacity:.85;font-size:11.5px">本票缺少该顶背驰点的<b>盘中上破价 / 上破日</b>（后端 broken 字段缺失：产物时点早于 R439 代码 / 产物白名单剥字段 / 本地补拉时源漂移跳过），故不显示上破细节 —— <b>失效结论不受影响</b>（收盘价已站上，强于盘中刺穿）。</span>';
+    banner='<div class="signals-box"><div class="bk-alert">'
+      +'<b>⚠️ 顶背驰高点已被上破</b> · 现价 <b>'+s.close+'</b> 已站上顶背驰高点 <b>'+_tbd.end_price+'</b>（高 <b>'+_tPct+'%</b>）'
+      +' — 缠论口径该<b>看跌判据已被证伪</b>：价格续创新高，「新高但力度衰竭」的前提不成立，须重新构筑顶部结构。'
+      +'图上<b>已撤下「顶确认·破位离场」与「反抽减仓参考」两条减仓/离场行动线</b>（按已被否掉的见顶结构指引操作比不画更危险），'
+      +'仅留一条<b>灰色点线「顶背驰高点·已失效」</b>标出该判据的<b>锚点</b> —— 用来理解「这个看跌结论是在哪个价位被否掉的」，'
+      +'<b>它不是压力位、更不是做空位</b>。'
+      +'<br><span style="opacity:.85;font-size:11.5px">⚠️ 这不等于「风险解除」：看跌<b>判据</b>失效只说明<b>不能按见顶结构减仓</b>；'
+      +'当前是否存在新的见顶结构，须按<b>新的顶背驰 + 新的中枢</b>重新评估（本页场景标签仍为扫描时的「'+esc(scen||"-")+'」，未随价格改写）。</span>'
+      +_tBk
+      +'</div></div>'+banner;
   }
   /* R440: 背驰端点已破警示 —— 无论有无近端 signals 都前置。永和股份正是「无 signals 但有 broken」
      的第三分支票: 页面从头到尾写着「场景 背驰见底机会」却无一处提示底线已被刺穿。
@@ -2361,7 +2446,7 @@ function showStk(sym){
       '<br>· 近60日均额 '+(s.avg_amt60!=null?(s.avg_amt60>=1e4?(s.avg_amt60/1e4).toFixed(1)+"亿":s.avg_amt60.toFixed(0)+"万")+"/日":"-")+' · 振幅中位 '+(s.med_amp!=null?s.med_amp+"%":"-")+'<br>· 一字板 '+(s.one_word||0)+'日 · 距高点回撤 '+(s.dd!=null?(s.dd*100).toFixed(1)+"%":"-")+'</div>';
   var stkHtml=banner+
     '<div class="panel"><div class="chart-note"><span class="legend-tag"><i style="background:#e54545"></i>涨</span><span class="legend-tag"><i style="background:#18a058"></i>跌</span><span class="legend-tag"><i style="background:#7f77dd"></i>笔</span><span class="legend-tag"><i style="background:rgba(127,119,221,.25)"></i>中枢</span><span class="legend-tag"><i style="background:#c92a2a"></i>顶背驰(红▼)</span><span class="legend-tag"><i style="background:#087f5b"></i>底背驰(绿▲)</span></div><div id="stkChart" style="width:100%;height:620px"><div class="loading sk">行情加载中…</div></div></div>'+
-    '<div class="chart-note" style="line-height:1.85;text-align:left;color:#475569;margin-top:6px">图上 <b>止损 / 入场参考 / 止盈参考</b> 三条线是<b>结构位</b>（背驰低点 / 现价下方 R/2 / 中枢上沿或 2R），<b>不是经实证优化的离场位</b>。R449 五年回测（292 票 · 73,054 个观察点 · 2022-01~2026-08）：63 条「止盈 × 止损 × 持有期」组合<b>无一条</b>产生可检测超额（最高 +0.07pp，p=0.45；0 条通过 Bonferroni α=0.00079），且<b>无规则持有的平均收益 +2.37% 高于任何组合</b>。原因：收益几乎全部来自头部 5% 的段（贡献 114%），止盈线的本质是砍右尾。<b>读法</b>：当结构参考位用，别当卖点。<br>⚠️ <b>结构失效时怎么画（R452/R453）</b>：若现价已跌破背驰低点，则<b>撤下该买点的三条行动线</b>（止损 / 入场参考 / 止盈参考），<b>只改画一条灰色点线</b> —— 跌破标「背驰低点·<b>已失效</b>」，现价<b>恰好等于</b>背驰低点（临界）标「背驰低点·<b>临界贴住</b>」（后者按 R336 口径<b>仍在池中</b>，只是现价即止损位、R=0 时入场/止盈线无意义）；两种标签都只把该位标出来供你判断<b>反抽到哪算结构修复</b>，<b>不是支撑、不是入场位</b>（见上方警示条）；若该票另有顶背驰结构，那套线不受影响、仍会照常显示。<br>⚠️ <b>同价合线（R451/R452）</b>：当两个体系的参考位落在<b>同一个价</b>时（最常见：底背驰的止盈参考 = 顶背驰的反抽位 = 末中枢上沿），图上只画一条，并在标签里用「<b>·亦X</b>」标出<b>被合并那条的来源</b> —— 如「止盈参考·亦中枢上沿」，或「止损·亦中枢下沿」（= 背驰低点与中枢下沿重合，双支撑）。<b>不是漏画</b>。</div>'+
+    '<div class="chart-note" style="line-height:1.85;text-align:left;color:#475569;margin-top:6px">图上 <b>止损 / 入场参考 / 止盈参考</b> 三条线是<b>结构位</b>（背驰低点 / 现价下方 R/2 / 中枢上沿或 2R），<b>不是经实证优化的离场位</b>。R449 五年回测（292 票 · 73,054 个观察点 · 2022-01~2026-08）：63 条「止盈 × 止损 × 持有期」组合<b>无一条</b>产生可检测超额（最高 +0.07pp，p=0.45；0 条通过 Bonferroni α=0.00079），且<b>无规则持有的平均收益 +2.37% 高于任何组合</b>。原因：收益几乎全部来自头部 5% 的段（贡献 114%），止盈线的本质是砍右尾。<b>读法</b>：当结构参考位用，别当卖点。<br>⚠️ <b>结构失效时怎么画（R452/R453）</b>：若现价已跌破背驰低点，则<b>撤下该买点的三条行动线</b>（止损 / 入场参考 / 止盈参考），<b>只改画一条灰色点线</b> —— 跌破标「背驰低点·<b>已失效</b>」，现价<b>恰好等于</b>背驰低点（临界）标「背驰低点·<b>临界贴住</b>」（后者按 R336 口径<b>仍在池中</b>，只是现价即止损位、R=0 时入场/止盈线无意义）；两种标签都只把该位标出来供你判断<b>反抽到哪算结构修复</b>，<b>不是支撑、不是入场位</b>（见上方警示条）；若该票另有顶背驰结构，那套线按下方 R454 规则独立处理（两套结构互不相干，可同时失效）。<br>⚠️ <b>顶背驰失效时怎么画（R454）</b>：若现价<b>已上破顶背驰高点</b>（<b>严格大于</b>，收盘价口径），则<b>撤下「顶确认·破位离场」与「反抽减仓参考」两条减仓/离场行动线</b>，<b>只改画一条灰色点线「顶背驰高点·已失效」</b> —— 价格续创新高即「新高但力度衰竭」的前提不成立，该<b>看跌判据已被证伪</b>，按它操作比不画更危险；灰线只作<b>判据锚点</b>（理解这个看跌结论是在哪个价位被否掉的），<b>不是压力位、更不是做空位</b>。⚠️ 判据失效 <b>≠</b> 风险解除：只说明<b>不能按见顶结构减仓</b>，是否存在新的见顶结构须按<b>新顶背驰 + 新中枢</b>重新评估。<b>顶侧判据刻意用严格 &gt;</b>，而底侧用 &lt;=（含相等）—— 底侧把「相等」也算失效，是因为 R=现价−止损=0 会让入场/止盈线与现价<b>重合退化</b>（数学问题，与结构无关）；顶侧两条线取中枢位、与背驰高点无关，「相等」（贴住前高但未破）时顶背驰<b>仍成立</b>，故线照画。<b>两侧判据不同是正确设计，不是笔误。</b><br>⚠️ <b>同价合线（R451/R452）</b>：当两个体系的参考位落在<b>同一个价</b>时（最常见：底背驰的止盈参考 = 顶背驰的反抽位 = 末中枢上沿），图上只画一条，并在标签里用「<b>·亦X</b>」标出<b>被合并那条的来源</b> —— 如「止盈参考·亦中枢上沿」，或「止损·亦中枢下沿」（= 背驰低点与中枢下沿重合，双支撑）。<b>不是漏画</b>。</div>'+
     '<div class="sec-t">结构明细 <span class="cnt">来自扫描快照(截至 '+esc(s.last||"")+')</span></div>'+
     '<div class="panel" style="padding:10px 16px"><div class="chart-sec">'+miniCol+infoCol+'</div></div>'+
     '<div class="foot">行情为浏览器实时拉取(腾讯前复权)；缠论标注按扫描时结构对齐日期。研究参考，不构成投资建议。</div>';
@@ -2780,13 +2865,25 @@ function visKlMinMax(kl,startPct){
 /* ===== R288: 顶背驰结构参考线(与 R262 底背驰对称) =====
    top_bc=最近顶背驰高点 end_price. 缠论顶背驰确认=跌破最后一个中枢下沿(zs_last.zd).
    confirm(绿线)=末中枢下沿: 收盘跌破即顶背离成立, 纪律性离场位
-   ref(橙线)=末中枢上沿 zs_last.zg(仅当上方仍有 >=0.5% 空间): 反抽到中枢上沿减仓参考 */
+   ref(橙线)=末中枢上沿 zs_last.zg(仅当上方仍有 >=0.5% 空间): 反抽到中枢上沿减仓参考
+   R454: 补失效分支 —— 详见下方注释与文件头 R454。 */
 function topRefOf(u){
   if(!u)return null;
   var st=u.st||{};var tbc=st.top_bc;
   if(!tbc||tbc.end_price==null)return null;
   var close=(st.close==null?null:+st.close);
   if(close==null)return null;
+  var hi=+tbc.end_price;
+  /* R454: 现价**向上突破**顶背驰高点 ⇒ 该见顶判据被证伪(价格续创新高), 后端 top_bc.broken 的
+     极值口径(high>endP)是同一件事的盘中版。原实现在此**直接往下画**两条"减仓/离场"行动线
+     ⇒ 用已失效的看跌结构指引操作, 与 R450 底侧"文案与图相反"同族, 但这里是**图与结构相反**。
+     实测线上 09-11 产物: 219 只命中, **219 只全部至少画一条**(216 画 confirm / 8 画 ref)。
+     ⚠️ 判据必须**严格 >**, 且**刻意不同于底侧 slTpOf 的 <=**:
+        底侧 `close<=endP` 把 `==` 也归 dead, 是因为 R=close-sl=0 ⇒ en/tp 与现价同值, 画出来是
+        三条**重合线**(数学退化, 与结构成不成立无关); 顶侧两条线取 zs_last.zd/zg, **与 endP 无关**,
+        `close==endP`(贴住前高但未突破)时顶背驰**仍成立** ⇒ 线照画。两侧判据不同是**正确**的。
+        (实测 close==endP 另有 6 只, 本轮**不动**它们的行为。) */
+  if(close>hi)return {dead:true,hi:hi,close:close};
   var zs=st.zs_last||{};
   var zd=(zs.zd==null?null:+zs.zd),zg=(zs.zg==null?null:+zs.zg);
   var o={close:close};
@@ -2827,8 +2924,19 @@ function addSlTpLine(opt,u){
     }
   }
   if(tz){
-    if(tz.confirm!=null)items.push({yAxis:+tz.confirm.toFixed(2),lineColor:"#18a058",textColor:"#0e7d4a",name:"顶确认·破位离场",value:tz.confirm,lineWidth:1.4,pri:0,sys:"t",geo:"中枢下沿"});
-    if(tz.ref!=null)items.push({yAxis:+tz.ref.toFixed(2),lineColor:"#e8590c",textColor:"#d9480f",name:"反抽减仓参考",value:tz.ref,pri:0,sys:"t",geo:"中枢上沿"});
+    if(tz.dead){
+      /* R454: 顶背驰已被**向上突破** ⇒ 撤下「顶确认·破位离场」「反抽减仓参考」两条"减仓/离场"
+         行动线, 只留 1 条**灰色点线**标出**判据锚点**(= 原顶背驰高点)。措辞刻意不写"压力位":
+         R288 已定义 ref(中枢上沿)才是压力/减仓位, 此处标的是"这个看跌结论在哪个价位被否掉的"。
+         pri=1: 与有效线同价时让位(同 R452 失效底线)。
+         (对照: 底侧 dead 撤「止损/入场/止盈」三条 —— 因为三条都以 endP 为锚、失效后无意义;
+          顶侧两条以 zs_last 为锚, 撤的理由是**看跌判据被证伪 ≠ 中枢位不存在**, 见 topRefOf 注释。) */
+      items.push({yAxis:+tz.hi.toFixed(2),lineColor:"#94a3b8",textColor:"#64748b",
+        name:"顶背驰高点·已失效",value:tz.hi,lineWidth:1.4,ltype:"dotted",pri:1,sys:"t",geo:"顶背驰高点"});
+    }else{
+      if(tz.confirm!=null)items.push({yAxis:+tz.confirm.toFixed(2),lineColor:"#18a058",textColor:"#0e7d4a",name:"顶确认·破位离场",value:tz.confirm,lineWidth:1.4,pri:0,sys:"t",geo:"中枢下沿"});
+      if(tz.ref!=null)items.push({yAxis:+tz.ref.toFixed(2),lineColor:"#e8590c",textColor:"#d9480f",name:"反抽减仓参考",value:tz.ref,pri:0,sys:"t",geo:"中枢上沿"});
+    }
   }
   if(!items.length)return;
   /* R451: 同值去重 —— z.tp 与 tz.ref 都取 zs_last.zg, 满足各自门槛时会在**同一价格** push
