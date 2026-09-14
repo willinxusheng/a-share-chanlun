@@ -459,12 +459,20 @@ def fetch_universe():
 #   `_KS_MIN_BARS=30` 拦不住这种截断 —— R348 那条只防"1 根假成功"。⇒ 深度不足判 tx_shallow
 #   并**继续切下一源**; 与 tx_short/em_short 同族 = 票面/接口深度问题, **不计入源故障连败**
 #   (R374 的血泪: 把票面短史混进连败窗口会冤停复权主源)。
-#   latch: 命中 _TX_SHALLOW_MAX 次后本轮不再试 tx —— 截断是**全市场恒定**的, 每票多打一次
-#   纯属浪费(6630 票 × 0.35s ≈ 39 分钟); 5 次足够区分"接口截断"与"个别次新股"。
+#   latch: 命中 _TX_SHALLOW_MAX 次后本轮不再试 tx —— 截断在**样本层面**是普遍的
+#   (300 只分层样本 qfqday>=1200 的票 0 只), 每票多打一次纯属浪费
+#   (6630 票 × 0.35s ≈ 39 分钟); 5 次足够区分"接口截断"与"个别次新股"。
+#   ⚠ 修正(R458c): 原注释写"截断是全市场**恒定**的" —— 不准确。实测存在**另一类**票
+#   (同 300 只样本中 13 只 = 4.3%)腾讯**压根不返回 qfqday**(只给完整 `day` 裸价),
+#   它们**穿过本守卫**(根数够长), 却是不复权序列 —— 已由 fetch_data.fetch_tx_qfq
+#   单独拦下(见下方 _tx_noqfq), 与本守卫是**两回事**, 两者都判失败切源。
 #   ⚠ `--src tx` 显式指定时**不套用**守卫: 那是本地取证开关, 要看到源的真实原貌(641 根)。
 _TX_MIN_BARS = 1200          # "2021 至今"≈1380 根, 取 1200 留约 1 年裕量
 _TX_SHALLOW_MAX = 5
 _tx_shallow = {"n": 0, "last": 0}
+# R458c: 「腾讯没给前复权序列(只给裸价 day)」的独立计数 —— 与 641 截断**分开记**(原因不同),
+#   但同属**票面/接口**问题: 判失败切源, **不进源故障连败**(R374 血泪), 单独落 meta.src_fail.
+_tx_noqfq = {"n": 0, "samples": []}
 
 
 def _fetch_tx(sym):
@@ -480,7 +488,15 @@ def _fetch_tx(sym):
     短序列(接口截断/异常)不再当"新鲜成功"吞掉, 显式判失败交切源。"""
     if sym.startswith("bj"):
         return [], "tx_skip_bj"
-    ks, _dirty = fd.fetch_tx(sym, "day")
+    # R458c: 走 fetch_tx_qfq —— **要求腾讯真的给出前复权序列**。原 `fd.fetch_tx` 的
+    #   `qfqday or ... or day` or 链会把"只有 day(不复权)"的票静默当成功(见该函数 docstring)。
+    ks, _dirty, _hasqfq = fd.fetch_tx_qfq(sym, "day")
+    if not _hasqfq:
+        with _tx_lock:
+            _tx_noqfq["n"] += 1
+            if len(_tx_noqfq["samples"]) < 8:
+                _tx_noqfq["samples"].append(sym)
+        return [], "tx_noqfq"
     if not ks:
         return [], "tx_empty"
     if not _last_fresh(ks[-1]["date"]):
@@ -880,6 +896,22 @@ def _try_tx(sym):
             # R374: 短序列(<30根)多为次新股上市不足(票面数据面), 非腾讯源故障 ——
             # 计连败会与真实网络失败(err/empty/stale)加总后冤停主源(09-07/09-08 82%裸价
             # 降级中 tx_short 21 票混入 6 连败窗口即触发整段停用); 切下级源但不动状态机。
+            return [], tag
+        # R458c: `tx_shallow`(深度不足) 与 `tx_noqfq`(腾讯没给复权序列) **同属票面/接口问题**,
+        #   与 tx_short 同族 ⇒ 不计连败。
+        #   ★ 这是 R458b 的自造缺陷: 新增的 tag 前缀不匹配上面两条豁免, 直接落到 `_src_fail`。
+        #   影响**实测为两层**(注意量级, 别夸大):
+        #     ① 每轮往 `_tx_down["count"]` 掺入 **≤5 次**伪失败(auto 分支的 _TX_SHALLOW_MAX latch
+        #        在第 5 次后就不再尝试 tx, 故单轮封顶 5) ⇒ 与**真实**网络失败(err/empty/stale)
+        #        同池累加, 可把原本不到 15 的计数顶过阈值 → 冤停主源(R374 同款血泪, 只是单轮
+        #        贡献更小); latch 被绕过时更甚 —— 本地逐票取证(_tx_shallow 逐票清零)实测
+        #        20 票即打「源连续失败 >=15 次, 整段停用 (末因: tx_shallow)」, 而腾讯此刻 100% 健康
+        #        (两主机 40/40 = 200)。
+        #     ② **诊断被污染**: meta.src_fail.tx 与 src_cycle 把"接口只给 641 根"记成"源故障",
+        #        于是"腾讯到底挂没挂"再次变成只能靠降级率反推的黑盒 —— 恰是 R458b 自己声明
+        #        要消灭的黑盒(R458b 原注释: "不判故障, 仅跳过; 落 meta.src_fail.tx" 自相矛盾)。
+        #   修法与 tx_short 对齐: 只切下级源, 不动状态机。
+        if tag and tag.startswith(("tx_shallow", "tx_noqfq")):
             return [], tag
         _src_fail(_tx_down, _tx_lock, tag.split(":")[0])
         return [], tag
@@ -2515,6 +2547,11 @@ def main():
     #        否则"腾讯怎么一根都没用上"又变成只能靠 87% 裸价反推的黑盒。
     if _tx_shallow["n"]:
         _tx_r["tx_shallow:%d根" % _tx_shallow["last"]] = _tx_shallow["n"]
+    # R458c: 「腾讯没给前复权序列」单独落痕(带票样前 8 只) —— 与 641 截断分开,
+    #        否则"某票标着 tx 却是不复权"这类错标事后无从追查。
+    if _tx_noqfq["n"]:
+        _tx_r["tx_noqfq"] = _tx_noqfq["n"]
+        _tx_r["tx_noqfq_samples"] = list(_tx_noqfq["samples"])
     _em_r = dict(_em_down.get("reasons") or {})
     src_fail = {}
     if _tx_r:
@@ -2534,7 +2571,23 @@ def main():
         "title": "A股全市场缠论雷达",
         "asof": asof, "build_time": datetime.datetime.now(
             datetime.timezone(datetime.timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S"),
-        "version": "P3b-r22",   # r22=R457: **ETF 折溢价率**(场内收盘 vs 官方单位净值, 按净值日期
+        "version": "P3b-r23",   # r23=R458: **K线源主机级回退 + qfq 真伪守卫**。三件事:
+                                #   (a) 腾讯两同源主机(ifzq / web.ifzq)由 WAF **来回翻** —— R249 只修了
+                                #       一半(硬编码单主机), 导致 09-11 线上 src_cnt={tx:876, sina:5821}
+                                #       = **87% 走不复权裸价**, 且 _probe_tx 直连同一主机 ⇒ 复探
+                                #       永远失败、状态机再无法恢复(死锁)。改 TX_KLINE_HOSTS 按序
+                                #       回退 + 进程内记忆, 落 meta.tx_host 免事后反推。
+                                #   (b) qfqday **恒定截断 641 根**(首根 2024-01-22; count/主机无关;
+                                #       300 只样本 qfqday>=1200 的票 0 只) ⇒ 深度守卫拒之, 否则全市场
+                                #       窗口从 5.7 年静默砍到 2.6 年。落 meta.src_fail.tx["tx_shallow:641根"]。
+                                #   (c) ★ 另一类票(13/300 = 4.3%)腾讯**压根不给 qfqday**, 只给完整
+                                #       `day`(裸价) —— 原 `qfqday or ... or day` or 链会把它**贴上
+                                #       前复权标签**, 而前端对 src!="sina" 直接跳过除权检查并显示
+                                #       "(前复权)·除权已平滑" ⇒ 对用户是**肯定性的错误陈述**。
+                                #       实测这 13 只与新新浪裸价逐日完全相同(0/1300 差异) ⇒ 改走
+                                #       fetch_tx_qfq 判 tx_noqfq 切源, **零数据变化、纯标签修复**。
+                                #       落 meta.src_fail.tx["tx_noqfq"](含票样)。
+                                # r22=R457: **ETF 折溢价率**(场内收盘 vs 官方单位净值, 按净值日期
                                 #   严格配对) / r21=R456: **ETF 标的池补全**。两件事同轮落地,
                                 #   关系是「池补全让折溢价有意义」—— 缺口恰是折溢价最有区分度的
                                 #   跨境/商品类, 只在旧池上做折溢价等于做了个看不见重点的功能。

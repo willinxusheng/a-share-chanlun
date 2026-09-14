@@ -109,10 +109,9 @@ def _get(url, retries=3, timeout=30):
             _delay = min(_delay * 3, 9)
 
 
-def fetch_tx(symbol, period):
-    # R458: 经 tx_get 走多主机回退(此前硬编码 ifzq.gtimg.cn, 该主机 09-14 起全站 501)。
-    data = json.loads(tx_get(symbol, period))["data"][symbol]
-    klines = data.get("qfqday") or data.get("qfqweek") or data.get("qfqmonth") or data.get("day") or data.get("week") or data.get("month") or []
+def _tx_parse(klines):
+    """腾讯原始数组 → 看板 bar 字典列表; 返回 (out, dirty)。
+    R458c: 从 fetch_tx 抽出, 供 fetch_tx / fetch_tx_qfq 共用(两份解析必须逐字节同口径)。"""
     out = []
     dirty = 0
     for row in klines:
@@ -136,6 +135,42 @@ def fetch_tx(symbol, period):
             dirty += 1
             continue
     return out, dirty
+
+
+def fetch_tx(symbol, period):
+    # R458: 经 tx_get 走多主机回退(此前硬编码 ifzq.gtimg.cn, 该主机 09-14 起全站 501)。
+    data = json.loads(tx_get(symbol, period))["data"][symbol]
+    # ⚠ R458c: 这条 or 链**保留原语义**(qfq 优先, 缺失则退裸价) —— 5 大指数(sh000001 等)
+    #   天生只有 `day`(指数无复权概念), `fetch_data.main()` 正是靠它取指数量价。
+    #   但"要求前复权"的调用方**不能**用它, 见 fetch_tx_qfq。
+    klines = data.get("qfqday") or data.get("qfqweek") or data.get("qfqmonth") or data.get("day") or data.get("week") or data.get("month") or []
+    return _tx_parse(klines)
+
+
+def fetch_tx_qfq(symbol, period):
+    """R458c(2026-09-14): **只在前复权序列真实存在时**返回数据 —— 雷达等"要求前复权"的调用方专用。
+    返回 (rows, dirty, has_qfq)。
+
+    动机(实测 2026-09-14):
+      · 腾讯对个股/ETF 的 `qfqday` **恒定截断在 641 根**(首根恒 2024-01-22; count 给 1700
+        或 1999 一样、两主机同款; 300 只分层样本中 qfqday>=1200 的票 **0 只**)。
+      · 另有**一整类**票(同 300 只样本中 13 只 = 4.3%, 多为 ETF, 亦含 sh688538 个股, 连
+        sh688981 也一样)腾讯**完全不返回 qfqday**, 只返回完整 `day`(自上市首日, 不复权)
+        —— 实测与新浪裸价**逐日完全相同**(13/13 只, 每只约 1300 根, 0 日差异)。
+    而唯一入口 `fetch_tx` 是 `qfqday or ... or day` 一条 or 链 ⇒ 这 13 只会被**贴上前复权
+    标签却喂进不复权序列**; 前端 exdivRisk 对 `src!=="sina"` 直接 `return null`、并显示
+    "(前复权) —— 除权已平滑" ⇒ **对用户构成肯定性的错误陈述**(R450 同族: 文案承诺须与实现一致)。
+    ∴ 把"要求前复权"显式成独立入口, 由调用方决定「拿不到复权序列就切下一源」。
+
+    ⚠ 与 `--src tx` 取证开关的关系: 该开关走 scan_radar._fetch_tx, 同样受本函数约束
+      (拿不到 qfq 就是拿不到, 取证时也应该看见真相而非裸价)。
+    """
+    data = json.loads(tx_get(symbol, period))["data"][symbol]
+    qk = data.get("qfqday") or data.get("qfqweek") or data.get("qfqmonth")
+    if not qk:
+        return [], 0, False
+    rows, dirty = _tx_parse(qk)
+    return rows, dirty, True
 
 
 def fetch_sina_series(symbol, datalen=2000):
