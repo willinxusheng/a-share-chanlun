@@ -144,6 +144,49 @@ ETF_THIN_AMT = 1000.0          # 60日均额硬否决线(万元): 低于此记�
 #     破坏面比它想防的还大(单元自测: 同指数随机收益对 → 867 对被否决、194 组被拆成 163 组)。
 #   取 −0.6 后, 只有真实反向关系才会命中; 宁漏不误并(误拆 = 退回 R447 行为, 误并 = 藏掉真标的)。
 ETF_TRACK_VETO = -0.6
+# ================= R457: ETF **折溢价率**(场内价 vs 官方单位净值) =================
+# 为什么加: ETF 的实操风险有一半不在"涨跌", 而在**你买入时多付/少付了多少**。跨境 QDII 因
+#   **限购无法申赎套利**, 折溢价可长期挂在两位数 —— 实测(2026-09-14) 513100 纳指ETF
+#   **+12.875%**、513500 标普500 **+9.942%**, 且连续 4 日稳定在 +8.7~+12.9%(非瞬时错价)。
+#   此时"底背驰买入信号"再好也是陷阱(买贵 13%)。而境内股票 ETF 套利有效, 实测
+#   1281/1319 只落在 ±0.5% 内 ⇒ **折溢价这一维度只在跨境/商品类上有区分度**, 必须能看见。
+#
+# 数据源: 天天基金 F10 历史净值 API `api.fund.eastmoney.com/f10/lsjz`(免鉴权;
+#   **Referer 必须为 fundf10.eastmoney.com**, 否则 403)。实测全量 1326 只并发 6:
+#   **1326 成功 / 3 失败(全是非基金的 81xxxx 代码) / 19.5s**, 无限流。
+#   ⚠️ 排队排除过的批量源(**没有**第二次尝试的必要, 已实测):
+#     · 腾讯 fqkline / 新浪 CN_MarketData —— 只有价格, 无净值;
+#     · 东财 push2 clist/getStock 宽字段 —— 无 IOPV/无净值(且 300 字段单请求被源端断连);
+#     · `fund.eastmoney.com/Data/Fund_JJJZ_Data.aspx` 一次可取全量 24058 只(**仅 3.6MB, 1 请求**)
+#       —— 但**只含场外份额**: 实测 510300/513100/511990/159915 在该全量列表中**一个都查不到**;
+#     · `fund.eastmoney.com/data/rankhandler.aspx?ft=zs|gp|zq|qdii` —— 同样只列场外份额
+#       (实测 5 个 ft 类型、3000 行内目标代码命中 **0**)。
+#     ⇒ 场内 ETF 的单位净值**只此一处可得**, 只能逐只取(但 1326 只仅 19.5s, 成本可忽略)。
+#
+# ★★ 必须按**净值日期严格配对**当日收盘价, **绝不可**「最新收盘 ÷ 最新净值」:
+#   反例(实测): 511990 华宝添益 / 511660 建信添益 的净值日是 **2026-09-13(周日, 货币基金按
+#     自然日发净值)**, 该日**无 K 线** ⇒ 硬配 100/0.5456 = **+18231%** 的伪溢价。
+#   反例: QDII 净值天然滞后 —— 513100/513500 净值停在 09-10 而境内已到 09-11;
+#     硬配会得到 +12.875%(假) 与真值 +0%(更假) 之间的任意垃圾。
+# ★ 日期配对**同时免疫除权/份额折算**: 同一日期上"价格"与"净值"处于同一份额基准, 比值与
+#   折算比例无关 —— 这点与收益率链不同(后者必须先复权)。
+EF_NAV_URL = "https://api.fund.eastmoney.com/f10/lsjz?fundCode=%s&pageIndex=1&pageSize=1"
+EF_NAV_REF = "https://fundf10.eastmoney.com/"
+EF_NAV_WORKERS = 6             # 并发上限(实测 6 并发稳定; 源端未声明限流, 保守取值)
+EF_NAV_DELAY = 0.10            # 每请求后 sleep(秒), 压低瞬时速率
+EF_NAV_TIMEOUT = 12.0
+EF_NAV_BUDGET = 300.0          # 整段硬预算(秒): 超出后余票直接放弃(缺字段, 前端降级, 不拖全量)
+# ★ 合理性带: |折溢价| 超此值判「口径不可解释」并**剔除**(落 meta.etf_prem.implausible 计数+样例)。
+#   依据(2026-09-14 实测, 双侧取证):
+#     真实上界 —— 跨境 QDII 极端 +12.9%(513100); 境内股票 ETF 实测 1281/1319 落在 ±0.5% 内;
+#     口径错误 —— 货币 ETF 的单位净值是「每万份收益」口径, 与场内每份价格不同基准,
+#                实测 sz159001(易方达保证金) 收盘 100.0000 vs 单位净值 0.2673 = **+37311%**,
+#                且连续 4 日稳定(非瞬时噪声), 同类还有 511990(+35899%)。
+#   带宽取 50%: 放过真实极端(历史限购狂热期 QDII 溢价可达数十%), 挡住 10^2~10^4 量级的
+#   口径错误 —— 两者量级相差 3 个数量级, 取值落在中间的任意位置等价, 50% 只是保守取低端。
+EF_PREM_MAX = 50.0
+# 净值日距 asof 超此天数 ⇒ 计为「净值滞后」(仍展示: 其日期已在 UI 明示; 只用于 meta 自证)
+EF_NAV_STALE = 7
 # R270: 新浪 datalen 实测支持 1500(2020-07 起), 扩至与腾讯qfq窗口(2021至今)同量级,
 # 避免新浪兜底时缠论结构起点(原800根≈3.2年自2023-05)与腾讯不一致导致的笔/中枢划分差异。
 SINA_LEN = 1500                # 新浪兜底K线根数(~6年, 2021至今全覆盖)
@@ -176,7 +219,27 @@ EM_HOSTS = ["https://push2delay.eastmoney.com", "https://push2.eastmoney.com",
             "http://82.push2.eastmoney.com", "http://push2delay.eastmoney.com"]
 EM_FS_STOCK = "m:1+t:2,m:1+t:23,m:0+t:6,m:0+t:80"      # 沪深A股(含主板/中小/创业/科创)
 EM_FS_BJ = "m:0+t:81+s:2048"                            # 北交所
-EM_FS_FUND = "b:MK0021"                                 # 场内基金(ETF/LOF)
+# R456: 场内基金 —— 原 `b:MK0021` 单板块**枚举不全**, 只覆盖境内股票 ETF/LOF。
+#   2026-09-14 实测东财基金板块空间(逐板取全量, 各板**互不重叠**, 合计 1752 只):
+#     b:MK0021 1326 境内股票ETF/LOF     b:MK0022   27 货币ETF      b:MK0023  241 跨境ETF
+#     b:MK0024   10 商品ETF             b:MK0025  111 科创/混合LOF b:MK0026   26 债券LOF
+#     b:MK0027    4 黄金LOF             b:MK0028    7 原油/商品LOF
+#   ⇒ 原池只覆盖 **1326/1752 = 75.7%**, 缺 426 只。且缺口**不是随机的**, 恰是实操风险
+#   最高的一类(实测缺 `b:MK0023` 后 513100/513500/518880/513050/511990 全部不可见):
+#     · 全部**跨境 ETF**(纳指/标普/恒生科技/中概互联/日经…), 241 只
+#     · 全部**货币 ETF**(华宝添益/银华日利…) 与**商品 ETF**(黄金/豆粕…), 共 37 只
+#   ★ 为什么这是**真缺口**而非有意排除(两条独立证据):
+#     ① 本行自 P1 首提交 00a97fb 起**从未改动**(`git log -S MK0021` 只命中该次), 注释原文
+#        即写「场内基金(ETF/LOF)」—— 原意就是「全部场内基金」, 是枚举不全;
+#     ② 同文件 L142 的 ETF 判据注释**预设了 QDII 在池内**(「QDII/港股通 ETF 交易日历与
+#        A 股不同, 序列错位会让相关塌向 0」)—— 若 QDII 从不在池内, 这条注释无从谈起。
+#   ★ 缺口代价(可量化): 跨境 QDII 因**限购无法申赎套利**, 折溢价可长期挂在两位数
+#     (实测 513100 纳指ETF 折溢价 **+12.875%**、513500 标普500 **+9.942%**, 且连续多日;
+#      而池内境内股票 ETF 实测 1281/1319 只落在 ±0.5% 内 —— 套利有效)。雷达看不见它们
+#     = 看不见**最该预警的一类**。
+#   ⚠️ 刻意**不含** b:MK0025~0028 的 148 只 LOF: 它们是「场内交易的场外型基金」, 纳入会改变
+#      「ETF板块」的语义与信噪比(多小规模/低流动), 属待议(旭总 2026-09-14 拍板仅补 ETF 四板)。
+EM_FS_FUND = "b:MK0021,b:MK0022,b:MK0023,b:MK0024"      # 场内 ETF: 股票+货币+跨境+商品(1604)
 # R270: 东财前复权K线下行镜像 —— https 优先(境外 CI 直连可达, R177b 情绪管线实证),
 # http 兜底(境内自托管/沙箱, 东财 http 仅境内 CDN 节点可达)。
 EM_KLINE_HOSTS = ["https://push2his.eastmoney.com",
@@ -387,6 +450,23 @@ def fetch_universe():
 
 
 # ================= 2. K线抓取(腾讯qfq 主 / 东财qfq 次 / 新浪裸价 备) =================
+# R458b: 腾讯 qfq **深度守卫**。09-14 实测腾讯把个股/ETF 的 qfq 历史**硬截断在 641 根**
+#   (首根恒 2024-01-22; count 给 1700 或 1999 一样、加日期段也一样、两个主机同款 ——
+#    见 fetch_data.TX_KLINE_HOSTS 注释。指数不受影响: 它们返回的是 `day`(不复权)满 2000 根)。
+#   而契约是"2021 至今"≈1380 根, 新浪兜底 1500 根, 东财 1600 根。若让 tx 正常胜出,
+#   全市场窗口会从 5.7 年**静默砍到 2.6 年**, 且各源窗口**参差**(09-11 线上即
+#   876 票 641 根 + 5821 票 1500 根混跑, 跨票比结构时起点不一致)。
+#   `_KS_MIN_BARS=30` 拦不住这种截断 —— R348 那条只防"1 根假成功"。⇒ 深度不足判 tx_shallow
+#   并**继续切下一源**; 与 tx_short/em_short 同族 = 票面/接口深度问题, **不计入源故障连败**
+#   (R374 的血泪: 把票面短史混进连败窗口会冤停复权主源)。
+#   latch: 命中 _TX_SHALLOW_MAX 次后本轮不再试 tx —— 截断是**全市场恒定**的, 每票多打一次
+#   纯属浪费(6630 票 × 0.35s ≈ 39 分钟); 5 次足够区分"接口截断"与"个别次新股"。
+#   ⚠ `--src tx` 显式指定时**不套用**守卫: 那是本地取证开关, 要看到源的真实原貌(641 根)。
+_TX_MIN_BARS = 1200          # "2021 至今"≈1380 根, 取 1200 留约 1 年裕量
+_TX_SHALLOW_MAX = 5
+_tx_shallow = {"n": 0, "last": 0}
+
+
 def _fetch_tx(sym):
     """腾讯 qfq(前复权)主源: 纯 count 形态(R248), 2021-01-01 起裁剪。
     R270: 新鲜度判定由 `>=2024-01-01`(过松, R267 注释自我批评却未在 scan 链路落实)
@@ -407,6 +487,17 @@ def _fetch_tx(sym):
         return [], "tx_stale"              # CDN 陈旧缓存(R248: 停 12h+), 重试无意义
     if len(ks) < _KS_MIN_BARS:
         return [], "tx_short:%d" % len(ks) # R348: 短序列(接口截断/异常)显式判失败切源, 不假成功吞票
+    # R458b: 深度守卫(见文件内 _TX_MIN_BARS 块) —— 截断序列不判成功, 继续切下一源。
+    if len(ks) < _TX_MIN_BARS and SRC_ONLY != "tx":
+        with _tx_lock:
+            _tx_shallow["n"] += 1
+            _tx_shallow["last"] = len(ks)
+            _hit = _tx_shallow["n"] == _TX_SHALLOW_MAX
+        if _hit:
+            print("[scan_radar] 腾讯 qfq 深度不足(<%d 根, 实测 %d 根) —— 连续 %d 票命中, "
+                  "本轮不再尝试腾讯源(不判故障, 仅跳过; 落 meta.src_fail.tx)"
+                  % (_TX_MIN_BARS, len(ks), _TX_SHALLOW_MAX), flush=True)
+        return [], "tx_shallow:%d" % len(ks)
     return ks, "tx"
 
 
@@ -461,10 +552,12 @@ def _fetch_em(sym):
 
 
 def _probe_tx():
-    """腾讯源轻量复探(整段停用后周期调用): 单票纯count请求 + 新鲜度判定, 成功即复位。"""
+    """腾讯源轻量复探(整段停用后周期调用): 单票纯count请求 + 新鲜度判定, 成功即复位。
+    R458: 经 fd.tx_get 走多主机回退 —— 原实现直连 fd._tx_url(硬编码 ifzq.gtimg.cn), 主机被
+    WAF 拦时复探**永远失败**, 源状态机再也恢复不了(09-11 那轮 87% 裸价即卡死在此)。"""
     _tx_th.wait()
     try:
-        raw = _get(fd._tx_url("sh600000", "day"), timeout=8).decode("utf-8", "ignore")
+        raw = fd.tx_get("sh600000", "day", timeout=8)
         node = (json.loads(raw).get("data") or {}).get("sh600000") or {}
         kl = node.get("qfqday") or node.get("day") or []
         return bool(kl and _last_fresh(kl[-1][0]))
@@ -652,7 +745,7 @@ def _month_macd(sym):
         _tx_th.wait()
         for _attempt in range(2):      # 初试 + 1 次轻量重试(吸收腾讯偶发 501/超时)
             try:
-                raw = _get(fd._tx_url(sym, "month"), timeout=15).decode("utf-8", "ignore")
+                raw = fd.tx_get(sym, "month", timeout=15)
                 node = (json.loads(raw).get("data") or {}).get(sym) or {}
                 kl = node.get("qfqmonth") or node.get("month") or []
                 pairs = []
@@ -832,7 +925,7 @@ def fetch_kline(sym):
         ks, _tag = _try_em(sym)
         return (ks, "em") if ks else (None, "em_only")
     # ---- auto ----
-    if not _src_down(_tx_down, _tx_lock):
+    if _tx_shallow["n"] < _TX_SHALLOW_MAX and not _src_down(_tx_down, _tx_lock):
         ks, _tag = _try_tx(sym)
         if ks:
             return ks, "tx"
@@ -1524,6 +1617,134 @@ def _load_etf_meta(path=ETF_META_JSON):
         return data if isinstance(data, dict) else {}
     except Exception:                                            # noqa: BLE001
         return {}
+
+
+def _ef_nav_one(code):
+    """R457: 取单只基金**最新单位净值** -> (nav: float, nav_d: 'YYYY-MM-DD') 或 None。
+
+    nav_d(净值日期) 是配对的**唯一依据**, 不是装饰: 用"最新净值"配"最新收盘"会产生
+    伪溢价(见 EF_NAV_URL 处反例 511990 +18231%)。失败/字段缺失一律返回 None
+    (由调用方计入 fail, 该票不落折溢价字段 ⇒ 前端降级, 绝不编数)。"""
+    c = str(code or "")
+    if len(c) != 6 or not c.isdigit():
+        return None
+    try:
+        d = json.loads(_get(EF_NAV_URL % c, timeout=EF_NAV_TIMEOUT,
+                            referer=EF_NAV_REF).decode("utf-8", "ignore"))
+        L = (d.get("Data") or {}).get("LSJZList") or []
+        if not L:
+            return None
+        r0 = L[0]
+        v = float(r0.get("DWJZ"))
+        dt = str(r0.get("FSRQ") or "")[:10]
+        return (v, dt) if (v > 0 and len(dt) == 10) else None
+    except Exception:
+        return None
+
+
+def _close_on(ks, d0):
+    """R457: 从(升序)K线里取**指定日期**的收盘; 该日无 K 线返回 None。
+
+    ★ 绝不"取最近一根代替" —— 那正是伪溢价的来源。倒序扫描: 命中的通常是末根或倒数第二根,
+      故实际 O(1)(无需为 1600 只 ETF 各建一份 date->close 全表, 省 ~100MB 峰值内存)。"""
+    if not ks or not isinstance(ks, (list, tuple)):
+        return None
+    for k in reversed(ks):
+        if not isinstance(k, dict):        # 形状异常宁可放弃该票, 也不让整段抛出去
+            return None
+        dt = k.get("date")
+        if dt == d0:
+            return k.get("close")
+        if dt and dt < d0:          # 已越过净值日(升序) ⇒ 该日无K线
+            return None
+    return None
+
+
+def _days_between(d1, d2):
+    """纯日期差(天); 任一不可解析返回 None。绝不碰 now()。"""
+    try:
+        a = datetime.date(*[int(x) for x in str(d1)[:10].split("-")])
+        b = datetime.date(*[int(x) for x in str(d2)[:10].split("-")])
+        return (b - a).days
+    except Exception:
+        return None
+
+
+def _etf_prem_scan(universe, got, csym, asof):
+    """R457: ETF 折溢价率 —— 逐只取官方单位净值, 与**同净值日期**的收盘配对。
+
+    就地写 row.etf_uav(单位净值) / etf_uavd(净值日期) / etf_prem(折溢价%) / etf_premd。
+    返回统计 dict 供落 meta.etf_prem(把"覆盖多少/剔除了什么"变成每日刷新数字, 而非口头声称)。
+    无 ETF 或整段失败 -> 返回 None(不落 meta 键, 前端按缺失降级)。"""
+    rows = [r for r in universe.values()
+            if r.get("type") == "ETF" and str(r.get("code") or "").isdigit()]
+    if not rows:
+        return None
+    codes = sorted({str(r["code"]) for r in rows})
+    t0 = time.time()
+
+    def _w(c):
+        if time.time() - t0 > EF_NAV_BUDGET:      # 硬预算: 超时余票直接放弃(缺字段, 不拖全量)
+            return (c, None)
+        r = _ef_nav_one(c)
+        time.sleep(EF_NAV_DELAY)
+        return (c, r)
+
+    nav = {}
+    with ThreadPoolExecutor(max_workers=EF_NAV_WORKERS) as ex:
+        for c, r in ex.map(_w, codes):
+            if r:
+                nav[c] = r
+
+    st = {"src": "api.fund.eastmoney.com/f10/lsjz", "asof": asof,
+          "n_etf": len(rows), "n_codes": len(codes), "n_nav": 0, "n_prem": 0,
+          "n_nav_no_px": 0, "n_implausible": 0, "n_stale": 0,
+          "fail": len(codes) - len(nav), "hi1": 0, "hi3": 0, "max_abs": 0.0,
+          "max_prem": EF_PREM_MAX, "stale_days": EF_NAV_STALE,
+          "workers": EF_NAV_WORKERS, "budget_s": EF_NAV_BUDGET,
+          "days": {}, "implausible": [], "secs": 0.0}
+    for r in rows:
+        c = str(r["code"])
+        nv = nav.get(c)
+        if not nv:
+            continue
+        v, d0 = nv
+        st["n_nav"] += 1
+        st["days"][d0] = st["days"].get(d0, 0) + 1
+        px = _close_on((got.get(csym.get(c)) or (None,))[0], d0)
+        if px is None:
+            # 净值日无当日K线: 货币 ETF 净值按**自然日**发布(实测 511990/511660 = 周日),
+            # 与交易日K线无法配对; 个别停牌亦然。**此票不产出折溢价**(降级, 绝不硬配)。
+            st["n_nav_no_px"] += 1
+            continue
+        p = (px / v - 1.0) * 100.0
+        if abs(p) > EF_PREM_MAX:
+            # 口径不可解释(货币ETF「每万份」净值口径; 见 EF_PREM_MAX 实证) -> 剔除并留痕
+            st["n_implausible"] += 1
+            if len(st["implausible"]) < 8:
+                st["implausible"].append([c, round(p, 1)])
+            continue
+        r["etf_uav"] = round(v, 4)
+        r["etf_uavd"] = d0
+        r["etf_prem"] = round(p, 3)
+        r["etf_premd"] = d0
+        st["n_prem"] += 1
+        if abs(p) > st["max_abs"]:
+            st["max_abs"] = round(abs(p), 3)
+        if abs(p) >= 1.0:
+            st["hi1"] += 1
+        if abs(p) >= 3.0:
+            st["hi3"] += 1
+        _gap = _days_between(d0, asof) if asof else None
+        if _gap is not None and _gap > EF_NAV_STALE:
+            st["n_stale"] += 1
+    st["secs"] = round(time.time() - t0, 1)
+    print("  ETF 折溢价: 取净值 %d/%d(失败%d) %.0fs | 产出折溢价 %d(净值日无K线 %d / 口径剔除 %d"
+          " / 滞后 %d) | |溢价|>=1%% %d 只, >=3%% %d 只, 最大 %.3f%%"
+          % (st["n_nav"], st["n_codes"], st["fail"], st["secs"], st["n_prem"],
+             st["n_nav_no_px"], st["n_implausible"], st["n_stale"],
+             st["hi1"], st["hi3"], st["max_abs"]), flush=True)
+    return st
 
 
 def _etf_track_groups(track_of, rets_map, mcap_map):
@@ -2257,6 +2478,20 @@ def main():
     from collections import Counter as _Counter
     _lc = _Counter(s["last"] for s in sts.values() if s.get("last"))
     asof = _lc.most_common(1)[0][0] if _lc else ""
+    # --- R457: ETF 折溢价率(场内收盘 vs 官方单位净值, 按**净值日期严格配对**) ---
+    #   放在 asof 之后(统计里要用 asof 算「净值滞后」), meta 之前(结果要进 meta)。
+    #   整段 non-fatal: 失败只缺字段, 前端按缺失降级, 绝不影响 K线/门禁/信号/画线。
+    _csym = {str(_r.get("code")): _s for _s, _r in universe.items()
+             if _r.get("type") == "ETF"}
+    try:
+        etf_prem_meta = _etf_prem_scan(universe, got, _csym, asof)
+    except Exception as _e:                     # noqa: BLE001
+        # ★ 必须是 non-fatal: 折溢价是**新增展示字段**, 与 K线/门禁/信号/画线无关;
+        #   若此段异常炸出去, 会让整轮全量扫描无产物(等于为一个装饰性字段废掉当日数据)。
+        #   失败 => 不落 meta 键 + 不落任何 row 字段 => 前端按缺失降级(与 R448 同款约定)。
+        etf_prem_meta = None
+        print("  !! ETF 折溢价段异常(已隔离, 不影响产物): %s: %s"
+              % (type(_e).__name__, str(_e)[:120]), flush=True)
     scen_cnt, gate_cnt = {}, {}
     for s in sts.values():
         scen_cnt[s["scenario"]] = scen_cnt.get(s["scenario"], 0) + 1
@@ -2276,6 +2511,10 @@ def main():
     deg_pct = round(src_cnt.get("sina", 0) * 100.0 / _src_tot)
     # R270: 各源失败原因统计(停用状态机 reasons) -> meta.src_fail, 前端/人工可查腾讯为何不可用
     _tx_r = dict(_tx_down.get("reasons") or {})
+    # R458b: 深度守卫命中数单独落痕 —— 它不进程故障计数字典(不该冤停源), 但必须可见,
+    #        否则"腾讯怎么一根都没用上"又变成只能靠 87% 裸价反推的黑盒。
+    if _tx_shallow["n"]:
+        _tx_r["tx_shallow:%d根" % _tx_shallow["last"]] = _tx_shallow["n"]
     _em_r = dict(_em_down.get("reasons") or {})
     src_fail = {}
     if _tx_r:
@@ -2295,7 +2534,25 @@ def main():
         "title": "A股全市场缠论雷达",
         "asof": asof, "build_time": datetime.datetime.now(
             datetime.timezone(datetime.timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S"),
-        "version": "P3b-r20",   # r20=R448: ETF 同指数去重**换判据** + 官方元数据上屏(三件事)。
+        "version": "P3b-r22",   # r22=R457: **ETF 折溢价率**(场内收盘 vs 官方单位净值, 按净值日期
+                                #   严格配对) / r21=R456: **ETF 标的池补全**。两件事同轮落地,
+                                #   关系是「池补全让折溢价有意义」—— 缺口恰是折溢价最有区分度的
+                                #   跨境/商品类, 只在旧池上做折溢价等于做了个看不见重点的功能。
+                                #   r22 折溢价: 源/阈值/剔除规则/日期配对反例全见 EF_NAV_URL 与
+                                #   EF_PREM_MAX 常量块; 覆盖自证落 meta.etf_prem(每日刷新数字)。
+                                #   ⚠️ 折溢价是**纯展示新增字段**, 不进任何判据/排序/门禁 ⇒
+                                #   对画线层零影响(已用全量穷举逐票签名 diff 取证: 变化集合为空)。
+                                # r21 池补全: 原 `b:MK0021` 单板块只覆盖 **1326/1752 = 75.7%**
+                                #   场内基金, 缺 426 只, 且缺口全是实操风险最高的一类:
+                                #   **全部跨境 ETF**(241, 纳指/标普/恒生科技/中概互联…) +
+                                #   **货币 ETF**(27) + **商品 ETF**(10)。⇒ 改为 ETF 四板块并集
+                                #   `b:MK0021,b:MK0022,b:MK0023,b:MK0024`(= 1604 只)。
+                                #   证据链 / 为何这是真缺口 / 缺口代价 / 为何不含 LOF, 全见
+                                #   EM_FS_FUND 处长注释。该行唯一下游影响 = "标的池多 278 只 ETF";
+                                #   对 个股/北交 的 K线/门禁/信号/行业聚合**按构造无影响**
+                                #   (三源路径与聚合键完全隔离), 已用 `--src tx --only` 单源
+                                #   确定性 A/B 取证(见 2026-09-14 验证记录)。
+                                # r20=R448: ETF 同指数去重**换判据** + 官方元数据上屏(三件事)。
                                 #   ★ 触发点 = R447 留下的**已知假阴性**: sz159527(云计算ETF广发)
                                 #     与 sz159739(云计算ETF鹏华) 官方跟踪标的**字面完全相同**
                                 #     「中证云计算与大数据主题指数」, 但 60 日收益相关仅 **0.9800**
@@ -2419,6 +2676,10 @@ def main():
         "degraded_pct": deg_pct,               # R374: 新浪占比%(前端严重度分级渲染)
         "degraded_reason": deg_reason,         # 降级黄条文案(前端优先展示)
         "src_fail": src_fail,                  # 各源失败原因计数(诊断腾讯/东财为何不可用)
+        "tx_host": fd.tx_host(),               # R458: 腾讯实际服务主机(空=本轮从未成功)。
+                                               # ifzq/web.ifzq 两个同源主机会被 WAF 轮流拦
+                                               # (09-06 拦 web./09-14 拦 ifzq), 落痕后一眼看出
+                                               # "哪台在服务", 不必再靠 87% 裸价反推。
         "src_cycle": src_cycle,                # R444: 各源停用/恢复轮次 {stops,resumes} —— 区分
                                                #       "整轮持续不可用"与"间歇抖动"(后者加密复探可救)
         "m_macd": _m_macd_stat,                # R400: 月线补拉统计 {tried,ok,short,net,down,warn}
@@ -2434,6 +2695,13 @@ def main():
                                                # 旧 JSON(无 etf_grp)窗口内不能放开(会冒出 10 只
                                                # 同指数 ETF 且无法折叠)。有该键 = 本轮确实去重过。
         "sanit_drop_bars": _sanit_drop_bars,   # R275: 净化丢弃 bar 数(坏根量化诊断; 正常≈0, 激增=源数据异常)
+        # R457: ETF 折溢价率的**能力声明 + 覆盖自证** —— 把"取到多少/为什么剔除"变成每日
+        # 刷新的数字而不是口头声称。键存在 = 本轮确实抓过净值(前端据此区分"本轮没这项数据"
+        # 与"这只恰好无净值日K线")。字段: n_etf/n_codes/n_nav/n_prem/n_nav_no_px(净值日无K线,
+        # 主要是货币ETF按自然日发净值)/n_implausible(口径不可解释, 附样例)/n_stale(净值滞后)/
+        # fail/hi1/hi3(|溢价|≥1%、≥3% 的只数)/max_abs(本轮最大|溢价|)/days(净值日期分布)/
+        # max_prem, stale_days, workers, budget_s, secs, src。
+        "etf_prem": etf_prem_meta,
         "ind_cnt": ind_cnt,
         "excl_st": excl.get("st", 0),
         "note": ("信号=近端背驰场景(背驰见底/见顶) 距背驰日<=%d天; 门禁剔除项仅展示不进信号; "
@@ -2460,7 +2728,11 @@ def main():
                             if k in ("name", "type", "code", "gate", "gd", "ind", "mcap",
                                      "st", "ff", "lead", "src",
                                      # R448: ETF 官方元数据(前端「细分领域标注 + 同指数选优」)
-                                     "etf_track", "etf_fee", "etf_nav")}
+                                     #   注意 etf_nav 是**净资产规模(亿元)**, 不是单位净值 ——
+                                     #   历史命名, 与 R457 的 etf_uav 不可混用。
+                                     "etf_track", "etf_fee", "etf_nav",
+                                     # R457: ETF 折溢价(单位净值 / 净值日期 / 折溢价% / 对应日期)
+                                     "etf_uav", "etf_uavd", "etf_prem", "etf_premd")}
                         for s, row in universe.items()}}
     # R275: 显式 UTF-8 —— 读侧(L1002)已带 encoding, 写侧遗漏; CI runner 若 locale 非 UTF-8
     # (如 C/POSIX), ensure_ascii=False 写中文 meta 文案会 UnicodeEncodeError 崩掉全量 run 无产物。

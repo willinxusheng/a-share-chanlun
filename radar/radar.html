@@ -435,11 +435,23 @@ h1{font-size:21px;font-weight:700;letter-spacing:.4px;line-height:1.3}   /* R323
 /* R455: 不复权源「结构可信度」标 —— 只对**近一年有除权记录**的票出橙标点名, 其余不再告警。
    动机: 信号区 247/276(89.5%) 走新浪不复权价, 原页脚一句泛化"除权日K线可能有假跳空"让
    **93.5% 实际不受影响的票跟着一起被怀疑**; 实测 sina 且近一年无除权 = 231/247。
-   标在名字行, 与 月线 mtag 同尺寸, 不挤占 K 线列。 */
+   ★ 标在 **`.st` 第二行**(不是名字行): 名字格实测仅 121px 且 overflow:hidden ⇒ 加任何标都会
+   截断股票名(违反 R448「名称不可牺牲」); 而 `.st` 第二行(grid 1fr=110px)实测仅用 ~60px
+   ⇒ 唯一有余量的格子。标宽 29px, 实测标右 421 < 格右 439 不裁切。 */
 .divtag{display:inline-block;font-size:9.5px;font-weight:700;border-radius:3px;padding:0 4px;
   margin-left:3px;line-height:1.6;white-space:nowrap;vertical-align:1px;letter-spacing:.2px;
   color:#b45309;background:rgba(232,160,16,.11);border:1px solid rgba(232,160,16,.35)}
 .revpool .prow .trtag{display:inline-block;font-size:9.5px;font-weight:700;border-radius:3px;padding:0 4px;margin-right:4px;line-height:1.6;white-space:nowrap;vertical-align:1px;letter-spacing:.2px}
+/* R457: ETF 折溢价率配色 —— **溢价红系递进(越高越危险), 折价只给中性灰蓝**。
+   刻意不给折价配绿色: 绿色在本站是"跌"(A股口径), 而折价不是涨跌; 且深折价多数有原因
+   (限购/流动性/退市), 涂绿等于暗示"机会", 与事实相反。 */
+.pr1{color:#b45309}.pr3{color:#c92a2a}.pd1{color:#475569}.pd3{color:#334155}
+.premtag{display:inline-block;font-size:9.5px;font-weight:700;border-radius:3px;padding:0 4px;
+  margin-left:3px;line-height:1.6;white-space:nowrap;vertical-align:1px;letter-spacing:.2px}
+.premtag.pr1{color:#b45309;background:rgba(232,160,16,.11);border:1px solid rgba(232,160,16,.35)}
+.premtag.pr3{color:#c92a2a;background:rgba(201,42,42,.10);border:1px solid rgba(201,42,42,.35)}
+.premtag.pd1{color:#475569;background:rgba(71,85,105,.10);border:1px solid rgba(71,85,105,.28)}
+.premtag.pd3{color:#334155;background:rgba(51,65,85,.12);border:1px solid rgba(51,65,85,.30)}
 .revpool .prow .trtag.rt{color:#0e7d4a;background:rgba(24,160,88,.10)}
 .revpool .prow .trtag.lt{color:#b45309;background:rgba(232,160,16,.10)}
 @media(max-width:980px){.revpool .prow,.revpool .phdr{grid-template-columns:minmax(110px,1.25fr) minmax(56px,.65fr) minmax(56px,.6fr) minmax(56px,.55fr) minmax(58px,.6fr) minmax(90px,.92fr) minmax(110px,.95fr);padding:7px 10px;font-size:11px}.revpool .phdr{padding:5px 10px;font-size:10px}.revpool .phead{padding:12px}}
@@ -1038,6 +1050,9 @@ function sigRow(s,opt){   // R380: opt.sub=true = 非低吸区灰显行(破位/�
     (bkTag?"\n⚠️ 盘中已破: 背驰笔结束后最低 "+_bbc.broken_price+"（"+_bbc.broken_date+"）已击穿背驰低点 "+_bbc.end_price+"，该一类买点在**结构上已失效**（看板按收盘价剔票，故本行仍在池）\n📊 R443 五年回测：该标记收益维度无可检测差异(20日 −0.32pp, p=0.74)，但风险维度有效 — 20日内最大浮亏>5% 概率 72.1%(未破 58.1%)，按风险读": "")+
     (topBkTag?"\n⚠️ 顶背驰已失效: 现价已上破顶背驰高点 "+_tbbc.end_price+"（"+(dev!=null?(dev>0?"高":"持平")+Math.abs(dev).toFixed(1)+"%":"")+"）—— 缠论口径该**看跌判据已被证伪**(价格续创新高)。图上已撤下「顶确认·破位离场」「反抽减仓参考」两条减仓/离场行动线, 仅留一条灰色「顶背驰高点·已失效」判据锚点(不是压力位、不是做空位)。⚠️ 判据失效 ≠ 风险解除: 只说明不能按见顶结构减仓, 是否有新的见顶结构须按新顶背驰重新评估": "")+
     (ff!=null?"\n当日主力净流入: "+ffTxt(ff):"")+
+    /* R457: ETF 折溢价进 tooltip —— 信号行里这一项是**风险侧**信息(底背驰"机会"若同时高溢价,
+       是"买贵"的陷阱), 故与资金流并列, 不塞进"选优"区。带净值日(T-1 口径)。 */
+    ((_isEtf&&premOf(s.sym)!=null)?"\nETF 折溢价: "+premTxt(premOf(s.sym))+"(净值日 "+premDayOf(s.sym)+" · T-1 口径; 正=买贵)":"")+
     ((ffNet!=null&&((!t&&ffNet<0)||(t&&ffNet>0)))?"\n⚠️ 资金背离警示: "+(t?"顶信号下主力仍净流入 "+ffTxt(ffNet)+"，警惕假顶/逼空":"底信号下主力却净流出 "+ffTxt(ffNet)+"，警惕假底不跟"):"")+
     "\n\n点击查看个股完整K线与结构";
   var resMode=(ffNet!=null)&&((!t&&ffNet>0)||(t&&ffNet<0));   // R287: 资金同向共振(顶+流出/底+流入)
@@ -1071,6 +1086,15 @@ function sigRow(s,opt){   // R380: opt.sub=true = 非低吸区灰显行(破位/�
         +"笔/中枢/背驰, 本信号的结构标注精度下降。请核对 K 线是否含假跳空, 或改用复权价自行复核。"
         +"⚠ 判据边界: 只识别「单日涨跌幅超板块涨跌停上限」的大比例除权(送转/大额分红/份额折算)")+'">除权</span>'
     :"";
+  /* R457: ETF 折溢价标 —— 信号区是它**最该出现**的位置: 底背驰给的是"机会"语义, 而跨境 QDII
+     因限购无法套利、折溢价可长期挂在两位数(实测 513100 +12.9%) ⇒ 此时"机会"实为"买贵 13%"。
+     阈值取 |溢价|≥1%: 境内股票 ETF 实测 1281/1319 落在 ±0.5% 内 ⇒ 1% 这条线几乎只对
+     跨境/商品类开口, 不会把 1300 只平价票全挂上标(信息量≈0 的标 = 噪声)。
+     ⚠ 位置: 挂 `.st` 第一行(面积行)而非名字行 —— 与 R455 除权标同样理由(名字格 121px 不可牺牲);
+       且该行对 ETF 通常只有 `面X.XX`(~50px/110px), 余量足够。 */
+  var _pm=premOf(s.sym);
+  var premTag=(_isEtf&&_pm!=null&&Math.abs(_pm)>=1)
+    ?'<span class="premtag '+premCls(_pm)+'" title="'+esc(premTip(s.sym))+'">'+premShort(_pm)+'</span>':"";
   return '<div class="'+rowCls+'" title="'+esc(sigTip)+'" onclick="pickSigRad(\''+s.sym+'\')">'+
     '<div><div class="nm">'+(t?"⚠️ ":((opt.sub)?"🔍 ":"✅ "))+esc(nm)+lead+ffMini+etfTag+twTag+'</div><div class="sub">'+esc(s.sym)+" · "+esc(indName)+'</div></div>'+   // R447: +etfTag/twTag
     /* R455: 原第二列渲染 `强N/缩 面X` —— 其中 `强N` 是**死字段**(跨 6 快照 1507 条信号 100% = 2,
@@ -1078,7 +1102,7 @@ function sigRow(s,opt){   // R380: opt.sub=true = 非低吸区灰显行(破位/�
        今: 去掉死字段 → _areaTag() 带上 R387 三段配色; `缩` 保留(55/221 有区分度); 末尾挂除权标。
        ⚠ 量缩标**必须用 `<span>` 不能用 `<b>`** —— 第 292 行 `.sigrad .srow .st b{display:block}`,
        用 `<b>` 会变块级、整列多占一行(实测行高 53→67px, 3/10 行被撑开)。 */
-    '<div class="st">'+(t?'<b style="color:#c92a2a">顶背驰</b>':'<b style="color:#087f5b">底背驰</b>')+'<span>'+_areaTag(s.area)+(s.vol?' <span style="color:#087f5b;font-weight:700" title="量缩确认: 该背驰笔区间成交量较前笔萎缩, 佐证动能衰竭(近端 55/276 只命中)">缩</span>':"")+(divTag?' '+divTag:"")+'</span></div>'+
+    '<div class="st">'+(t?'<b style="color:#c92a2a">顶背驰</b>':'<b style="color:#087f5b">底背驰</b>')+'<span>'+_areaTag(s.area)+(s.vol?' <span style="color:#087f5b;font-weight:700" title="量缩确认: 该背驰笔区间成交量较前笔萎缩, 佐证动能衰竭(近端 55/276 只命中)">缩</span>':"")+(divTag?' '+divTag:"")+(premTag?' '+premTag:"")+'</span></div>'+
     '<div class="st">'+(fr==null?"-":(fr===0?"当日":fr+"天前"))+frTag+'</div>'+
     '<div class="right">'+
       '<div class="dev '+devCls+'" title="'+esc(devTip||sigTip)+'">'+(dev!=null?devTxt:"-")+'<small>'+bkTag+topBkTag+devSub+'</small></div>'+
@@ -1358,7 +1382,45 @@ function _amtW(v){return v==null?"-":(v>=1e4?(v/1e4).toFixed(1)+"亿":v.toFixed(
    缺失一律降级: 无 track ⇒ 退回 R447 展示; 无 fee/nav ⇒ 该处显 "-"。**绝不因缺失而少显示行**。 */
 function trkOf(sym){return ((UNI[sym]||{}).etf_track)||"";}
 function feeOf(sym){var v=(UNI[sym]||{}).etf_fee;return (v==null?null:+v);}
+/* ⚠️ etf_nav 的含义是**净资产规模(亿元)**, 不是单位净值 —— 历史命名(规模=Net Asset Value)。
+   单位净值是 R457 新增的 etf_uav, 两者**不可混用**(量级差 2~3 个数量级)。 */
 function navOf(sym){var v=(UNI[sym]||{}).etf_nav;return (v==null?null:+v);}
+/* ===================== R457: ETF 折溢价率 =====================
+   后端已按**净值日期严格配对**算好(close(净值日)/单位净值−1), 前端只做展示与配色 —— 
+   判据不在前端复刻(复刻必然两边漂移)。
+   ★ 为什么必须把「净值日」显式打出来(本项最容易出错的地方):
+     · 净值由基金公司**收盘后(约 20:00)**披露, 而本看板是 ~16:00 起的收盘快照 ⇒ 折溢价天然
+       是 **T-1** 口径;
+     · 跨境/QDII 的净值再滞后 1 个交易日(实测 513100/513500 净值停在 T-2)。
+     ⇒ 只写"折溢价 12.9%"会被误读成"现在"; 必须带上净值日。
+   ★ 配色与语义: 溢价(正)= 买贵了, 越高越危险; 折价(负)= 买便宜了, 但深折价通常有原因
+     (限购/流动性/退市), 故折价**不涂绿**(不暗示"机会"), 只在中度以上给中性提示色。 */
+function premOf(sym){var v=(UNI[sym]||{}).etf_prem;return (v==null?null:+v);}
+function premDayOf(sym){return ((UNI[sym]||{}).etf_premd)||"";}
+function uavOf(sym){var v=(UNI[sym]||{}).etf_uav;return (v==null?null:+v);}
+function premTxt(p){return (p==null)?"-":((p>0?"+":"")+p.toFixed(2)+"%");}
+function premShort(p){return (p==null)?"":((p>=0?"溢":"折")+Math.abs(p).toFixed(2)+"%");}
+function premCls(p){return (p==null)?"":(p>=3?"pr3":(p>=1?"pr1":(p<=-3?"pd3":(p<=-1?"pd1":""))));}
+function premTip(sym){
+  var p=premOf(sym),d=premDayOf(sym),nv=uavOf(sym);
+  if(p==null){return "该 ETF 未产出折溢价 —— 常见原因是其**净值日无当日K线**(货币 ETF 的单位净值按自然日披露, 含周末, 与交易日K线无法配对)或净值口径与场内价格基准不同。宁可不显示, 不强配(强配会产生数千%的伪溢价)。";}
+  var L=[];
+  L.push("");
+  L.push("【ETF 折溢价率】"+premTxt(p)+" = "+d+" 收盘价 ÷ "+d+" 官方单位净值 − 1");
+  if(nv!=null)L.push("  单位净值 "+nv+"(净值日 "+d+"), 来自天天基金 F10 披露 —— 非估算。");
+  L.push("  ★ 正 = 溢价(相对净值买贵了); 负 = 折价(相对净值买便宜了)。");
+  L.push("");
+  L.push("  ◆ 为什么这个数值得看(区分度实测, 非估计):");
+  L.push("     · 境内股票 ETF 有一级市场申赎套利 ⇒ 折溢价被压到 ±0.5% 内(全池实测 1281/1319 只);");
+  L.push("     · 跨境 QDII **因限购无法套利** ⇒ 折溢价可长期挂在两位数 —— 实测 513100 纳指ETF 连续 4 个交易日 +11.9~+12.9%、513500 标普500 +8.7~+9.9%。");
+  L.push("     ⇒ 这类票上「买贵 13%」是**确定发生**的成本; 结构信号再好也抵消不掉。");
+  L.push("");
+  L.push("  ⚠️ 口径边界(必须知道): 净值由基金公司**收盘后(约 20:00)**披露, 而本看板是 ~16:00 起的收盘快照 ⇒ 折溢价天然为 **T-1**; 跨境/QDII 再滞后 1 个交易日(实测 513100/513500 净值停在 T-2)。上方的「净值日」就是真实口径, 请勿当成当日值。");
+  if(p>=3)L.push("  ⚠️ 溢价 ≥3%: 已远超正常跟踪误差量级, 买入成本显著偏高。");
+  else if(p<=-3)L.push("  ⚠️ 折价 ≥3%: 便宜, 但深折价通常有原因(限购/流动性差/退市预期), 先确认原因再谈机会。");
+  return L.join("\n");
+}
+function prem3Line(sym){var p=premOf(sym);return (p!=null&&Math.abs(p)>=3)?" · 折溢价 "+premTxt(p)+"("+premDayOf(sym)+")":"";}
 /* 跟踪标的 -> 短领域标签(仅展示, 不改任何判据)。
    ① 先剥括号注释(「创业板指数(价格)」-> 「创业板指数」); ② 去尾部「指数/全收益指数/收益率」;
    ③ 去首部「中证/国证」—— 但**仅当剩余 ≥6 字**才去, 否则「中证1000」会被削成「1000」、
@@ -1398,7 +1460,8 @@ function twinInfo(c){
   var rows=mem.map(function(s){
     var u=UNI[s]||{},st=u.st||{};
     return {sym:s,name:(u.name||s),fee:feeOf(s),nav:navOf(s),
-            amt:(st.avg_amt60==null?null:+st.avg_amt60),trk:trkOf(s)};
+            amt:(st.avg_amt60==null?null:+st.avg_amt60),trk:trkOf(s),
+            prem:premOf(s),premd:premDayOf(s)};   // R457: 折溢价(同指数选哪只的第三项差异)
   });
   var byFee=rows.filter(function(r){return r.fee!=null}).sort(function(a,b){return a.fee-b.fee||(b.amt||0)-(a.amt||0)});
   var byNav=rows.filter(function(r){return r.nav!=null}).sort(function(a,b){return b.nav-a.nav});
@@ -1435,7 +1498,7 @@ function twinTip(c){
     var warn="";
     if(r.nav!=null&&r.nav<ti.clear)warn+=" ⚠️规模"+navTxt(r.nav)+"(<"+ti.clear+"亿·清盘风险)";
     if(r.amt!=null&&r.amt<ti.thin)warn+=" ⚠️60日均额"+_amtW(r.amt)+"(<"+ti.thin+"万·执行偏难)";
-    _L.push("  • "+r.sym+" "+r.name+(r.sym===c.sym?"  ← 本行":"")+"  费率"+feeTxt(r.fee)+"  规模"+navTxt(r.nav)+"  60日均额"+_amtW(r.amt)+warn);
+    _L.push("  • "+r.sym+" "+r.name+(r.sym===c.sym?"  ← 本行":"")+"  费率"+feeTxt(r.fee)+"  规模"+navTxt(r.nav)+"  60日均额"+_amtW(r.amt)+(r.prem!=null?("  折溢价"+premTxt(r.prem)+"(净值日 "+r.premd+")"):"")+warn);
   });
   if(n>show.length)_L.push("  … 另 "+(n-show.length)+" 只同指数产品(此处只列前 10, 余量同源不再展开)");
   _L.push("");
@@ -1445,6 +1508,18 @@ function twinTip(c){
   if(ti.amt)_L.push("  ◆ 成交最活跃: "+ti.amt.sym+" "+ti.amt.name+" ("+_amtW(ti.amt.amt)+"/日)  费率"+feeTxt(ti.amt.fee));
   if(ti.fee&&ti.feeMax&&ti.feeMax.fee!=null&&ti.fee.fee!=null&&ti.feeMax.fee>ti.fee.fee)
     _L.push("  ⇒ 组内费率极差 "+(ti.feeMax.fee-ti.fee.fee).toFixed(2)+"pp/年 = **确定的**持有成本差。资金量不大且不需日内进出 → 看费率; 需大额一次进出 → 看流动性。");
+  /* R457: 同指数产品之间的差异只有三项 —— 费率(长期/确定) / 规模与流动性(执行) /
+     **折溢价(这一笔买入当场吃掉或省下的钱)**。前两项是"每年", 折溢价是"每次" ⇒
+     组内折溢价极差 ≥1% 时, 它比费率极差更该先看(费率差要持有一年才追平)。 */
+  (function(){
+    var _pw=ti.rows.filter(function(r){return r.prem!=null});
+    if(_pw.length<2)return;
+    _pw.sort(function(a,b){return a.prem-b.prem});
+    var _lo=_pw[0],_hi=_pw[_pw.length-1];
+    _L.push("  ◆ 折溢价最低: "+_lo.sym+" "+_lo.name+" ("+premTxt(_lo.prem)+", 净值日 "+_lo.premd+")");
+    if(_hi.prem!=null&&_lo.prem!=null&&(_hi.prem-_lo.prem)>=1)
+      _L.push("  ⇒ 组内折溢价极差 "+(_hi.prem-_lo.prem).toFixed(2)+"pp = **这一次买入**当场吃掉/省下的钱(费率差是「每年」, 折溢价是「每次」) ⇒ 同指数「买哪只」应先看它, 再看费率。");
+  })();
   var _cw=(ti.fee&&ti.nav&&ti.fee.sym!==ti.nav.sym);
   if(_cw)_L.push("  ⚠️ 「费率最低」与「规模最大」**不是同一只** —— 全市场实测这种冲突占 68%(132/194 组) ⇒ 必须两列并看, 不能默认「挑最大的买」—— 那是错的。");
   var _clears=ti.rows.filter(function(r){return r.nav!=null&&r.nav<ti.clear});
@@ -2259,7 +2334,13 @@ function renderIndStkList(k){
       var _tlbl=(u.type==="ETF")?((_tgn>1)?("×"+_tgn):_tk):"";
       var trkTag=_tlbl?(' <span class="trk" title="'+esc(trkTip(x))+'">'+esc(_tlbl)+'</span>'):"";
       var _fee=(u.type==="ETF")?feeOf(x.sym):null, _nav=(u.type==="ETF")?navOf(x.sym):null;
-      var _cdTxt=esc(x.sym)+(u.type==="ETF"?(' · 费率'+( _fee!=null?feeTxt(_fee):"-")+( _nav!=null?' · '+navTxt(_nav):"")):"");
+      /* R457: 折溢价只对 |溢价|≥1% 的 ETF 上屏 —— 境内 ETF 实测 1281/1319 在 ±0.5% 内,
+         全挂标等于噪声; 1% 这条线几乎只对跨境/商品类开口。带净值日(不标日期的"折溢价X%"
+         会被当成当日值, 而它天然是 T-1)。 */
+      var _pm=premOf(x.sym);
+      var _cdTxt=esc(x.sym)+(u.type==="ETF"?(' · 费率'+( _fee!=null?feeTxt(_fee):"-")+( _nav!=null?' · '+navTxt(_nav):"")):"")
+        +((u.type==="ETF"&&_pm!=null&&Math.abs(_pm)>=1)
+          ?(' · <span class="'+premCls(_pm)+'" title="'+esc(premTip(x.sym))+'">'+premShort(_pm)+'</span><span class="muted">('+esc(String(premDayOf(x.sym)).slice(5))+')</span>'):"");
       return '<div class="stk-grid'+hl+'" title="'+tip+'" onclick="pickStkInInd(\''+x.sym+'\')">'+
         /* R448: 名称格里的 👑 标**只留图标不留文字** —— 名称格实测仅 184px, 「长名称(113px) +
            👑 规模最大(60px) + ×N 徽章(23px)」三者并存会把名称压到 84px(实测「中证A500ETF国泰」
@@ -2454,6 +2535,8 @@ function showStk(sym){
     ((u.type==="ETF"&&trkOf(sym))?'<span title="'+esc(trkTip({sym:sym}))+'">跟踪 <b>'+esc(trkShort(trkOf(sym)))+'</b></span>':'')+
     ((u.type==="ETF"&&feeOf(sym)!=null)?'<span title="管理费 + 托管费合计(天天基金 fundf10 官方披露, 非估算)。同指数 ETF 之间净值走势相同 ⇒ 费率是最**确定**的一项差异。全市场实测(2026-09-13): 194 个同指数组里 96 组费率极差 ≥0.20pp/年, 最大 0.90pp/年(0.20% vs 1.10%)。">费率 <b>'+feeTxt(feeOf(sym))+'</b></span>':'')+
     ((u.type==="ETF"&&navOf(sym)!=null)?'<span title="净资产规模(基金定期报告披露)。低于 '+((((M||{}).etf_twin||{}).clear_yi)||0.5)+' 亿有清盘风险(会强制赎回, 长期持有者应避开)。⚠️ 反证边界: K 线层**看不出**小 ETF 价格更差 —— 同指数 10 只日均振幅 4.47~4.62%, 与规模相关仅 +0.045, 仅跟踪偏差与成交额弱负相关(−0.442, n=10) ⇒ 规模的意义是**执行成本 + 清盘尾部风险**, 不是价格质量。">规模 <b>'+navTxt(navOf(sym))+'</b></span>':'')+
+    /* R457: ETF 折溢价率 —— 就地给数值 + **净值日**(没有净值日的"折溢价X%"会被误读成当日值) */
+    ((u.type==="ETF"&&premOf(sym)!=null)?'<span title="'+esc(premTip(sym))+'">折溢价 <b class="'+premCls(premOf(sym))+'">'+premTxt(premOf(sym))+'</b><span class="muted">(净值日 '+esc(String(premDayOf(sym)).slice(5))+')</span></span>':'')+
     '<span>笔/中枢 <b>'+(s.bi_n||0)+'/'+(s.zs_n||0)+'</b></span>'+
     (_bbd.end_price!=null?'<span>背驰低点 <b class="'+(_bbd.broken?"down":"")+'">'+_bbd.end_price+'</b>'+_bkBadge(_bbd)+'</span>':'')+
     /* R454: 顶侧对标 —— 原 metric-strip 只披露「背驰低点」, 顶背驰高点**从不显示**, 于是"价格已站上

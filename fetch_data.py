@@ -26,12 +26,63 @@ SYMBOLS = {
 # 修复: _tx_url 去掉 2021-01-01 起始与动态结束日期, 对齐斐波那契项目的纯 count 形态;
 #       count 保留 R246 的动态化(1700~1999, 实测合法上限约 2000), 覆盖 2021 起 1300+ 根绰绰有余;
 #       起始日期由 fetch_tx 内按 MIN_DATE=2021-01-01 裁剪保证(与看板"2021 至今"契约一致)。
-def _tx_url(symbol, period):
+# R458(2026-09-14): **主机级回退** —— R249 那次只修了一半。两个同源主机是「腾讯 WAF 在两者
+#   之间来回翻」, 谁被拦并非固定: R249(09-06) 是 web. 被 501; R458(09-14) 恰好反过来 ——
+#   实测 9 个板各取 1 票(sh600000/sh510300/sh511990/sh513100/sh518880/sz159001/sh000001/
+#   sz399006/bj920002) 连打 20 次:
+#     ifzq.gtimg.cn      → 9/9 板 501, 20/20 = 501  (恒定拒绝, 非间歇/非限流)
+#     web.ifzq.gtimg.cn  → 9/9 板 200, 20/20 = 200
+#   单主机硬编码的代价 = 一次翻转就让**全市场**掉进新浪兜底。09-11 线上产物自报:
+#     src_cnt={tx: 876, sina: 5821(87%)} · degraded=true · degraded_pct=87
+#     src_fail.tx.err=36 (36 = 两轮 15 连败 + 6 残余, 正合"停用→复探恢复→再停用"两轮)
+#   ⇒ 整整一周 87% 的票在跑**不复权裸价**, 除权日假跳空直接污染笔/中枢/背驰结构。
+#   ⇒ 改为「按序试多主机 + 进程内记忆可用主机」, 与 EM_KLINE_HOSTS/push2his 镜像同范式:
+#     记忆命中时只需 1 次请求(与改前同开销); 主机翻转时多试一次即自动恢复, 无需再改代码。
+TX_KLINE_HOSTS = ["ifzq.gtimg.cn", "web.ifzq.gtimg.cn"]
+_TX_HOST_OK = [None]      # 进程内记忆: 上次成功的主机; None=未定(按 TX_KLINE_HOSTS 顺序)
+
+
+def _tx_url(symbol, period, host=None, count=None):
     _b = (datetime.now().minute * 60 + datetime.now().second) % 300
     # R249(2026-09-06): web.ifzq.gtimg.cn 对本机出口被腾讯 WAF 501 拦截(跳 waf.tencent.com
-    # 验证页), 同源 ifzq.gtimg.cn(无 web. 前缀) 实测 200 正常 —— host 去掉 web. 前缀。
-    return ("https://ifzq.gtimg.cn/appstock/app/fqkline/get?param=%s,%s,,,%d,qfq") % (
-        symbol, period, 1700 + _b)
+    # 验证页), 当时切到同源 ifzq.gtimg.cn(无 web. 前缀); R458 起不再硬编码单主机, 见上方常量。
+    return ("https://%s/appstock/app/fqkline/get?param=%s,%s,,,%d,qfq") % (
+        host or _TX_HOST_OK[0] or TX_KLINE_HOSTS[0], symbol, period,
+        count if count else 1700 + _b)
+
+
+def tx_host():
+    """R458: 当前记忆中的可用主机(空串=本进程内尚未成功过一次)。
+    供产物 meta 落痕 —— 事后判「这一轮是哪台主机在服务」, 免得靠降级比例反推。"""
+    return _TX_HOST_OK[0] or ""
+
+
+def tx_get(symbol, period, count=None, timeout=30):
+    """R458: 腾讯 K线响应(**已解码的 str**, 与 `_get` 同口径) —— 多主机按序回退 + 进程内记忆。
+
+    ★ 返回 str 不是 bytes: 底层 `_get` 就是 `resp.read().decode("utf-8")`。调用方按原
+      `_get(...)` 的用法直接 `json.loads(...)` 即可, **不要再 `.decode()`** ——
+      对 str 调 .decode() 会抛 AttributeError 并被各自的 except 吞掉, 表现为
+      "腾讯路径网络失败→静默降级新浪"(R458 自造缺陷, 由 R458b 的 A/B 逐票 diff 抓出)。
+
+    记忆主机优先 ⇒ 正常情况 1 次请求, 与改前同开销; 失败再按 TX_KLINE_HOSTS 顺序试其余主机。
+    每主机只重试 1 次(_get retries=2), 而非默认的 3 次指数退避: 501/403 是**确定性**拒绝,
+    退避重试纯属空耗(且单票 ~4s, 全场 6600 票即数小时), 真正该做的是换主机。
+    全主机皆失败则抛最后一次异常, 由调用方按原逻辑计失败(源状态机照常工作)。
+    """
+    memo = _TX_HOST_OK[0]
+    order = ([memo] if memo else []) + [h for h in TX_KLINE_HOSTS if h != memo]
+    last = None
+    for _h in order:
+        try:
+            raw = _get(_tx_url(symbol, period, _h, count), retries=2, timeout=timeout)
+        except Exception as _e:     # noqa: BLE001
+            last = _e
+            continue
+        if _TX_HOST_OK[0] != _h:
+            _TX_HOST_OK[0] = _h
+        return raw
+    raise (last if last else RuntimeError("tx_get: 无可用主机"))
 
 # 看板数据契约起点(标题"2021 至今")。纯 count 接口会返回更早历史(如日线 2019-04 起),
 # 统一裁剪到该日期之后, 保证各线首根与历史版本一致(2021-01-04 首交易日)。
@@ -41,23 +92,26 @@ UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 _BASE = os.path.dirname(os.path.abspath(__file__))
 
 
-def _get(url):
+def _get(url, retries=3, timeout=30):
     # R173(F1): 指数退避重试, 避免瞬时网络失败(5xx/超时)直接丢弃整标的 → 看板对缺失标的静默标 N/A
+    # R458: 增 retries/timeout 可调 —— tx_get 需要"快速失败换主机"而非长退避(见 tx_get docstring)。
     req = urllib.request.Request(url, headers=UA)
+    _n = max(1, int(retries))
     _delay = 1
-    for _i in range(3):
+    for _i in range(_n):
         try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
                 return resp.read().decode("utf-8")
         except Exception:
-            if _i == 2:
+            if _i == _n - 1:
                 raise
             time.sleep(_delay)
             _delay = min(_delay * 3, 9)
 
 
 def fetch_tx(symbol, period):
-    data = json.loads(_get(_tx_url(symbol, period)))["data"][symbol]
+    # R458: 经 tx_get 走多主机回退(此前硬编码 ifzq.gtimg.cn, 该主机 09-14 起全站 501)。
+    data = json.loads(tx_get(symbol, period))["data"][symbol]
     klines = data.get("qfqday") or data.get("qfqweek") or data.get("qfqmonth") or data.get("day") or data.get("week") or data.get("month") or []
     out = []
     dirty = 0
@@ -172,14 +226,14 @@ def fetch_em(secid):
 # R267(2026-09-06): 去掉 web. 前缀 —— R249 实证 web.ifzq.gtimg.cn 出口被腾讯 WAF 501 拦截,
 # 同源 ifzq.gtimg.cn(无 web.) 200 正常(_tx_url 已于 R249 修复, 此处同步遗漏)。此前东财限流
 # 触发腾讯回退时, 回退请求实际必挂 -> 情绪 txt 停在旧快照(08-2x 曾发生), 回退形同虚设。
-TX_SENT_URL = "https://ifzq.gtimg.cn/appstock/app/fqkline/get?param=%s,day,,,1300,qfq"
-
-
+# R458(2026-09-14): 保留上面的来龙去脉, 但**不再硬编码主机** —— 实测 09-14 两边翻转, ifzq
+# 全站 501 / web.ifzq 全 200; 再翻转一次这条路就又形同虚设。改由 tx_get 走 TX_KLINE_HOSTS
+# 回退。★ count 仍锁 1300 不可动: 情绪 txt 的行数契约依赖它(本函数**不按 MIN_DATE 裁剪**,
+# 全量返回), 顺手换成 _tx_url 默认的 1700 会直接改变产物行数。
 def fetch_tx_sentiment(tx_code):
     """腾讯 gtimg 前复权日线回退: 返回正序 [(date, open, close, high, low, volume, amount_proxy, to_proxy)]。
     东财不可达时由 update_sentiment_txts 调用; amount_proxy=volume×typical_price, to_proxy=amount_proxy。"""
-    u = TX_SENT_URL % tx_code
-    data = json.loads(_get(u))["data"]
+    data = json.loads(tx_get(tx_code, "day", count=1300))["data"]
     node = (data or {}).get(tx_code) or {}
     kl = node.get("day") or node.get("qfqday") or []
     out, dirty = [], 0
