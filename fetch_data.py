@@ -3,6 +3,7 @@
 import json
 import os
 import sys
+import threading
 import time
 import urllib.request
 from datetime import datetime, timedelta, timezone
@@ -51,13 +52,60 @@ SYMBOLS = {
 TX_KLINE_HOSTS = ["ifzq.gtimg.cn", "web.ifzq.gtimg.cn"]
 _TX_HOST_OK = [None]      # 进程内记忆: 上次成功的主机; None=未定(按 TX_KLINE_HOSTS 顺序)
 
+# R460: **按主机独立**节流 —— R458 的实证是"单主机被打到限流、而镜像仍干净"(两主机是独立
+#   镜像, 各自独立限流) ⇒ 限速必须**按主机**而非全局: 全局节流会把两台镜像的吞吐绑成一台,
+#   按主机才与"多主机回退"的设计自洽(且有实证支撑: 镜像在被限期间仍回答正常)。
+TX_INTERVAL = 0.35        # 单主机 ~2.9 rps(R458 的 P0 实证值: 突发连发会 501)
+#   ★ 为什么必须补上(2026-09-14 实跑实测, 见 radar/scan_radar.py 的 R460 段):
+#     日线 K 线路径此前**根本没有 tx 节流** —— `_tx_th.wait()` 只用于 scan_radar._probe_tx
+#     与月线路径。4 并发无节流突发 ⇒ 单主机(记忆主机吸收全部流量)被限流 ⇒ scan_radar 的源
+#     状态机"连续失败 >=15 次整段停用" ⇒ **本轮余下全市场转新浪裸价**。600 只实测:
+#     `src_cycle.tx={stops:1,resumes:0}` / tx 仅 79/599 / `degraded_pct=87` —— 与 09-11 线上
+#     87% 裸价的失败签名一致。而 R458b 注释里那个"6630 票 × 0.35s ≈ 39 分钟"的算式说明
+#     **设计意图本来就是每票节流**, 只是从未落到日线路径上。
+#   ⇒ 现把节流点放进 tx_get 自身(跟着最容易漏的地方走, 而不是依赖每个调用方记得 wait)。
+#     翻页时按页轮流 prefer 两主机 ⇒ 聚合 ~5.7 rps, 与新浪(0.18s, ~5.5 rps, 线上长期稳定)同量级。
 
-def _tx_url(symbol, period, host=None, count=None):
+
+class _Throttle:
+    """跨线程共享的间隔节流器: 每次 wait() 与上一次放行至少相隔 interval 秒。
+    与 scan_radar._Throttle 同语义; 此处独立一份是为让限速点跟着 tx_get 走。"""
+
+    def __init__(self, interval):
+        self.interval = float(interval)
+        self._next = 0.0
+        self._lock = threading.Lock()
+
+    def wait(self):
+        with self._lock:
+            now = time.time()
+            _s = self._next - now
+            self._next = max(now, self._next) + self.interval
+        if _s > 0:
+            time.sleep(_s)
+
+
+_TX_TH = {}
+_TX_TH_LOCK = threading.Lock()
+
+
+def _tx_pace(host):
+    """取该主机专属节流器并等待(首次访问惰性创建)。"""
+    with _TX_TH_LOCK:
+        th = _TX_TH.get(host)
+        if th is None:
+            th = _TX_TH[host] = _Throttle(TX_INTERVAL)
+    th.wait()
+
+
+def _tx_url(symbol, period, host=None, count=None, end=None):
     _b = (datetime.now().minute * 60 + datetime.now().second) % 300
     # R249(2026-09-06): web.ifzq.gtimg.cn 对本机出口被腾讯 WAF 501 拦截(跳 waf.tencent.com
     # 验证页), 当时切到同源 ifzq.gtimg.cn(无 web. 前缀); R458 起不再硬编码单主机, 见上方常量。
-    return ("https://%s/appstock/app/fqkline/get?param=%s,%s,,,%d,qfq") % (
-        host or _TX_HOST_OK[0] or TX_KLINE_HOSTS[0], symbol, period,
+    # R460: 补 `end` 游标槽(param 语义 = code,period,start_date,end_date,count,fq) ——
+    #   原实现只填 count、start/end 留空 ⇒ 永远只能取到"最新 640 根"(见 fetch_tx_qfq_paged)。
+    return ("https://%s/appstock/app/fqkline/get?param=%s,%s,,%s,%d,qfq") % (
+        host or _TX_HOST_OK[0] or TX_KLINE_HOSTS[0], symbol, period, end or "",
         count if count else 1700 + _b)
 
 
@@ -67,7 +115,7 @@ def tx_host():
     return _TX_HOST_OK[0] or ""
 
 
-def tx_get(symbol, period, count=None, timeout=30):
+def tx_get(symbol, period, count=None, timeout=30, end=None, prefer=None):
     """R458: 腾讯 K线响应(**已解码的 str**, 与 `_get` 同口径) —— 多主机按序回退 + 进程内记忆。
 
     ★ 返回 str 不是 bytes: 底层 `_get` 就是 `resp.read().decode("utf-8")`。调用方按原
@@ -79,13 +127,25 @@ def tx_get(symbol, period, count=None, timeout=30):
     每主机只重试 1 次(_get retries=2), 而非默认的 3 次指数退避: 501/403 是**确定性**拒绝,
     退避重试纯属空耗(且单票 ~4s, 全场 6600 票即数小时), 真正该做的是换主机。
     全主机皆失败则抛最后一次异常, 由调用方按原逻辑计失败(源状态机照常工作)。
+
+    R460 两处新增:
+      ① **每次尝试前按主机节流** `_tx_pace(_h)` —— 见上方 TX_INTERVAL 注释: 日线路径此前
+         完全没有 tx 节流, 无节流突发会把记忆主机打到限流, 进而触发源状态机整段停用
+         (实测 600 只: tx 仅 79/599、src_cycle.tx.stops=1、degraded_pct=87)。
+      ② `prefer` = **本轮首选主机**(翻页时按页轮流给两主机) —— 记忆主机优先会让一台吸收
+         全部翻页流量; 轮流 prefer 才能用满两个独立镜像的额度(各 2.9 rps ⇒ 聚合 ~5.7 rps)。
+         prefer 不改变回退语义: 它只是把顺序从 [memo, ...] 变成 [prefer, memo, ...]。
     """
     memo = _TX_HOST_OK[0]
-    order = ([memo] if memo else []) + [h for h in TX_KLINE_HOSTS if h != memo]
+    order = []
+    for _h in ([prefer] if prefer else []) + ([memo] if memo else []) + list(TX_KLINE_HOSTS):
+        if _h and _h not in order:
+            order.append(_h)
     last = None
     for _h in order:
+        _tx_pace(_h)
         try:
-            raw = _get(_tx_url(symbol, period, _h, count), retries=2, timeout=timeout)
+            raw = _get(_tx_url(symbol, period, _h, count, end), retries=2, timeout=timeout)
         except Exception as _e:     # noqa: BLE001
             last = _e
             continue
@@ -187,6 +247,80 @@ def fetch_tx_qfq(symbol, period):
         return [], 0, False
     rows, dirty = _tx_parse(qk)
     return rows, dirty, True
+
+
+# R460: 腾讯 qfq 单次请求**硬上限**(实测 count 给 1700/1999 都只回 641 根; 两主机同款)。
+#   注意: 这是**请求形态**的上限, 不是"腾讯没有历史" —— 填 end 游标即可往回翻页。
+_TX_PAGE_CAP = 640
+
+
+def fetch_tx_qfq_paged(symbol, period="day", min_date=MIN_DATE, min_bars=None, max_pages=2):
+    """R460: 分页取**全量前复权** —— 沿 param 的 end 游标往回翻, 拼成完整 qfq 序列。
+    返回 (rows, dirty, has_qfq, pages)。
+
+    ── 为什么(实测 2026-09-14, 证据见 _dbg/r460/) ──
+    · R458b/c 记「腾讯把 qfq 历史**硬截断**在 641 根(首根恒 2024-01-22), 加日期段也一样」
+      ⇒ 据此加了深度守卫, 把 tx **整源拒掉**(线上 tx 从 09-11 的 876 票掉到 09-14 的 1 票)。
+      ★ 该结论**不成立**: 当时只试了 count 槽。param 的语义是
+        `code, period, start_date, end_date, count, fq`, 生产把 start/end 留空 ⇒ 只能取到
+        "最新 640 根"。实测填 end 游标:
+          · end=2021-01-01~2023-12-31 → 640 根, 首根 2021-05-18   (窗口内**最后** 640 根)
+          · end=2019-01-01~2021-12-31 → 640 根, 首根 2019-05-21
+        两个主机(ifzq / web.ifzq)同款, count 槽给多少都只影响"取窗口最后多少根"。
+    · ★ 拼接**安全性已实证**(这是本方案唯一的致命风险点): 若各页以**各自窗口末日**为前复权
+      基准, 拼接处就会出现**假跳空** —— 而假跳空正是要消灭的东西。判据 = 同一历史日期用
+      6 个不同 end 窗口去取, 价格是否漂移:
+        **2797 个 (日期×窗口) 对, 不一致 0 个, 最大差 0.000000** ⇒ 基准锚定在固定日期(最新),
+        与请求窗口无关 ⇒ **翻页拼接安全**。
+      旁证: d = 裸价 − qfq 在全序列只有 **6~8 个变点**, 且逐一定位后**全部落在真实分红日**
+        (sh600000 连续 6 年 7 月中、sz000001 6~7 月), 末端 d→0.0000; **无一个落在页边界**
+        ⇒ 拼接未引入额外跳变。
+    · 复权方式: 腾讯 qfq 是**等差(加法)** `qfq = 裸价 − C(t)`, C 为阶梯常数(仅在除权日跳变);
+      所以 k=qfq/裸价 **逐日变**(那不是 bug), d 才分段常数。与东财 fqt=1 的**等比**口径不同,
+      但两者都把除权缺口抹掉(实测 -4.94% 的除权跳空在 qfq 上只剩 -0.28% 残差)。
+
+    ── 分页策略(成本用) ──
+    停止条件(任一): ① `first <= min_date`(已覆盖契约起点) ② 本页根数 < _TX_PAGE_CAP(窗口耗尽
+    ⇒ 腾讯侧没有更早的数据了) ③ 达到 `max_pages` ④ 给出 `min_bars` 且已取够(可选的"够用即停")。
+    雷达传 `min_bars=None, max_pages=3` ⇒ sh600000 实测拿到 **1382 根, 首根 2021-01-04**
+    (3 页: 641 + 640 + 640), 与新浪兜底**同深度** ⇒ 换算后可保证"只变复权口径、不变深度"。
+    次新股首页即"窗口未填满"(< _TX_PAGE_CAP) ⇒ 停止, 那是它**从上市首日起的完整**历史。
+    """
+    got, dirty_total, pages = {}, 0, 0
+    end = None
+    _nl = max(1, len(TX_KLINE_HOSTS))
+    for _i in range(max(1, int(max_pages))):
+        # R460: 按页**轮流**首选两主机 —— 见 TX_INTERVAL 注释②: 记忆主机优先会让一台吸收
+        #   全部翻页流量(3 页/票), 轮流 prefer 才用满两个独立镜像的额度(各 2.9 rps)。
+        try:
+            data = json.loads(tx_get(symbol, period, count=_TX_PAGE_CAP, end=end,
+                                     prefer=TX_KLINE_HOSTS[_i % _nl]))["data"][symbol]
+        except Exception:                    # noqa: BLE001
+            if _i == 0:
+                raise                        # 首页失败 = 源不可用, 交调用方按原状态机计失败
+            break                            # 后续页失败: 保留已取部分(首页本身是完整序列), 不丢票
+        qk = data.get("qfqday") or data.get("qfqweek") or data.get("qfqmonth")
+        if not qk:
+            break
+        rows, _d = _tx_parse(qk)
+        dirty_total += _d
+        pages += 1
+        if not rows:
+            break
+        for r in rows:
+            got[r["date"]] = r
+        first = rows[0]["date"]
+        if first <= min_date:                # 已覆盖契约起点("2021 至今")⇒ 完
+            break
+        if len(rows) < _TX_PAGE_CAP:         # 窗口没填满 ⇒ 腾讯侧没有更早的数据了
+            break
+        if min_bars and len(got) >= min_bars:  # 深度已够 ⇒ 停(够用即停, 控成本)
+            break
+        end = (datetime.strptime(first, "%Y-%m-%d")
+               - timedelta(days=1)).strftime("%Y-%m-%d")
+    if not got:
+        return [], dirty_total, False, 0
+    return [got[d] for d in sorted(got)], dirty_total, True, pages
 
 
 def fetch_sina_series(symbol, datalen=2000):
