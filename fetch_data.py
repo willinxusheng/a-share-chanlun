@@ -51,6 +51,36 @@ SYMBOLS = {
 #     记忆命中时只需 1 次请求(与改前同开销); 单主机被限时多试一次即自动恢复, 无需再改代码。
 TX_KLINE_HOSTS = ["ifzq.gtimg.cn", "web.ifzq.gtimg.cn", "proxy.finance.qq.com"]
 _TX_HOST_OK = [None]      # 进程内记忆: 上次成功的主机; None=未定(按 TX_KLINE_HOSTS 顺序)
+# R464(2026-09-14): 主机 → **本轮失败次数**(任一主机成功即清零该主机的计数)。**仅用于排序**。
+#   ★ 为什么需要: R458 的"记忆主机优先"只优化了**稳态**(命中即 1 次请求), 没优化**故障态** ——
+#     某台被 WAF 拒时(501/403 是**确定性**拒绝, 见 tx_get docstring), 每个请求仍会先按
+#     prefer/memo 撞它一次, 每次**白占掉该台自己的一个节流额度(0.35s)**。R463 实测(仅第 3 台
+#     可用): 393 个 tx 请求对应 226 个"页" ⇒ 平均 **1.74 请求/页**, 白打占 43%。
+#   ⚠⚠ **收益口径(实测 2026-09-14, 110 票注入对照, 见 _dbg/r464/)** —— 省的是**请求数**,
+#     **不是墙钟**。别把这条读成"提速":
+#       · 请求数: tx 393 → 223(**−43.3%**); 坏台 ifzq 110→1 / web 62→1,
+#         而健康台 proxy **221 → 221 不变** ⇒ 数据获取需求零变化
+#         (逐票核对: 111 票两组都走腾讯、0 票不可比; 109 票变化**全部为负**,
+#          新旧值对 {2→1:48, 3→1:3, 4→2:7, 5→3:51} 算术自洽 = 48+6+14+102 = **170**)。
+#       · 墙钟: **95.5s → 97.7s(没降)** —— 机制已由请求时间戳证实: 总耗时由**最忙主机的
+#         span**决定, 两组 proxy 的 span 都是 **79.5s**(221 请求 × 0.350s 间隔), 而坏台的
+#         0.35s 走**它自己的**节流器、与其他台**并行**(ifzq 38.2s / web 74.0s, 均不敌 79.5s)
+#         ⇒ 移除**非瓶颈**请求不缩短总时长。**仅当坏台的节流总量超过健康台时**才会缩短。
+#     ⇒ 真实价值: ① 有效请求占比 **56% → 99%**, 失败请求不再白白计入腾讯侧的频率统计
+#       (削弱"把坏台越打越死"的自我强化); ② **尾部风险对冲** —— 一旦坏台从"快速 501"退化为
+#       "慢失败/超时"(R458c 记过"反复探针会延长冷却"), 白打就会**串进线程内的等待**而成为
+#       瓶颈, 那时收益从 0 跳成"正比于 坏台请求数 ×(超时秒数 − 0.35)"; ③ 与 R463 的多镜像
+#       提速叠加时, 不让白打占用镜像的节流额度。
+#   ⚠⚠ 纪律: **只重排, 不删除** —— 坏主机只是排到队尾, 全坏时仍会被逐个试到
+#     ⇒ **可达性完全不变 ⇒ 零正确性风险**(与"硬拉黑"的本质区别: 拉黑会在"仅剩的健康台"
+#     上放大负载; 而重排把流量给队首那台, 一旦命中就 return, 队尾坏台**根本不发请求**)。
+#   ★ 为什么不会把健康台打爆: 吞吐上限由**按主机**节流器 `_tx_pace`(0.35s/台) 兜底 ——
+#     无论其他台是否可用, 单台 sustained rps 恒 ≤2.86。而 R458 的 0.35s 正是在
+#     "单主机连轴转"(当时只有一台)形态下实证的安全值 ⇒ 可直接继承, 无需重测。
+#     (这也正是"重排"优于"拉黑"的机制: 拉黑不改变单台上限, 却会让健康台的空闲间隔消失;
+#      而节流器保证那个间隔本就安全。)
+_TX_HOST_BAD = {}
+_TX_HOST_BAD_LOCK = threading.Lock()
 # R463(2026-09-14): 第 3 台 `proxy.finance.qq.com` —— 腾讯把 ifzq 挂在 proxy 下的**同源镜像**
 #   (路径前缀 `/ifzqgtimg`), 由下表给前缀。★ 为什么值得加: 全市场取数耗时 = 请求数 / **聚合 rps**,
 #   而聚合 rps = 主机数 × 单主机安全 rps(按主机独立节流, 见 TX_INTERVAL 注释) ⇒ 多一台镜像
@@ -143,6 +173,49 @@ def tx_host():
     return _TX_HOST_OK[0] or ""
 
 
+def tx_host_bad():
+    """R464: 本轮被降序的主机 → 失败次数(纯观测落痕, 不参与任何判定)。
+
+    ★ 判读: **空 dict = 三台都健康**, 此时 `_tx_order` 的输出与改动前**逐字节相同**
+      ⇒ 这是"零回归天然成立"的判据(稳态无失败 ⇒ 全 0 ⇒ 稳定排序不动)。
+      非空则给出"哪几台被判死、各白打过几次" —— 配合 `meta.tx_host` 可完整还原本轮主机可用性。
+    """
+    with _TX_HOST_BAD_LOCK:
+        return dict(_TX_HOST_BAD)
+
+
+def tx_reset_host_state():
+    """R464: 清空**失败计数**(**保留** memo `_TX_HOST_OK`)。新一次取数开始时调用。
+
+    ★ 为什么不连 memo 一起清 —— 两者语义不同, 故意区别对待:
+      · `_TX_HOST_OK` = "上次**成功过**的主机", 跨轮复用是**有意**的(下轮首个请求即命中, 省探测);
+      · `_TX_HOST_BAD` = "本轮的**失败证据**", 源可能已经恢复, 带着上一轮的黑名单进新轮是错的。
+    ⚠ 代价(如实记, 可忽略): 清空后本轮首个请求仍会按 prefer/memo 撞一次坏台(1 次白打,
+      按 0.35s 节流计 ≈ 0.35s) —— 因为"哪台坏"本来就要靠试出来。每 run 一次, 不累积。
+    """
+    with _TX_HOST_BAD_LOCK:
+        _TX_HOST_BAD.clear()
+
+
+def _tx_order(prefer=None):
+    """R464: 组出本轮的主机尝试顺序 —— `prefer` → memo → TX_KLINE_HOSTS 去重后,
+    把**本轮已证失败**的主机**稳定重排**到队尾(失败次数少的在前, 同级保持 prefer/memo 次序)。
+
+    ★ 只**重排**不**删除**(见 _TX_HOST_BAD 注释): 可达性不变, 故是零正确性风险的纯负载优化。
+    ★ 全健康时 `_TX_HOST_BAD` 为空 ⇒ 不触发 sort ⇒ 输出与改动前**逐字节相同**(零回归)。
+    """
+    memo = _TX_HOST_OK[0]
+    order = []
+    for _h in ([prefer] if prefer else []) + ([memo] if memo else []) + list(TX_KLINE_HOSTS):
+        if _h and _h not in order:
+            order.append(_h)
+    with _TX_HOST_BAD_LOCK:
+        _bad = dict(_TX_HOST_BAD)
+    if _bad:
+        order.sort(key=lambda h: _bad.get(h, 0))   # 稳定排序 ⇒ 同级仍按 prefer/memo 偏好
+    return order
+
+
 def tx_get(symbol, period, count=None, timeout=30, end=None, prefer=None):
     """R458: 腾讯 K线响应(**已解码的 str**, 与 `_get` 同口径) —— 多主机按序回退 + 进程内记忆。
 
@@ -163,12 +236,14 @@ def tx_get(symbol, period, count=None, timeout=30, end=None, prefer=None):
       ② `prefer` = **本轮首选主机**(翻页时按页轮流给各主机) —— 记忆主机优先会让一台吸收
          全部翻页流量; 轮流 prefer 才能用满各独立镜像的额度(R463 起 3 台 × 2.9 rps ≈ 8.6 rps)。
          prefer 不改变回退语义: 它只是把顺序从 [memo, ...] 变成 [prefer, memo, ...]。
+
+    R464 新增(顺序层, 不改回退语义):
+      ③ **已证失败的主机被重排到队尾** —— 见 `_tx_order` / `_TX_HOST_BAD`。prefer 与 memo
+         **同样照降**(501/403 是确定性拒绝, 重试它只为"记住它本轮坏了"; 但绝不删除 ⇒ 全坏时
+         仍会试到, 可达性不变)。动机: 记忆主机优先只优化稳态, 故障态下每个请求仍会白撞一次
+         (R463 实测 1.74 请求/页, 白打 ~42%)。成功即清零 ⇒ 对偶发抖动自愈。
     """
-    memo = _TX_HOST_OK[0]
-    order = []
-    for _h in ([prefer] if prefer else []) + ([memo] if memo else []) + list(TX_KLINE_HOSTS):
-        if _h and _h not in order:
-            order.append(_h)
+    order = _tx_order(prefer)
     last = None
     for _h in order:
         _tx_pace(_h)
@@ -176,9 +251,17 @@ def tx_get(symbol, period, count=None, timeout=30, end=None, prefer=None):
             raw = _get(_tx_url(symbol, period, _h, count, end), retries=2, timeout=timeout)
         except Exception as _e:     # noqa: BLE001
             last = _e
+            with _TX_HOST_BAD_LOCK:         # R464: 记失败 ⇒ 本轮后续请求把它排到队尾
+                _TX_HOST_BAD[_h] = _TX_HOST_BAD.get(_h, 0) + 1
             continue
         if _TX_HOST_OK[0] != _h:
             _TX_HOST_OK[0] = _h
+        with _TX_HOST_BAD_LOCK:
+            # R464: 自愈 —— **被试到且成功**即恢复其原优先级(而非"永久拉黑")。
+            #   注意语义边界: 若队首那台一直健康, 队尾的台**不会被试到**, 其 bad 就一直留着
+            #   (无害: 它本来就没在服务)。真正的恢复检测发生在"服务中的台也失败"时 ——
+            #   那时所有台同分, 排序退回候选原序, prefer/memo 台会重新被试到 ⇒ 自适应。
+            _TX_HOST_BAD.pop(_h, None)
         return raw
     raise (last if last else RuntimeError("tx_get: 无可用主机"))
 
