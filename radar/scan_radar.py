@@ -515,21 +515,56 @@ _TX_MIN_BARS = 1200          # "2021 至今"≈1380 根, 取 1200 留约 1 年�
 #      最坏情形不是"更差的数据"而是"更慢": 源被拦后 `_src_down` 会**短路**(不再尝试),
 #      暴露量仅"整段停用前的 15 连败 ≈ 21s"(+ R428 每 300 票复探一次 ≈ 23×1.4s), 之后照常回落
 #      新浪 ⇒ 总量 ≈ 今日时长 + 1~2 分钟; 数据侧要么全站前复权、要么回到今日的裸价, **不会更坏**。
-#   ⚠ 遗留(未测完): "腾讯单次 run 的**请求预算**上限"仍是未知量 —— 本轮本想用 600 只实跑量它,
-#     但**本机出口被自己的探针打到 501**(两主机同款、单次请求即 501), 该测量被迫中止。
-#     ⇒ 待封禁解除后补测; 若预算不足以支撑 3 页/票, 首选方案是**两阶段取数**(先 1 页跑门禁,
-#       只对通过门禁的 ~2500 票回补第 2/3 页), 而不是回退到 1~2 页(理由见上表)。
+#   ✅ 已落地(R463, 见 main 的抓K线段): **两阶段取数** —— 阶段①全市场只取 1 页(641 根),
+#     阶段②只对 `gate_prefix4` 四项全过的票补第 2/3 页。请求数 −13.6%(20940 → 18094)。
+#     ★ 更正本段原先的口径错误: 原文写"只对通过门禁的 ~2500 票回补" —— 2546 是**被门禁
+#       剔除**的票数(09-14 产物 meta.n_gate), 通过的是 4360(`gate_cnt[""]`)。两阶段真正
+#       省的是"被**前 4 项**剔除的那部分" = **1423 只**(次新233 + 停牌17 + 低流动性1172 +
+#       一字板1, 顺序判定互斥)。为什么低自洽**不能**前置、前 4 项为何安全: 见
+#       `gate_prefix4` 与 main 抓K线段(证据 _dbg/r463/stage2_ab.py)。
+#   ⚠ 仍未知: "腾讯单次 run 的**请求预算**上限" —— 本机测它会被自己的探针打到 501(自伤);
+#     而线上扫描跑在 **GitHub runner 的出口 IP** 上(与**本机不同**), 故本机测出的阈值
+#     **不可外推**到线上。真正的答案只能由线上首轮 run 的 meta 给出:
+#     `src_fail.tx` / `src_cycle.tx` / `degraded_pct` / `tx_stage2` / `tx_depth`。
 _TX_MAX_PAGES = 3
 # R460: 深度**观测**计数(不参与任何判定, 只落 meta.tx_depth) —— 替代原 latch 的可观测性:
 #   要能看见"这一轮的 tx 序列到底多长", 而不是只能靠降级率反推(那正是 R458b 想消灭的黑盒)。
 _tx_depth = {"n": 0, "min": 0, "max": 0, "sum": 0, "thin": 0}
+# R463: 两阶段取数的**阶段一 → 阶段二续取游标**: sym → 下一页的 `end`(字符串)。
+#   只记"上一页的边界日期"这一个字符串, **不存 K 线序列** —— 若存 {date: bar}(641 条/票)
+#   则会占 ~690 MB(6906 票), 而游标只有 ~30 B/票。阶段二的 K 线由调用方从 got 里带过来
+#   (见 _fetch_deep_one 的 got0 传参), 与本表配合即可无损续取。
+#   全程在 _tx_lock 下读写(_fetch_tx 内已持锁)。
+_SHALLOW_RESUME = {}
 # R458c: 「腾讯没给前复权序列(只给裸价 day)」的独立计数 —— 与 641 截断**分开记**(原因不同),
 #   但同属**票面/接口**问题: 判失败切源, **不进源故障连败**(R374 血泪), 单独落 meta.src_fail.
 _tx_noqfq = {"n": 0, "samples": []}
 
 
-def _fetch_tx(sym):
+def _record_tx_depth(ks):
+    """R463: `meta.tx_depth` 的唯一写入点 —— 只记**最终采纳**的腾讯序列深度。
+
+    ★ 为什么必须抽成一个函数(而不是继续内联在 _fetch_tx 里): 两阶段取数之后, "拿到腾讯序列"
+      有**两条**路径(阶段①的浅取 / 阶段②的补深度), 若各写一份, `tx_depth` 的语义就会漂 ——
+      实测踩过: 只在 _fetch_tx 里记 ⇒ 阶段①的 641 根把分布钉死在 {min=641,max=641,thin=+n},
+      而"这只票最终到底多深"完全看不见(阶段②绕过 _fetch_tx 直调 fetch_tx_qfq_paged)。
+      现在的规则是**只记最终态**: 浅取(max_pages==1)不记(它只是中间态, 不是给上层的序列),
+      阶段②补深后记一次, 非两阶段的常规路径照旧记。
+    ★ `thin` 的语义随之保住: 它统计"腾讯给得比 _TX_MIN_BARS 少"的票 —— 浅取的 641 根
+      **不是**"腾讯给得少"(是我们只取了一页), 不该计入, 否则每次全量都会凭空多出几千个 thin。"""
+    with _tx_lock:
+        _tx_depth["n"] += 1
+        _tx_depth["sum"] += len(ks)
+        _tx_depth["min"] = len(ks) if not _tx_depth["min"] else min(_tx_depth["min"], len(ks))
+        _tx_depth["max"] = max(_tx_depth["max"], len(ks))
+        if len(ks) < _TX_MIN_BARS:
+            _tx_depth["thin"] += 1
+
+
+def _fetch_tx(sym, max_pages=None):
     """腾讯 qfq(前复权)主源: 纯 count 形态(R248), 2021-01-01 起裁剪。
+    R463: `max_pages=1` = **两阶段取数的阶段一浅取**(只取最新 641 根), 见本文件 R463 段;
+    缺省 None = 原来的 `_TX_MAX_PAGES`(3 页/1382 根), 既有调用方行为逐字节不变。
     R270: 新鲜度判定由 `>=2024-01-01`(过松, R267 注释自我批评却未在 scan 链路落实)
     收紧为 _last_fresh 分级(gap<=3 常规 / 4~12 仅长假窗口内合法) —— 腾讯 CDN 陈旧缓存
     (R248: 缓存键含日期段曾停 12h+)不再被静默当有效数据吞下。
@@ -549,7 +584,7 @@ def _fetch_tx(sym):
     #   min_bars=None ⇒ 不在"够深"处早停, 只按 `first<=MIN_DATE`/窗口耗尽/页数上限停 ——
     #   目的是让本变更**只含复权口径一个变量**, 不引入深度变化(见 _TX_MAX_PAGES 注释)。
     ks, _dirty, _hasqfq, _np = fd.fetch_tx_qfq_paged(sym, "day", min_bars=None,
-                                                     max_pages=_TX_MAX_PAGES)
+                                                     max_pages=max_pages or _TX_MAX_PAGES)
     if not _hasqfq:
         with _tx_lock:
             _tx_noqfq["n"] += 1
@@ -566,13 +601,21 @@ def _fetch_tx(sym):
     #   改为**纯观测**: 记录深度分布落 meta.tx_depth, 序列照常采用 ——
     #   分页后短序列只可能来自"上市晚"(完整历史)或"腾讯侧确实没有更早数据", 两者都不是故障;
     #   拒收它们只会把**前复权**换成**裸价**, 是净退化(09-14 实测 tx 876→1)。
+    # R463: 深度**不在这里记** —— 两阶段取数下"最终深度"要等阶段②跑完才知道,
+    #   统一由 main 在取数全部结束后对 src=="tx" 的票扫一遍(见 main 的"落深度"段)。
     with _tx_lock:
-        _tx_depth["n"] += 1
-        _tx_depth["sum"] += len(ks)
-        _tx_depth["min"] = len(ks) if not _tx_depth["min"] else min(_tx_depth["min"], len(ks))
-        _tx_depth["max"] = max(_tx_depth["max"], len(ks))
-        if len(ks) < _TX_MIN_BARS:
-            _tx_depth["thin"] += 1
+        # R463: 浅取成功后记下**续取游标**供阶段二。
+        #   只在"这一页被填满"时有第 2 页可翻 —— 根数更少说明腾讯侧没有更早数据
+        #   (次新股/窗口耗尽), 记了也只会在阶段二空翻一次。游标 = 本页首根 − 1 天,
+        #   与 fetch_tx_qfq_paged 内部翻页用的**同一算式**(直接引用 fd._TX_PAGE_CAP,
+        #   不再另写一个 640 字面量, 避免两处阈值日后漂移)。
+        if max_pages == 1:
+            if len(ks) >= fd._TX_PAGE_CAP:
+                _SHALLOW_RESUME[sym] = (
+                    datetime.datetime.strptime(ks[0]["date"], "%Y-%m-%d")
+                    - datetime.timedelta(days=1)).strftime("%Y-%m-%d")
+            else:
+                _SHALLOW_RESUME.pop(sym, None)
     return ks, "tx"
 
 
@@ -937,14 +980,16 @@ def fetch_fflow_all(syms):
     return out
 
 
-def _try_tx(sym):
+def _try_tx(sym, max_pages=None):
     """腾讯qfq一次尝试: 成功 (ks,"tx"); 失败(异常/空/陈旧) 计入停用统计后返回 ([],tag)。
+    R463: `max_pages=1` 供两阶段取数的**阶段一浅取** —— 状态机/豁免/计数**全部照旧**
+    (浅取与全取必须走同一条计数路径: 否则同一次尝试会被记成两次源故障, 或反过来漏计)。
     R337: 成功即复位连续失败计数 —— 原实现只在停用后 probe 成功才清零, 健康期的
     `count` 只增不清, "连续失败"退化成"自上次停用以来累计失败": 分散在多轮抖动中的
     失败会被错误加总(如 5 次历史失败 + 恢复后 1 次偶发失败即达阈值停用主源, 全市场
     误转东财/新浪降级)。成功请求本身就是源健康的最强证据, 应清零。"""
     try:
-        ks, tag = _fetch_tx(sym)
+        ks, tag = _fetch_tx(sym, max_pages=max_pages)
     except Exception:   # noqa: BLE001
         _src_fail(_tx_down, _tx_lock, "err")     # 归一化(原始消息多变, 不入 reasons)
         return [], ""
@@ -997,12 +1042,16 @@ def _try_em(sym):
     return ks, "em"
 
 
-def fetch_kline(sym):
+def fetch_kline(sym, skip_tx=False):
     """三级源(按 SRC_ONLY):
       auto: 腾讯qfq(复权) → 东财qfq(复权) → 新浪裸价(最后兜底, 除权假跳空风险由黄条提示)
       tx / em / sina: 仅指定源(本地调试/降速场景)。
     R270: 每级失败计入源统计, 连续 >=MAX 次整段停用 + 周期复探自动恢复 —— 单次抖动不再
-    废掉整 run 主源, 也避免境外不可达源逐票空耗 timeout。"""
+    废掉整 run 主源, 也避免境外不可达源逐票空耗 timeout。
+    R463: `skip_tx=True` **只**给两阶段取数的阶段一兜底用 —— 它已经单独试过腾讯(浅取)且失败了,
+      这里**不该再打一次腾讯**。这不是"省一次请求"那么小: ETF(约 1557 只)+北交+`tx_noqfq`
+      的票**本来就拿不到腾讯 qfq**(票面/接口问题, 与源健康无关), 浅取对它们**必然**失败;
+      若兜底再试一次腾讯, 这类票的额外请求(≈1600)会把两阶段省下的额度(≈2846)吃掉一大半。"""
     if SRC_ONLY == "sina":
         return _fetch_sina_checked(sym)
     if SRC_ONLY == "tx":
@@ -1019,7 +1068,7 @@ def fetch_kline(sym):
     # R460: 原此处的 `_tx_shallow["n"] < _TX_SHALLOW_MAX` 闸门已拆 —— 它的 latch 会因**任意 5 只
     #   次新股**(根数天然少, 是完整历史而非截断)把腾讯整源掐掉, 与源健康与否无关; 而分页取数
     #   已把"深度"从"拒收整源"变成"多打 1 次请求"(见文件内 R460 段)。
-    if not _src_down(_tx_down, _tx_lock):
+    if not skip_tx and not _src_down(_tx_down, _tx_lock):
         ks, _tag = _try_tx(sym)
         if ks:
             return ks, "tx"
@@ -1049,6 +1098,63 @@ def _fetch_one(sym):
         time.sleep(0.4)
         ks, src = fetch_kline(sym)      # 重试一次(网络抖动/限流偶发)
     return sym, (ks, src) if ks else (None, src)
+
+
+def _fetch_one_shallow(sym):
+    """R463 **阶段一**取数(worker): 腾讯**只取 1 页**(641 根)。
+    为什么 1 页就够: 阶段一判的是 `gate_prefix4` 那 4 项, 实测 100% 深度无关(见该函数)。
+    返回与 `_fetch_one` 同形 `(sym, (ks, src))`, 故 `ex.map` 直接复用。
+
+    两条路径:
+      · 腾讯可用 ⇒ 浅取 1 页。若这票之后被判"需要深度", 续取游标已由 `_fetch_tx`
+        写进 `_SHALLOW_RESUME`(只在"这一页被填满"时才写, 次新票不写)。
+      · 腾讯不可用(整源停用/北交跳过/请求失败) ⇒ 落到 `_fetch_one` 的**完整三级源**
+        —— 东财(1600 根)/新浪(1500 根)给的本来就是完整序列, 无需阶段二。
+    ⚠ 只在 `SRC_ONLY == "auto"` 启用: `--src tx/em/sina` 是本地取证开关, 必须保持
+      "取满深度"的原貌(它们的设计意图就是看源的真实全貌)。
+    ⚠ 浅取失败**不重试腾讯** —— 直接落到 `fetch_kline(skip_tx=True)`: 腾讯既然刚试过,
+      再打一次既浪费时间又**重复计一次源故障**(状态机按次数判"整段停用")。
+    ⚠ 浅取走 `_try_tx` 而不是直接 `_fetch_tx`: 源状态机(连败计数 / 票面豁免 tx_short·
+      tx_noqfq / 成功复位)必须与全量路径是**同一条**, 否则计数口径就分叉了。"""
+    if SRC_ONLY == "auto" and not _src_down(_tx_down, _tx_lock):
+        ks, _tag = _try_tx(sym, max_pages=1)      # 走**状态机同一条路径**(计数/豁免/复位照旧)
+        if ks:
+            return sym, (ks, "tx")
+        # 腾讯刚试过且失败(源级故障 or 票面问题) ⇒ 兜底**不再打腾讯**(见 fetch_kline.skip_tx)。
+        ks, src = fetch_kline(sym, skip_tx=True)
+        if not ks and _need_retry(src):
+            time.sleep(0.4)
+            ks, src = fetch_kline(sym, skip_tx=True)
+        return sym, (ks, src) if ks else (None, src)
+    return _fetch_one(sym)
+
+
+def _fetch_deep_one(job):
+    """R463 **阶段二**取数(worker): 对阶段一判"需要深度"的票, 从续取游标再往回翻
+    (_TX_MAX_PAGES − 1) 页, 与阶段那 1 页**合并**(走 fetch_tx_qfq_paged 的 got0)。
+    入参 `job = (sym, ks_shallow)`。
+    返回 `(sym, (ks, "tx"))`, 或 `(sym, None)` = 无可续取 / 续取没多拿到东西
+    (两者都表示"**保留阶段一的数据**", 调用方据此不动原值)。
+    ★ 本函数失败**不影响正确性**: 拿不到更深就用浅的, 绝不把票弄丢 —— 这是与"降页数"
+      那种做法的本质区别(后者是主动放弃深度)。
+    ★ `page0=1`: **页序接着阶段一编** —— 阶段一那 1 页用的是 `TX_KLINE_HOSTS[0]`, 故这里
+      从索引 1 起(prefer 各主机一次)。若不续接(从 0 起), 第 0 台会被 prefer 两轮, 在
+      "第 0 台不可用"时白打一次请求(实测 110 票里 51 票的 tx 请求从 5 涨到 6 —— 见
+      fetch_tx_qfq_paged 的 `page0` 注释)。这是**纯负载顺序**修正, 不改变任何取到的数据
+      (三台同源已实测逐字节一致), 故零正确性风险。"""
+    sym, ks1 = job
+    end = _SHALLOW_RESUME.get(sym)
+    if not end or not ks1:
+        return sym, None
+    try:
+        ks, _dirty, _hasqfq, _np = fd.fetch_tx_qfq_paged(
+            sym, "day", min_bars=None, max_pages=max(1, _TX_MAX_PAGES - 1),
+            got0={k["date"]: k for k in ks1}, start_end=end, page0=1)
+    except Exception:                     # noqa: BLE001
+        return sym, None
+    if not ks or len(ks) <= len(ks1):
+        return sym, None                  # 一页都没多取到 ⇒ 保留阶段一数据
+    return sym, (ks, "tx")
 
 
 # ================= 3. 结构摘要 + 门禁 + 近端信号 =================
@@ -1273,12 +1379,46 @@ def _one_word_count(ks, win=ONE_WORD_WIN):
     return sum(1 for k in seg if k["low"] > 0 and abs(k["high"] / k["low"] - 1) < 1e-9)
 
 
+def shallow_stats(sym, ks, sanitized=False):
+    """R463: 门禁**前 4 项**所需的那些字段 —— `analyze_one` 与两阶段取数的**阶段一**共用同一份
+    计算(不是复制代码: analyze_one 内部**调本函数**) ⇒ 浅深度判定与全量判定口径必然一致。
+
+    刻意**不触碰 chanlun 引擎**(笔/中枢/背驰) —— R461 实测单票 92.7% 墙钟在 `bi_agreement`,
+    而本函数只做 O(n) 的近端统计 ⇒ 这就是"阶段一判定几乎免费"的来源(否则阶段一要再跑一遍
+    全量 analyze_one, 6906 票 ≈ 2.8 分钟, 会把两阶段省下的时间吃掉一大半)。
+
+    `sanitized=True` 表示调用方已经 `_sanitize_ks` 过(analyze_one 就是), 跳过重复净化。
+    返回 dict(键名与 st 一致, 可直接取用) 或 None(净化后为空 ⇒ 调用方按 ks_bad 处理)。"""
+    if not sanitized:
+        ks = _sanitize_ks(ks)
+        if not ks:
+            return None
+    last = ks[-1]
+    d0, d1 = ks[0]["date"], last["date"]
+    _a0 = _days_ago(d0)                       # 首根距今(自然日); 复用避免双算(7000票级)
+    tail60 = ks[-60:]
+    avg_amt = sum(k["volume"] * _vol_share_per_unit(sym) * k["close"] for k in tail60) / max(1, len(tail60)) / 1e4  # R300: 科创板 volume 单位=股, 勿再 ×100
+    return {
+        "n_bars": len(ks), "first": d0, "last": d1,
+        "span_days": _a0 - _days_ago(d1) if _a0 < 30000 else -1,
+        "avg_amt60": round(avg_amt, 1),
+        "one_word": _one_word_count(ks),   # R277: 近端120根窗口(原全历史累计误杀上市初期连板的正常票)
+        "stop_days": _days_ago(d1),        # 距今天数(停牌判定: 明显大于3)
+    }
+
+
 def analyze_one(sym, ks):
     """chanlun.analyze -> 精简摘要(雷达schema) + 轻量绘图标注 mark。
     返回 (st, err, mark)。mark 仅供前端详情页叠画, 门禁剔除票也尽量给(可点看结构)。
     R271: 入口统一过 _sanitize_ks 净化(日期有序去重/OHLC自洽/契约窗), 坏数据不进引擎。"""
     ks = _sanitize_ks(ks)
     if not ks:
+        return None, "ks_bad", {}
+    # R463: 6 个"门禁前缀字段"改走 shallow_stats —— 与两阶段取数的**阶段一**是同一个函数,
+    #   故"浅深度判定"与"全量判定"口径**必然一致**(原先是靠两处代码写一样来维持, 会漂)。
+    #   传 sanitized=True: 上面的 _sanitize_ks 刚做过, 不必再 O(n) 重做一遍(6906 票级)。
+    _sh = shallow_stats(sym, ks, sanitized=True)
+    if _sh is None:
         return None, "ks_bad", {}
     try:
         r = cl.analyze(ks, with_stability=False)
@@ -1297,29 +1437,26 @@ def analyze_one(sym, ks):
         n = len(ks)
         last = ks[-1]
         d0, d1 = ks[0]["date"], last["date"]
-        _a0 = _days_ago(d0)                       # 首根距今(自然日); 复用避免双算(7000票级)
-        span_days = _a0 - _days_ago(d1) if _a0 < 30000 else -1
-        tail60 = ks[-60:]
-        avg_amt = sum(k["volume"] * _vol_share_per_unit(sym) * k["close"] for k in tail60) / max(1, len(tail60)) / 1e4  # R300: 科创板 volume 单位=股, 勿再 ×100
+        # R463: n_bars/first/last/span_days/avg_amt60/one_word/stop_days 这 7 项已由
+        #   shallow_stats 算好(单一事实来源) —— 此处不再重算, 只留引擎侧真正要用的量。
         amp = [h / l - 1 for h, l in zip(highs, lows) if l > 0]
-        one_word = _one_word_count(ks)   # R277: 近端120根窗口(原全历史累计误杀上市初期连板的正常票)
         med_amp = (sorted(amp)[len(amp) // 2] if amp else 0.0) * 100
-        stop_days = _days_ago(d1)   # 距今天数(停牌判定: 明显大于3)
         zs_last = ({"zd": round(zss[-1]["zd"], 2), "zg": round(zss[-1]["zg"], 2),
                     "date_end": zss[-1]["date_end"]} if zss else None)
         scenario = cls.get("scenario", "")
         bottom = _bc_tail(bc, bis, "bottom", ks=ks)
         top = _bc_tail(bc, bis, "top", ks=ks)
         st = {
-            "n_bars": n, "first": d0, "last": d1, "span_days": span_days,
+            "n_bars": _sh["n_bars"], "first": _sh["first"], "last": _sh["last"],
+            "span_days": _sh["span_days"],
             "close": round(last["close"], 3), "chg1d": round(last["close"] / closes[-2] - 1, 4) if n >= 2 else 0,
             "bi_n": len(bis), "zs_n": len(zss), "bc_n": len(bc), "sig_n": len(signals),
             "agree": round(agree["rate"], 3), "agree_n": agree["total"],
             "scenario": scenario, "trend": cls.get("trend_type", ""),
             "last_bi_dir": bis[-1]["dir"] if bis else 0,
-            "avg_amt60": round(avg_amt, 1), "med_amp": round(med_amp, 2),
-            "one_word": one_word, "dd": round(last["close"] / max(highs) - 1, 3) if highs else 0,
-            "zs_last": zs_last, "stop_days": stop_days,
+            "avg_amt60": _sh["avg_amt60"], "med_amp": round(med_amp, 2),
+            "one_word": _sh["one_word"], "dd": round(last["close"] / max(highs) - 1, 3) if highs else 0,
+            "zs_last": zs_last, "stop_days": _sh["stop_days"],
             "bottom_bc": bottom, "top_bc": top,
             "seg_bot": bool(cls.get("seg_bc_bottom")), "seg_top": bool(cls.get("seg_bc_top")),
         }
@@ -1392,17 +1529,67 @@ def _exdiv_dates(ks, sym):
     return out
 
 
+def gate_prefix4(st):
+    """R463: `gate_of` 的**前 4 项**(次新/停牌/低流动性/一字板) —— 专门给两阶段取数的**阶段一**
+    用: 判定"这票需不需要补深度"。从 gate_of 抽出来是为了**两处共用同一份判定**(复制一份必漂移)。
+
+    ★ 为什么只有这 4 项能用浅数据判 —— 实测(_dbg/r463/stage2_ab.py, 401 票 × 三个深度
+      641/1282/1500, 纯本地重放生产引擎):
+        · 这 4 项**100% 深度无关**(逐票判定 0 差异): 判定的**结果**不随深度变, 虽然 `n_bars`
+          这类字段值本身会变 —— 机理是三者都落在浅取(641)窗口内:
+            `MIN_BARS=120` **远小于 641** ⇒ 浅取一律满足第 1 项; `stop_days` 只看最后一根;
+            `avg_amt60` 只用近 60 根; `one_word` 只用近 120 根窗口。加长历史只在**远端**追加。
+        · 第 5 项「低自洽」**不满足**该性质: 它统计的是**全局**笔序列一致率(`agree`/`agree_n`),
+          641 根 vs 1500 根有 **57/401 票翻转**(浅判低自洽而全量判通过), 反向 19 票 ——
+          **双向、非单调**, 且 `agree` 大量票卡在阈值 0.6 附近。
+      ⇒ 阶段一**必须**止步于这 4 项。把低自洽放进阶段一 = 用噪声把本该进信号的票永久剔出
+        (那 57 票会拿不到深度、最终被标成"低自洽"而不进信号), 是**净损失**而非省事。
+
+    ★ 第 6 项 `bi_n < 4`(笔数不足, 见 gate_of 末行)**同样不能**前置 —— 它是**笔数**, 会随
+      深度单调变化, 不像前 4 项那样有近端窗口保护。它的实际暴露量**实测为 0**, 但依据
+      **不是数值下界**(那种推理是错的, 见下):
+        · 实测(_dbg/r463/gate_stage2_risk.py —— 401 票真实 K 线 × 641/1500 两深度本地重放):
+          "进阶段二"的 **334 票**里, 641 根下 `bi_n<4` 的 1 只、1500 根下 1 只, 且是**同一只**
+          (`sh511990`, bi=2 vs 1 —— 两深度**同侧**都在阈下) ⇒ **真翻转 0 票**。
+        · ⚠ 反面教训(**别再用这个推理**): 曾想用"线上产物通过桶的 bi_n 下界 68(全量口径)"
+          推"腰斩也不到 4" —— **无效**: 实测进阶段二的票在 641 根下 `bi_n` 可低至 2, 且
+          "243→114"这种腰斩是常态。结论要站在**逐票实测**上, 不能站在汇总量的下界上。
+        · 机理: `bi_n<4` 只在"几乎无结构"时命中, 这类票笔数在**两个深度下都极少**;
+          且它们 n_bars 通常同时偏小, 多被第 1 项(MIN_BARS=120)先拦下。
+      ⇒ 结论: 第 5 项(低自洽)才是浅深度的**唯一**真实风险源(76/401 翻转), 第 6 项实测无暴露。
+        ⇒ 两者都**不必**进阶段一 —— 这就是「只前置前 4 项」这个设计的完整论证。
+      ⚠ 但第 5 项的 76/401 翻转会在**另一处**以另一种方式暴露: 若阶段二对某只有游标的票失败,
+        该票停在 641 根 ⇒ 第 5 项须在浅数据上判 ⇒ 门禁码可能与单阶段不同(实测该格子
+        76/334 = **22.8%**)。这是两阶段取数**等价性的适用边界**(不是前置决策的问题) —— 见
+        main 抓K线段, 监测字段 `meta.tx_stage2.deep_ok/need`。
+    返回 gate_code(与 gate_of 同名同义), "" = 这 4 项全过(还需 gate_of 判后两项)。"""
+    if st is None:
+        return "fail"
+    if st["n_bars"] < MIN_BARS:
+        return "次新"
+    if st["stop_days"] > 20:
+        return "停牌"
+    if st["avg_amt60"] < LOW_AMT60:
+        return "低流动性"
+    if st["one_word"] >= ONE_WORD_MAX:
+        return "一字板"
+    return ""
+
+
 def gate_of(st):
-    """门禁: 返回 (gate_code, desc)。gate="" 表示可通过。"""
+    """门禁: 返回 (gate_code, desc)。gate="" 表示可通过。
+    R463: 前 4 项改调 `gate_prefix4`(单一事实来源, 两阶段取数阶段一也用它) ——
+    本函数**判定顺序与输出与 R463 之前逐字节相同**, 已用同进程逐票比较验证。"""
     if st is None:
         return "fail", "分析失败"
-    if st["n_bars"] < MIN_BARS:
+    _g4 = gate_prefix4(st)
+    if _g4 == "次新":
         return "次新", "数据不足(%d根<%d)" % (st["n_bars"], MIN_BARS)
-    if st["stop_days"] > 20:
+    if _g4 == "停牌":
         return "停牌", "最后K线距今%d天" % st["stop_days"]
-    if st["avg_amt60"] < LOW_AMT60:
+    if _g4 == "低流动性":
         return "低流动性", "近60日均额%.0f万" % st["avg_amt60"]
-    if st["one_word"] >= ONE_WORD_MAX:
+    if _g4 == "一字板":
         return "一字板", "一字板%d天" % st["one_word"]
     if st["agree_n"] >= AGREE_TOTAL_MIN and st["agree"] < AGREE_RATE_MIN:
         return "低自洽", "分笔自洽%.2f" % st["agree"]
@@ -2142,20 +2329,100 @@ def main():
     elif limit:
         syms = syms[:limit]
 
-    # --- 抓K线(并发, 全局限速由 fetch_kline 内 throttle 保证; 失败重试一轮) ---
+    # --- 抓K线: **两阶段取数**(R463; 并发, 全局限速由 tx_get/_tx_th 内 throttle 保证) ---
+    #   阶段①: 全市场只取腾讯**第 1 页**(641 根) —— 足够判 `gate_prefix4` 那 4 项, 实测
+    #          100% 深度无关(401 票 × 三个深度逐票 0 差异, _dbg/r463/stage2_ab.py)。
+    #   阶段②: 只对"这 4 项全过"的票, 从续取游标再往回翻 2 页并与第 1 页**合并**。
+    #   省下的是"那些注定被这 4 项剔除的票的第 2/3 页": 线上口径(09-14 产物)约
+    #     **1423 只**(次新 233 + 停牌 17 + 低流动性 1172 + 一字板 1) = 20.4% 的票,
+    #     按 3 页/票推算请求数 **-13.6%**(20940 → 18094)。请求数是唯一瓶颈(耗时 ≈ 请求数 /
+    #     聚合 rps), 故这就是直接的时间收益, 且**不牺牲任何数据的正确性**(理由见下)。
+    #
+    #   ⚠ **实测对照(R463, 110 票四类桶全覆盖, _dbg/r463/count_reqs.py)**:
+    #     上面那个 -13.6% 是**全市场推算**; 小样本实测是: **旧版 407 → 未修页序 444(+9%) → 修后 393(-3.4%)**
+    #     tx 请求。三个数都要如实记, 别只看推算:
+    #       · "省不出来"在小样本上是**样本结构**使然: 省的是"被剔除票的第 2/3 页", 而 110 票里
+    #         被剔除的 40 只**大多本身就只有 1 页**(短历史, 阶段一没填满 ⇒ 旧版也只 1 页)
+    #         ⇒ 几乎没有"页"可省。实测只有 **6 票**真省, 全部是"被前 4 项剔除的长历史票",
+    #         各 -2~-3 请求 = **-14**。只有全市场规模下那 1423 只(低流动性票历史往往很长)才省得出来。
+    #       · "+9%" 那一步**不是两阶段的固有成本, 而是页序缺陷**(R463 已修, 见下)
+    #         —— 也是本轮唯一一个"实测推翻推算"的地方, 故单独记。
+    #       · 修后**逐票核对**: 与旧版相比**只有 6 票**请求数变化且**全部为负**(净省 -14);
+    #         分主机 **ifzq=110 与旧版逐项相同** ⇒ 页序已完全恢复。若 3 台都健康, 轮转本就
+    #         零浪费, 此时两阶段的收益纯为"省掉的 2/3 页"(全市场 -13.6%)。
+    #   ✅ **已修(R463)**: 让阶段二的**页序接着阶段一编**
+    #     (`fetch_tx_qfq_paged(..., page0=1)`, 见该函数 docstring)。
+    #     机制已由**逐票 diff 精确对上号**: 旧版 3 页的 prefer 序列 = [0,1,2]
+    #     ⇒ 每台**恰好一次**, 第 3 页落在唯一可用的那台上(1 请求); 不续接时两段各自编号
+    #     = [0] + [0,1] ⇒ **第 0 台被 prefer 两次** ⇒ 多一次白打。逐票实测(110 票):
+    #     51 票 5→6(**+1**)、6 票(被前 4 项剔除的长历史票) 5/4→2(**-2/-3**),
+    #     算术自洽 **+51-14 = +37**(与汇总 407→444 一致)。续接后回到与单阶段
+    #     **逐票相同**的页序 ⇒ 对被剔除票只剩净省。
+    #   ⏳ 仍**未做**(待拍板): 让 prefer **跳过本轮已知不可用的主机**需把 `_TX_HOST_OK`
+    #     (单台 memo)升级为"已证可用主机集(LRU)", 属**源状态机改动**(R458/R460/R463 的
+    #     限速与停用判定全挂在它上面) ⇒ 不擅动。好在 3 台**都健康**时轮转本就零浪费,
+    #     该优化只在"部分主机长期不可用"时才有增益。真相由线上首轮 run 的
+    #     `meta.tx_host` / `meta.src_cycle` / `meta.tx_stage2` 给出。
     got, fails = {}, {}
     t_f = time.time()
     with ThreadPoolExecutor(max_workers=CONCURRENCY) as ex:
-        for n_done, (sym, res) in enumerate(ex.map(_fetch_one, syms), 1):
+        for n_done, (sym, res) in enumerate(ex.map(_fetch_one_shallow, syms), 1):
             ks, src = res
             if ks:
                 got[sym] = (ks, src)
             else:
                 fails[sym] = src
-            if n_done % 200 == 0:
-                print("  拉取 %d/%d  有效%d 失败%d  %.0fs" % (
+            if n_done % 500 == 0:
+                print("  拉取① 浅取 %d/%d  有效%d 失败%d  %.0fs" % (
                     n_done, len(syms), len(got), len(fails), time.time() - t0), flush=True)
-    print("  拉取完成: 有效 %d / %d, 失败 %d, %.0fs" % (len(got), len(syms), len(fails), time.time() - t_f))
+    print("  拉取①(浅取 1 页)完成: 有效 %d / %d, 失败 %d, %.0fs"
+          % (len(got), len(syms), len(fails), time.time() - t_f), flush=True)
+
+    # --- 阶段②: 只对"前 4 项门禁全过"的票补深度 ---
+    t_d = time.time()
+    _n_shallow = len(got)               # 阶段①浅取成功的票数(落 meta.tx_stage2)
+    _need = []
+    for _sym, (_ks, _src) in got.items():
+        _sh = shallow_stats(_sym, _ks)          # 与 analyze_one 同一函数 ⇒ 判定口径必然一致
+        if _sh is None:
+            continue
+        if not gate_prefix4(_sh):
+            _need.append((_sym, _ks))
+    print("  阶段②筛选: 需补深度 %d / %d (前 4 项门禁已剔除 %d 只, 省其第 2/3 页请求)"
+          % (len(_need), len(got), len(got) - len(_need)), flush=True)
+    # R463: 量化"**阶段二失败**"这个风险格子(纯观测, 不参与判定) ——
+    #   `resume` = 有续取游标的票(浅取填满了 641 根 ⇒ 阶段二**真的会**去翻页),
+    #   `deep_miss` = 有游标但一页都没多取到 ⇒ 该票停在 641 根。
+    #   为什么这个数要单独落痕: 门禁第 5 项「低自洽」对深度**敏感**(76/401 票翻转),
+    #   而停在 641 根的票只能拿浅数据判它 ⇒ 门禁码可能与单阶段不同(实测该格子
+    #   **76/334 = 22.8%**, 见 _dbg/r463/gate_stage2_risk.py)。`deep_miss` 就是
+    #   "本轮可能漂移的票数"上界 —— 它是两阶段取数**等价性的适用边界**, 必须可见。
+    #   (`resume - deep_miss` = 成功补到深度的票, 与旧版逐票深度一致, 零风险。)
+    _n_resume = sum(1 for _s, _k in _need if _s in _SHALLOW_RESUME)
+    _n_deep = 0
+    if _need:
+        with ThreadPoolExecutor(max_workers=CONCURRENCY) as ex:
+            for n_done, (sym, res) in enumerate(ex.map(_fetch_deep_one, _need), 1):
+                if res:
+                    got[sym] = res
+                    _n_deep += 1
+                if n_done % 500 == 0:
+                    print("  拉取② 补深度 %d/%d  已补 %d  %.0fs" % (
+                        n_done, len(_need), _n_deep, time.time() - t_d), flush=True)
+    print("  拉取②(补深度)完成: %d / %d 票拿到更深序列, %.0fs"
+          % (_n_deep, len(_need), time.time() - t_d), flush=True)
+    if _n_resume > _n_deep:
+        print("  ⚠ 阶段②有 %d 票**有游标却没补到深度**(停在 641 根 ⇒ 第5项按浅数据判,"
+              " 与单阶段可能有差异, 实测该格子 22.8%%) — 见 meta.tx_stage2.deep_miss"
+              % (_n_resume - _n_deep), flush=True)
+
+    # --- R463: 落"**最终采纳**的腾讯序列深度"到 meta.tx_depth ---
+    #   必须等到两个阶段都结束才扫: 阶段①记的是 641 根(中间态)、阶段②才可能变深。
+    #   判据用 **src == "tx"**(最终采用的源) ⇒ 走 sina/em 兜底的票不计入, 与 R460 的
+    #   "腾讯序列深度分布"语义一致; 且 `thin` 只在最终确实浅时才 +1(浅取不算 thin)。
+    for _sym, (_ks, _src) in got.items():
+        if _src == "tx":
+            _record_tx_depth(_ks)
 
     # --- R283: 当日主力资金流(全市场 sh/sz 批量; 与 K 线/源健康解耦, 失败只缺字段不崩产物) ---
     t_ff = time.time()
@@ -2638,7 +2905,24 @@ def main():
         "title": "A股全市场缠论雷达",
         "asof": asof, "build_time": datetime.datetime.now(
             datetime.timezone(datetime.timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S"),
-        "version": "P3b-r26",   # r26=R463: **第 3 台同源镜像 `proxy.finance.qq.com/ifzqgtimg` 接入轮页**。
+        "version": "P3b-r27",   # r27=R463: **两阶段取数** —— 阶段①全市场只取 1 页(641 根)判
+                                #   `gate_prefix4` 四项, 阶段②只对通过者从续取游标补第 2/3 页。
+                                #   请求数 **−13.6%**(20940 → 18094; 被前置剔除 1423 只)。
+                                #   性质: **结构性省请求, 零正确性变更** ——
+                                #   · 前 4 项(n_bars/stop_days/avg_amt60/one_word)**实测 100% 深度无关**
+                                #     (401 票 × 641/1282/1500 三深度逐票 0 差异, _dbg/r463/stage2_ab.py)
+                                #     ⇒ 被前置剔除的票, 门禁码与全量**逐个相同**(它们本就判到那一步返回)。
+                                #   · 「低自洽」**刻意不前置**: 它对全局笔序列敏感 —— 641 vs 1500 根有
+                                #     **57/401 票"浅判低自洽→全量通过"的误剔**(反向 19 票; 双向、非单调,
+                                #     且 agree 大量票卡在阈值 0.6 附近) ⇒ 前置 = 把这些票永久踢出信号,
+                                #     是**净损失**, 不是"省事"。这条红线写进 gate_prefix4 的 docstring。
+                                #   · 被前置的票仍拿**前复权**(只是 641 根深), 且 scen/顶底背驰/zs_last
+                                #     实测对深度 **0.0% 敏感**(见 _TX_MAX_PAGES 上方 R460 深度 A/B 表)
+                                #     ⇒ 展示层无实质变化。
+                                #   · 阶段②拿不到更深 ⇒ **保留阶段①数据**, 绝不丢票(与"主动降页数"
+                                #     有本质区别: 后者是放弃深度)。
+                                #   落痕 `meta.tx_stage2{shallow,need,deep_ok,skip4}` 可事后核算。
+                                # r26=R463: **第 3 台同源镜像 `proxy.finance.qq.com/ifzqgtimg` 接入轮页**。
                                 #   性质: **吞吐优化, 零正确性变更** —— 请求数不变(仍 3 页/票)、
                                 #   窗口不变、拼接基准不变, 只是聚合 rps **5.7 → 8.6 (+50%)**。
                                 #   全市场耗时 = 请求数 / 聚合 rps, 故这是"缩短线上时间"里
@@ -2861,7 +3145,30 @@ def main():
                                                # "哪台在服务", 不必再靠 87% 裸价反推。
         "src_cycle": src_cycle,                # R444: 各源停用/恢复轮次 {stops,resumes} —— 区分
                                                #   间歇抖动(resumes 高)与整轮不可用(stops=1,resumes=0)
+        "tx_stage2": {                         # R463: 两阶段取数落痕(纯观测, 不参与任何判定)
+            "shallow": _n_shallow,             #   阶段①(1 页/票)取到有效序列的票数
+            "need": len(_need),                #   需补深度 = `gate_prefix4` 四项全过的票数
+            "resume": _n_resume,               #   其中**有续取游标**的票数(浅取填满 641 根 ⇒
+                                               #   阶段②真的会去翻页 —— 这才是会踩风险格子的集合)
+            "deep_ok": _n_deep,                #   阶段②真正拿到**更深**序列的票数
+            "deep_miss": _n_resume - _n_deep,  # ★ 有游标却没补到 ⇒ 该票停在 641 根, 门禁第 5 项
+                                               #   只能在浅数据上判 ⇒ 与单阶段可能不同(该格子实测
+                                               #   **22.8%** 会翻转, _dbg/r463/gate_stage2_risk.py)。
+                                               #   这是"可能漂移的票数"**上界** ⇒ **期望 0**;
+                                               #   非 0 = 等价性出现缺口(可用性导致, 非逻辑缺陷),
+                                               #   采信名单前须与单阶段产物逐票对照。
+            "skip4": _n_shallow - len(_need),  #   被前 4 项剔除 ⇒ 省掉其第 2/3 页请求的票数
+        },                                     # 期望形态: skip4 ≈ 20%(线上 09-14 口径 1423/6906),
+                                               #   deep_ok/need ≈ 100% **且 deep_miss = 0**;
+                                               #   need 远小于 shallow 说明前置生效。
         "tx_depth": tx_depth,                  # R460: 腾讯 qfq 序列深度分布(纯观测, 不参与判定)
+                                               # R463 起语义收紧为「**最终采纳**的序列深度」:
+                                               #   仍记全部 src=="tx" 的票(含停在 641 的), 故
+                                               #   min=641 = 有票最终只有 1 页 —— 其构成是
+                                               #   "被前 4 项前置的票"(对照 tx_stage2.skip4) +
+                                               #   "阶段②没补到的票"(对照 tx_stage2.deep_miss),
+                                               #   thin 只在"最终确实浅"时计 —— 浅取的 641 根
+                                               #   只是中间态, 不再计入, 否则每轮会凭空多几千个 thin。
                                                #       "整轮持续不可用"与"间歇抖动"(后者加密复探可救)
         "m_macd": _m_macd_stat,                # R400: 月线补拉统计 {tried,ok,short,net,down,warn}
                                                # (09-09 r11 首扫 143 票全败曾无痕; 落痕后看门狗/前端可查

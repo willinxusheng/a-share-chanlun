@@ -282,9 +282,24 @@ def fetch_tx_qfq(symbol, period):
 _TX_PAGE_CAP = 640
 
 
-def fetch_tx_qfq_paged(symbol, period="day", min_date=MIN_DATE, min_bars=None, max_pages=2):
+def fetch_tx_qfq_paged(symbol, period="day", min_date=MIN_DATE, min_bars=None,
+                       max_pages=2, got0=None, start_end=None, page0=0):
     """R460: 分页取**全量前复权** —— 沿 param 的 end 游标往回翻, 拼成完整 qfq 序列。
-    返回 (rows, dirty, has_qfq, pages)。
+    返回 (rows, dirty, has_qfq, pages)  ← **签名与 R460 一致, 未变**(既有调用方无需改)。
+
+    R463 三处**可选**入参(默认值下行为与 R460 逐字节相同):
+      · `got0`      = 已有 `{date: bar}`(阶段一取到的 1 页) —— 结果与本次翻页**合并**,
+                      合并走同一个 `got[r["date"]] = r` 去重, 故重复日期不会双计。
+      · `start_end` = 翻页起点游标(阶段一末页首根的前一天) —— 直接作为首轮 `end`。
+      · `page0`     = **页序索引起点**(默认 0) —— 决定"这一页 prefer 哪台主机"。
+                      ★ 为什么两阶段必须续接页序(R463 实测, 见下): `prefer` 是**按页轮流**
+                        选主机, 而轮流的索引若在分层后**每段从 0 重启**, 同一台(第 0 台)就会被
+                        prefer 两次 ⇒ 在"第 0 台不可用"的常见场景下**多打一次必然失败的请求**。
+                        实测(110 票, _dbg/r463/count_reqs.py): 不续接时 51 票从 5 个请求涨到 6;
+                        续接(page0=1, 即紧接阶段一用过的那一页)后回到与单阶段**逐票相同**。
+      语义要点: 续取时若首页请求失败, **不再 raise 而是 break**(保留已有部分) ——
+        因为此时"源不可用"已由阶段一证伪(它刚刚成功过), 失败只说明这一页取不到,
+        不该让调用方把它当源故障计连败(R374 血泪: 票面/单页问题不该停整源)。
 
     ── 为什么(实测 2026-09-14, 证据见 _dbg/r460/) ──
     · R458b/c 记「腾讯把 qfq 历史**硬截断**在 641 根(首根恒 2024-01-22), 加日期段也一样」
@@ -315,19 +330,21 @@ def fetch_tx_qfq_paged(symbol, period="day", min_date=MIN_DATE, min_bars=None, m
     (3 页: 641 + 640 + 640), 与新浪兜底**同深度** ⇒ 换算后可保证"只变复权口径、不变深度"。
     次新股首页即"窗口未填满"(< _TX_PAGE_CAP) ⇒ 停止, 那是它**从上市首日起的完整**历史。
     """
-    got, dirty_total, pages = {}, 0, 0
-    end = None
+    got, dirty_total, pages = (dict(got0) if got0 else {}), 0, 0
+    end = start_end or None            # R463: 续取时直接落在阶段一的游标上
     _nl = max(1, len(TX_KLINE_HOSTS))
     for _i in range(max(1, int(max_pages))):
         # R460: 按页**轮流**首选各主机 —— 见 TX_INTERVAL 注释②: 记忆主机优先会让一台吸收
         #   全部翻页流量(3 页/票), 轮流 prefer 才用满各独立镜像的额度(R463 起 3 台 × 2.9 rps)。
+        # R463: `page0` 让**续取**的页序接着上一段编(两阶段取数的阶段二传 1) —— 否则每段都从
+        #   第 0 台起, 第 0 台被 prefer 两次, 在"第 0 台不可用"时白打一次(实测 51/110 票 +1 请求)。
         try:
             data = json.loads(tx_get(symbol, period, count=_TX_PAGE_CAP, end=end,
-                                     prefer=TX_KLINE_HOSTS[_i % _nl]))["data"][symbol]
+                                     prefer=TX_KLINE_HOSTS[(_i + int(page0)) % _nl]))["data"][symbol]
         except Exception:                    # noqa: BLE001
-            if _i == 0:
-                raise                        # 首页失败 = 源不可用, 交调用方按原状态机计失败
-            break                            # 后续页失败: 保留已取部分(首页本身是完整序列), 不丢票
+            if _i == 0 and not got:
+                raise                        # 首次请求失败 = 源不可用, 交调用方按原状态机计失败
+            break                            # 后续页/续取首页失败: 保留已取部分, 不丢票(见 docstring)
         qk = data.get("qfqday") or data.get("qfqweek") or data.get("qfqmonth")
         if not qk:
             break
