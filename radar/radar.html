@@ -426,6 +426,19 @@ h1{font-size:21px;font-weight:700;letter-spacing:.4px;line-height:1.3}   /* R323
 .revpool .prow .artag.adeg{color:#64748b}
 /* R452: 信号雷达行的「面积退化」标 —— .artag 的被限定在 .revpool 内, 此处需独立类 */
 .area-deg{color:#64748b;font-weight:700;font-size:9.5px;white-space:nowrap}
+/* R455: 把 R387 的背离强度三段配色**引入信号雷达行** —— 原 sigrad 把 area 渲染成裸数字
+   「面0.496」(无 class), 而同一指标在 revpool 是 绿(<0.5强)/橙(<0.8中)/红(≥0.8弱) 三段着色
+   ⇒ 同一字段两处语义不一致, 且列表里**最有区分度**的判据反而没有可读语义。
+   (实测 09-11: area 分布 0.008~0.830, 中位 0.326, 6 只退化 ⇒ 是本行区分度最高的字段) */
+.sigrad .srow .artag{font-weight:700;white-space:nowrap}
+.sigrad .srow .artag.a1{color:#0e7d4a}.sigrad .srow .artag.a2{color:#b45309}.sigrad .srow .artag.a3{color:#c92a2a}
+/* R455: 不复权源「结构可信度」标 —— 只对**近一年有除权记录**的票出橙标点名, 其余不再告警。
+   动机: 信号区 247/276(89.5%) 走新浪不复权价, 原页脚一句泛化"除权日K线可能有假跳空"让
+   **93.5% 实际不受影响的票跟着一起被怀疑**; 实测 sina 且近一年无除权 = 231/247。
+   标在名字行, 与 月线 mtag 同尺寸, 不挤占 K 线列。 */
+.divtag{display:inline-block;font-size:9.5px;font-weight:700;border-radius:3px;padding:0 4px;
+  margin-left:3px;line-height:1.6;white-space:nowrap;vertical-align:1px;letter-spacing:.2px;
+  color:#b45309;background:rgba(232,160,16,.11);border:1px solid rgba(232,160,16,.35)}
 .revpool .prow .trtag{display:inline-block;font-size:9.5px;font-weight:700;border-radius:3px;padding:0 4px;margin-right:4px;line-height:1.6;white-space:nowrap;vertical-align:1px;letter-spacing:.2px}
 .revpool .prow .trtag.rt{color:#0e7d4a;background:rgba(24,160,88,.10)}
 .revpool .prow .trtag.lt{color:#b45309;background:rgba(232,160,16,.10)}
@@ -595,13 +608,77 @@ function capStr(y){if(y==null)return "-";if(y>=1e8)return (y/1e8).toFixed(0)+"�
 /* R283: 资金流格式化 —— net=主力净额(元, 正=净流入 负=净流出) */
 function ffTxt(net){if(net==null||isNaN(net))return "-";var a=Math.abs(net),s=net>0?"+":(net<0?"-":"");if(a>=1e8)return s+(a/1e8).toFixed(a>=1e9?1:2)+"亿";if(a>=1e4)return s+(a/1e4).toFixed(0)+"万";return s+a.toFixed(0)}
 function ffCls(v){return v==null? "":(v>0?"up":(v<0?"down":"muted"))}
-/* R271: K线源徽标 —— 让"数据准确性"可感知到票级: sina裸价(除权日假跳空风险)橙标警示, 复权源绿标 */
-function srcTag(s){
+/* R271: K线源徽标 —— 让"数据准确性"可感知到票级: sina裸价(除权日假跳空风险)橙标警示, 复权源绿标
+   R455: **从泛化警告改为单票结论**。原 tooltip 恒为"新浪裸价不复权，除权日K线可能有假跳空",
+   对 247 只 sina 票一律如此 —— 而实测 sina 且近一年无除权 231/247(93.5%), 这些票的近期价格
+   序列连续、近端笔/中枢/背驰**不受除权跳空影响**。一律警告的后果是"要么全信要么全弃", 两种都错。
+   现按 `st.exdiv_d` 分三态给结论; 未带 u 的旧调用点保守维持警示(零回归)。 */
+function dDays(d1,d2){   // R455: 纯**数据日**之差(绝不碰 Date.now() —— 防 R272 那类"未来日期定时炸弹")
+  if(!d1||!d2)return null;
+  var a=new Date(String(d1).slice(0,10)+"T00:00:00+08:00").getTime();
+  var b=new Date(String(d2).slice(0,10)+"T00:00:00+08:00").getTime();
+  return (isNaN(a)||isNaN(b))?null:Math.round((b-a)/864e5);
+}
+/* R455: 不复权源的「结构可信度」—— 返回 {d,days,risk} 或 null(不适用/无记录)。
+   risk=true 仅当最近疑似除权日落在近端窗口(<=365 天)内 —— 此时除权跳空可能污染笔与中枢。
+   ★ 边界(不夸大不缩小): 后端 `_exdiv_dates` 判据 = 单日|chg| > 板块涨跌停上限×1.05
+     ⇒ **只覆盖大比例除权**(送转/大额分红/份额折算); 中小分红(约2~5%)检不出 —— 但该幅度
+     在正常日内波动(全市场 med_amp≈2.7%)之内, 与日常噪音同量级, 对笔/中枢无实质影响。
+     故本标只回答"近端是否可能被**跳空级**除权污染", **不声称绝对无污染**。 */
+function exdivRisk(u){
+  if(!u||u.src!=="sina")return null;
+  var d=(u.st||{}).exdiv_d;
+  if(!d)return null;
+  var n=dDays(d,(M||{}).asof);
+  if(n==null)return {d:d,days:null,risk:true};
+  return {d:d,days:n,risk:(n>=0&&n<=365)};
+}
+function srcTag(s,u){
   var map={"tx":"腾讯qfq","em":"东财qfq","sina":"新浪裸价","synth":"成分合成"};
-  var t=map[s]||s||"-";var warn=(s==="sina");
-  return '<span style="font-size:11px;padding:1px 6px;border-radius:8px;white-space:nowrap;'+(
-    warn?"background:#fff3cd;color:#92400e;border:1px solid #f0d98c"
-        :"background:#e8f4ec;color:#1a7f4b;border:1px solid #bfe0cc")+'">'+t+(warn?'<span title="新浪裸价不复权，除权日K线可能有假跳空">⚠</span>':"")+'</span>';
+  var t=map[s]||s||"-";
+  var isSina=(s==="sina"), r=isSina?exdivRisk(u):null;
+  var known=!!u;   // R455: 带 u ⇒ 可给单票结论; 未带 u 的老调用点保守维持警示(零回归)
+  var tag,styl,tip;
+  /* ⚠ 分支顺序即防线: `r` 在「sina 且无 exdiv_d 记录」与「未带 u」两种情形下都是 null,
+     故**绝不能**在 warn 分支里裸读 r.d —— 初版就踩了这个 null(实测 sh601117 详情页整页 TypeError 白屏)。
+     今按 (r存在? 近端存疑 : 未检出) 与 known 分层, 每条分支只读自己确证存在的字段。 */
+  if(!isSina){
+    styl="background:#e8f4ec;color:#1a7f4b;border:1px solid #bfe0cc";
+    tip=t+"(前复权) —— 除权已平滑, 结构不受除权跳空影响。";
+    tag=t;
+  }else if(r&&r.risk){
+    styl="background:#fff3cd;color:#92400e;border:1px solid #f0d98c";
+    tip="新浪裸价(不复权) —— ⚠ 该票最近疑似除权日 "+r.d+(r.days!=null?"(距今 "+r.days+" 天)":"")
+       +" 落在近端窗口内: 除权跳空可能污染笔/中枢, 该票结构标注精度下降, 请核对 K 线是否含假跳空。";
+    tag=t+'<span title="'+esc(tip)+'">⚠</span>';
+  }else if(known){
+    styl="background:#eef2f6;color:#475569;border:1px solid #d8e0e8";
+    tip="新浪裸价(不复权) —— "
+       +(r?"该票最近疑似除权日 "+r.d+(r.days!=null?", 距今 "+r.days+" 天":"")+", 已在近端窗口之外"
+            :"该票全窗口**未检出**大比例除权日")
+       +" ⇒ 近期价格序列连续, **近端笔/中枢/背驰不受除权跳空影响**(仅历史除权日附近的结构可能有偏差)。"
+       +"\n⚠ 判据边界: 只识别「单日涨跌幅超板块涨跌停上限」的大比例除权(送转/大额分红/份额折算); "
+       +"中小分红(约2~5%)检不出 —— 但其幅度与正常日波动(全市场振幅中位≈2.7%)同量级, 对笔/中枢无实质影响。";
+    tag=t+'<span class="muted" title="'+esc(tip)+'">·</span>';
+  }else{
+    // 老调用点(未传 u): 无从判断该票是否受影响 ⇒ 保守维持原橙标与泛化提示, 行为与 R271 逐字一致
+    styl="background:#fff3cd;color:#92400e;border:1px solid #f0d98c";
+    tip="新浪裸价不复权，除权日K线可能有假跳空";
+    tag=t+'<span title="'+esc(tip)+'">⚠</span>';
+  }
+  return '<span style="font-size:11px;padding:1px 6px;border-radius:8px;white-space:nowrap;'+styl
+    +'" title="'+esc(tip)+'">'+tag+'</span>';
+}
+/* R455: 信号雷达行的「背离强度」标 —— 取代原死字段「强N/」, 并把 R387 三段配色落到位。
+   area_ratio = 本笔 MACD 面积 / 前笔面积, **越小越可靠**(该方向动能衰竭越彻底)。
+   退化(area<=0)沿用 R452 中性灰标 —— 不是"最强背离"(该笔无 MACD 柱使判据构造上恒成立)。 */
+function _areaTag(a){
+  if(a==null)return '<span class="artag" style="color:#94a3b8" title="本背驰笔无 MACD 面积数据(未参与强度判读)">面 -</span>';
+  if(!(a>0))return '<span class="area-deg" title="面积 0 = 退化: 该背驰笔区间内此方向无 MACD 柱 ⇒ 判据「本笔面积 &lt; 前笔×0.85」构造上恒成立, 不含力度证据 —— 别读成「最强背离」。看板排序已按无有效面积沉底(R387/R452 同口径)">面积退化</span>';
+  var w=a<0.5?"强背离: 该方向动能衰竭已很彻底":(a<0.8?"中等背离":"弱背离: 力度衰竭有限, 接近未背离");
+  return '<span class="artag '+(a<0.5?"a1":a<0.8?"a2":"a3")+'" title="背离强度 '+a.toFixed(3)
+    +' = 本笔 MACD 面积 ÷ 前笔面积('+w+')。**越小越可靠** —— 绿&lt;0.5 强 / 橙0.5~0.8 中 / 红≥0.8 弱, '
+    +'与「逆向观察池」同一口径(R387)。该标只描述力度, 不含方向判断">面'+a.toFixed(2)+'</span>';
 }
 /* ===== R258: 图表实例池 + K线拉取竞态令牌 ===== */
 var CH_POOL=[];   // 全页图表实例登记(showStk/backHome 整页重建时统一 dispose, 防孤儿实例泄漏)
@@ -954,7 +1031,7 @@ function sigRow(s,opt){   // R380: opt.sub=true = 非低吸区灰显行(破位/�
   var spk=(s.spark&&s.spark.data)?s.spark.data:s.spark;
   var nm=(u.name||s.name||s.sym);
   var sigTip=(t?"顶背驰·风险":"底背驰·机会")+" | "+nm+" "+(s.sym||"")+
-    "\n"+(s.bc_date||"")+"触发 · 距今"+(fr==null?"?":(fr===0?"当日":fr+"天"))+"\n类型 "+(s.bc_type||"-")+" · 强度"+(s.strong||0)+"/2"+(s.vol?" · 量缩确认":"")+(s.area==null?" · 面积比 -":" · "+(s.area>0?"面积比 "+s.area:"面积 0(退化: 该笔区间内此方向无 MACD 柱 ⇒ 判据「本笔面积<前笔×0.85」构造上恒成立, 不含力度证据)"))+   // R320: fresh=0 →"距今当日"(原"距今0天"误导) · R452: area=0 显式标退化(原静默) 
+    "\n"+(s.bc_date||"")+"触发 · 距今"+(fr==null?"?":(fr===0?"当日":fr+"天"))+"\n类型 "+(s.bc_type||"-")+(s.vol?" · 量缩确认":"")+(s.area==null?" · 面积比 -":" · "+(s.area>0?"面积比 "+s.area:"面积 0(退化: 该笔区间内此方向无 MACD 柱 ⇒ 判据「本笔面积<前笔×0.85」构造上恒成立, 不含力度证据)"))+   // R320: fresh=0 →"距今当日"(原"距今0天"误导) · R452: area=0 显式标退化(原静默) 
     "\n所属 "+(indName||"-")+(u.lead?" · 行业龙头":"")+
     momRsTip(st,u)+   // R447: 多周期动量 + 行业内相对强度(纯描述)
     (dev!=null?"\n现价较信号位: "+devTxt+(devTip?" ("+devTip+")":""):"")+
@@ -980,9 +1057,28 @@ function sigRow(s,opt){   // R380: opt.sub=true = 非低吸区灰显行(破位/�
     mTag=_mab
       ?'<span class="mtag mnull" title="月线MACD 数据在但月K不足 —— 该票上市约 '+_mab+' 个月, 未达判定门槛 40 根(按 MACD 26+9 EMA 收敛所需), 故月线档记中性、名次未按月线校正 · 非取数失败">月K不足 '+_mab+'</span>'
       :'<span class="mtag mnull" title="月线MACD 本次未取得数据 —— 腾讯 qfq 月K 与 新浪日线聚合两路均失败或完全无月K, 属真取不到。该信号月线档中性, 名次未按月线校正, 「底部刚启」非全维度结论">月线—</span>';}
+  /* R455: 不复权源「结构可信度」标 —— **只对近一年有除权记录的票点名**(边界见 exdivRisk)。
+     动机: 原页脚一句泛化"除权日K线可能有假跳空"覆盖全部 247 只 sina 票, 而其中 231 只
+     近一年无除权、近端结构不受影响 ⇒ 泛化警告让 93.5% 的票跟着一起被怀疑。改为精确点名。
+     ⚠ **位置不能放名称格**: `.nm` 是 `overflow:hidden;text-overflow:ellipsis`, 而 `.nm` 实测
+       宽度仅 121px、名称+资金+ETF标已用满(加 49px 标 → scrollW 156~163, 触 ellipsis)
+       ⇒ 会把**股票名(首要标识)截断**。改放 `.st` 第二行: 该行 `1fr`=110px, `面X 缩` 实测仅用
+       ~60px, 余 50px 正好容纳紧凑标「除权」; 名称格零影响。 */
+  var _dr=exdivRisk(u);
+  var divTag=(_dr&&_dr.risk)
+    ?'<span class="divtag" title="'+esc("该票走新浪裸价(不复权), 且最近疑似除权日 "+_dr.d
+        +(_dr.days!=null?"(距今 "+_dr.days+" 天)":"")+" 落在近端窗口内 —— 除权跳空可能污染该票近端的"
+        +"笔/中枢/背驰, 本信号的结构标注精度下降。请核对 K 线是否含假跳空, 或改用复权价自行复核。"
+        +"⚠ 判据边界: 只识别「单日涨跌幅超板块涨跌停上限」的大比例除权(送转/大额分红/份额折算)")+'">除权</span>'
+    :"";
   return '<div class="'+rowCls+'" title="'+esc(sigTip)+'" onclick="pickSigRad(\''+s.sym+'\')">'+
     '<div><div class="nm">'+(t?"⚠️ ":((opt.sub)?"🔍 ":"✅ "))+esc(nm)+lead+ffMini+etfTag+twTag+'</div><div class="sub">'+esc(s.sym)+" · "+esc(indName)+'</div></div>'+   // R447: +etfTag/twTag
-    '<div class="st">'+(t?'<b style="color:#c92a2a">顶背驰</b>':'<b style="color:#087f5b">底背驰</b>')+'<span>强'+(s.strong||0)+'/'+(s.vol?"缩":"")+(s.area==null?"":(s.area>0?" 面"+s.area:' <span class="area-deg" title="面积 0 = 退化: 该背驰笔区间内此方向无 MACD 柱 ⇒ 判据「本笔面积 &lt; 前笔×0.85」构造上恒成立, 不含力度证据 —— 别读成「最强背离」">面积退化</span>'))+'</span></div>'+
+    /* R455: 原第二列渲染 `强N/缩 面X` —— 其中 `强N` 是**死字段**(跨 6 快照 1507 条信号 100% = 2,
+       `vol=false` 时还会留下悬空斜杠「强2/」), 而 `面X` 是本行区分度最高的判据却**无配色**。
+       今: 去掉死字段 → _areaTag() 带上 R387 三段配色; `缩` 保留(55/221 有区分度); 末尾挂除权标。
+       ⚠ 量缩标**必须用 `<span>` 不能用 `<b>`** —— 第 292 行 `.sigrad .srow .st b{display:block}`,
+       用 `<b>` 会变块级、整列多占一行(实测行高 53→67px, 3/10 行被撑开)。 */
+    '<div class="st">'+(t?'<b style="color:#c92a2a">顶背驰</b>':'<b style="color:#087f5b">底背驰</b>')+'<span>'+_areaTag(s.area)+(s.vol?' <span style="color:#087f5b;font-weight:700" title="量缩确认: 该背驰笔区间成交量较前笔萎缩, 佐证动能衰竭(近端 55/276 只命中)">缩</span>':"")+(divTag?' '+divTag:"")+'</span></div>'+
     '<div class="st">'+(fr==null?"-":(fr===0?"当日":fr+"天前"))+frTag+'</div>'+
     '<div class="right">'+
       '<div class="dev '+devCls+'" title="'+esc(devTip||sigTip)+'">'+(dev!=null?devTxt:"-")+'<small>'+bkTag+topBkTag+devSub+'</small></div>'+
@@ -999,9 +1095,12 @@ function renderSigRadar(){
   if(!box)return;
   var top=[],bot=[];
   var nRes=0,nDiv=0,nNear=0,nTopDn=0,nBotCl=0,nBotLive=0,nBotBk=0;   // R442: nBotBk=底信号中「盘中已击穿背驰低点」(缠论一买已废)的数量
+  var nSina=0,nExR=0;   // R455: nSina=信号票走新浪不复权价的数量 · nExR=其中近一年有除权记录(需点名)的数量
   SIG.forEach(function(s){
     if(!s||!s.sym)return;
-    var f=(UNI[s.sym]||{}).ff||{};
+    var _u=UNI[s.sym]||{};
+    if(_u.src==="sina"){nSina++;if((exdivRisk(_u)||{}).risk)nExR++;}
+    var f=(_u.ff)||{};
     var fn=f.net,t=s.dir==="top";
     if(fn!=null){if((!t&&fn>0)||(t&&fn<0))nRes++;else if((!t&&fn<0)||(t&&fn>0))nDiv++;}
     if((s.fresh!=null&&s.fresh<=5))nNear++;
@@ -1103,6 +1202,14 @@ function renderSigRadar(){
       (nTopDn?'<span title="顶信号已从背驰高点回落超过3%的数量(横截面口径, 非时间序列回测)">顶信号已回落&gt;3% <b class="fd">'+nTopDn+'/'+top.length+'</b></span>':'')+
       (nBotCl&&nBotLive?'<span title="底信号现价仍贴近背驰低点(+8%以内, 尚未走高=待启动; 分母=未破位底信号数, 横截面口径)">底待启动 <b class="bb">'+nBotCl+'/'+nBotLive+'</b></span>':'')+
       (nBotBk?'<span title="底信号中「盘中已击穿背驰低点」的数量 —— 缠论一类买点结构已失效(看板按收盘价剔票故仍在榜, 有意避开日内插针); all 模式已将其沉至底组末尾(非低吸参考), res/div 资金视角保留原序">底已破 <b class="fd">'+nBotBk+'</b></span>':'')+
+      /* R455: 不复权源的结构可信度**收敛口径** —— 替代原页脚一句泛化警告("除权日K线可能有假跳空"),
+         把"247 只一律存疑"收敛为"nExR 只点名 + 其余洗清"。判据与边界见 exdivRisk()。 */
+      (nSina?'<span title="'+esc("信号区 "+(SIG.length||0)+" 只中有 "+nSina+" 只走新浪不复权价。"
+        +"除权跳空**只在「近期发生除权」时**才会污染笔/中枢 —— 实测其中 "+(nSina-nExR)+" 只近一年无除权记录, "
+        +"近期价格序列连续, 近端笔/中枢/背驰**不受除权跳空影响**; "+nExR+" 只近期有除权, 已用橙色「除权存疑」在行内点名。"
+        +"⚠ 判据边界: 只识别「单日涨跌幅超板块涨跌停上限」的大比例除权(送转/大额分红/份额折算), 中小分红(约2~5%)检不出 —— "
+        +"但其幅度与正常日波动(全市场振幅中位≈2.7%)同量级, 对笔/中枢无实质影响。")+'">不复权源 '
+        +'<b>'+(nSina-nExR)+'/'+nSina+'</b> 近一年无除权'+(nExR?' · <b class="fd">'+nExR+' 只存疑</b>':'')+'</span>':'')+
       ((indTop.length&&indTop[0].n>=2)?'<span title="近5日背驰信号最密集的行业(顶+底合计) — 板块效应/资金合力提示">🎯 近端集中 <b>'+indTop.map(function(o){return o.k+' '+o.n;}).join(' · ')+'</b></span>':'')+
       (inTop?'<span>主力净流入 <b class="fn">'+esc(inTop.k)+' '+ffTxt(inTop.nf)+'</b></span>':'')+
       (inBot?'<span>净流出 <b class="fd">'+esc(inBot.k)+' '+ffTxt(inBot.nf)+'</b></span>':'')+
@@ -1115,7 +1222,7 @@ function renderSigRadar(){
       '<span class="chip'+chipOn("res")+'" onclick="setSigMode(\'res\')">💰资金共振</span>'+
       '<span class="chip'+chipOn("div")+'" onclick="setSigMode(\'div\')">⚠️背离警示</span>'+
     '</div>'+smark+
-    '<span class="shint" style="width:100%">全市场最新背驰信号 · <b style="color:#c92a2a">顶=风险</b>(警惕/减仓) <b style="color:#087f5b">底=机会</b>(关注/分批低吸) · 「偏离」=现价较信号位涨跌(<8%贴近=低吸参考区, 大=已走远慎追) · 👑龙头/资金佐证 · <span style="color:#e54545">左边条=资金共振</span>/<span style="color:#f59f00">黄条=背离警示</span> · <b>顶组仅列未兑现</b>(已回落&gt;3%=方向应验, 从🔥最新剔除, 摘要可见已兑现数; 💰⚠️模式可查全量)</span></div>'+
+    '<span class="shint" style="width:100%">全市场最新背驰信号 · <b style="color:#c92a2a">顶=风险</b>(警惕/减仓) <b style="color:#087f5b">底=机会</b>(关注/分批低吸) · 「偏离」=现价较信号位涨跌(<8%贴近=低吸参考区, 大=已走远慎追) · 👑龙头/资金佐证 · <span style="color:#e54545">左边条=资金共振</span>/<span style="color:#f59f00">黄条=背离警示</span> · <b>顶组仅列未兑现</b>(已回落&gt;3%=方向应验, 从🔥最新剔除, 摘要可见已兑现数; 💰⚠️模式可查全量) · <span title="背离强度 = 本笔 MACD 面积 ÷ 前笔面积。**越小越可靠**(该方向动能衰竭越彻底): 绿&lt;0.5 强 / 橙0.5~0.8 中 / 红≥0.8 弱。「面积退化」=该笔无 MACD 柱, 判据构造上恒成立、不含力度证据(R387/R452)。⚠ 原「强度N/2」列已移除 —— 跨 6 个快照(09-04~09-11)共 1507 条信号中该值 100% 落在 2 档, 零区分度; 且 vol=false 时会渲染出悬空斜杠「强2/」。故改为把最有区分度的面积比上色(实测 area 分布 0.008~0.830, 中位 0.326)">「面X」=背离强度 <b style="color:#0e7d4a">越小越可靠</b>(绿强/橙中/红弱) · 原「强度N」列已移除(1507 条信号 100% = 2 档, 无区分度)</span></div>'+
     '<div class="sbody">'+grp("⚠️","顶背驰 · 风险",pt)+grp("✅","底背驰 · 机会",pb,pbSub)+'</div>'+
     '<div class="foot">信号=自研缠论引擎背驰确认 · 数据截至 '+esc(M.asof||"-")+' · 仅供研究参考，不构成投资建议</div>';
 }
@@ -2141,7 +2248,7 @@ function renderIndStkList(k){
       else if(s.scenario&&s.scenario.indexOf("见")>=0)tag='<span class="badge2 '+(s.scenario.indexOf("见底")>=0?"g":"r")+'">'+esc(s.scenario)+'</span>';
       else if(s.scenario)tag='<span class="badge2 z">'+esc(s.scenario)+'</span>';
       else tag='<span class="badge2 o">震荡</span>';
-      var tip=esc((u.name||"")+" | "+(x.sg?(x.sg.dir==="top"?"顶背驰":"底背驰")+" "+x.sg.bc_date+" "+x.sg.bc_type+" 强度"+(x.sg.strong||0)+"/2"+(x.sg.vol?" 量缩确认":"")+" 距今"+(x.sg.fresh!=null?(x.sg.fresh===0?"当日":x.sg.fresh+"天"):" ?") :(s.scenario||"震荡"))+(s.trend?" | 趋势"+s.trend:"")+(s.agree!=null?" | 自洽"+(s.agree*100).toFixed(0)+"%":""))+trkTip(x);   // R321: fresh=0 → "距今当日"(同 R320 口径, 原"距今0天"误导) · R448: 附 ETF 领域/费率/同指数选优
+      var tip=esc((u.name||"")+" | "+(x.sg?(x.sg.dir==="top"?"顶背驰":"底背驰")+" "+x.sg.bc_date+" "+x.sg.bc_type+(x.sg.vol?" 量缩确认":"")+" 距今"+(x.sg.fresh!=null?(x.sg.fresh===0?"当日":x.sg.fresh+"天"):" ?") :(s.scenario||"震荡"))+(s.trend?" | 趋势"+s.trend:"")+(s.agree!=null?" | 自洽"+(s.agree*100).toFixed(0)+"%":""))+trkTip(x);   // R321: fresh=0 → "距今当日"(同 R320 口径, 原"距今0天"误导) · R448: 附 ETF 领域/费率/同指数选优
       /* R448: ETF 徽章 —— **表内只承载「同指数只数」这一个判据**, 领域名交给①基金名本身
          (「云计算ETF华夏」已含主题) ②行的 title(含官方跟踪标的全名)。原因(实测, 非审美):
          名称格仅 184px, 「名称 + 👑规模最大标(60px) + 领域徽章(96px)」三者并存会把名称压到
@@ -2358,14 +2465,14 @@ function showStk(sym){
     (_tbd.end_price!=null?'<span>背驰高点 <b>'+_tbd.end_price+'</b>'+_bkBadgeTop(_tbd)+'</span>':'')+
     '<span>自洽 <b>'+(s.agree!=null?(s.agree*100).toFixed(0)+"%":"-")+'</b></span>'+
     '<span>区间 <b>'+(s.first||"-")+'~'+(s.last||"-")+'</b></span>'+
-    '<span>数据 <b>'+(s.n_bars||0)+'根</b> '+srcTag(u.src)+'</span></div>';   // R276: src 在后端 universe row 顶层(u.src), 不在 st 内 —— 原取 s.src 恒 undefined, 源徽标详情页永远"-"
+    '<span>数据 <b>'+(s.n_bars||0)+'根</b> '+srcTag(u.src,u)+'</span></div>';   // R276: src 在后端 universe row 顶层(u.src), 不在 st 内 —— 原取 s.src 恒 undefined, 源徽标详情页永远"-" · R455: 传 u 使徽标给单票结论
   var banner='';
   if(stk){
     var t=stk.dir==="top";
     // R285: 现价 vs 信号位偏离(用 SIG 条目自带的最近背驰位 end_price 计算) —— 个股实操直读
     var _dv=sigDev(stk,s);
     var _dvTxt=_dv!=null?((_dv>=0?"现价已高于信号位 ":"现价已低于信号位 ")+Math.abs(_dv).toFixed(1)+"%"):"";
-    banner+='<div class="signals-box"><div class="signal-pill '+(t?"t":"b")+'"><b>'+(t?"⚠️ 顶背驰风险":"✅ 底背驰机会")+'</b> · '+(stk.bc_date||"")+'触发('+(stk.fresh==null?"?":(stk.fresh===0?"当日":stk.fresh+"天前"))+') · '+(stk.bc_type||"")+' · 强度'+(stk.strong||0)+'/2'+(stk.vol?" · 量缩确认":"")+   // R320: fresh=0 →"当日"(原"0天前"误导)
+    banner+='<div class="signals-box"><div class="signal-pill '+(t?"t":"b")+'"><b>'+(t?"⚠️ 顶背驰风险":"✅ 底背驰机会")+'</b> · '+(stk.bc_date||"")+'触发('+(stk.fresh==null?"?":(stk.fresh===0?"当日":stk.fresh+"天前"))+') · '+(stk.bc_type||"")+' · '+(stk.area==null?"面积比 -":(stk.area>0?"背离强度 "+stk.area.toFixed(2):"面积退化"))+(stk.vol?" · 量缩确认":"")+   // R455: 原渲染「强度N/2」为死字段(1507 条信号 100%=2 档) ⇒ 换成同族但有区分度的背离强度(area_ratio)   // R320: fresh=0 →"当日"(原"0天前"误导)
       // R313-fix: 底信号 dv<0(现价已跌破背驰低点=结构失效)不能再当"低吸参考区"引导 — R289 sigRow 已修, showStk banner 漏修同源
       (_dvTxt?' · <b style="'+(t?(_dv<0?"color:#0e7d4a":"color:#c92a2a"):(!t&&_dv<0?"color:#c92a2a":(_dv<=8?"color:#0e7d4a":"color:#c92a2a")))+'">'+_dvTxt+'</b>':'')+
       '<br><span style="opacity:.85;font-size:12px">'+(t?( _dv!=null&&_dv<0?"已从顶背驰高点回落 "+Math.abs(_dv).toFixed(1)+"%，风险有所释放，仍防反抽遇压":(_dv!=null&&_dv>0?"已上破顶背驰高点 "+_dv.toFixed(1)+"%，该见顶判据被证伪 · 图上两条减仓/离场行动线已撤下（详见下方警示），别再按见顶结构减仓":(_dv!=null?"现价已回到顶背驰高点（尚未上破），该见顶判据仍成立":"上攻动能减弱，注意中枢上沿/前高压力"))):( _dv!=null&&_dv<0?"已跌破背驰低点 "+Math.abs(_dv).toFixed(1)+"%，底背驰结构失效 · 暂不低吸，等重新企稳再评估":(_dv!=null&&_dv<=8?"现价仍贴近背驰低点(+"+_dv.toFixed(1)+"%)，属低吸参考区，跌破"+((s.bottom_bc&&s.bottom_bc.end_price)!=null?s.bottom_bc.end_price:"背驰低点")+"则结构失效":(_dv!=null&&_dv>8?"已较背驰低点走高 "+_dv.toFixed(1)+"%，追高风险 · 勿追高，等回踩企稳再看":"下跌动能衰竭，关注中枢下沿支撑与企稳信号"))))+'</span></div></div>';
