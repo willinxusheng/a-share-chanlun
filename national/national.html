@@ -343,7 +343,10 @@ footer{color:var(--muted);font-size:11.5px;line-height:1.8;padding:2px 2px 0}
       <span class="chip" id="chipLag"><i>数据滞后</i><b id="metaLag">-</b></span>
       <span class="chip" id="chipWin"><i>披露窗口</i><b id="metaWin">-</b></span>
       <span class="chip" title="与主看板同一条调度链：北京时间 16:00 起每 30 分钟一轮、共 12 轮（cron-job.org 外部定时 → 云端 CI 自动刷新并发布），另有每 4 小时的云端定时轮询（覆盖上午时段）。ETF 日度快照按交易所披露节奏补齐 —— 份额源自带权威数据日期（STAT_DATE），一经披露即写入，故盘中看到上一期属正常。非披露窗口数据无变化时不重复写盘。"><i>自动刷新</i><b>盘后每 30 分钟 · 全天另有轮询</b></span>
-      <span class="chip"><i>数据版本</i><b id="metaVer">-</b></span>
+      <!-- R467: 本页有两套**节奏不同**的数据, 故头部并排给出两个时钟(原只有一个季度时钟,
+           用户会把"季度数据 09-10"读成"整页 5 天没更新" —— 实际日度 ETF 模块是 09-14)。 -->
+      <span class="chip" id="chipVer" title="本页有两套节奏不同的数据：①季度持仓（本徽章）＝ 季末定期报告「前十大流通股东」口径，只在披露窗口内变化 —— 非披露窗口（如 9~10 月等三季报）保持不变属正常，系统每轮仍会照常重算核对（数据一致则不重复写盘）；②日度 ETF 资金流 ＝ 右侧「日度数据日期」徽章，每交易日更新。★ 此时间为「内容最近一次发生实质变化」的时刻，不是「最近一次刷新」的时刻。"><i>季度数据版本</i><b id="metaVer">-</b></span>
+      <span class="chip" id="chipEtfDate" title="ETF 份额取自交易所官方口径（STAT_DATE），每交易日披露、当日盘后／次日可得 ⇒ 该日期通常比左侧季度数据更新，两者不同步属正常。"><i>日度数据日期</i><b id="metaEtfDate">-</b></span>
     </div>
   </div>
   <a class="goback" href="javascript:toIndex()">← 返回主看板</a>
@@ -515,11 +518,15 @@ function render(data){
      (setHours 等价于"时刻 +8h"), 故本次修复的是"缺 Invalid Date 兜底"而非时区。
      改为纯时间戳运算 + isNaN 兜底, 任一异常输入均退化为当前时刻, 不阻断渲染。 */
   var gt=meta.generated_at, btm=gt?new Date(gt).getTime()+8*36e5:NaN;
-  document.getElementById('metaVer').textContent+=' · 数据更新 '+
+  /* R467: 文案「数据更新」→「内容最近变化」—— 本值语义是"内容最近一次**实质变化**"时刻
+     (G3 幂等: 内容一致就不写盘), 原措辞会被读成"最近一次刷新" ⇒ 见页头日度徽章与 tooltip。 */
+  document.getElementById('metaVer').textContent+=' · 内容最近变化 '+
     new Date(isNaN(btm)?Date.now():btm).toISOString().slice(0,16).replace('T',' ')+' 北京';
-  /* R419: generated_at 现为「内容最近一次实质更新」时刻(无变化不写盘), 故补 tooltip 说明 */
+  /* R419: generated_at 现为「内容最近一次实质更新」时刻(无变化不写盘), 故补 tooltip 说明
+     (R467: 补上"本页有两套节奏"的说明 —— 原 tooltip 只管季度源, 用户仍会拿它跟同页日度
+      ETF 模块对比而误判"整页停更") */
   (function(){var v=document.getElementById('metaVer');if(v&&v.parentNode)v.parentNode.title=
-    '系统每交易日盘后（北京 16:00 起每 30 分钟）自动检查刷新；此时间为数据内容最近一次发生实质变化的时刻，非披露窗口内保持不变属正常。';})();
+    '本页有两套节奏不同的数据：①季度持仓（本徽章）＝ 季末定期报告「前十大流通股东」口径，只在披露窗口内变化，非披露窗口（如 9~10 月等三季报）保持不变属正常（系统每轮仍照常重算核对，内容一致则不重复写盘）；②日度 ETF 资金流 ＝ 右侧「日度数据日期」徽章，每交易日更新。★ 此时间为「内容最近一次发生实质变化」的时刻，不是「最近一次刷新」的时刻。';})();
   /* R418 数据时效: 滞后天数(色级警示) + 披露窗口状态 */
   (function(){
     var rp=meta.latest_report;if(!rp)return;
@@ -752,6 +759,20 @@ function bjToday(){
      此处用绝对时间 Date.now()+8h 再取 UTC 日期 —— 与本地时区无关, 故可安全用
      toISOString()(与 nextBiz 的坑不同: 那里构造的是本地墙上时间, 不可混用)。 */
   return new Date(Date.now()+8*36e5).toISOString().slice(0,10);
+}
+function setEtfDateChip(e){
+  /* R467: 页头「日度数据日期」徽章 —— 与「季度数据版本」并排, 让两套节奏一眼可辨
+     (此前页头只有季度时钟 ⇒ 用户看到"季度数据 09-10"会以为整页 5 天没更新, 而同页
+      ETF 日度模块其实是新的)。日期口径与下方 fbar 完全一致(meta.data_date||latest),
+      "几天前"的算法也复用同一个 dayDiff/bjToday, 避免两处对同一日期给出不同说法。 */
+  var el=document.getElementById('metaEtfDate');if(!el)return;
+  var m=(e&&e.meta)||{},dd=m.data_date||m.latest;
+  el.textContent=dd||'-';
+  if(!dd)return;
+  var chip=el.parentNode;if(!chip)return;
+  var gap=dayDiff(dd,bjToday());
+  chip.title='ETF 份额取自交易所官方口径（STAT_DATE），每交易日披露、当日盘后／次日可得 ⇒ 该日期通常比左侧季度数据更新，两者不同步属正常。当前数据日期 '+dd
+    +'（'+(gap<=0?'即今日':(gap===1?'上一交易日':gap+' 天前'))+'）。';
 }
 function drawEtfFresh(e){
   var el=document.getElementById('etfFresh');if(!el)return;
@@ -1128,7 +1149,7 @@ fetch('national.json',{cache:'no-cache'}).then(function(r){if(!r.ok)throw new Er
   document.getElementById('mcards').innerHTML='<div class="err">数据加载失败（'+e.message+'）<br>线上请访问 https://willinxusheng.github.io/a-share-chanlun/national/national.html<br>本地查看需在仓库目录起 http 服务后访问本页。</div>';
 });
 fetch('etf_share.json',{cache:'no-cache'}).then(function(r){if(!r.ok)throw new Error(r.status);return r.json();})
-.then(function(e){renderEtf(e);renderEtfQ(e);})
+.then(function(e){renderEtf(e);renderEtfQ(e);setEtfDateChip(e);})
 .catch(function(err){
   var tb=document.getElementById('etfTb');
   if(tb)tb.innerHTML='<tr class="empty"><td colspan="7">ETF 日度数据暂不可用（'+err.message+'）· CI 每日盘后自动累积</td></tr>';

@@ -73,6 +73,47 @@ jobs:
         with:
           python-version: '3.13'
 
+      # ===== R467: 国家队两步**前移**至此 =====
+      # 原位置在「抓取行情 + 生成报告」之后 ⇒ 主行情失败的那轮把它们**连带跳过**
+      # (实测 09-15 16:00 run 34944617350: 抓取步 27s 失败 ⇒ 后续全 skipped, 含国家队刷新)。
+      # 而这两步与主看板的行情抓取**没有任何数据依赖**(各自独立取数、独立守卫),
+      # 放在最前即与主行情成败解耦: 每轮都真的检查一次。
+      # ⚠ 边界要说清: 「部署到 Pages」仍归主行情成败门控(抓取失败=不出空产物, 有意为之)
+      #   ⇒ 前移保证的是"检查与落盘不少跑", **不是**"主行情失败也会发布站点"。
+      # ⚠ ETF 快照(下方)有同样的依赖形态, 本轮**刻意未动** —— 它是日度节奏且自带
+      #   数据日期幂等, 漏一轮 30 分钟内自愈; 是否一起前移留待拍板。
+      - name: 国家队持仓数据刷新（与主看板同节奏, 幂等）
+        # R419: 国家队主数据 national.json 此前从不随 CI 刷新(只在手动跑时更新),
+        # 现接入与主看板完全相同的调度链 —— cron-job.org 北京 16:00 起每 30 分钟
+        # dispatch 本 workflow, 故国家队持仓/披露数据与主看板同步刷新(每日 12 轮起)。
+        # 实测全量 86 票约 1.5 分钟(30 分钟间隔绰绰有余), 失败票 0。
+        # calc_national.py 内部三重守卫保证"每轮都跑、只在真有新披露时才写盘":
+        #   G1 失败票超阈值拒写(云端限流时残缺产物不得覆盖完整产物)
+        #   G2 报告期数/覆盖票数收缩拒写(历史只增不减)
+        #   G3 剔除 generated_at 后与旧产物一致 → 跳过写盘(非披露窗口零提交噪音)
+        run: python national/calc_national.py --out national/national.json
+
+      - name: 提交国家队持仓数据（有实质变化才提交, 防重复触发循环）
+        # 与 ETF 快照同款模式: 仅当 calc_national 真正写盘(有新披露)时才
+        # commit+push。本步骤位于「配置 Pages / 部署」之前, 故新数据在同一次 run
+        # 内即随 Pages 产物上线; [skip ci] 防止 push 再触发一轮冗余 deploy
+        # (G3 幂等已保证第二轮不会写盘, 双保险)。
+        # ⚠ R467 起还要求 `git pull --rebase --autostash origin ${GITHUB_REF_NAME}` ——
+        #   现在它跑在主行情之前, 若上一轮的 keep-alive/雷达提交尚未落地, rebase 就是必需项
+        #   (失败时只打 WARN 并 exit 0, 不影响本 run 其余步骤 —— 原行为, 未改)。
+        run: |
+          set -euo pipefail
+          if git status --porcelain national/national.json | grep -q .; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add national/national.json
+            git commit -m "chore: national holdings refresh $(date -u +%F) [skip ci]" || echo "no changes"
+            git pull --rebase --autostash origin "${GITHUB_REF_NAME}" || { echo "WARN: rebase 失败跳过推送(下一时点会补)"; exit 0; }
+            git push || echo "WARN: push 失败(下一时点会补)"
+          else
+            echo "national.json 无变化(非披露窗口/数据一致), 跳过提交"
+          fi
+
       - name: 恢复上次成功的行情数据（让"抓取失败兜底"真正可用）
         # R238 修掉一个潜伏的"假兜底"：data.json 被 .gitignore 且从不入库，
         # 所以下面 R228 那条「抓取失败 -> 用仓库已提交的 data.json 兜底继续部署」
@@ -203,34 +244,8 @@ jobs:
           path: ${{ runner.temp }}/_ov.txt
           if-no-files-found: ignore
 
-      - name: 国家队持仓数据刷新（与主看板同节奏, 幂等）
-        # R419: 国家队主数据 national.json 此前从不随 CI 刷新(只在手动跑时更新),
-        # 现接入与主看板完全相同的调度链 —— cron-job.org 北京 16:00 起每 30 分钟
-        # dispatch 本 workflow, 故国家队持仓/披露数据与主看板同步刷新(每日 12 轮起)。
-        # 实测全量 86 票约 1.5 分钟(30 分钟间隔绰绰有余), 失败票 0。
-        # calc_national.py 内部三重守卫保证"每轮都跑、只在真有新披露时才写盘":
-        #   G1 失败票超阈值拒写(云端限流时残缺产物不得覆盖完整产物)
-        #   G2 报告期数/覆盖票数收缩拒写(历史只增不减)
-        #   G3 剔除 generated_at 后与旧产物一致 → 跳过写盘(非披露窗口零提交噪音)
-        run: python national/calc_national.py --out national/national.json
-
-      - name: 提交国家队持仓数据（有实质变化才提交, 防重复触发循环）
-        # 与下方 ETF 快照同款模式: 仅当 calc_national 真正写盘(有新披露)时才
-        # commit+push。本步骤位于「配置 Pages / 部署」之前, 故新数据在同一次 run
-        # 内即随 Pages 产物上线; [skip ci] 防止 push 再触发一轮冗余 deploy
-        # (G3 幂等已保证第二轮不会写盘, 双保险)。
-        run: |
-          set -euo pipefail
-          if git status --porcelain national/national.json | grep -q .; then
-            git config user.name "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
-            git add national/national.json
-            git commit -m "chore: national holdings refresh $(date -u +%F) [skip ci]" || echo "no changes"
-            git pull --rebase --autostash origin "${GITHUB_REF_NAME}" || { echo "WARN: rebase 失败跳过推送(下一时点会补)"; exit 0; }
-            git push || echo "WARN: push 失败(下一时点会补)"
-          else
-            echo "national.json 无变化(非披露窗口/数据一致), 跳过提交"
-          fi
+      # R467: 「国家队持仓数据刷新 + 提交」两步骤已**前移**到「配置 Python」之后(见文件上方)
+      # —— 它们与主看板行情抓取无数据依赖, 原先排在这里会被"主行情失败的那轮"连带跳过。
 
       - name: ETF 份额日度快照（疑似国家队资金流代理, 幂等）
         # R413: 宽基 ETF 总份额每交易日披露(东财 push2 f84, 与腾讯 total_shares 双源互证),

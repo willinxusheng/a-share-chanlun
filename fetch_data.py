@@ -6,6 +6,7 @@ import sys
 import threading
 import time
 import urllib.request
+import zlib
 from datetime import datetime, timedelta, timezone
 
 SYMBOLS = {
@@ -81,6 +82,42 @@ _TX_HOST_OK = [None]      # 进程内记忆: 上次成功的主机; None=未定(
 #      而节流器保证那个间隔本就安全。)
 _TX_HOST_BAD = {}
 _TX_HOST_BAD_LOCK = threading.Lock()
+# R467: 本轮**每台主机的请求次数**(纯观测落痕, 不参与任何判定) —— 与 _TX_HOST_BAD 同锁。
+#   ★ 为什么必须有这个数: R467(按票分散 prefer)要修的正是"三台首尾接力 ⇒ 吞吐锁死单台上限",
+#     而**请求数总量不变**, 唯一能判"是否真的三台并行"的证据就是**分布是否均匀**
+#     (R465 旧版实测 342/348/685; R467 新版实测 471/446/456)。没有它, 线上只能靠墙钟猜。
+#   ★ 与 `_TX_HOST_OK`/`_TX_HOST_BAD` 的区别: 那两者是"状态/判据", 本表是"计量" ——
+#     即使某台后来被判坏、后续请求不再走它, 它已经吃掉的请求数仍然要如实计下来。
+_TX_HOST_CNT = {}
+# R467b(2026-09-15): 主机"冷却-半开"重试 —— `prefer` 被 `_TX_HOST_BAD` 架空时**容许**带多少失败
+#   仍保持首位, 以及被判定"死透"后**多久允许再探一次**。
+#   ★ 为什么需要(实测抓出的真问题, 不是理论推演):
+#     `_TX_HOST_BAD` 是**每轮绝对值且不可恢复**的 —— bad 一旦把某台排到队尾, 该台**永不被试到**
+#     ⇒ 永不成功 ⇒ `pop` 永不执行 ⇒ 永久压制。"哪一轮会塌"因此成了**抛硬币**:
+#       跑次        代码      三台分布(ifzq/web/proxy)  阶段①  墙钟
+#       17:45      R467      471 / 446 / 456          107s    262s   分散
+#       18:00      HEAD(旧)  4 / 1365 / 4             232s    533s   塌
+#       18:16      R467+阈值 4 / 1365 / 3             232s    526s   塌
+#       18:2x      R467      4 / 1365 / 3             232s    526s   塌
+#       18:33      HEAD(旧)  300 / 640 / 434          ~231s   506s   分散
+#     ⇒ **新旧代码都会分散、也都会塌**(第 2 行 vs 第 5 行同为旧码) ⇒ 差异不在 R467 的排序,
+#       而在"**本轮有没有台在早期失败过**": 早期失败 ⇒ 整轮永久拉黑 ⇒ 塌。
+#     ⚠ 归因过程如实记(两版结论都被实探推翻): ① 先怀疑"R464 排序压制 prefer" ⇒ 加阈值豁免,
+#       **实跑仍塌**; ② 再钉住三台各发 1 次请求看**响应体**: `ifzq` 确实 HTTP 501(**真坏**),
+#       而 `web` **返回正常数据(健康)** —— 它只是被并发窗口内的 3 次抖动记成 bad=3 后**再无
+#       复探机会**(队尾台永不被试到 ⇒ 永不成功 ⇒ pop 永不执行), 余下 1250+ 次请求全压 proxy。
+#       ⇒ 真因是"**抖动后无复探**"; 纯阈值豁免只把塌方推迟 2 次失败, 治不了。
+#   ★ 修法(断路器半开态): bad >= `_TX_BAD_PIN` 只表示"死透", **不是永久** ——
+#     距最近一次失败超过 `_TX_BAD_COOLDOWN` 秒后自动降回普通候选(允许再探一次);
+#     再失败则重新计时。⇒ 瞬时抖动的代价从"整轮单台"降到"一次请求 + 一个冷却窗"。
+#   ★ 阈值取 3 而非 1: 并发窗口(CONCURRENCY=4)下首次失败前最多有 4 个在途请求, bad=1~2 属正常
+#     抖动而非死透; 取 3 避免把抖动当死亡。冷却取 60s: 一轮约 9 分钟, 最多 9 个冷却窗,
+#     窗口内退化为单台(可接受), 窗口后有恢复机会(关键)。该收益由**注入对照**验收(可控、可复现):
+#     见 `_dbg/r467/inj_*.log` —— 对健康台注入"前 6s 失败随后恢复", 旧码整轮不再用它、
+#     新码在冷却窗(测试压到 8s)后自动恢复服务。
+_TX_BAD_PIN = 3
+_TX_BAD_COOLDOWN = 60.0
+_TX_HOST_BAD_AT = {}       # 每台**最近一次失败**的时刻(与 _TX_HOST_BAD 同锁, 一起清)
 # R463(2026-09-14): 第 3 台 `proxy.finance.qq.com` —— 腾讯把 ifzq 挂在 proxy 下的**同源镜像**
 #   (路径前缀 `/ifzqgtimg`), 由下表给前缀。★ 为什么值得加: 全市场取数耗时 = 请求数 / **聚合 rps**,
 #   而聚合 rps = 主机数 × 单主机安全 rps(按主机独立节流, 见 TX_INTERVAL 注释) ⇒ 多一台镜像
@@ -184,6 +221,31 @@ def tx_host_bad():
         return dict(_TX_HOST_BAD)
 
 
+def tx_host_count():
+    """R467: 本轮各主机的**请求次数**(落 meta.tx_host_cnt)。
+
+    ★ 判读(线上验收 R467 的唯一硬证据): 三台**分布是否均匀**。
+      · 旧版(R466 及以前)实测 701 票: ifzq 342 / web 348 / proxy 685 —— 前两台是"被打到疲劳
+        后整轮齐切"的产物, 后一台吸收剩余全部 ⇒ **阶段① span 231s ≈ 663/2.86rps(单台上限)**。
+      · 新版(R467 按票分散)同池实测: 471 / 446 / 456, 阶段① 107s ⇒ 三台真并行。
+      ⇒ 线上看到"某台 ≈ 另外两台之和"即说明分散未生效; 三台接近 1:1:1 即生效。
+      ⚠ 注意总请求数**不该明显变化**(R467 只改顺序): 实测 1375 → 1373。
+    ★★ **但"单台独大"有两种性质, 必须配 `tx_host_cold` 才能判**(R467b 实测教训):
+      · 该台**真的**在拒绝: 实测 18:2x 一轮得到 4 / 3 / 1365, 阶段① 232s —— 钉住各发 1 次请求
+        看响应体, `ifzq` 确实 HTTP 501; 但同一时刻 `web` **返回正常数据** ⇒ 当时只有 `web`+`proxy`
+        能服务, 而 `web` 也被 3 次抖动拉黑了 ⇒ 才塌成单台。**镜像会来回翻**(18:33 那一轮
+        旧码就拿到了 300 / 640 / 434), 故"某台长时间零请求"未必是它坏。
+      · 误判(抖动被永久拉黑): `web` 本是健康的, 只因并发窗口内 3 次抖动被记 bad=3 且
+        **永不复探** ⇒ 余下 1250+ 次请求全压 proxy ⇒ 墙钟 262s 变 526s。
+      ⇒ **看分布 + 看 `tx_host_cold` + 看 `tx_host_bad` 三者一起判**: 冷名单里躺着的台若
+        下一轮就恢复 ⇒ 是恢复机制在工作; 若连续多轮都在冷名单 ⇒ 该台是真坏, 属正常退化。
+      ⚠ 判"源是否真挂"的纪律照旧: **低速率(每台 ≤5 次/轮) + 跨 ≥2 时点**, 禁用批量探针
+        (单主机 501 可自伤, 实测 ≥15~20min 才恢复, 且每次复探重新计时)。
+    """
+    with _TX_HOST_BAD_LOCK:
+        return dict(_TX_HOST_CNT)
+
+
 def tx_reset_host_state():
     """R464: 清空**失败计数**(**保留** memo `_TX_HOST_OK`)。新一次取数开始时调用。
 
@@ -195,6 +257,28 @@ def tx_reset_host_state():
     """
     with _TX_HOST_BAD_LOCK:
         _TX_HOST_BAD.clear()
+        _TX_HOST_BAD_AT.clear()   # R467b: 冷却计时器与失败计数同生命周期
+        _TX_HOST_CNT.clear()      # R467: 计数也按"本轮"语义重置(与失败计数同生命周期)
+
+
+def _tx_cold(host, bad, now=None):
+    """R467b: 该台此刻是否在**冷却期**内(死透且未到半开重试时刻)。"""
+    if bad.get(host, 0) < _TX_BAD_PIN:
+        return False
+    return ((now if now is not None else time.time())
+            - _TX_HOST_BAD_AT.get(host, 0.0)) < _TX_BAD_COOLDOWN
+
+
+def tx_host_cold():
+    """R467b: 此刻处于冷却期的主机列表(**落 meta.tx_host_cold**) —— 线上诊断用。
+
+    ★ 判读: 若线上长期只有一台在服务(看 `tx_host_cnt`), 而 `tx_host_cold` 里躺着本来
+      **健康**的镜像 ⇒ 说明冷却窗还没走到恢复点(正常, 最坏 60s); 若 `tx_host_cold` 为空
+      却仍单台 ⇒ 才是排序/分散逻辑出了问题。
+    """
+    with _TX_HOST_BAD_LOCK:
+        _bad = dict(_TX_HOST_BAD)
+    return sorted(h for h in TX_KLINE_HOSTS if _tx_cold(h, _bad))
 
 
 def _tx_order(prefer=None):
@@ -203,6 +287,13 @@ def _tx_order(prefer=None):
 
     ★ 只**重排**不**删除**(见 _TX_HOST_BAD 注释): 可达性不变, 故是零正确性风险的纯负载优化。
     ★ 全健康时 `_TX_HOST_BAD` 为空 ⇒ 不触发 sort ⇒ 输出与改动前**逐字节相同**(零回归)。
+
+    R467b 两条修正(都是为了不让 R464 的降级把 R467 的按票分散**永久**架空):
+      ① `prefer` 只要**未进入冷却期**就保持首位 —— 它是**分发键**(按票轮转 ⇒ 三台并行),
+         被 bad 排序挤下去就再也不会被试到 ⇒ 永不恢复(实测把 262s 的一轮变成 526s)。
+      ② 已进冷却期的台排在**所有非冷却台之后**(而非仅按 bad 计数), 且冷却到期后自动回到
+         普通候选 ⇒ 源恢复能被**自动发现**, 不需要人工改代码/重跑。
+    `prefer` 缺省(None, 例如月线路径/探针)时**行为与 R464 逐字节相同** —— 零回归。
     """
     memo = _TX_HOST_OK[0]
     order = []
@@ -211,9 +302,52 @@ def _tx_order(prefer=None):
             order.append(_h)
     with _TX_HOST_BAD_LOCK:
         _bad = dict(_TX_HOST_BAD)
-    if _bad:
+        _now = time.time()
+        _cold = {h: _tx_cold(h, _bad, _now) for h in order}
+    if any(_cold.values()):
+        if prefer and not _cold.get(prefer):
+            rest = [h for h in order if h != prefer]
+            rest.sort(key=lambda h: (_cold[h], _bad.get(h, 0)))   # 冷却的排最后
+            return [prefer] + rest
+        order.sort(key=lambda h: (_cold[h], _bad.get(h, 0)))
+    elif _bad:
+        if prefer:
+            rest = [h for h in order if h != prefer]
+            rest.sort(key=lambda h: _bad.get(h, 0))
+            return [prefer] + rest
         order.sort(key=lambda h: _bad.get(h, 0))   # 稳定排序 ⇒ 同级仍按 prefer/memo 偏好
     return order
+
+
+def tx_prefer_seed(symbol):
+    """R467: 按**票**给出 `prefer` 起点(0..n−1), 让全市场把三台主机当成**并行**通道用。
+
+    ★ 修的是什么(实测机制, R465 三组对照 + 请求时间线):
+      阶段①固定 `max_pages=1` ⇒ 翻页索引 `_i` 恒 0 ⇒ `prefer` 由 `TX_KLINE_HOSTS[0]` 决定
+      ⇒ **对全市场每一票都完全相同** ⇒ 全压第 0 台。实测该台被连续打到 ~342 次后开始 501,
+      失败计入 `_TX_HOST_BAD` ⇒ 因为计数是**绝对值**(>0 即排到队尾), 全市场**齐切**下一台,
+      再疲劳, 再齐切 ⇒ 最终只剩最后一台服务:
+        · R465 C 组(701 票): ifzq 342 → web 348 → proxy 685, 三台**首尾相接零重叠**
+          ⇒ 阶段① 231s ≈ 663 请求 / 2.86 rps(单台上限 1/TX_INTERVAL)。
+      ⇒ 三台**独立节流器**(`_tx_pace(_h)`)本该给出 3/TX_INTERVAL ≈ 8.6 rps, 但被"同一时刻
+        只有一台在服务"吃掉了。按票分散起点后三台同时进行, 上限恢复到 ~8.6 rps。
+      ⇒ 这是**纯负载顺序**改动: 三台镜像同源(已实测逐字节一致), 换哪台取到的数据都一样。
+
+    ★ **前提**: 本函数只决定"**首发**哪台", 它能否真的分散还取决于该台**此刻是否可用** ——
+      死在冷却窗里的台仍会被跳过(见 `_TX_BAD_COOLDOWN` 段)。故验收必须**同时**看
+      `meta.tx_host_cnt`(分布)与 `meta.tx_host_cold`(收尾时刻谁在冷却), 只看分布会误判。
+
+    ★ 为什么用**符号自身的散列**而不是"枚举下标":
+      阶段①(全市场)与阶段②(通过门禁的子集)是两次**独立**遍历, 子集的枚举下标与阶段①不同
+      ⇒ 同一票在两阶段会拿到不同起点, 破坏"页序连续"(R463 的教训: 页序不续接会让第 0 台
+      被 prefer 两次, 在它不可用时白打一次请求)。用符号自身的值则两阶段**天然一致**。
+    ★ 为什么 `crc32` 而不是 `int(code) % 3`(两者都试过, 用**真实 701 标的池**实测比较):
+      后者依赖"代码段的数字分布", 实测 263/219/219(**极差 6.28%**); crc32 实测
+      251/226/224(**极差 3.85%**, 最忙台占比 35.8%), 且对任意标的池都近似均匀。
+      最忙台占比直接决定并行收益上界(总时间 ≈ 最忙台的请求数 / 单台 2.86rps), 故取更均衡者。
+      可复现性不受影响: crc32 是确定性函数, 同一 symbol 永远同一 seed。
+    """
+    return zlib.crc32(symbol.encode("utf-8")) % max(1, len(TX_KLINE_HOSTS))
 
 
 def tx_get(symbol, period, count=None, timeout=30, end=None, prefer=None):
@@ -247,12 +381,15 @@ def tx_get(symbol, period, count=None, timeout=30, end=None, prefer=None):
     last = None
     for _h in order:
         _tx_pace(_h)
+        with _TX_HOST_BAD_LOCK:                 # R467: 计量(每台实际发出的请求数)
+            _TX_HOST_CNT[_h] = _TX_HOST_CNT.get(_h, 0) + 1
         try:
             raw = _get(_tx_url(symbol, period, _h, count, end), retries=2, timeout=timeout)
         except Exception as _e:     # noqa: BLE001
             last = _e
             with _TX_HOST_BAD_LOCK:         # R464: 记失败 ⇒ 本轮后续请求把它排到队尾
                 _TX_HOST_BAD[_h] = _TX_HOST_BAD.get(_h, 0) + 1
+                _TX_HOST_BAD_AT[_h] = time.time()   # R467b: 冷却计时起点(半开重试用)
             continue
         if _TX_HOST_OK[0] != _h:
             _TX_HOST_OK[0] = _h
@@ -261,9 +398,51 @@ def tx_get(symbol, period, count=None, timeout=30, end=None, prefer=None):
             #   注意语义边界: 若队首那台一直健康, 队尾的台**不会被试到**, 其 bad 就一直留着
             #   (无害: 它本来就没在服务)。真正的恢复检测发生在"服务中的台也失败"时 ——
             #   那时所有台同分, 排序退回候选原序, prefer/memo 台会重新被试到 ⇒ 自适应。
+            #   ⚠ R467b 实测修正: 上述"自适应"**只在队首也失败时才成立** —— 队首健康时坏台
+            #     会被**永久**压制(实测: web 健康却只因 3 次抖动被拉黑, 余下 1250+ 请求全压
+            #     proxy ⇒ 墙钟 262s→526s)。故补 `_TX_BAD_COOLDOWN` 半开重试, 不再依赖该偶然性。
             _TX_HOST_BAD.pop(_h, None)
+            _TX_HOST_BAD_AT.pop(_h, None)
         return raw
     raise (last if last else RuntimeError("tx_get: 无可用主机"))
+
+
+# R467: 结构异常取证(只加日志, 不改行为)。上限 5 条/进程, 防"每票都异常"时刷屏。
+_TX_STRUCT_WARN = [0]
+
+
+def _tx_body_head(raw, n=200):
+    """报文前 n 字符(单行化), 仅用于日志取证。"""
+    try:
+        s = raw if isinstance(raw, str) else raw.decode("utf-8", "ignore")
+    except Exception:                          # noqa: BLE001
+        s = repr(raw)
+    return s[:n].replace("\n", " ").replace("\r", " ").replace("\t", " ")
+
+
+def _tx_data(raw, symbol):
+    """R467: 取腾讯响应里的 `["data"][symbol]`; **结构异常时先取证, 再把原异常抛出去**。
+
+    背景(2026-09-15 16:00 run `34944617350` 整站阻断): 5 大指数全部 `抓取/校验失败`,
+    但日志里只有异常类型 —— `string indices must be integers, not 'str'`, 即响应中
+    `data` 是个**字符串**(限流/异常提示的典型形态)而不是正常 dict。由于**没有任何报文片段**,
+    只能反推源侧形态(为确认"是不是限流"另跑了一轮低速率复现, 白花一轮)。
+    本函数把"取证"补上: 打印命中主机 + 报文前 200 字符, 然后 `raise` **原异常**。
+
+    ⚠ 语义边界: **不吞异常、不切源、不重试** —— 行为与改动前逐字节相同。顺带修掉
+      "HTTP 200 但结构异常时换下一台主机" 是**另一个未拍板项**(`tx_get` 共用, 改动面大),
+      不在此处顺手做。
+    """
+    try:
+        return json.loads(raw)["data"][symbol]
+    except Exception as _e:                    # noqa: BLE001
+        if _TX_STRUCT_WARN[0] < 5:
+            _TX_STRUCT_WARN[0] += 1
+            print("[WARN] 腾讯响应结构异常 %s: %s | host=%s symbol=%s body[:200]=%s%s"
+                  % (type(_e).__name__, _e, tx_host() or "?", symbol, _tx_body_head(raw),
+                     "" if _TX_STRUCT_WARN[0] < 5 else " (后续同类不再打印)"),
+                  file=sys.stderr, flush=True)
+        raise
 
 # 看板数据契约起点(标题"2021 至今")。纯 count 接口会返回更早历史(如日线 2019-04 起),
 # 统一裁剪到该日期之后, 保证各线首根与历史版本一致(2021-01-04 首交易日)。
@@ -320,7 +499,7 @@ def _tx_parse(klines):
 
 def fetch_tx(symbol, period):
     # R458: 经 tx_get 走多主机回退(此前硬编码 ifzq.gtimg.cn, 该主机 09-14 起全站 501)。
-    data = json.loads(tx_get(symbol, period))["data"][symbol]
+    data = _tx_data(tx_get(symbol, period), symbol)     # R467: 结构异常时取证
     # ⚠ R458c: 这条 or 链**保留原语义**(qfq 优先, 缺失则退裸价) —— 5 大指数(sh000001 等)
     #   天生只有 `day`(指数无复权概念), `fetch_data.main()` 正是靠它取指数量价。
     #   但"要求前复权"的调用方**不能**用它, 见 fetch_tx_qfq。
@@ -352,7 +531,7 @@ def fetch_tx_qfq(symbol, period):
     ⚠ 与 `--src tx` 取证开关的关系: 该开关走 scan_radar._fetch_tx, 同样受本函数约束
       (拿不到 qfq 就是拿不到, 取证时也应该看见真相而非裸价)。
     """
-    data = json.loads(tx_get(symbol, period))["data"][symbol]
+    data = _tx_data(tx_get(symbol, period), symbol)     # R467: 结构异常时取证
     qk = data.get("qfqday") or data.get("qfqweek") or data.get("qfqmonth")
     if not qk:
         return [], 0, False
@@ -380,6 +559,10 @@ def fetch_tx_qfq_paged(symbol, period="day", min_date=MIN_DATE, min_bars=None,
                         prefer 两次 ⇒ 在"第 0 台不可用"的常见场景下**多打一次必然失败的请求**。
                         实测(110 票, _dbg/r463/count_reqs.py): 不续接时 51 票从 5 个请求涨到 6;
                         续接(page0=1, 即紧接阶段一用过的那一页)后回到与单阶段**逐票相同**。
+                      ★ R467: 生产调用方现传 `tx_prefer_seed(sym)`(阶段①)/ `+1`(阶段②),
+                        使起点**按票分散**而非全市场固定 0 —— 见 `tx_prefer_seed` docstring
+                        (修的是"全市场齐压第 0 台 ⇒ 三台接力 ⇒ 吞吐锁死单台上限")。
+                        默认值 0 仅为兼容既有调用方/本地取证脚本。
       语义要点: 续取时若首页请求失败, **不再 raise 而是 break**(保留已有部分) ——
         因为此时"源不可用"已由阶段一证伪(它刚刚成功过), 失败只说明这一页取不到,
         不该让调用方把它当源故障计连败(R374 血泪: 票面/单页问题不该停整源)。
@@ -422,8 +605,9 @@ def fetch_tx_qfq_paged(symbol, period="day", min_date=MIN_DATE, min_bars=None,
         # R463: `page0` 让**续取**的页序接着上一段编(两阶段取数的阶段二传 1) —— 否则每段都从
         #   第 0 台起, 第 0 台被 prefer 两次, 在"第 0 台不可用"时白打一次(实测 51/110 票 +1 请求)。
         try:
-            data = json.loads(tx_get(symbol, period, count=_TX_PAGE_CAP, end=end,
-                                     prefer=TX_KLINE_HOSTS[(_i + int(page0)) % _nl]))["data"][symbol]
+            data = _tx_data(               # R467: 结构异常时取证(不改异常/回退语义)
+                tx_get(symbol, period, count=_TX_PAGE_CAP, end=end,
+                       prefer=TX_KLINE_HOSTS[(_i + int(page0)) % _nl]), symbol)
         except Exception:                    # noqa: BLE001
             if _i == 0 and not got:
                 raise                        # 首次请求失败 = 源不可用, 交调用方按原状态机计失败
