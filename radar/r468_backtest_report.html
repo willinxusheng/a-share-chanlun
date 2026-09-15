@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>R468 系统准确性深度回测（2026-09-15 数据）</title>
+<style>
+  :root{
+    --bg:#f5f6f8; --card:#fff; --ink:#1b1d21; --ink2:#4a4f57; --ink3:#8b919b;
+    --line:#e4e7ec; --up:#d92b3a; --down:#189a56; --purple:#8b2fc9; --blue:#1f6feb;
+    --amber:#b5761a; --red:#c0261f;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+    line-height:1.65;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1120px;margin:0 auto;padding:40px 28px 80px}
+  header{border-bottom:3px solid var(--purple);padding-bottom:20px;margin-bottom:32px}
+  h1{font-size:27px;margin:0 0 8px;letter-spacing:-.3px}
+  .sub{color:var(--ink2);font-size:14px}
+  .tags{margin-top:12px;display:flex;gap:8px;flex-wrap:wrap}
+  .tag{font-size:12px;padding:3px 10px;border-radius:99px;background:#efe7f7;color:#6b21a8;border:1px solid #e0cff0}
+  .tag.g{background:#e7f6ee;color:#0f7a43;border-color:#cfeadd}
+  .tag.r{background:#fdeaea;color:#a51d18;border-color:#f6d5d3}
+  .tag.a{background:#fff6e5;color:#8a5a12;border-color:#f2e0bd}
+  h2{font-size:19px;margin:44px 0 14px;padding-left:11px;border-left:4px solid var(--purple)}
+  h3{font-size:15px;margin:26px 0 10px;color:var(--ink2)}
+  p{margin:10px 0}
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(228px,1fr));gap:14px;margin:18px 0}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px 18px}
+  .card .k{font-size:12px;color:var(--ink3);letter-spacing:.4px;text-transform:uppercase}
+  .card .v{font-size:24px;font-weight:700;margin:6px 0 2px;font-variant-numeric:tabular-nums}
+  .card .d{font-size:12.5px;color:var(--ink2)}
+  .red{color:var(--up)} .grn{color:var(--down)} .pur{color:var(--purple)} .amb{color:var(--amber)}
+  table{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);
+    border-radius:10px;overflow:hidden;font-size:13.5px;margin:14px 0}
+  th,td{padding:9px 12px;text-align:left;border-bottom:1px solid var(--line)}
+  th{background:#fafbfc;font-weight:600;color:var(--ink2);font-size:12.5px;white-space:nowrap}
+  tr:last-child td{border-bottom:none}
+  td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+  code{background:#f0f1f3;padding:1.5px 6px;border-radius:5px;font-size:12.5px;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px}
+  .note{background:#fbfbfc;border:1px solid var(--line);border-left:3px solid var(--ink3);
+    border-radius:8px;padding:12px 16px;margin:14px 0;font-size:13px;color:var(--ink2)}
+  .bad{background:#fdf4f3;border:1px solid #f6d5d3;border-left:3px solid var(--red);
+    border-radius:8px;padding:14px 18px;margin:16px 0}
+  .good{background:#f2fbf6;border:1px solid #cfeadd;border-left:3px solid var(--down);
+    border-radius:8px;padding:14px 18px;margin:16px 0}
+  .warn{background:#fffaf0;border:1px solid #f2e0bd;border-left:3px solid var(--amber);
+    border-radius:8px;padding:14px 18px;margin:16px 0}
+  .bar-wrap{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:20px 22px;margin:16px 0}
+  .bar-row{display:grid;grid-template-columns:178px 1fr 96px;align-items:center;gap:12px;margin:11px 0;font-size:13px}
+  .bar-track{background:#f0f1f3;border-radius:6px;height:22px;position:relative;overflow:hidden}
+  .bar{height:100%;border-radius:6px}
+  .bar.a{background:linear-gradient(90deg,#9aa2ad,#6c7480)}
+  .bar.c{background:linear-gradient(90deg,#a855f7,#7c22b8)}
+  .bar.d{background:linear-gradient(90deg,#6fbf8f,#189a56)}
+  .bar-val{text-align:right;font-variant-numeric:tabular-nums;font-weight:600}
+  .foot{margin-top:52px;padding-top:18px;border-top:1px solid var(--line);
+    font-size:12.5px;color:var(--ink3);line-height:1.85}
+  .kv{font-size:12.5px;color:var(--ink2);margin:10px 0 0;line-height:1.8}
+  ul{margin:10px 0 10px 22px;padding:0} li{margin:6px 0}
+  .hl{background:linear-gradient(transparent 62%, #ffe9a8 62%)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>R468 · 系统准确性深度回测</h1>
+  <div class="sub">用 <b>2026-09-15</b> 的全市场数据与生产口径，重跑点对点（PIT）回测　·　样本 311 票 × <b>3 个日历窗 / 105 个交易日</b> = 29,040 个 (票,日) 时点（<b>分层抽样，非逐日连续</b>）</div>
+  <div class="tags">
+    <span class="tag">结论：<b>方向零反号，全部复现</b></span>
+    <span class="tag g">底背驰 +4.23% p&lt;0.001</span>
+    <span class="tag a">顶背驰 −2.33% p=0.186（不显著）</span>
+    <span class="tag r">今日 109 条顶背驰：超额仅 +0.21%</span>
+  </div>
+</header>
+
+<!-- ============================================================ -->
+<div class="warn">
+<b>⚠️ 先读这条：本报告用的是「分段日历窗」样本，不是逐日连续重放。</b>
+R459 为省算力采用了「早期广铺 + 近期加密」的分层抽样（<code>_dbg/r459/replay2.py</code> 开头明写：1380 根窗口下
+<code>analyze</code> 约 0.45s/次、而 2022 年时点窗口仅约 0.035s，便宜 <b>13 倍</b>）⇒ 样本只覆盖
+<b>3 个窗口 / 105 个交易日</b>：<span class="mono">2022-09-01 ~ 10-14（26 日）</span> ·
+<span class="mono">2024-03-01 ~ 04-08（25 日）</span> · <span class="mono">2026-06-01 ~ 08-14（54 日）</span>。
+所以上面写的「29,040 个 (票,日) 时点」= <b>3 个快照 × 311 票</b>，<b>不是「连续 4 年每天都测」</b>。
+<br><b>⇒ 与 R443 的逐日连续重放（150 票 / 31,026 时点 / 2021-11~2026-08）不是同一采样设计，两边的 p 值不可直接比较。</b>
+同层的「背驰见顶风险」在 R443 连续样本上是 <b>p=0.018</b>，在本报告的分层窗样本上是
+<b>sina p=0.186 / tx p=0.144</b>。这不是谁对谁错 —— 两者<b>各自有效，只是回答的问题不同</b>：
+「连续五年里是否稳定」vs「三个 regime 快照下是否成立」。本报告的<b>有效对照是「同票同时点换源」</b>，
+不是「与 R443 比 p 值」。
+</div>
+
+<!-- ============================================================ -->
+<h2>摘要：一句话结论</h2>
+
+<div class="good">
+<b>系统判据在「今天真正使用的数据口径」下没有失效。</b>把 R459 的全部结论放到今天生产实际用的
+<b>腾讯前复权（qfq）</b>口径上复跑，六个分层<b>方向零反号</b>、超额差 ≤ 0.72pp；底背驰实际信号
+仍显著（<b>+4.23%，p&lt;0.001</b>）、顶背驰实际信号仍不显著、阳性对照「多头延续」仍显著为负
+（−2.92%，p&lt;0.001）—— 后者正是 R459「这套体系刻画的是均值回复而非动量」的核心证据，<b>它在 tx 口径下独立复现</b>。
+</div>
+
+<div class="cards">
+  <div class="card">
+    <div class="k">框架自校验（铁律②）</div>
+    <div class="v grn">560 / 562 票</div>
+    <div class="d">逐字段 0 差异；剩余 2 票归因到<b>源侧盘后修正</b>与<b>分页深度抖动</b>，与代码无关</div>
+  </div>
+  <div class="card">
+    <div class="k">源依赖度（29,040 点）</div>
+    <div class="v">最终信号差异 0.6%</div>
+    <div class="d">换源（不复权 ↔ 前复权）对<b>结构判定</b>影响 1~6%，对 <code>sig</code> 只有 <b>0.6%</b></div>
+  </div>
+  <div class="card">
+    <div class="k">底背驰实际信号（tx 口径）</div>
+    <div class="v grn">+4.23%</div>
+    <div class="d">192 段，p&lt;0.001；中位 +3.89%、排名 58.0%、胜率 62.0%　<b>非右尾驱动</b>（头部贡献 86%）</div>
+  </div>
+  <div class="card">
+    <div class="k">顶背驰实际信号（tx 口径）</div>
+    <div class="v amb">−2.33%</div>
+    <div class="d">93 段，<b>p=0.186 不显著</b>；日簇 CI [−7.13%, +2.28%] 跨 0</div>
+  </div>
+  <div class="card">
+    <div class="k">今日 109 条顶背驰 · 已实现</div>
+    <div class="v red">−3.86%</div>
+    <div class="d">但同期基准池 <b>−4.07%</b> ⇒ <b>横截面超额仅 +0.21%</b>（中位 −0.01%）</div>
+  </div>
+  <div class="card">
+    <div class="k">唯一口径敏感项</div>
+    <div class="v amb">p 0.041 → 0.099</div>
+    <div class="d">「背驰见顶风险·过门禁」在 sina 下显著、在 tx 下转为边缘</div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<h2>一、为什么"用今天的数据回测"不是重跑一遍那么简单</h2>
+
+<p>我去翻了生产产物里每日的数据源结构，发现<b>两天之间发生了一次根本性翻转</b>：</p>
+
+<table>
+  <thead><tr><th>日期</th><th>产物 version</th><th class="num">signals 条数</th><th>数据源分布（<code>meta.src_cnt</code>）</th></tr></thead>
+  <tbody>
+    <tr><td>2026-09-07</td><td class="mono">P3b-r5</td><td class="num">202</td><td class="mono">tx 1414 / sina 5278</td></tr>
+    <tr><td>2026-09-08</td><td class="mono">P3b-r6</td><td class="num">241</td><td class="mono">tx 1191 / sina 5500</td></tr>
+    <tr><td>2026-09-09</td><td class="mono">P3b-r11</td><td class="num">311</td><td class="mono">tx 857 / sina 5836</td></tr>
+    <tr><td>2026-09-10</td><td class="mono">P3b-r11</td><td class="num">332</td><td class="mono">tx 861 / sina 5834</td></tr>
+    <tr><td>2026-09-11</td><td class="mono">P3b-r12</td><td class="num">276</td><td class="mono">tx 876 / sina 5821</td></tr>
+    <tr style="background:#fdf4f3"><td><b>2026-09-14</b></td><td class="mono">P3b-r22</td><td class="num"><b>96</b></td><td class="mono"><b>tx 1</b> / sina 6979 ← 几乎全走新浪兜底</td></tr>
+    <tr style="background:#f2fbf6"><td><b>2026-09-15（今天）</b></td><td class="mono">P3b-r27</td><td class="num">115</td><td class="mono"><b>tx 5222</b> / sina 1758 ← 75.6% 腾讯前复权</td></tr>
+  </tbody>
+</table>
+
+<div class="bad">
+<b>这就是本轮回测真正的靶子。</b>R459 的取数脚本（09-14 写）开头白纸黑字记着它的口径依据：<br>
+<span class="mono">「今日产物 meta.src = {sina:6905, tx:1} ⇒ 生产实际用的是新浪兜底（不复权, datalen=1500）」</span><br>
+也就是说 —— <b>R459 那套「顶背驰有效 / 底背驰仅 late regime 有效」的历史结论，是在今天用户实际看不到的那 24% 数据上得出的。</b>
+而今天用户看到的 115 条信号里，<b>113 条（98.3%）由腾讯前复权数据算出</b>。
+</div>
+
+<h3>但必须同时说清楚：本轮"用今天的数据"在<b>样本期</b>上的增量几乎为零</h3>
+<div class="warn">
+要算 20 日前向收益，重放时必须在末端留 <b>21 根 warmup</b> ⇒ <b>最后一个可分析时点 = 09-15 往前 21 个交易日 ≈ 08-14</b>，
+与 R459 的末端<b>完全相同</b>。所以"今天多了一根 K 线"<b>并不会延长历史回测的样本期</b>——这一点如果不说清，
+"用今天的数据做了回测"就是一句误导性的话。<br>
+<b>今天的数据带来的真正增量是两样：</b>① 用今天的生产口径（tx 前复权 + 1383 根深度）重跑同一批时点，
+把「源口径」变成唯一变量；② 今日 109 条信号的<b>即时跟踪</b>（下面第五节）。
+</div>
+
+<!-- ============================================================ -->
+<h2>二、方法与自校验（含我自己踩的一个坑）</h2>
+
+<h3>2.1 取数：同一批票，两套 K 线</h3>
+<p>取数池 = R459 的 450 票 ∪ 今日 115 条信号票 = <b>554 票</b>。对每票<b>分源各取一套</b>：</p>
+<table>
+  <thead><tr><th>臂</th><th>走的生产函数</th><th>深度</th><th>覆盖</th><th>末根</th></tr></thead>
+  <tbody>
+    <tr><td><b>tx</b>（前复权）</td><td class="mono">scan_radar._fetch_tx → fetch_tx_qfq_paged</td><td>3 页 / 中位 <b>1383</b> 根</td><td>433 票（61 只北交腾讯无历史、68 只腾讯不给 qfq）</td><td class="mono">2026-09-15</td></tr>
+    <tr><td><b>sina</b>（不复权）</td><td class="mono">scan_radar._fetch_sina_checked</td><td>datalen 1500 / 中位 1381 根</td><td>562 票</td><td class="mono">2026-09-15</td></tr>
+  </tbody>
+</table>
+<p>两臂都从 <code>MIN_DATE=2021-01-01</code> 裁起、<b>深度相当</b> ⇒ 唯一变量 = <b>是否前复权</b>。</p>
+
+<div class="bad">
+<b>必须如实记的失误。</b>我第一版脚本把取数池误写成<b>全市场 6908 票</b>（本意只是 554 票），
+以约 <b>8.5 rps</b> 连续打了 2 分钟，`tx` 成功率从 63% 一路掉到 <b>30%</b>（生产今天实测 74.8%）。
+这违反了我自己记录过的探针纪律。停掉后按 ≤ 6 次请求的低速率复探，<b>三台主机全部健康</b>（0.13s 响应）；
+改回 554 票后成功率 <b>91%</b>。⇒ 那次低成功率是<b>我打出来的</b>，不是源的问题。
+</div>
+
+<h3>2.2 框架自校验（铁律②）：重放口径 == 生产口径</h3>
+<p>做法：<b>按每票今天的实际源</b>（<code>universe[sym].src</code>）取对应 K 线，在 <code>t = N−1</code>（asof 当日，<b>不需要前向收益</b>）重放引擎，与今日真实产物逐字段比对。
+照抄生产的完整调用顺序，包括两处容易漏掉的步骤：</p>
+<ul>
+  <li><code>st["mom%d"%w] = _mom(ks2, w)</code> —— 生产在 sts 建好后<b>另有一段</b>补算动量（<code>scan_radar:2644</code>）。<b>漏掉它 ⇒ 562 票全部报 mom 差异</b>（我第一版就漏了）。</li>
+  <li><b>深度对齐</b> —— 被 R463 前 4 项门禁剔除的票<b>不进阶段②</b> ⇒ 停在阶段①的 ~641 根。<b>全市场有 267 只这样的票</b>（<code>(tx,641)</code> 224 只 + <code>(tx,640)</code> 43 只）。用全量 1383 根重放会让 <code>dd / bc_n / bi_n / zs_n / span_days</code> 这些<b>展示字段</b>系统性偏离 —— 那是"深度不同"，不是"代码不同"。</li>
+</ul>
+<p>补上这两步后，差异从 <b>16 票降到 2 票</b>：</p>
+<table>
+  <thead><tr><th>票</th><th>我的取数（19:5x，两次一致）</th><th>产物（18:27）</th><th>归因</th></tr></thead>
+  <tbody>
+    <tr><td class="mono">sh513950</td><td>821 根 / 末根 close <b>1.245</b></td><td>821 根 / close <b>1.250</b></td><td>源侧盘后修正了 09-15 收盘价（<code>chg1d</code> 同步从 −0.88% 变 −0.48%）</td></tr>
+    <tr><td class="mono">sh601699</td><td><b>1383</b> 根（新取也是 1383）</td><td><b>1353</b> 根</td><td>源侧<b>分页深度抖动</b>（少 30 根）⇒ <code>span_days</code> 2021 vs 2080</td></tr>
+  </tbody>
+</table>
+<div class="good"><b>判据达成：562 票中 560 票 × 23 个字段 0 差异</b>，两票差异均可归因到<b>数据时点</b>而非代码 ⇒ 后续统计结论可信。</div>
+
+<!-- ============================================================ -->
+<h2>三、源依赖度：29,040 个时点上逐条比判定</h2>
+
+<p>在 311 票 × 29,040 个 <b>(票, 日)</b> 交集上（两臂票集、时点集完全相同），逐条比引擎输出：</p>
+
+<div class="bar-wrap">
+  <div class="bar-row"><div>最终信号 <code>sig</code></div><div class="bar-track"><div class="bar d" style="width:6%"></div></div><div class="bar-val">0.6%</div></div>
+  <div class="bar-row"><div>顶背驰存在 <code>bc_top</code></div><div class="bar-track"><div class="bar d" style="width:10%"></div></div><div class="bar-val">1.0%</div></div>
+  <div class="bar-row"><div>顶背驰类型 <code>ft</code></div><div class="bar-track"><div class="bar a" style="width:11%"></div></div><div class="bar-val">1.1%</div></div>
+  <div class="bar-row"><div>底背驰存在 <code>bc_bot</code></div><div class="bar-track"><div class="bar a" style="width:16%"></div></div><div class="bar-val">1.6%</div></div>
+  <div class="bar-row"><div>底背驰类型 <code>fb</code></div><div class="bar-track"><div class="bar a" style="width:19%"></div></div><div class="bar-val">1.9%</div></div>
+  <div class="bar-row"><div>门禁码 <code>gate</code></div><div class="bar-track"><div class="bar c" style="width:50%"></div></div><div class="bar-val">5.0%</div></div>
+  <div class="bar-row"><div>场景 <code>scen</code></div><div class="bar-track"><div class="bar c" style="width:61%"></div></div><div class="bar-val">6.1%</div></div>
+</div>
+
+<p><b>结论：换源会改变 1~6% 的结构判定，但只有 0.6% 会改变最终发出的信号。</b>
+<b>成交额口径完全对齐</b>（<code>avg_amt60</code> 两臂比值中位 <b>1.0000</b>，偏离 ±10% 的仅 4 票 = 0.9%）——
+这说明当年 R320 修的新浪 volume 单位换算是对的。</p>
+
+<h3>3.1 顺带拿到了「不复权会污染回测」的直接实证</h3>
+<p>同一批时点上，两臂的 20 日收益差（tx − sina）：<b>中位 +0.000%、均值 +0.268%</b>，
+但 <b>min −17.93%、max +145.85%</b>。极端例 <code>sh603929</code> 在 2022-10-12 这一点上两臂差
+<b>+145.85pp</b>。</p>
+<div class="note">
+方向完全自洽：<b>不复权口径系统性低估收益</b>（除权日产生假跳空下跌）。所以
+在 <b>sina 臂</b> 上「顶背驰 → 跌」会显得更有效（−1.46% vs −1.11%）、
+「底背驰 → 涨」会显得更弱（+3.51% vs +4.23%）。<b>而这正是本轮唯一一处显著性翻转的来源。</b>
+</div>
+
+<!-- ============================================================ -->
+<h2>四、双口径分层对照（票池对齐后 = 纯源效应）</h2>
+
+<div class="warn">
+<b>先修一个会误导人的对照缺陷。</b>第一次跑出来的段数是 sina 629 vs tx 500（差 129），
+看着像"换源让信号少了两成"。但 tx 臂只有 311 票、sina 臂有 401 票 —— <b>那 90 票的差全是票池差</b>。
+把 sina 臂也限制到同样 311 票后，段数差缩到 <b>−31 ~ +11（基数 500~800，误差 4% 以内）</b>。
+</div>
+
+<table>
+  <thead><tr>
+    <th>层（20 日超额）</th>
+    <th class="num">sina* 段</th><th class="num">sina* 超额</th><th class="num">sina* p</th>
+    <th class="num">tx 段</th><th class="num">tx 超额</th><th class="num">tx p</th>
+    <th class="num">超额差</th>
+  </tr></thead>
+  <tbody>
+    <tr><td>背驰见顶风险·全量</td><td class="num">496</td><td class="num">−0.85%</td><td class="num">0.186</td><td class="num">500</td><td class="num">−0.94%</td><td class="num">0.144</td><td class="num">−0.09pp</td></tr>
+    <tr style="background:#fffaf0"><td>背驰见顶风险·过门禁</td><td class="num">377</td><td class="num">−1.46%</td><td class="num"><b>0.041</b></td><td class="num">375</td><td class="num">−1.11%</td><td class="num">0.099</td><td class="num">+0.35pp</td></tr>
+    <tr><td>背驰见底机会·全量</td><td class="num">834</td><td class="num">+1.02%</td><td class="num">0.006</td><td class="num">807</td><td class="num">+1.04%</td><td class="num">0.010</td><td class="num">+0.02pp</td></tr>
+    <tr><td>背驰见底机会·过门禁</td><td class="num">627</td><td class="num">+1.49%</td><td class="num">0.001</td><td class="num">596</td><td class="num">+1.42%</td><td class="num">0.002</td><td class="num">−0.07pp</td></tr>
+    <tr><td>实际信号·顶背驰</td><td class="num">94</td><td class="num">−2.10%</td><td class="num">0.206</td><td class="num">93</td><td class="num">−2.33%</td><td class="num">0.186</td><td class="num">−0.22pp</td></tr>
+    <tr style="background:#f2fbf6"><td><b>实际信号·底背驰</b></td><td class="num">202</td><td class="num"><b>+3.51%</b></td><td class="num"><b>0.000</b></td><td class="num">192</td><td class="num"><b>+4.23%</b></td><td class="num"><b>0.000</b></td><td class="num">+0.72pp</td></tr>
+    <tr><td>阳性对照·多头延续</td><td class="num">584</td><td class="num">−2.57%</td><td class="num">0.000</td><td class="num">580</td><td class="num">−2.92%</td><td class="num">0.000</td><td class="num">−0.35pp</td></tr>
+    <tr><td>中性参考·中枢震荡偏多</td><td class="num">644</td><td class="num">−0.67%</td><td class="num">0.186</td><td class="num">655</td><td class="num">−0.45%</td><td class="num">0.391</td><td class="num">+0.21pp</td></tr>
+  </tbody>
+</table>
+
+<p class="kv">
+超额 = 同日 · 同类型 · 留一法中性化后的 20 日收益均值；p = 符号翻转置换 3000 次；
+段级聚合 GAP = 10 交易日（同票连续命中聚成一段，取段首）；日簇 CI = 按<b>交易日</b>重采样自助。
+自检：两臂 <code>Σ超额 ≡ 0</code>（−1.9e−13 / −8.0e−14）、全样本排名均值 <b>50.00</b> ✅。
+</p>
+
+<h3>4.1 四条实质结论</h3>
+<ol>
+  <li><b>方向零反号。</b>六个分层里没有一层在两种口径下符号相反 ⇒ 判据的<b>方向性</b>不依赖源。</li>
+  <li><b>「实际信号·底背驰」是本轮回测里唯一稳的阳性结论</b>：两臂都 p&lt;0.001，tx 口径更强（+4.23%）。
+      而且它<b>不是右尾假象</b> —— 头部 10% 贡献 86%（sina 是 104%），「其余 90%」均值在 tx 口径下是 <b>+0.54%</b>（sina 是 −0.12%）。</li>
+  <li><b>「实际信号·顶背驰」在两种口径下都不显著</b>（0.206 / 0.186），日簇 CI 都跨 0。</li>
+  <li><b>阳性对照「多头延续」两臂都显著为负</b>（−2.57% / −2.92%，p&lt;0.001）。
+      按 R459 的记载，这个"反号"结果是<b>发现而非 bug</b>：它与"顶背驰→跌、底背驰→涨"合起来指向同一结论 ——
+      <b>这套体系刻画的是一套均值回复/反转结构，而不是动量</b>。<b>该结论本轮在 tx 口径下独立复现。</b></li>
+</ol>
+
+<div class="bad">
+<b>唯一的口径敏感项（必须单独提出来）。</b>「背驰见顶风险·过门禁」在 sina 口径下
+<b>p=0.041（显著）</b>，在 tx 口径下 <b>p=0.099（边缘，不显著）</b>。结合 3.1 的方向分析，
+这正是"不复权把下跌放大"的后果。<br>
+<b>实务含义：不要把顶背驰侧的显著性当稳定事实。</b>它落在显著与不显著的边界上，
+换一次数据源口径就会翻。底背驰侧没有这个问题（两臂都是 p&lt;0.001）。
+</div>
+
+<!-- ============================================================ -->
+<h2>五、今日 109 条顶背驰的即时跟踪（今天独有的证据）</h2>
+
+<h3>5.1 这些信号不是"今天突然冒出来"的</h3>
+<p>把今日 115 条信号拿到 09-07~09-14 的历史产物里比对首次出现日：</p>
+<table>
+  <thead><tr><th>首次出现日</th><th class="num">条数</th><th>说明</th></tr></thead>
+  <tbody>
+    <tr><td>09-07 ~ 09-11</td><td class="num">14</td><td>更早就在信号列表里</td></tr>
+    <tr style="background:#fafbfc"><td><b>09-14</b></td><td class="num"><b>57</b></td><td>09-14 产物共 96 条 signals，其中 <b>66 条</b>与今日重叠</td></tr>
+    <tr><td>09-15</td><td class="num">44</td><td>今日首次出现</td></tr>
+  </tbody>
+</table>
+<div class="note">
+<b>注意 09-14 那天：产物只有 96 条 signals（对比 09-10 的 332、09-11 的 276），而当天数据源是
+<code>tx 1 / sina 6979</code> —— 几乎全走新浪兜底。</b>信号条数在 96~332 之间的大幅波动，
+与数据源健康状况同期发生。这个相关性我<b>没有做因果验证</b>（本轮只做回测，未做同日双源 A/B），
+<b>列为待查项</b>，不当结论用。
+</div>
+
+<h3>5.2 已实现收益 vs 横截面基准 —— 这一节是本轮最值钱的数字</h3>
+<p>从 <code>bc_date</code> 的<b>次一交易日开盘</b>买入，到 09-15 收盘（持有 2~5 个交易日）：</p>
+<table>
+  <thead><tr>
+    <th>方向</th><th class="num">n</th><th class="num">信号原始均值</th><th class="num">同日基准池均值</th>
+    <th class="num">横截面超额</th><th class="num">超额中位</th><th class="num">胜率</th><th class="num">路径 MAE 中位</th>
+  </tr></thead>
+  <tbody>
+    <tr><td><b>顶背驰</b></td><td class="num">109</td><td class="num red">−3.86%</td><td class="num red">−4.07%</td>
+        <td class="num amb"><b>+0.21%</b></td><td class="num">−0.01%</td><td class="num">49.5%</td><td class="num">−7.51%</td></tr>
+    <tr><td><b>底背驰</b></td><td class="num">6</td><td class="num grn">−0.66%</td><td class="num red">−4.45%</td>
+        <td class="num grn"><b>+3.79%</b></td><td class="num">+4.27%</td><td class="num">100%</td><td class="num">−3.10%</td></tr>
+  </tbody>
+</table>
+
+<div class="bad">
+<b>这是本轮最反直觉、也最重要的一个数。</b>109 只顶背驰票平均跌 3.86%，看上去"非常准"——
+但<b>同期基准池（447 只非信号票）也跌了 4.07%</b>。扣掉同日基准后，
+<b>横截面超额只有 +0.21%，中位 −0.01%，胜率 49.5%</b>。<br>
+⇒ <b>这 109 条顶背驰的"跌"，几乎全部是市场 beta，不是信号的 alpha。</b>
+这与历史回测的结论（顶背驰实际信号 p=0.186 不显著）<b>方向一致地指向"顶背驰不构成可用信号"</b>。
+</div>
+
+<p>按起算日拆开看，符号也不稳定（4 个起算日里 3 正 1 负）：</p>
+<table>
+  <thead><tr><th>起算日</th><th>方向</th><th class="num">n</th><th class="num">信号</th><th class="num">基准</th><th class="num">超额</th></tr></thead>
+  <tbody>
+    <tr><td class="mono">2026-09-08</td><td>top</td><td class="num">23</td><td class="num">−4.17%</td><td class="num">−4.34%</td><td class="num">+0.17%</td></tr>
+    <tr><td class="mono">2026-09-09</td><td>top</td><td class="num">29</td><td class="num">−5.78%</td><td class="num">−4.68%</td><td class="num red">−1.10%</td></tr>
+    <tr><td class="mono">2026-09-10</td><td>top</td><td class="num">47</td><td class="num">−3.13%</td><td class="num">−3.97%</td><td class="num">+0.84%</td></tr>
+    <tr><td class="mono">2026-09-11</td><td>top</td><td class="num">10</td><td class="num">−0.99%</td><td class="num">−2.19%</td><td class="num">+1.21%</td></tr>
+  </tbody>
+</table>
+
+<p>极端样本（超额口径）也说明同一件事 —— 信号之后<b>涨得最猛的票，也在顶背驰名单里</b>：</p>
+<table>
+  <thead><tr><th>票</th><th>起算日</th><th class="num">收益</th><th class="num">基准</th><th class="num">超额</th></tr></thead>
+  <tbody>
+    <tr><td class="mono">sz003004</td><td class="mono">09-08</td><td class="num red">−23.56%</td><td class="num">−4.34%</td><td class="num red">−19.22%</td></tr>
+    <tr><td class="mono">sh688677</td><td class="mono">09-09</td><td class="num red">−20.15%</td><td class="num">−4.68%</td><td class="num red">−15.47%</td></tr>
+    <tr><td class="mono">sh600088</td><td class="mono">09-09</td><td class="num grn">+11.08%</td><td class="num">−4.68%</td><td class="num grn">+15.76%</td></tr>
+    <tr><td class="mono">sh688090</td><td class="mono">09-10</td><td class="num grn">+8.64%</td><td class="num">−3.97%</td><td class="num grn">+12.61%</td></tr>
+  </tbody>
+</table>
+
+<!-- ============================================================ -->
+<h2>六、与 R459 / R460 结论的关系</h2>
+
+<table>
+  <thead><tr><th>R459/R460 的结论</th><th>本轮（tx 口径）结果</th><th>判读</th></tr></thead>
+  <tbody>
+    <tr><td>底背驰仅 late regime 有效</td><td>tx 臂 late 原始均值 <b>+5.64%</b>（sina +5.05%）；early +3.33%</td><td class="grn">✅ 复现（tx 略更强）</td></tr>
+    <tr><td>顶背驰 → 跌</td><td>tx late 原始均值 <b>−11.00%</b>（sina −10.63%）；但超额 p=0.186</td><td class="amb">⚠ 方向一致、超额不显著</td></tr>
+    <tr><td>多头延续反向（均值回复体系）</td><td>tx 臂 <b>−2.92% p&lt;0.001</b></td><td class="grn">✅ 独立复现</td></tr>
+    <tr><td>复权对判定的影响很小（层 C：1056 点）</td><td>扩到 <b>29,040 点</b>：<code>sig</code> 差 0.6%、<code>bc_top</code> 差 1.0%</td><td class="grn">✅ 结论被 40 倍样本量证实</td></tr>
+    <tr><td>「mid 窗口」底背驰反向（+3.16%）</td><td>tx 臂 mid 窗口<b>只有 0 段</b>（样本不足）</td><td class="amb">⚠ 无法在 tx 口径下复核</td></tr>
+  </tbody>
+</table>
+
+<div class="warn">
+<b>⚠️ 一处我自己纠正过的判断（留痕）。</b>本报告初稿曾写：「看板上写的『顶背驰 p=0.018 唯一显著』与本轮 tx 口径测出的方向相反」。
+<b>这个对比是错的，已撤回</b>，错在三处：
+<br>① <b>层不同（最主要）</b>。看板引的是 R443 的「背驰见顶风险 / 见底机会」<b>scenario 全量层</b>（带该 scenario 的所有时点）；
+本报告卡片上的「顶背驰 / 底背驰」是<b>实际发出的信号层</b>（<code>sig</code>，即前者经门禁与近端筛选后的<b>子集</b>）。
+子集不显著推不出全集不显著 —— <b>不能拿子集去否定全集</b>。同层对照可验证：本报告 scenario 全量层
+sina −0.85% / tx −0.94%，与 R443 的 −0.80pp <b>同量级</b>。
+<br>② <b>口径不是主因</b>。R443 报告<b>自己就做过前复权复跑</b>：腾讯前复权 125 票 / 13,117 时点 ⇒
+<b>看跌 −1.00pp (p=0.012)、看涨 +0.27pp (p=0.58)</b>，与主样本（新浪 −0.80pp p=0.018 / +0.58pp p=0.13）
+<b>方向一致、结论不变</b> ⇒ <b>换源并没有翻转 R443 的定性</b>（旧记录里"R443 只在新浪口径下成立"的说法不成立）。
+<br>③ <b>样本不可比</b>。R443 = 150 票<b>逐日连续重放</b>；R459/R468 = 311/401 票 × <b>3 个日历窗分层抽样</b>。
+两者 p 值差异主要来自<b>采样设计与样本期</b>，不是源。
+<br><b>⇒ 结论：看板数字无需因口径而改；也不应把两组数字并列展示</b>（层与样本都不同，并列会诱导错误比较）。
+本轮实际落地只做「口径透明化」：给看板数字补上样本与源标注、补出 R443 自带的前复权复跑数字、
+并披露本报告样本其实是 3 窗口分层抽样。
+</div>
+
+<!-- ============================================================ -->
+<h2>七、诚实边界（请与上面的数字一起读）</h2>
+
+<ul>
+  <li><b>样本期没有延长。</b>因 20 日前向收益需 21 根 warmup，最后一个可分析时点仍是 ≈08-14，与 R459 相同。本轮增量是<b>源口径对照</b>与<b>今日即时跟踪</b>，不是"更多历史样本"。</li>
+  <li><b>tx 臂只有 311 票</b>（61 只北交腾讯无历史 K 线、68 只腾讯不给 qfq）。这 90 只在对照中被排除，不在 tx 结论的适用范围里。</li>
+  <li><b>存活偏差</b>：取数池取自"今日仍在册"的标的 ⇒ 期间退市/被并的票不在样本内，<b>系统性高估看涨（反转）信号、低估看跌信号</b>。受影响最大的是 early 窗口（2022-09）。</li>
+  <li><b>今日即时跟踪的独立事件数 ≈ 1</b>：109 条信号的 <code>bc_date</code> 只落在 4 个日历日、窗口高度重叠、同属一段市场走势 ⇒ 第五节的所有数字<b>只能当方向性观察</b>，不得作为统计结论。它的价值恰恰在于<b>与历史回测方向一致</b>（顶背驰无 alpha），而不是它本身的 p 值。</li>
+  <li><b>基准池是近似</b>：447 只（来自 R459 的固定种子随机抽样，非选择性样本），不是全市场 6908 只。</li>
+  <li><b>零假设校准通过</b>（各层拒绝率 2.5%~10.8%，名义 5%，逐层独立 120 轮）⇒ 上面的"不显著"是<b>可信的负结论</b>，不是检验没力。</li>
+  <li><b>两处未验证项</b>：① 09-14 信号条数骤降与"全走新浪兜底"是否因果，未做同日双源 A/B；② <code>sh601699</code> 的分页深度抖动（1353 vs 1383）是否跨主机不一致，未复现。</li>
+</ul>
+
+<!-- ============================================================ -->
+<h2>八、结论与建议</h2>
+
+<div class="good">
+<b>① 系统的判据在今天的生产口径下是稳的。</b>六个分层方向零反号、超额差 ≤ 0.72pp、框架自校验 560/562 票零差异。
+R459 的历史结论<b>不需要因为换源而推翻</b>。<br><br>
+<b>② 唯一稳的阳性信号仍是「底背驰（实际信号）」</b>：tx 口径 +4.23%、p&lt;0.001、胜率 62%、头部贡献 86%（非右尾驱动）。<br><br>
+<b>③ 顶背驰侧不要当信号用</b>：历史 p=0.186，今日 109 条的横截面超额只有 +0.21%（中位 −0.01%）。
+它的"跌"是市场 beta；<b>今日名单里既有跌 23% 的，也有涨 11% 的</b>。<br><br>
+<b>④ 不建议基于本轮结论改代码</b>：本轮没有发现任何需要修的缺陷，两处差异都可归因到源侧抖动。<br><br>
+<b>⑤ 看板实证条按「口径透明化」落地 —— 不改任何数字</b>：补出 R443 自带的前复权复跑数字、标注样本与源、
+并披露本报告样本其实是 3 窗口分层抽样。<b>明确不做</b>「把两组数字并列展示」（层与样本都不同，并列会诱导错误比较）。
+纠正留痕见第六节末。
+</div>
+
+<div class="foot">
+  R468 报告 · 数据日 2026-09-15 · 样本 311 票 × <b>3 个日历窗 / 105 个交易日</b> = 29,040 个 (票,日) 时点（<b>分层抽样，非逐日连续</b>）<br>
+  对照代码版本：sina 臂 = R459 <span class="mono">recs.pkl</span>（09-14 口径）／ tx 臂 = 本工作区 <span class="mono">recs_tx.pkl</span>（今天抓的 1383 根前复权 K 线上重放同一批时点）<br>
+  脚本：<span class="mono">_dbg/r468/{fetch_ks2, verify_src, replay_tx, stats_cmp, today_excess, sig_history}.py</span> ——
+  所有数字来自这些脚本的实跑输出（<span class="mono">*.log</span>），无估算值。统计脚本自检 <span class="mono">Σ超额≡0</span> 与排名均值 50.00 均已通过。
+</div>
+
+</div>
+</body>
+</html>

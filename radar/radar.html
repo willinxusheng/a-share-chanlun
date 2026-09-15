@@ -396,6 +396,7 @@ h1{font-size:21px;font-weight:700;letter-spacing:.4px;line-height:1.3}   /* R323
 .efbar .efc .efn{font-size:14px;font-weight:800;margin:0 1px}
 .efbar .efc .efk{font-size:10px;font-weight:700;opacity:.9;border:1px solid currentColor;border-radius:3px;padding:0 4px;margin-left:5px;white-space:nowrap;vertical-align:1px}
 .efbar .efc .eft{display:block;font-size:10.5px;opacity:.88;margin-top:1px}
+.efbar .efc .sfc{display:block;font-size:10px;opacity:.8;margin-top:3px;padding-top:3px;border-top:1px dashed rgba(0,0,0,.18)}
 .efbar .efd{flex:1 1 100%;font-size:11px;line-height:1.75;color:#334155;background:rgba(100,116,139,.05);border:1px solid rgba(100,116,139,.26);border-radius:6px;padding:8px 11px;display:none}
 .efbar.open .efd{display:block}
 .efbar .efd table{width:100%;border-collapse:collapse;margin:5px 0 6px}
@@ -912,6 +913,14 @@ function renderBar(){
      「盘中已破」   收益 −0.32pp p=0.74 / 深亏>5% 概率 72.1% vs 58.1%(+14pp) ⇐ 风险维度有效
    ⚠️ 局限: 横截面污染度 14.7% ⇒ 上述估计**偏乐观**; 17层×3周期未做多重比较校正(顶风险为
    先验对照且方向/单调性/年度一致性三重齐备); 样本期未含 2015/2018 极端流动性危机。
+   ★★ R468 追加(2026-09-15; **未改任何数字**, 只做「口径透明化」):
+     ① 补出 R443 自带的换源复跑数字(腾讯前复权 125票/13,117时点: 看跌 −1.00pp p=0.012 /
+        看涨 +0.27pp p=0.58 ⇒ **换源不改定性**)。此前展开区只含糊说"结论一致", 用户无法自查。
+     ② 补 R468 的独立换源复核(311票/29,040 对: 结构层差 1~6%, 而 **最终信号只差 0.6%**)。
+     ③ 披露 R459/R468 的样本其实是**3 个日历窗 / 105 个交易日**(分层抽样, 非逐日连续) ⇒
+        与 R443 的逐日连续重放**不可直接比 p**; 局限段新增 ④ 条写明"唯一显著"的适用边界。
+     ⚠ **明确不写**「看板数字与本轮 tx 口径方向相反」—— 该说法是**跨层错配**(拿"实际信号子集"
+        去比"scenario 全量层")叠加跨采样设计比较, 已在本轮自纠, 详见 r468_backtest_report.html 第六节末。
    存在意义: 此前结论只在本地报告里, 用户每日打开看板仍会把「底机会」当买入信号 —— 与
    R425/R436「口径须与判据一致」同源: 展示信号的同时必须标注该信号的**实测效力**。 */
 var efOpen=false;
@@ -935,10 +944,12 @@ function renderEfBar(){
   el.innerHTML=
     '<div class="efc warn"><span class="efh">⚠️ 背驰见顶风险 <span class="efn">'+nTop+'</span> 只</span>'
       +'<span class="efk">实证有效</span>'
-      +'<span class="eft">五年回测中<b>唯一</b>跨过显著性门槛的信号 — 20日超额 <b>−0.80pp</b>(p=0.018) · 5年4负 · 随持有期单调增强 ⇒ <b>当风险提示用</b></span></div>'
+      +'<span class="eft">五年回测中<b>唯一</b>跨过显著性门槛的信号 — 20日超额 <b>−0.80pp</b>(p=0.018) · 5年4负 · 随持有期单调增强 ⇒ <b>当风险提示用</b>'
+        +'<span class="sfc">口径: 新浪裸价 150票 / 31,026时点 / 2021-11~2026-08 <b>逐日连续重放</b>。换腾讯前复权 125票 / 13,117时点复跑 ⇒ 看跌 <b>−1.00pp (p=0.012)</b> · 看涨 +0.27pp (p=0.58), <b>结论不因换源而变</b></span></span></div>'
     +'<div class="efc neut"><span class="efh">🟢 背驰见底机会 <span class="efn">'+nBot+'</span> 只</span>'
       +'<span class="efk">未获证实</span>'
-      +'<span class="eft">同口径回测<b>无可检测超额</b>(+0.58pp, p=0.13, 年度正负交替) ⇒ <b>不宜直接当买入信号</b>, 需自备止损纪律</span></div>'
+      +'<span class="eft">同口径回测<b>无可检测超额</b>(+0.58pp, p=0.13, 年度正负交替) ⇒ <b>不宜直接当买入信号</b>, 需自备止损纪律'
+        +'<span class="sfc">口径同上（新浪裸价 2021-11~2026-08 连续重放）。换腾讯前复权复跑 <b>+0.27pp (p=0.58)</b> —— 仍不显著</span></span></div>'
     +'<div class="efc neut"><span class="efh">🎯 离场位(止损/止盈)</span>'
       +'<span class="efk">未获证实</span>'
       +'<span class="eft">63 条「止盈×止损×持有期」组合<b>无一条</b>产生可检测超额(最高 +0.07pp, p=0.45) · <b>无规则持有 +2.37% 反而最高</b> · 收益几乎全靠头部 5% 的段(贡献 114%) ⇒ <b>止损/止盈线是结构参考位, 不是优化卖点</b></span></div>'
@@ -950,14 +961,18 @@ function renderEfBar(){
       }).join('')
       +'</table>'
       +'<b>方法</b>: point-in-time 重放 — 对历史每个交易日截断 K 线后喂给<b>生产引擎本身</b>(非复刻), 只把「今天是哪天」伪装成历史日 ⇒ 无前视偏差。'
-      +'样本: 新浪 150 票 / 31026 时点 / 2021-11~2026-08; 腾讯前复权 125 票 / 13117 时点复跑, 核心结论一致。'
+      +'样本: <b>新浪裸价 150 票 / 31,026 时点 / 2021-11~2026-08（逐日连续重放）</b>。'
+      +'<b>换源复跑（R443 自带，本次一并披露数字）</b>: 同一引擎在<b>腾讯前复权 125 票 / 13,117 时点</b>上跑 ⇒ 看跌 <b>−1.00pp (p=0.012)</b>、看涨 <b>+0.27pp (p=0.58)</b> ⇒ <b>与主样本方向一致，结论不因换源而变</b>。'
       +'框架自校验: 以 09-11 为「今天」重放 100 票, 与 CI 当日真实产物逐字段比对, 8 字段仅 1 处不一致(scenario / 背驰低点 / 偏离度 / 门禁 / 均额 / 收盘价 全 0 差异)。'
       +'基准用<b>横截面同日均值</b>, 不用沪深300 —— 后者会把 size 风格差异算成超额(实测把 +0.58pp 放大成 +2.25pp)。'
+      +'<br><b>换源独立复核（R468 · 2026-09-15）</b>: 对同一批 <b>311 票 / 29,040</b> 个 (票,日) 用两个源各跑一遍整链 —— 结构判定层差异 scenario <b>6.1%</b> / 门禁 <b>5.0%</b> / 背驰标记 1.0~1.9%, 而<b>最终发出的信号只差 0.6%</b>; 框架自校验 <b>560/562 票 × 23 字段零差异</b> ⇒ <b>换源不动结论</b>。'
+      +'<div class="lim">⚠ 该复核的样本是<b>分段日历窗</b>（3 个窗口 / 105 个交易日: 2022-09、2024-03、2026-06~08, <b>非逐日连续</b>）⇒ <b>与上表不是同一采样设计, p 值不可直接比较</b> —— 同层的「背驰见顶风险」在连续样本上 p=0.018, 在分层窗样本上是 0.14~0.19。两套数字<b>各自有效, 只是回答的问题不同</b>: 「连续五年里是否稳定」vs「三个 regime 快照下是否成立」。</div>'
       +'<br><b>R449 退出规则</b>: 在同一重放资产上(292 票 / 73,054 观察点 / 2022-01~2026-08)跑「止盈 × 止损 × 持有期」63 条网格 + 6 条预注册规则, 事件段级 + <b>同日同类型</b>基准 + Bonferroni 校正。逐规则 200 轮零假设校准(同日随机同伴, 构造上真值=0)实测拒绝率 3.5%~8.0%(名义 5%, t 的 sd 0.95~1.06) ⇒ <b>检验未失灵, 负结论成立</b>。'
       +'<br><b>可执行性</b>: 20 日内触及 +8% 的段占比 — 个股 44.4% / <b>ETF 30.3%</b> / 北交 62.5%(+10% 时分别 35.8% / <b>22.4%</b> / 55.0%) ⇒ <b>在 ETF 上挂 8~10% 止盈线, 七成以上永不触发</b>。'
-      +'<div class="lim">⚠️ 局限: ①横截面污染度 14.7% ⇒ 上述超额估计<b>偏乐观</b>(真实值可能更低); ②17 层 × 3 周期未做多重比较校正(Bonferroni 后顶风险不再显著; 但它是先验对照, 且方向/单调性/年度一致性三重齐备); ③样本期未覆盖 2015/2018 极端流动性危机。仅供研究参考, 不构成投资建议。</div>'
-      +'<div style="margin-top:7px"><a href="r443_backtest_report.html" target="_blank" rel="noopener" style="font-weight:700">📄 查看完整回测报告（含分层数据表与三张图表）↗</a>'
+      +'<div class="lim">⚠️ 局限: ①横截面污染度 14.7% ⇒ 上述超额估计<b>偏乐观</b>(真实值可能更低); ②17 层 × 3 周期未做多重比较校正(Bonferroni 后顶风险不再显著; 但它是先验对照, 且方向/单调性/年度一致性三重齐备); ③样本期未覆盖 2015/2018 极端流动性危机; ④<b>「唯一显著」的适用边界 = 2021-11~2026-08 的逐日连续重放</b> —— 换成"3 日历窗分层抽样"样本复算时, 同层超额仍在 −0.85~−0.94% 但 p 升至 0.14~0.19（<b>非受控对照: 样本期 / 采样密度 / 票池三项混杂, 不可分离</b>）⇒ 该显著性<b>对采样设计敏感</b>, 勿外推为跨样本通用。仅供研究参考, 不构成投资建议。</div>'
+      +'<div style="margin-top:7px"><a href="r443_backtest_report.html" target="_blank" rel="noopener" style="font-weight:700">📄 R443 完整回测报告（分层数据表 + 三张图表）↗</a>'
       +'<a href="r449_exit_rules_report.md" target="_blank" rel="noopener" style="font-weight:700;margin-left:14px">📄 R449 退出规则实证报告（含 63 条网格全表与校准）↗</a>'
+      +'<a href="r468_backtest_report.html" target="_blank" rel="noopener" style="font-weight:700;margin-left:14px">📄 R468 换源复核报告（2026-09-15 · 3 窗口分层窗样本）↗</a>'
       +'<span style="font-size:10px;color:#64748b;margin-left:8px">数字可自查 —— 报告与本节同源, 含全部局限</span></div>'
       +'</div>';
   el.onclick=function(){efOpen=!efOpen;el.className="efbar"+(efOpen?" open":"");};
