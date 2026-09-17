@@ -65,6 +65,17 @@ def _is_trading_day(dt):
     return dt.weekday() < 5  # 0=周一 … 4=周五
 
 
+# R469: 买卖点图上短名 —— "一类买点(底背驰)" → "1买"。标签宽度是去重叠的硬约束：
+# 实测主图窗口 1383 根压进 948px（0.685px/日），而单标签宽 56~74px ⇒ 一个标签的宽度
+# 相当于 80~110 个交易日（约 4~5 个月），故"数字+方向"两字比中文序号三字省约 33px/条
+# 直接转化为可见条数。键取 kind[:3]；未登记的 kind 原样输出（不静默变空）。
+_KIND_SHORT = {
+    "一类买": "1买", "一类卖": "1卖",
+    "二类买": "2买", "二类卖": "2卖",
+    "三类买": "3买", "三类卖": "3卖",
+}
+
+
 def _label_w(t):
     """估算标签像素宽度（与 verify_overlap.js 的字宽口径一致），用于确定性去重叠。"""
     w = 0.0
@@ -75,8 +86,16 @@ def _label_w(t):
 
 def dedup_mark_labels(items, n, y_min, y_max, plot_w, plot_h, grid_l, grid_t,
                       idx_map, default_pos="top"):
-    """确定性地去重叠 markPoint 标签：按 x 排序，贪心保留，与已保留标签框重叠的则隐藏。
-    仅修改各 item 的 label['show']，不改变标记符号。"""
+    """确定性地去重叠 markPoint 标签：按 (优先级 desc, x asc) 贪心保留，与已保留标签框
+    重叠的则隐藏。仅修改各 item 的 label['show']，不改变标记符号。
+
+    R469: 引入优先级 —— 原实现只按 x 排序（"谁靠左谁先占位"），使买卖点与背驰/拐点标签
+    平等竞争，被挤掉的恰好是信息量最高的买卖点。实测（主图窗口 1383 根压进 948px、
+    单标签宽 56~74px ⇒ 一个标签相当于 80~110 个交易日）：上证 9 个买卖点被隐藏 4 个，
+    含 2026-03-12 二类卖、2026-07-01 三类卖，用户主观感受即"图上没有买卖点提示"。
+    现按 item 的 "_pri" 降序优先占位：买卖点=2 > 背驰=1 > 历史拐点=0；"_pri" 在函数内
+    pop 掉，不落入产物 JSON。未提供 "_pri" 的调用方（预测图 end_points）全按 0 处理
+    ⇒ 排序键退化为纯 x 升序，与原行为逐字节一致。"""
     if n <= 0 or (y_max - y_min) == 0:
         return
     bar = plot_w / n
@@ -97,8 +116,9 @@ def dedup_mark_labels(items, n, y_min, y_max, plot_w, plot_h, grid_l, grid_t,
         lab = it.get("label") or {}
         pos = lab.get("position", default_pos)
         recs.append({"x": grid_l + xi * bar, "yc": y_of(c[1], pos),
-                     "w": _label_w(it.get("value", "")), "p": it})
-    recs.sort(key=lambda d: d["x"])
+                     "w": _label_w(it.get("value", "")), "p": it,
+                     "pri": it.pop("_pri", 0)})
+    recs.sort(key=lambda d: (-d["pri"], d["x"]))
     kept = []
     for m in recs:
         if any(abs(m["x"] - k["x"]) < (m["w"] + k["w"]) / 2 + 2 and
@@ -272,8 +292,13 @@ def echart_main(klines, r, sym, captured=None):
             _marker += "·盘"
         if s.get("vol_confirm"):
             _marker += "·量"
-        lbl = f"{dates[xi][5:]} {s['kind'][:3]}{_marker}"
+        # R469: 图上显示用短名（一类买→1买，见 _KIND_SHORT）。仅压缩显示串，signal 的
+        # kind 原文仍完整保留在 r["signals"] 里（tooltip / 下游逻辑不受影响）。
+        _k3 = s["kind"][:3]
+        lbl = f"{dates[xi][5:]} {_KIND_SHORT.get(_k3, _k3)}{_marker}"
         sig_points.append({
+            # R469: 优先级 2（最高）—— 去重叠时买卖点先占位，不再被背驰/拐点标签挤掉
+            "_pri": 2,
             "coord": [dates[xi], price],
             "value": lbl,
             "itemStyle": {"color": RED if d == 1 else GREEN},
@@ -300,6 +325,8 @@ def echart_main(klines, r, sym, captured=None):
             continue
         _last_x_bc[d] = xi
         bc_points.append({
+            # R469: 优先级 1（中）—— 次于买卖点、优于历史拐点（背驰是一类买卖点的上游依据）
+            "_pri": 1,
             "coord": [dates[xi], round(b["end_price"], 2)],
             "value": f"{dates[xi][5:]} 顶背驰" if d == 1 else f"{dates[xi][5:]} 底背驰",
             "itemStyle": {"color": RED if d == 1 else GREEN},
@@ -347,6 +374,8 @@ def echart_main(klines, r, sym, captured=None):
             _is_cap = _lab in _cap_labels
             _pcol = GOLD if _is_cap else "#94a3b8"
             cap_points.append({
+                # R469: 优先级 0（最低）—— 已知历史拐点是参照系而非交易信号，冲突时让位
+                "_pri": 0,
                 "coord": [dates[_bi], round(klines[_bi]["close"], 2)],
                 "value": f"{dates[_bi][5:]} ✓" if _is_cap else f"{dates[_bi][5:]} ◇",
                 "itemStyle": {"color": _pcol},
@@ -1036,12 +1065,13 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
         f'</div>'
         f'<div class="fc-targets">结构演绎目标(主路径终点) ≈ <b>{main_p[-1][1]:.0f}</b>（<b style="color:{RED}">{((main_p[-1][1]/last-1)*100):+.1f}%</b>） · '
         f'均值期望终点 ≈ <b>{_medf(1.0):.0f}</b>（{((_medf(1.0)/last-1)*100):+.1f}%） · '
-        f'风险止损位(风险路径终点) ≈ <b>{risk_p[-1][1]:.0f}</b>（{((risk_p[-1][1]/last-1)*100):+.1f}%） · '
+        f'风险止损位(风险路径终点·向下量度) ≈ <b>{risk_p[-1][1]:.0f}</b>（{((risk_p[-1][1]/last-1)*100):+.1f}%） · '
         f'趋势外推位 ≈ <b>{trend_end_price:.0f}</b> · '
         f'主路径失效位(有效跌破ZD) ≈ <b>{zd:.0f}</b> · '
         f'结构存续概率(锥) ≈ <b>{_p_hold*100:.0f}%</b></div>'
     )
     note = (f"主路径失效位：现价有效跌破 ZD {zd:.0f}（收盘确认）→ 主路径失效、风险路径概率上升；风险路径确认需同时满足「跌破 ZD + 周线笔转向下」。\n"
+             f"上方「风险止损位」即该风险路径的<b>向下量度终点</b>（由 ZD 派生的结构参考位）——需要「往下还有多少空间」时读这一栏；确认条件未满足前它只是条件应对的边界，不是对底部的预测。\n"
              f"红色阴影为基于<b>真实历史 {horizon} 日对数收益分布</b>推演的<b>经验分位扇形置信带</b>（P05–P95 外层 / P25–P75 内层）：与对称 ±σ 带不同，它直接由本指数历史兑现统计得出、天然包含 A 股肥尾与涨跌不对称，"
         f"故<b>上下带非对称</b>——按真实历史经验分位分别给上下沿定宽（替代对称 ±1.645σ 等宽假设）：本指数近 3 年 {horizon} 日对数收益呈右偏，上行离散（P95–P50）约为下行的 1.5–2.5 倍，故<b>上行带更宽</b>，如实容纳单边急涨的肥尾。R57+R58 口径：① 校准窗口由全历史改为<b>近 3 年</b>，剔除 2015 股灾等早期崩溃收益导致的 era-shift 偏悲观；② 中心由中位改为<b>窗口均值（期望）</b>，A 股含正漂移、中位低估中枢，使方向判定正确率由约 36% 升至约 54%；③ 近窗口已含当前波动，<b>不再叠加 regime 因子</b>（此前双重放大使创业板带宽虚胖至 ±60%+）。覆盖修正系数 κ（R168 重标定 + R171 regime 细化）：walk-forward 实测(同回测引擎, 5指数 N=180/horizon)表明 κ=1.8 时牛/震荡实测覆盖达 96~98%(过宽、名义90%被高估、带几乎无信息量)，故 R168 将 κ 由 1.8 降至 1.4，聚合精确命中名义 90%(T+8 89.4%、T+30 91.1%)。但 R171 分 regime 重扫(动态 exec 真实 forecast_svg, 遍历 κ∈[1.4,2.3])发现：单一 bull κ 无法同时让 H8/H30 都≈90%——bull H8 在 κ=1.4 仅 79.2%(N=53, 牛市短期急涨急跌使 30日带对 T+8 偏窄)，而 bull H30 在 κ=1.4 已 90.6%、κ=1.6 即过宽到 96.2%(无信息量带)。故 R171 取折中 bull=1.5：bull H8 79.2%→86.8%(接近名义90%、健康)、bull H30 92.5%(未过宽)；range 维持 1.4(聚合 H8/H30 均 93.2%)、bear 维持 2.3(下行富尾安全垫)。早期「κ=1.4→86%/κ=1.8→90.2%」系 R57/R58 改窗口与改中心前的旧口径、已 stale。√t 缩放假设仍成立(覆盖率随 horizon 分桶均匀)。<b>κ 按市场环境自适应(R108)</b>：牛 <b>{_KAPPA_NEAR['bull']:.2f}/{_KAPPA['bull']:.2f}</b>(近端/远端) / 震荡 <b>{_KAPPA['range']:.2f}</b> / 熊市 <b>{_KAPPA['bear']:.2f}</b>(关15 实证熊市 T+30 原 κ=1.8 漏覆盖 33.3%、LRuc=7.1 拒绝 99%，放宽后给下行富尾补安全垫——A 股熊市下跌更急更肥尾，近 3 年经验分位低估了极端下行)。R223：仅牛市加「近端(f=0)加宽」斜坡(1.5→1.60)修 T+8 漏覆盖 86.8%→≈90+(walk-forward 实测复核见 backtest_diff)；震荡/熊市维持 R171 原值不动——过度收窄属安全侧过宽非缺陷，且盲目降 range κ 会把创业板 T+30 本已偏低覆盖(86.1%)进一步压低(假绿)，故仅精准修牛市近端这一真缺陷。中线路径为「实测漂移期望（均值）」而非手工情景路径，置信带中线统计诚实；带宽随时间按 √t 扩张（随机游走特性），近月不确定性即已显著，并非线性外推的针状。<b>代价</b>：创业板等超高波动指数 60 日 P05–P95 带宽达 ~119%，这是其真实波动的诚实反映，而非缺陷。\n"
              f"本图为目的（分类框架）而非点位预测：缠论给出的是「不跌破 ZD 则结构延续、跌破则转弱」的条件应对，不是对具体价位的预测。\n"
