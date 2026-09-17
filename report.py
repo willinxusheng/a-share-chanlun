@@ -3,6 +3,7 @@
 新增：成交量面板、双法一致性、结构健康度、推演置信度、已知拐点捕捉、原则化推演"""
 import json
 import os
+import sys
 import math
 import ast
 from datetime import datetime, timedelta, timezone
@@ -76,16 +77,18 @@ _KIND_SHORT = {
 }
 
 
-def _label_w(t):
-    """估算标签像素宽度（与 verify_overlap.js 的字宽口径一致），用于确定性去重叠。"""
+def _label_w(t, extra=0.0):
+    """估算标签像素宽度（与 verify_overlap.js 的字宽口径一致），用于确定性去重叠。
+    extra = 背景/边框造成的额外外扩（R476：新信号标签带 padding[1,3]+borderWidth 1
+    ⇒ 水平外扩 (3+1)*2 = 8px）。必须计入，否则门禁（按真实渲染算）会报重叠。"""
     w = 0.0
     for ch in str(t):
         w += 11.0 if ord(ch) > 0x2e80 else 6.16
-    return w + 2.2
+    return w + 2.2 + extra
 
 
 def dedup_mark_labels(items, n, y_min, y_max, plot_w, plot_h, grid_l, grid_t,
-                      idx_map, default_pos="top"):
+                      idx_map, default_pos="top", bgap=True, w_vis=253):
     """确定性地去重叠 markPoint 标签：按 (优先级 desc, x asc) 贪心保留，与已保留标签框
     重叠的则隐藏。仅修改各 item 的 label['show']，不改变标记符号。
 
@@ -96,26 +99,47 @@ def dedup_mark_labels(items, n, y_min, y_max, plot_w, plot_h, grid_l, grid_t,
     函数内 pop 掉，不落入产物 JSON。未提供 "_pri" 的调用方（预测图 end_points）全按 0
     处理 ⇒ 排序键退化为纯 x 升序，与原行为逐字节一致。
 
+    R476: x 尺度模型改为**严格复刻 ECharts 的 category 轴映射**（此前是拍脑袋的 `bar = plot_w/W`
+    加无偏移的 `grid_l + (i-x0)*bar`，与渲染器差 0.4~1.9%）。用 SSR 真渲染 + ECharts 自带的
+    `convertToPixel()` 标定（`_dbg/r476/calib_geom.js`）得两条**精确律**（残差 0.0000）：
+
+      boundaryGap=True （主图）: band = plot_w / W ; x(i) = grid_l + ((i - x0) + 0.5) * band
+      boundaryGap=False（预测图）: bar  = plot_w / (n - 1) ; x(i) = grid_l + i * bar
+
+    两个已实证的口径错（均属"生成期模型 ≠ 渲染器"这一类，与 R473 修的 y 向同源）：
+      ① 主图窗口 **W = 253 而非 252**：JS 传 `start = (n-252)/n*100`，而 ECharts 对 category 轴按
+         `startValue = floor((n-1)*start/100) = n-253` 解释 ⇒ 窗口类别恰好 **253** 个（实测
+         `dataZoom[0] = {start:81.77874186550976, startValue:1130, endValue:1382}`，n=1383）。
+         旧模型 W=252 且漏掉 boundaryGap 的 **+0.5 格**中心偏移 ⇒ 左端偏低 5.6px、右端偏低 1.9px。
+      ② 预测图两处错（**右端累计偏差 17.73px**）：`plot_w` 传 940 而真实绘图区宽 = 1100-96-88
+         = **916**（right 是 88 不是 64）；且 n=150 时 boundaryGap=False ⇒ 分母应为 **n-1=149**
+         （实测 bar = 916/149 = 6.147651，旧模型 940/150 = 6.266667，相对误差 1.936%）。
+    标定实测：主图 `grid_l` 反解 = **96.000**（与配置逐位相等）⇒ 此前记的"真实 ≈101.6"是我的
+    推断错误，`grid_l=96` 本来就是对的，**该项作废**。
     R470: x 尺度改按「默认可见窗口」而非全历史 —— 原 `bar = plot_w / n` 把全部 n≈1384 根
     压进 948px（=0.685 px/根），使相隔 76 个交易日的两个标签（2026-03-12 二类卖 vs
     2026-07-01 三类卖，价差仅 2 点）算得 52px 距离、必然判为重叠而把后者烤死成
-    show:false；但主图 dataZoom 初始窗口只有最近 252 根（=3.76 px/根），同样两个标签实际
+    show:false；但主图 dataZoom 初始窗口只有最近 253 根（=3.75 px/根），同样两个标签实际
     相距 286px、根本不重叠。尺度差 5.5 倍 ⇒ 生成期系统性过度隐藏，且 show:false 是烙进
     JSON 的，用户放大后标签也不会回来 —— 这正是"该买卖的点标不出来"的主因。
-    现 x 一律按 252 根可见窗口计算，与 verify_overlap.js 的真实渲染窗口同口径
-    ⇒ 去重叠判据 == 门禁判据（真实渲染实测 3.747 px/根 vs 本函数 3.762 px/根，差 0.39%）。
-    窗口内元素再补一条"标签框左缘不得探入 y 轴刻度区"（可见窗口最左端的点被"居中"标签
-    向左探出，门禁实测与刻度文字撞 6~7px）。
     R472: 生成期只负责**初始视图**的可见性（口径 == verify_overlap.js 的门禁渲染）。至于
     "被隐藏的标签放大后能否回来"与"窗口外元素被渲染器夹到绘图区左缘"这两件事，改由前端
     `relayout()` 在 dataZoom 后按真实视口重算 —— 旧设计让窗口外元素保留 show=True、指望
     用户缩小后由 ECharts 自行重算坐标，但 show 是烙进 JSON 的、ECharts 不会恢复。
-    预测图 n=150<252 ⇒ _W=n、_x0=0 ⇒ 与改动前逐字节一致（零回归）。"""
+    预测图 boundaryGap=False、全量显示（dataZoom start=0）⇒ x = grid_l + i*bar，与主图不同式。"""
     if n <= 0 or (y_max - y_min) == 0:
         return
-    _W = min(n, 252)          # 主图 dataZoom 初始可见根数（与下方 JS dataZoom start 同式）
-    bar = plot_w / max(1, _W)
-    _x0 = n - _W
+    if bgap:
+        # 主图：窗口类别数 W（= 实测 253，见上）；类别中心落在 band 的中央 ⇒ +0.5
+        _W = max(1, min(n, w_vis))
+        _bar = plot_w / _W
+        _x0 = n - _W
+        _xof = lambda i: grid_l + ((i - _x0) + 0.5) * _bar
+    else:
+        # 预测图：boundaryGap=False ⇒ 首末类别贴绘图区两缘，间隔数 = n-1
+        _bar = plot_w / max(1, n - 1)
+        _x0 = 0
+        _xof = lambda i: grid_l + i * _bar
     ppx = plot_h / (y_max - y_min)
 
     # R473: 标签纵向位置改用 ECharts 的**精确放置律**（原为「±11 / 层外推 17px」的拍脑袋模型）。
@@ -160,8 +184,8 @@ def dedup_mark_labels(items, n, y_min, y_max, plot_w, plot_h, grid_l, grid_t,
             continue
         lab = it.get("label") or {}
         pos = lab.get("position", default_pos)
-        _w = _label_w(it.get("value", ""))
-        _x = grid_l + (xi - _x0) * bar
+        _w = _label_w(it.get("value", ""), 8.0 if it.get("new") else 0.0)
+        _x = _xof(xi)
         if xi < _x0:
             # R472: 窗口之外的元素在**初始视图**里一律不显示。此前（R470/R470b）这里保留
             # show=True，理由是"用户缩小到 1 年以上时 ECharts 会重算坐标"—— 但 show 是烤进
@@ -233,7 +257,49 @@ def _smooth(pts, tension=1.0, nd=3):
 
 # ================= 单指数主图（价格 + 成交量 + MACD） =================
 # ================= ECharts 主图（参考斐波那契项目，解决放大失真） =================
-def echart_main(klines, r, sym, captured=None):
+
+# ── R476: 「新信号」标记 ────────────────────────────────────────────────────────
+# 要解决的问题（待议㉓）：看板此前**无法区分「今天新出的信号」与「早就存在的信号」** ——
+# 两者视觉完全一致，而新信号的坐标在过去 5~12 个交易日（R474 实证滞后 7/5/12 日）⇒ 用户
+# 扫一眼看不出"今天有没有新东西"。根因是信号挂在**已完成笔**的端点上（chanlun.py 的
+# `bis_done = bis[:-1]`，防未来函数，是正确设计），笔的确认天然滞后。
+# 这里不改滞后（那是正确设计），只把「新」这件事**如实呈现**给用户。
+SIG_NEW_DAYS = 3     # 距今 ≤ N 个交易日内诞生的信号 ⇒ 图上加「新」前缀 + 底色
+SIG_LOOKBACK = 6     # 有限重放深度（> SIG_NEW_DAYS 即可判"非新"；留 2 档余量防风噪）
+
+
+def compute_sig_birth(klines, r_now, lookback=SIG_LOOKBACK):
+    """算出每条当前信号「已经存在了几个交易日」（0 = 最后一根 K 线才出现）。
+
+    手法 = **有限重放**（与 R474 的端到端核查同法，已被实证）：把 K 线末端依次砍掉
+    1..lookback 根重跑 analyze()。某条信号在"砍掉 c 根"时**仍存在** ⇒ 它至少已存在 c 天；
+    取最大的 c 即它的年龄。年龄 > SIG_NEW_DAYS ⇒ 视为旧信号。
+    key 用 `(date, dir)` 而非 `(date, dir, kind)` —— 重放时 kind 可能随结构微调而改写
+    （如"一类卖点"↔"三类卖点"），用 kind 会把它误判成"新生"。
+    成本：5 指数 × lookback 次全量 analyze（实测约 0.07s/次 ⇒ 约 2s）。
+    """
+    n = len(klines)
+    now = {(s["date"], s["dir"]) for s in r_now.get("signals", [])}
+    if not now or n < 80:
+        return {}
+    age = {k: 0 for k in now}
+    for cut in range(1, lookback + 1):
+        if n - cut < 80:
+            break
+        # ★ 必须用文件头 `from chanlun import analyze` 导入的那个 analyze —— R476 首版写成
+        # `chanlun.analyze`（report.py 并未 `import chanlun`）⇒ NameError，而这里的防御式
+        # try 把它静默吞成「全部 age=0 / 耗时 0.00s」的**假绿**。教训：防御式 except 必须
+        # 打印，否则它把真 bug 伪装成"没有新信号"。（详见 REF-debug-pitfalls）
+        keys = {(s["date"], s["dir"]) for s in analyze(klines[:n - cut]).get("signals", [])}
+        for k in now:
+            if k in keys:
+                age[k] = cut
+        if all(age[k] > SIG_NEW_DAYS for k in now):
+            break        # 全部都已超过阈值 ⇒ 再往前追溯没有意义
+    return age
+
+
+def echart_main(klines, r, sym, captured=None, sig_age=None):
     """用 ECharts 绘制缠论主图（价格+成交量+MACD），缩放后仍清晰细腻。"""
     dates = [k["date"] for k in klines]
     # ECharts 蜡烛图数据格式为 [open, close, low, high]
@@ -364,18 +430,42 @@ def echart_main(klines, r, sym, captured=None):
         # kind 原文仍完整保留在 r["signals"] 里（tooltip / 下游逻辑不受影响）。
         _k3 = s["kind"][:3]
         lbl = f"{dates[xi][5:]} {_KIND_SHORT.get(_k3, _k3)}{_marker}"
+        # R476: 「新信号」标记（详见 compute_sig_birth 的说明）。前缀「新 」让用户一眼可辨，
+        # 底色让它在一堆同类标签里跳出来；两者都会被 _label_w 的 extra 与真实渲染一并计入。
+        _age = (sig_age or {}).get((dates[xi], d))
+        _is_new = (_age is not None and _age <= SIG_NEW_DAYS)
+        if _is_new:
+            lbl = "新 " + lbl
+        _sig_col = RED if d == 1 else GREEN
+        # R476: 新信号额外**外推一层**（distance 4→22，实测 off 由 14.5 → 32.5px）。
+        # 理由是实测出来的：09-01 的「一类卖点·顶背驰」与 08-18 的「三类卖点」价格只差 1 点、
+        # x 相距 37.5px，两者同为 position=top ⇒ 纵向只差 14.5-14.5=0 ⇒ 一直被 08-18 挤掉
+        # （**线上 R473 也是 show=false**，非本轮回退）。外推 18px > 重叠阈值 13px ⇒ 两者可共存，
+        # 用户既保留 08-18 的原始确认位、又能看见"今天新出的这个"。distance 会被 _lab_off()
+        # 与前端 relayout() 自动消费，无需另写层号。
+        _lab = {"show": True, "position": "bottom" if d == 1 else "top",
+                "color": _sig_col, "fontSize": 11, "fontWeight": "bold",
+                "distance": (4 + 18) if _is_new else 4}
+        if _is_new:
+            # 同色系浅底 + 细边框：不改动 position/distance（纵向位置律不受影响），
+            # 水平外扩 8px 已计入 _label_w / 前端 _labW。
+            _lab.update({"backgroundColor": "rgba(229,69,69,0.13)" if d == 1 else "rgba(24,160,88,0.13)",
+                         "borderColor": _sig_col, "borderWidth": 1, "borderRadius": 3,
+                         "padding": [1, 3]})
         sig_points.append({
             # R469: 优先级 2（最高）—— 去重叠时买卖点先占位，不再被背驰/拐点标签挤掉
             # R472: 同一优先级另以 "p" 落进产物 —— 前端 relayout() 在 dataZoom 后按真实
             # 视口重算时要用同一套优先级（"_pri" 是函数内临时字段，被 dedup pop 掉、不入 JSON）。
             "_pri": 2, "p": 2,
+            # R476: 是否「近 SIG_NEW_DAYS 个交易日内新生」（前端 _labW 要用它补 8px 外扩）
+            "new": _is_new,
             "coord": [dates[xi], price],
             "value": lbl,
-            "itemStyle": {"color": RED if d == 1 else GREEN},
+            "itemStyle": {"color": _sig_col},
             "symbol": "triangle" if d == 1 else "invertedTriangle",
             "symbolSize": 10,
-            # R339: label position 随确认位翻转 —— 买(低点)标签置下/卖(高点)置上, 与 bc_points 同构
-            "label": {"show": True, "position": "bottom" if d == 1 else "top", "color": RED if d == 1 else GREEN, "fontSize": 11, "fontWeight": "bold", "distance": 4}
+            # R339: label position 随确认位翻转 —— 买(低点)标签置下/卖(高点)置上
+            "label": _lab
         })
 
     # R472: **删除** bc_points（笔级背驰标注）—— 实证 100% 冗余：5 个指数共 113 条背驰点，
@@ -517,8 +607,13 @@ def echart_main(klines, r, sym, captured=None):
     hmax = max(abs(v) for v in hist) or 1
 
     # 确定性去重叠：买卖点/背驰/线段端点/拐点标签（ECharts markPoint 的 hideOverlap 在带 position/distance 时不可靠）
+    # R476: w_vis=253 是 ECharts 对 `dataZoom.start = (n-252)/n*100` 的实际解释结果
+    # （category 轴按 startValue = floor((n-1)*start/100) ⇒ n-253），SSR 实测 n=1383 时
+    # dataZoom[0] = {startValue:1130, endValue:1382} ⇒ 窗口类别 253 个。改这个值必须同改
+    # 下方 JS 的 dataZoom.start 算式（`D.dates.length - 252`）。
     dedup_mark_labels(sig_points + seg_points + cap_points, len(dates), _yMin, _yMax,
-                      1100 - 96 - 56, 640 * (1 - 0.40) - 48, 96, 48, date_idx)
+                      1100 - 96 - 56, 640 * (1 - 0.40) - 48, 96, 48, date_idx,
+                      bgap=True, w_vis=253)
 
     chart_data = {
         "dates": dates,
@@ -633,11 +728,13 @@ def echart_main(klines, r, sym, captured=None):
   // 左缘与 y 轴刻度打架。这里把同一套「优先级 + 像素重叠」贪心判据搬到运行时：每次
   // dataZoom 后按当前可见窗口与真实画布宽度重算，任意缩放级别都取该级别下的最优集。
   // 判据与 report.py dedup_mark_labels() 同口径（字宽公式 / 13px 框高 / +2px 余量）。
-  function _labW(t) {{
+  // R476: extra = 背景/边框的额外外扩（新信号标签带 padding[1,3]+borderWidth1 ⇒ 8px），
+  // 必须与 report.py _label_w(t, extra) 逐字同口径，否则门禁（按真实渲染算）会报重叠。
+  function _labW(t, extra) {{
     t = '' + (t == null ? '' : t);
     var w = 0;
     for (var i = 0; i < t.length; i++) w += (t.charCodeAt(i) > 0x2e80) ? 11.0 : 6.16;
-    return w + 2.2;
+    return w + 2.2 + (extra || 0);
   }}
   var _MK = D.sigPoints.concat(D.segPoints).concat(D.capPoints);
   var _MKI = {{}};
@@ -648,13 +745,23 @@ def echart_main(klines, r, sym, captured=None):
     var n = D.dates.length;
     var opt = chart.getOption();
     var dz = (opt.dataZoom && opt.dataZoom[0]) || {{ start: 0, end: 100 }};
-    var s = Math.max(0, Math.floor(n * (dz.start || 0) / 100));
-    var e = Math.min(n - 1, Math.ceil(n * ((dz.end == null) ? 100 : dz.end) / 100));
+    // R476: 与 ECharts category 轴（boundaryGap=True）**严格同式**。旧代码用
+    //   s = floor(n*start/100)、bar = plotW/(e-s) —— 两处都与渲染器不符：
+    //   ① ECharts 的 percent→索引是 (n-1) 而非 n：start=(n-252)/n*100 时
+    //      startValue = floor((n-1)*start/100) = n-253（实测 n=1383 → 1130）；
+    //   ② boundaryGap=True 时窗口含 W = e-s+1 个类别（各占一 band），类别中心落在 band 中央
+    //      ⇒ x = gridL + ((i-s)+0.5) * plotW/W。
+    //   优先直接取 ECharts 算好的 startValue/endValue（最不易错），退回时按 (n-1) 换算。
+    var s, e2;
+    if (dz.startValue != null) s = dz.startValue;
+    else s = Math.max(0, Math.floor((dz.start || 0) / 100 * (n - 1)));
+    if (dz.endValue != null) e2 = dz.endValue;
+    else e2 = Math.min(n - 1, Math.ceil(((dz.end == null) ? 100 : dz.end) / 100 * (n - 1)));
     var gridL = 96, gridR = 56, gridT = 48;
     var plotW = W - gridL - gridR;
     var plotH = 640 * (1 - 0.40) - gridT;
     if (plotW < 100) return;
-    var bar = plotW / Math.max(1, e - s);
+    var bar = plotW / Math.max(1, e2 - s + 1);
     var yAx = (opt.yAxis && opt.yAxis[0]) || {{}};
     var yMin = (yAx.min == null ? D.yMin : yAx.min);
     var yMax = (yAx.max == null ? D.yMax : yAx.max);
@@ -667,8 +774,8 @@ def echart_main(klines, r, sym, captured=None):
       xi = _MKI[c[0]];
       if (xi == null) continue;
       lab = it.label || (it.label = {{}});
-      w = _labW(it.value);
-      x = gridL + (xi - s) * bar;
+      w = _labW(it.value, it.new ? 8 : 0);
+      x = gridL + ((xi - s) + 0.5) * bar;
       // ① 点本身落在绘图区内（否则渲染器会把它 clamp 到边界、与 y 轴刻度打架）
       // ② 标签框左缘不得探入 y 轴刻度区（与 report.py 的轴区判据同口径）
       if (!(x >= gridL - 0.5 && x <= gridL + plotW + 0.5 && x - w / 2 >= gridL)) {{
@@ -1549,8 +1656,14 @@ def forecast_echart(sym, fc_data):
     key_levels_text = "  ".join(f_kl)
 
     # 确定性去重叠：推演端点（主/次/风险）标签
-    dedup_mark_labels(end_points, len(xcats), core_lo, core_hi, 1100 - 96 - 64, 440 - 44 - 74, 96, 44,
-                      {xcats[-1]: len(xcats) - 1})
+    # R476: 三个几何量此前全是错的，用 SSR 真渲染 + convertToPixel() 实测校正（误差 0.0000）：
+    #   ① plot_w: 传 940（=1100-96-64）而真实绘图区宽 = 1100-96-**88** = **916**（grid.right=88）
+    #   ② plot_h: 传 440-44-74=322 而真实 = 440 - **64** - **80** = **296**（grid top/bottom 实测）
+    #   ③ grid_t: 传 44 而真实 = **64**
+    #   ④ 且预测图 xAxis boundaryGap=**False** ⇒ 分母是 n-1（不是 n）：实测 bar = 916/149 = 6.147651
+    # 叠加后右端标签 x 偏差达 **17.73px** ⇒ 跨价格/跨位置的去重叠判据系统性失准。
+    dedup_mark_labels(end_points, len(xcats), core_lo, core_hi, 1100 - 96 - 88, 440 - 64 - 80, 96, 64,
+                      {xcats[-1]: len(xcats) - 1}, bgap=False)
 
     fdata = {
         "keyLevelsText": key_levels_text,
@@ -3371,6 +3484,15 @@ def main():
     for sym, d in data.items():
         try:
             r = results[sym]
+            # R476: 「新信号」标记 —— 有限重放算出每条信号"已存在几天"（详见 compute_sig_birth）。
+            # 包 try：这是展示层增强，任何异常都不应影响报告生成（退化为"无新信号"）。
+            try:
+                sig_age = compute_sig_birth(d["klines"], r)
+            except Exception as _e:
+                # 不能静默：防御式 except 会把代码错误伪装成"没有新信号"（R476 首版即如此）
+                print(f"[warn] {sym} 新信号标记失败（{type(_e).__name__}: {_e}）"
+                      f"，本条退化为不标记", file=sys.stderr)
+                sig_age = {}
             # 推演路径历史命中率回测（预测准确性自校验）：horizon 与推演图自适应 horizon 对齐，
             # 使「路径命中率自校验」对照的是同一时间尺度（此前固定 h=60，而锥图用 30~90 自适应，
             # 口径不一致会让校准对照失真）。step 取 horizon//2 保证样本窗基本不重叠、统计独立。
@@ -3413,8 +3535,14 @@ def main():
     <section class="panel" id="sec-{sym}">
       <h2>{d["name"]}（{sym}）{badge(f'日线：{cls["scenario"]}', sc_color)}{badge(f'周线：{wcls["scenario"]}', w_color)}{badge(f'月线：{mcls["scenario"]}', m_color)}{badge(f'健康 {health}', _score_color(health))}{badge(f'置信 {conf}', _score_color(conf))}{_sent_badge}</h2>
       <div class="chartbox">
-        {echart_main(d["klines"], r, sym, r["captured"])}
+        {echart_main(d["klines"], r, sym, r["captured"], sig_age)}
       </div>
+      <div style="margin-top:6px;font-size:12px;line-height:1.75;color:#64748b">标签：<b>1/2/3买·卖</b> = 一类/二类/三类买卖点 ·
+        <b>段顶·次高 / 段底·次低</b> = 线段级二类折返 ·
+        <b>·趋 / ·盘</b> = 趋势 / 盘整背驰 · <b>·量</b> = 量价背离确认 ·
+        <span style="background:rgba(229,69,69,0.13);border:1px solid #e54545;border-radius:3px;padding:0 3px;font-weight:700">新 XX 买·卖</span>
+        = <b>近 {SIG_NEW_DAYS} 个交易日内才出现</b>的信号（因信号须等其所处「笔」走完才确认，
+        其坐标日期会<b>早于</b>诞生日 5~12 个交易日，属正常，非数据错误）</div>
       <div class="verdict"><b>结构解读：</b><p>{cls["detail"]}</p>
       <p style="margin-top:4px"><b>周线级别：</b>{wcls["detail"]}</p>{_sent_row}</div>
       <h3 class="fc-title">未来走势推演</h3>
