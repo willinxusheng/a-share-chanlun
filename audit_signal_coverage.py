@@ -34,6 +34,28 @@ from chanlun import analyze  # noqa: E402
 EXPECT_SYMS = {"sh000001", "sh000300", "sz399001", "sz399006", "sh000905"}
 
 
+def seg_kind_short():
+    """段级 kind[:3] → 图上显示串的映射。
+
+    ★ **单一来源**：直接从 report.py 的 `_KIND_SHORT` 里筛出以「段」开头的键。
+    R480 之前这里是**硬编码的 {段一买, 段一卖, 段二买, 段二卖}** ⇒ 新增段三后，18 条
+    **已经正确合并**进笔级标签的段三点被误判成「未进产物 / 引擎有产物无」，门禁假 FAIL。
+    同义词表一旦硬编码，就必然随新增级别而失效 —— 这类"改 A 漏改 B"是本项目的高频坑。
+    导入 report 是安全的：它只有 `if __name__ == "__main__"` 守卫，模块级只定义常量。
+    异常时**显式报错**而不是退化成空表 —— 空表会让门禁在错误前提下给出 PASS。
+    """
+    try:
+        import report as _rp            # noqa: PLC0415 —— 延迟导入：避免与门禁自身形成循环
+    except Exception as e:              # pragma: no cover
+        raise RuntimeError(
+            f"无法导入 report.py 读取 _KIND_SHORT（{e}）—— 段级合并识别不可靠，拒绝出结论"
+        ) from e
+    m = {k: v for k, v in getattr(_rp, "_KIND_SHORT", {}).items() if k.startswith("段")}
+    if not m:
+        raise RuntimeError("report.py 的 _KIND_SHORT 里没有任何「段*」键 —— 映射表结构已变，门禁需同步")
+    return m
+
+
 def parse_blocks(html):
     """抽出所有 `var D = {...}` 块（主图/预测图交错）。"""
     out = []
@@ -99,8 +121,8 @@ def main():
         # （R479，如 `08-25 2买` + `段2买` → `08-25 2买·段2买`）—— 它们不该各自成点，
         # 但**必须**能在对应笔级标签里找到自己的级别标记；其余仍须各自成点。
         # ★ 这比"只比条数"更强：合并逻辑若静默吞掉一条，这里会直接判 FAIL。
-        _seg_short = {"段一买": "段1买", "段一卖": "段1卖",
-                      "段二买": "段2买", "段二卖": "段2卖"}
+        # ★ 映射取**单一来源**（report.py 的 _KIND_SHORT）—— 硬编码副本会随新增级别静默失效
+        _seg_short = seg_kind_short()
         _val_at = {(p["coord"][0], round(p["coord"][1], 2)): (p.get("value") or "") for p in sig}
         own_seg, merged_seg = [], []
         for s in e_seg:

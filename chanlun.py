@@ -496,12 +496,21 @@ def attach_rr(signals, bis, zss, klines, merged):
         prev_hi = max((b["high"] for b in _prev), default=price)
         prev_lo = min((b["low"] for b in _prev), default=price)
         z_prev = None
-        for z in zss:
-            if z["end"] <= bj["start"]:
-                z_prev = z
+        # R480: 信号可自带**锚定中枢**（`zs_ref`）—— 段级三类点必须锚在**段级**中枢的下沿/上沿，
+        # 用笔中枢会把止损位放到错误的级别上。缺省（键不存在）⇒ 走原逻辑，笔级与段级
+        # 一类/二类的 stop/target/rr **逐字节不变**（已用 R480 零回归对照实证）。
+        if s.get("zs_ref"):
+            z_prev = s["zs_ref"]
+        else:
+            for z in zss:
+                if z["end"] <= bj["start"]:
+                    z_prev = z
         if s["dir"] == 1:  # 买点
             # 三类买（回抽不进中枢）：价格已在中枢上方，止损看「跌破中枢下沿 ZD」而非久远前低；
-            if "三类" in s["kind"] and z_prev:
+            # R480: "段三" 同样走此分支 —— kind 是「段三买点(回抽不进段中枢)」，其中「三类」
+            # 二字不相邻，用 `"三类" in kind` **匹配不到** ⇒ 会错走普通分支、把止损锚到近程前低，
+            # 丢掉的正是三类点最重要的「跌破中枢即证伪」语义。
+            if ("三类" in s["kind"] or "段三" in s["kind"]) and z_prev:
                 stop = z_prev["zd"] * 0.99
             else:
                 stop = prev_lo * 0.99 if prev_lo < price else price * 0.97
@@ -516,7 +525,8 @@ def attach_rr(signals, bis, zss, klines, merged):
                 tgt = max(tgt, z_prev["zg"] + _zh * 0.618 * 0.9)
             target = tgt
         else:  # 卖点
-            if "三类" in s["kind"] and z_prev:
+            # R480: "段三" 与 "三类" 同分支（理由见上方买点处的注释）
+            if ("三类" in s["kind"] or "段三" in s["kind"]) and z_prev:
                 stop = z_prev["zg"] * 1.01
             else:
                 stop = prev_hi * 1.01 if prev_hi > price else price * 1.03
@@ -574,6 +584,28 @@ def attach_rr(signals, bis, zss, klines, merged):
 SEG_LAG_LOOKBACK = 400   # 段二类：一类段之后「次级别首个反向折返」的搜索上限（笔数，防御式上限）
 
 
+def build_seg_zhongshu(segments, merged):
+    """在线段序列上重构「段级中枢」（R480）。
+
+    与笔中枢**同构**：连续 3 条线段的重叠区间即段级中枢，其后线段有重叠则扩展
+    （含 ≥9 段延伸标记）。实现上**直接复用 `build_zhongshu`** —— `segments` 的元素与
+    笔在字段上同构（`start`/`end`/`high`/`low`/`start_price`/`end_price`），唯一差别是
+    `build_zhongshu` 会读 `date_start`/`date_end` ⇒ 这里补上。
+
+    ⚠ 本函数**只服务于段级三类点**的判断，不改动任何既有结构：笔中枢 `zss` 仍由
+    `build_zhongshu(bis)` 产出，图上中枢区间/分类推演的读数**不受影响**。
+    """
+    if not segments:
+        return []
+    _segs = []
+    for s in segments:
+        t = dict(s)
+        t["date_start"] = merged[s["start"]]["date"]
+        t["date_end"] = merged[s["end"]]["date"]
+        _segs.append(t)
+    return build_zhongshu(_segs)
+
+
 def find_seg_signals(bis_done, segments, seg_beichi, zss, klines, merged):
     """段级（线段级别）买卖点 —— 级别联立的第二个级别（R478 新增）。
 
@@ -596,21 +628,48 @@ def find_seg_signals(bis_done, segments, seg_beichi, zss, klines, merged):
       段二类买/卖点 = 段一类之后**次级别（笔）首个反向折返**不破前极值
                       （段底背驰后首支向下笔低点 > 段底价；破则锚点失效、不再后扫 —— 与
                       find_signals 的 R338 语义一致，避免把数十日后的普通折返错配成二类）。
-    三类（段级中枢的离开-回抽）**不实现**：段级中枢需先在线段序列上重构中枢，属独立课题；
-    宁缺勿滥 —— 用未经验证的定义去标注，比不标更糟。
+      段三类买/卖点 = **段级中枢**形成后，次级别（笔）回抽/反抽**不重新进入**段级中枢区间
+                      （R480 补齐；定义与笔级三类点逐字同构，只把「笔中枢」换成「段级中枢」、
+                      把「离开-回抽」的级别升一层。**段级中枢由 build_seg_zhongshu 在线段序列
+                      上重构**，此前 R478 因缺这一步而整族缺失）。
 
     未来函数防护：段端点所在笔必须是**已完成笔**（bis_done 内）。最后一段若仍挂在未完成笔上，
     该段不产出信号（原「段底·背驰」结构参照位不受影响 —— 那是结构标注，不是交易信号）。
+    三类点的回抽体同样只在 `bis_done` 里取，且要求其起点晚于段级中枢的结束 ⇒ 天然落在过去。
 
     返回与笔级信号同构（bi_index 指向 bis 下标），可直接喂 attach_rr()。
     """
-    if not segments or not seg_beichi:
+    if not segments:
         return []
     end2bi = {}
     for i, b in enumerate(bis_done):
         end2bi.setdefault(b["end"], i)      # merged 索引 → 已完成笔下标
     raw = []
-    for sb in seg_beichi:
+    # ── R480: 段级三类买卖点（段级中枢的「离开-回抽」）──────────────────────────
+    # 判定逐字照抄 find_signals 的笔级三类点（第 434~447 行），只把中枢来源从「笔中枢」
+    # 换成「段级中枢」、把回抽体从「笔」保持不变（段级的次级别就是笔）。
+    # 每个段级中枢只取其离开后的**首个**有效回抽（与笔级同律，避免多年累积噪声）。
+    # 实测（5 指数 2021 至今日线）：段级中枢 39 个 → 三类点 34 条，其中 18 条与笔级三类点
+    # **同坐标**（图上按既有机制合并成「3买·段3买」），16 条为纯增量。
+    for z in build_seg_zhongshu(segments, merged):
+        for j in range(len(bis_done)):
+            bj = bis_done[j]
+            if bj["start"] > z["end"]:      # 笔起点在段级中枢结束之后
+                if bj["dir"] == -1 and bj["start_price"] > z["zg"] and bj["end_price"] > z["zd"]:
+                    raw.append({"bi_index": j, "kind": "段三买点(回抽不进段中枢)", "dir": 1,
+                                "date": bj["date_end"], "price": bj["end_price"],
+                                "vol_confirm": False, "bc_type": "", "level": "seg",
+                                # ★ 自带锚定中枢：attach_rr 据此把止损锚在**段级**中枢下沿，
+                                #   而不是笔中枢（否则级别错配，止损位无意义）。
+                                "zs_ref": {"zg": z["zg"], "zd": z["zd"], "end": z["end"]}})
+                    break
+                if bj["dir"] == 1 and bj["start_price"] < z["zd"] and bj["end_price"] < z["zg"]:
+                    raw.append({"bi_index": j, "kind": "段三卖点(反抽不进段中枢)", "dir": -1,
+                                "date": bj["date_end"], "price": bj["end_price"],
+                                "vol_confirm": False, "bc_type": "", "level": "seg",
+                                "zs_ref": {"zg": z["zg"], "zd": z["zd"], "end": z["end"]}})
+                    break
+    for sb in (seg_beichi or []):
         si = sb.get("seg_index")
         if si is None or si < 0 or si >= len(segments):
             continue
@@ -657,7 +716,10 @@ def find_seg_signals(bis_done, segments, seg_beichi, zss, klines, merged):
             break                           # 首支反向折返即终止（破位 = 锚点失效，不再后扫）
     # 去重：同一支笔可能被多个段锚点选中（一类优先，与 find_signals 的 _prio 同序）
     def _prio(k):
-        return 0 if "段一" in k else 1
+        # R480: 加入段三点后，优先级为 一类 > 三类 > 二类 —— 与 find_signals 的
+        # `_prio = lambda k: 0 if "一类" in k else (1 if "三类" in k else 2)` 逐字同序。
+        # 「段一 > 段二」的相对顺序未变 ⇒ 无段三点参与冲突时输出与 R478 逐字节一致。
+        return 0 if "段一" in k else (1 if "段三" in k else 2)
 
     _seen, dedup = {}, []
     for s in sorted(raw, key=lambda x: (x["bi_index"], _prio(x["kind"]))):
