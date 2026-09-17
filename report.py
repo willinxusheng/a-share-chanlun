@@ -74,7 +74,14 @@ _KIND_SHORT = {
     "一类买": "1买", "一类卖": "1卖",
     "二类买": "2买", "二类卖": "2卖",
     "三类买": "3买", "三类卖": "3卖",
+    # R478: 段级（线段级别）买卖点 —— 显示串必须与笔级**一眼可分**（段前缀），
+    # 否则用户会把段级二类当成笔级二类，两个级别的止损/目标完全不同。
+    "段一买": "段1买", "段一卖": "段1卖",
+    "段二买": "段2买", "段二卖": "段2卖",
 }
+
+# R478: 段级买卖点在图上的标签后缀（与笔级 sig_points 的 ·趋/·盘/·量 同位置的语义补充）。
+_SEG_MARKER = {"段级底背驰": "·背驰", "段级顶背驰": "·背驰"}
 
 # R476: 顶部筹码条（graphic rich 文本）的排版常量 —— 与 JS 侧 option.graphic 的 style/rich
 # **单一来源**（JS 里的 fontSize 由这里的值插值，_chip_obs_rect() 也用同一份，不会漂移）。
@@ -149,7 +156,8 @@ def _chip_obs_rect(parts, left, top, base_fs, rich_fs):
 
 
 def dedup_mark_labels(items, n, y_min, y_max, plot_w, plot_h, grid_l, grid_t,
-                      idx_map, default_pos="top", bgap=True, w_vis=253, obs=None):
+                      idx_map, default_pos="top", bgap=True, w_vis=253, obs=None,
+                      push_out=0.0, push_pri=2, push_step=2.0):
     """确定性地去重叠 markPoint 标签：按 (优先级 desc, x asc) 贪心保留，与已保留标签框
     重叠的则隐藏。仅修改各 item 的 label['show']，不改变标记符号。
 
@@ -196,6 +204,23 @@ def dedup_mark_labels(items, n, y_min, y_max, plot_w, plot_h, grid_l, grid_t,
     筹码条是 z-index 100 的独立 graphic，既不在 markPoint 集合里、也不参与去重叠，所以
     贪心判据对它完全无感。障碍框的几何由 `_chip_obs_rect()` 按实测排版律给出（见其 docstring）。
     ⚠ 若 obs 为 None（如未提供筹码条内容），行为与改动前**逐字节一致**。
+
+    R479: 引入「碰撞先**外推**再隐藏」（push_out>0 时生效）。此前唯一出路是隐藏，而两个标签的
+    **纵向间距**是由 `distance` 决定的 ⇒ 把后来者的 distance 推大到 |Δy| ≥ 13px，两者就能共存。
+    触发场景是用户红框指出的那一类：`2026-07-20 段1买·背驰`(3741.11) 与 `2026-07-30 段2买`
+    (3767.50) 价差仅 26.39 点，默认视口下 y 向相距 8.53px < 13px ⇒ 后者被隐藏。两者都是各自
+    段锚点上**唯一**的二类确认位，藏掉哪个都丢信息，而它们本来就是「同级别相邻两次同向机会」，
+    叠在一起才正常 ⇒ 外推后间距 ≥ 13px，可共存且仍紧邻各自锚点。
+
+    ★ 位移量必须**自适应**（`push_step` 由小到大扫到第一个可行值），不能是固定值：
+    位移 t 使 |Δy| = |Δy₀ ∓ t| **先减后增**，固定 18px 实测两头都翻过车 ——
+      ① 上证 2026-07-30：Δy₀=8.53，t=18 → 推到被撞者另一侧仅 9.5px（仍撞）；
+      ② 中证500 2026-08-25：t=18 → 正好撞上第三个标签（Δy=11.8）。
+    规则刻意收窄，避免把图搞乱：① 只对 `_pri >= push_pri`（默认 2 = 交易信号）生效，结构
+    参照位/历史拐点仍走"让位隐藏"；② 位移有上限 `push_out`（默认 40px），推不进去就隐藏，
+    不做链式外推；③ 被推的条目把基准 distance 写进产物的 `d0` 键 —— 前端 `relayout()` 据此
+    复位再按同一规则重推，两侧单一口径（否则用户缩放一次，distance 会被反复叠加）。
+    ⚠ push_out=0（缺省）时行为与改动前**逐字节一致**（预测图调用点即走此路）。
     """
     if n <= 0 or (y_max - y_min) == 0:
         return
@@ -231,6 +256,15 @@ def dedup_mark_labels(items, n, y_min, y_max, plot_w, plot_h, grid_l, grid_t,
         except (TypeError, ValueError):
             return 12.0
 
+    def _lab_dist(it):
+        """标签基线与锚点的设计间距（缺省 5，与 ECharts 一致）。R479: 拆出来供外推判据复用 ——
+        外推就是在它之上加一层，且前端 relayout() 需要知道**基准值**才能复位。"""
+        lab = (it or {}).get("label") or {}
+        try:
+            return float(lab.get("distance", 5)) if lab.get("distance") is not None else 5.0
+        except (TypeError, ValueError):
+            return 5.0
+
     def _lab_off(it, pos):
         ss = (it or {}).get("symbolSize", 0)
         if isinstance(ss, (list, tuple)):
@@ -239,11 +273,7 @@ def dedup_mark_labels(items, n, y_min, y_max, plot_w, plot_h, grid_l, grid_t,
             ss = float(ss)
         except (TypeError, ValueError):
             ss = 0.0
-        lab = (it or {}).get("label") or {}
-        try:
-            dist = float(lab.get("distance", 5)) if lab.get("distance") is not None else 5.0
-        except (TypeError, ValueError):
-            dist = 5.0
+        dist = _lab_dist(it)
         fsz = _lab_fs(it)
         off = ss / 2.0 + dist + fsz / 2.0
         return -off if pos == "top" else off
@@ -296,6 +326,11 @@ def dedup_mark_labels(items, n, y_min, y_max, plot_w, plot_h, grid_l, grid_t,
         recs.append({"x": _x, "yc": y_of(c[1], pos, it), "w": _w, "p": it,
                      "fs": _lab_fs(it), "pri": it.pop("_pri", 0)})
     recs.sort(key=lambda d: (-d["pri"], d["x"]))
+
+    def _collide(mm, kept_):
+        return any(abs(mm["x"] - k["x"]) < (mm["w"] + k["w"]) / 2 + 2 and
+                   abs(mm["yc"] - k["yc"]) < 13 for k in kept_)
+
     kept = []
     for m in recs:
         # R476: 障碍框优先于贪心 —— 命中即隐藏，且**不占位**（已不可见，不该再挤掉别人）。
@@ -303,9 +338,38 @@ def dedup_mark_labels(items, n, y_min, y_max, plot_w, plot_h, grid_l, grid_t,
         if _obs_hit(m, obs):
             m["p"]["label"]["show"] = False
             continue
-        if any(abs(m["x"] - k["x"]) < (m["w"] + k["w"]) / 2 + 2 and
-               abs(m["yc"] - k["yc"]) < 13 for k in kept):
-            m["p"]["label"]["show"] = False
+        if _collide(m, kept):
+            # R479: 先试「外推」（逐步加大位移，取**最小可行值**）再隐藏。后来者外推（先到先得）。
+            # ★ 不能用**固定**位移：位移 t 让标签沿射线移动，与被撞者的 |Δy| = |Δy0 ∓ t| 是
+            #   **先减后增**的 ⇒ 固定 18px 既可能把标签"推过"被撞者、落在其另一侧 9.5px 处
+            #   （实测上证 2026-07-30 段2买），也可能正好撞上第三个标签（实测中证500 08-25）。
+            _pushed = False
+            if push_out > 0 and m["pri"] >= push_pri:
+                _pos = (m["p"].get("label") or {}).get("position", default_pos)
+                _d0 = _lab_dist(m["p"])
+                _sg = 1.0 if _pos != "top" else -1.0
+                _t = push_step
+                while _t <= push_out:
+                    _yc2 = m["yc"] + _sg * _t
+                    _m2 = {"x": m["x"], "w": m["w"], "fs": m["fs"], "yc": _yc2}
+                    # 纵向落点约束：标签框（[yc-0.8fs, yc+0.3fs]，与门禁 textBoxes 同模型）必须
+                    # 留在画布内、且不得探进下方成交量面板（该面板上缘 = grid_t+plot_h）。
+                    # ⚠ 不能用「yc 必须落在绘图区内」—— 实测深证 2026-07-01 段2卖 需要推到
+                    #   yc≈34（在 grid_t=48 之上、筹码条左侧的空白区），那样才既可见又不撞任何东西；
+                    #   按"绘图区内"判会把这类**完全合法**的外推一并否掉。
+                    _bbt = _yc2 - m["fs"] * 0.8
+                    _bbb = _yc2 + m["fs"] * 0.3
+                    if (_bbt >= 2.0 and _bbb <= grid_t + plot_h + 8.0
+                            and not _obs_hit(_m2, obs) and not _collide(_m2, kept)):
+                        m["p"]["label"]["distance"] = _d0 + _t
+                        m["p"]["d0"] = _d0    # 前端 relayout() 据此复位/重推（单一口径）
+                        m["yc"] = _yc2
+                        kept.append(m)
+                        _pushed = True
+                        break
+                    _t += push_step
+            if not _pushed:
+                m["p"]["label"]["show"] = False
         else:
             kept.append(m)
 
@@ -371,9 +435,15 @@ def compute_sig_birth(klines, r_now, lookback=SIG_LOOKBACK):
     key 用 `(date, dir)` 而非 `(date, dir, kind)` —— 重放时 kind 可能随结构微调而改写
     （如"一类卖点"↔"三类卖点"），用 kind 会把它误判成"新生"。
     成本：5 指数 × lookback 次全量 analyze（实测约 0.07s/次 ⇒ 约 2s）。
+    R478: now/keys 集合并入**段级信号**（r["seg_signals"]）—— 否则新增的段级买卖点永远拿不到
+    「新」标记（它们的 (date,dir) 若不与笔级信号重合，就查不到年龄）。两级用同一张年龄表是
+    正确的：段级信号挂在同一支笔端点上时，二者「诞生时刻」本就相同。
     """
     n = len(klines)
-    now = {(s["date"], s["dir"]) for s in r_now.get("signals", [])}
+    def _keyset(r):
+        return ({(s["date"], s["dir"]) for s in r.get("signals", [])} |
+                {(s["date"], s["dir"]) for s in r.get("seg_signals", [])})
+    now = _keyset(r_now)
     if not now or n < 80:
         return {}
     age = {k: 0 for k in now}
@@ -384,7 +454,7 @@ def compute_sig_birth(klines, r_now, lookback=SIG_LOOKBACK):
         # `chanlun.analyze`（report.py 并未 `import chanlun`）⇒ NameError，而这里的防御式
         # try 把它静默吞成「全部 age=0 / 耗时 0.00s」的**假绿**。教训：防御式 except 必须
         # 打印，否则它把真 bug 伪装成"没有新信号"。（详见 REF-debug-pitfalls）
-        keys = {(s["date"], s["dir"]) for s in analyze(klines[:n - cut]).get("signals", [])}
+        keys = _keyset(analyze(klines[:n - cut]))
         for k in now:
             if k in keys:
                 age[k] = cut
@@ -665,6 +735,89 @@ def echart_main(klines, r, sym, captured=None, sig_age=None):
                       "distance": 21}
         })
 
+    # R478: 段级（线段级别）买卖点 —— 级别联立的第二级（引擎见 chanlun.find_seg_signals）。
+    # **为什么加**：用户红框指出的「该买点没标」实测根因之一就是这一族完全缺失 ——
+    #   2026-07-30 低点 3767.50 是 2026-07-20 段底背驰(3741.11) 之后**次级别(笔)首个回抽
+    #   不破前低** ⇒ 标准「段级二类买点」；但引擎的二类点只以**笔级**一类买为锚 ⇒ 系统性漏标
+    #   （历史上证 4 例全漏：2022-05-10 / 2024-03-28 / 2025-05-28 / 2026-07-30；5 指数合计 87 条）。
+    # 口径：段级背驰端点 = 段级一类买卖点；其后再取次级别首个反向折返不破前极值 = 段级二类。
+    # 优先级 2（与笔级买卖点同级）—— 它们是交易信号，不该被结构参照位（pri 0）挤掉。
+    # R479: 笔级信号索引 —— (日期, 价, 方向) → 笔级条目，供下面「同坐标同向**合并显示**」用。
+    # 方向由 symbol 反推（sig_points 里 `triangle`=买 / `invertedTriangle`=卖，是唯一的单点符号）。
+    _sig_at = {}
+    for _p in sig_points:
+        _sig_at[(_p["coord"][0], _p["coord"][1],
+                 1 if _p.get("symbol") == "triangle" else -1)] = _p
+    _merged_keys = set()
+    seg_sig_points = []
+    for s in r.get("seg_signals", []) or []:
+        _bi = s["bi_index"]
+        if _bi >= len(bis):
+            continue
+        xi = merged[bis[_bi]["end"]]["idx_end"]
+        d = s["dir"]
+        _k3 = s["kind"][:3]
+        lbl = (f"{dates[xi][5:]} {_KIND_SHORT.get(_k3, _k3)}"
+               f"{_SEG_MARKER.get(s.get('bc_type', ''), '')}")
+        # 「新信号」判定走与笔级同一张年龄表（compute_sig_birth 的 now 集合已并入段级 key）⇒
+        # 段级也能带「新」前缀 + 底色，无需另开一套机制。
+        _age = (sig_age or {}).get((dates[xi], d))
+        _is_new = (_age is not None and _age <= SIG_NEW_DAYS)
+        # R479: 与**笔级信号同坐标同方向**时**合并显示**，不再另画一个 markPoint。
+        # 理由：两级落在同一锚点时，两个 markPoint 的符号会**逐像素重合**（实测中证500
+        # 2026-08-25 的「2买」与「段2买」坐标逐位相同；上证/深证/沪深300 同类各若干），
+        # 而符号重合后贪心必挤掉其中一个 —— 丢掉的是「两级共振」这条信息，不是噪声。
+        # ★ 只改**显示串**（`08-25 2买` → `08-25 2买·段2买`）：统计/回测仍各自成行、互不混计。
+        _mkey = (dates[xi], round(s["price"], 2), d)
+        _host = _sig_at.get(_mkey)
+        if _host is not None:
+            _host["value"] = f"{_host['value']}·{_KIND_SHORT.get(_k3, _k3)}"
+            if _is_new and not _host.get("new"):
+                # 段级是「新」而宿主不是 ⇒ 把宿主提升为「新信号」样式（前缀 + 底色 + 外推一层），
+                # 与笔级新信号同一套写法；宽度补偿由 it["new"] 驱动（见 _label_w / 前端 _labW）。
+                _host["new"] = True
+                _host["value"] = "新 " + _host["value"]
+                _host["label"].update({
+                    "backgroundColor": "rgba(229,69,69,0.13)" if _host.get("symbol") == "triangle"
+                                       else "rgba(24,160,88,0.13)",
+                    "borderColor": _host["itemStyle"]["color"], "borderWidth": 1,
+                    "borderRadius": 3, "padding": [1, 3], "distance": 4 + 18})
+            _merged_keys.add((_host["coord"][0], _host["coord"][1]))
+            continue
+        if _is_new:
+            lbl = "新 " + lbl
+        _sig_col = RED if d == 1 else GREEN
+        _lab = {"show": True, "position": "bottom" if d == 1 else "top",
+                "color": _sig_col, "fontSize": 11, "fontWeight": "bold",
+                "distance": (4 + 18) if _is_new else 4}
+        if _is_new:
+            _lab.update({"backgroundColor": "rgba(229,69,69,0.13)" if d == 1 else "rgba(24,160,88,0.13)",
+                         "borderColor": _sig_col, "borderWidth": 1, "borderRadius": 3,
+                         "padding": [1, 3]})
+        seg_sig_points.append({
+            "_pri": 2, "p": 2,
+            # lvl=2 = 段级（笔级信号不带该键 ⇒ 前端/门禁可据此区分，向后兼容）
+            "lvl": 2,
+            "new": _is_new,
+            "coord": [dates[xi], round(s["price"], 2)],
+            "value": lbl,
+            "itemStyle": {"color": _sig_col},
+            # 比笔级三角大一圈：两级同时出现时用户一眼能分出哪个是线段级别。
+            "symbol": "triangle" if d == 1 else "invertedTriangle",
+            "symbolSize": 13,
+            "label": _lab
+        })
+    # 去冗余：段级信号与「线段端点参照位」(seg_points) 必然落在**完全相同**的 (日期,价) 上
+    # （段一类 = 段背驰端点；段二类 = 段端点·次高/次低，见 _seg2_label）。信号标签信息量严格更大
+    # （含买卖方向；表③ 还给出止损/目标/R:R）⇒ 同坐标只留信号，避免两个标签互相挤。
+    # R479: 被**合并进笔级标签**的段级信号（_merged_keys）也算「该坐标已有信号」—— 否则它的
+    # 段端点参照位会重新出现在同一坐标上，与合并后的标签再撞一次。
+    if seg_sig_points or _merged_keys:
+        _sg_keys = ({(p["coord"][0], p["coord"][1]) for p in seg_sig_points}
+                    | _merged_keys)
+        seg_points = [p for p in seg_points
+                      if (p["coord"][0], p["coord"][1]) not in _sg_keys]
+
     # 已知历史拐点
     cap_points = []
     if captured is not None:
@@ -706,6 +859,56 @@ def echart_main(klines, r, sym, captured=None, sig_age=None):
     _yMin = math.floor((_yMin - _pad) / 10) * 10
     _yMax = math.ceil((_yMax + _pad) / 10) * 10
 
+    # ── R479: 去重叠判据的 y 尺度必须与**运行时同口径**（这是「该标的买卖点标不出来」的
+    # 第三个根因；前两个 R470 修了 x 尺度、R472 加了运行时 relayout，y 一直漏着）。
+    #   · 生成期：上面的 `_yMin/_yMax` 是**全历史极值**（上证 2021 至今 2635~4260，span 1760
+    #     ⇒ ppx ≈ 0.19 px/点）；
+    #   · 运行时：`recomputeY()` 在 init（以及每次 dataZoom）按**当前视口**（默认最近 253 根）
+    #     重算并 setOption yAxis.min/max（span ≈ 1040 ⇒ ppx ≈ 0.32 px/点）。
+    # 实测尺度差 1.2~2.3×（5 指数）⇒ 生成期把真实相距 8.53px 的标签算成 5.04px、判为重叠并
+    # **烤死**成 show:false；而前端 init 刻意**不调用** relayout（"首屏保持生成期结果、门禁
+    # 看到的就是首屏"）⇒ 用户首屏看到的正是这份过度隐藏。实证：上证 2026-07-20 段1买(3741.11)
+    # 与 2026-07-30 段2买(3767.50) 价差 26.39 点，真实 8.53px、生成期算成 5.04px。
+    # ⇒ 判据改用**视口口径**：窗口 [a,b] 内 OHLC 极值 + 四档均线 + lastZsLines + fibLines +
+    #   gapAreas，pad=6%、floor/ceil 到 10 —— 与 recomputeY() 逐式同律。
+    # ⚠ 仅喂给 dedup 判据，**不改** chart_data["yMin"]/["yMax"]（那是 y 轴渲染范围，改了会连锁
+    #   影响区间导航条几何，属另一件事）。
+    _nd = len(dates)
+    _vz = max(0.0, (_nd - 252) / _nd * 100.0) if _nd else 0.0
+    _va = max(0, int(math.floor(_nd * _vz / 100.0)))
+    _vb = _nd - 1
+    _yMinV, _yMaxV = _yMin, _yMax
+    if _nd and _vb >= _va:
+        _vlo = min(ohlc[i][2] for i in range(_va, _vb + 1))
+        _vhi = max(ohlc[i][3] for i in range(_va, _vb + 1))
+        for _ser in (ma20, ma60, ma120, ma250):
+            for i in range(_va, _vb + 1):
+                _v = _ser[i]
+                if _v is not None:
+                    if _v < _vlo:
+                        _vlo = _v
+                    if _v > _vhi:
+                        _vhi = _v
+        for _ln in (last_zs_lines, fib_lines):
+            for _e in _ln:
+                _v = _e.get("yAxis")
+                if _v is not None:
+                    if _v < _vlo:
+                        _vlo = _v
+                    if _v > _vhi:
+                        _vhi = _v
+        for _gp in gap_areas:
+            for _e in _gp:
+                _v = _e.get("yAxis")
+                if _v is not None:
+                    if _v < _vlo:
+                        _vlo = _v
+                    if _v > _vhi:
+                        _vhi = _v
+        _vpad = (_vhi - _vlo) * 0.06
+        _yMinV = math.floor((_vlo - _vpad) / 10) * 10
+        _yMaxV = math.ceil((_vhi + _vpad) / 10) * 10
+
     vmax = max(volumes) or 1
     hmax = max(abs(v) for v in hist) or 1
 
@@ -714,9 +917,12 @@ def echart_main(klines, r, sym, captured=None, sig_age=None):
     # （category 轴按 startValue = floor((n-1)*start/100) ⇒ n-253），SSR 实测 n=1383 时
     # dataZoom[0] = {startValue:1130, endValue:1382} ⇒ 窗口类别 253 个。改这个值必须同改
     # 下方 JS 的 dataZoom.start 算式（`D.dates.length - 252`）。
-    dedup_mark_labels(sig_points + seg_points + cap_points, len(dates), _yMin, _yMax,
+    # R479: y 传视口口径（_yMinV/_yMaxV），并开启「碰撞自适应外推」（≤40px，只对交易信号）。
+    dedup_mark_labels(sig_points + seg_sig_points + seg_points + cap_points,
+                      len(dates), _yMinV, _yMaxV,
                       1100 - 96 - 56, 640 * (1 - 0.40) - 48, 96, 48, date_idx,
-                      bgap=True, w_vis=253, obs=_chip_obs)
+                      bgap=True, w_vis=253, obs=_chip_obs,
+                      push_out=40.0, push_pri=2, push_step=2.0)
     # R476 注：预测图（下方 forecast_echart）**不加**障碍框 —— 它的标签是静态的、
     # 不经 relayout 重排，且其筹码条（left:100, top:50，6 种 rich 片段）在 verify_overlap.js
     # 的初始 + 3 档视口扫描里实测零重叠 ⇒ 已被门禁完全覆盖，不需要额外判据。
@@ -741,6 +947,7 @@ def echart_main(klines, r, sym, captured=None, sig_age=None):
         "gapAreas": gap_areas,
         "fibLines": fib_lines,
         "sigPoints": sig_points,
+        "segSigPoints": seg_sig_points,
         "segPoints": seg_points,
         "segLines": seg_lines,
         "capPoints": cap_points,
@@ -907,9 +1114,26 @@ def echart_main(klines, r, sym, captured=None, sig_age=None):
                 y0: _cy - 0.8 * _KL_OBS_MFS, y1: _cy + 0.3 * _KL_OBS_MFS }};
     }} catch (e) {{ return null; }}
   }}
-  var _MK = D.sigPoints.concat(D.segPoints).concat(D.capPoints);
+  // R478: 段级买卖点（D.segSigPoints）与笔级同列进 markPoint；`|| []` 兜底是为了让
+  // 旧产物/局部渲染（无该键）仍能跑，不因新增键而 ReferenceError。
+  var _MK = D.sigPoints.concat(D.segSigPoints || []).concat(D.segPoints).concat(D.capPoints);
   var _MKI = {{}};
   for (var _qi = 0; _qi < D.dates.length; _qi++) _MKI[D.dates[_qi]] = _qi;
+  // R479: 碰撞「自适应外推」的参数，必须与 report.py dedup_mark_labels(push_out/push_pri/
+  // push_step) **同参**（两侧不同 ⇒ 门禁按真实渲染算出的结论与生成期会对不上）：
+  //   _PUSH_MAX=40（位移上限，推不进去就隐藏）/ _PUSH_STEP=2（由小到大扫，取**最小可行**位移）/
+  //   仅 pri>=2（交易信号）适用。★ 位移不能取固定值 —— |Δy| = |Δy₀ ∓ t| 是**先减后增**的，
+  //   固定值既可能"推过"被撞者落在它另一侧（实测上证 07-30 段2买：Δy 9.5px 仍撞），也可能
+  //   正好撞上第三个标签（实测中证500 08-25：Δy 11.8px）。
+  var _PUSH_MAX = 40, _PUSH_STEP = 2;
+  // R479: 障碍框判据抽成函数 —— 外推重试要拿**新的 yc** 再判一次「是否推进筹码条里」。
+  // 框模型与 report.py _obs_hit() 逐字同式（x 向 [x±w/2]，纵向 [yc-0.8·fs, yc+0.3·fs]，两向 > 1px）。
+  function _obsHit(x, yc, w, fs, o) {{
+    if (!o) return false;
+    var _ox = Math.min(x + w / 2, o.x1) - Math.max(x - w / 2, o.x0);
+    var _oy = Math.min(yc + fs * 0.3, o.y1) - Math.max(yc - fs * 0.8, o.y0);
+    return _ox > 1 && _oy > 1;
+  }}
   function relayout() {{
     var W = chart.getWidth();
     if (!W || W < 300) return;            // 尺寸不可用（SSR 等）⇒ 保留生成期结果
@@ -960,29 +1184,49 @@ def echart_main(klines, r, sym, captured=None, sig_age=None):
       var _ss = it.symbolSize;
       if (Object.prototype.toString.call(_ss) === '[object Array]') _ss = _ss.length > 1 ? _ss[1] : (_ss[0] || 0);
       _ss = (typeof _ss === 'number' ? _ss : (parseFloat(_ss) || 0));
-      var _dist = (lab.distance == null ? 5 : parseFloat(lab.distance));
-      if (isNaN(_dist)) _dist = 5;
       var _fsz = parseFloat(lab.fontSize);
       if (isNaN(_fsz)) _fsz = 12;
-      var _off = _ss / 2 + _dist + _fsz / 2;
-      recs.push({{ x: x, yc: gridT + (yMax - c[1]) * ppx + (pos === 'top' ? -_off : _off),
+      // R479: distance 用**基准值**（d0）参与定位，并在每次重排时复位 —— 生成期可能已把它
+      // 外推过一层（此时产物里同时写了 d0 = 原值），若不复位会层层叠加（缩放几次就飘走）。
+      var _d0 = (typeof it.d0 === 'number' ? it.d0 : (lab.distance == null ? 5 : parseFloat(lab.distance)));
+      if (isNaN(_d0)) _d0 = 5;
+      it.d0 = _d0;
+      lab.distance = _d0;
+      var _off = _ss / 2 + _d0 + _fsz / 2;
+      var _ybase = gridT + (yMax - c[1]) * ppx;
+      var _ysg = (pos === 'top' ? -1 : 1);
+      recs.push({{ x: x, yc: _ybase + _ysg * _off, ybase: _ybase, ysg: _ysg, off: _off,
                   w: w, it: it, fs: _fsz, pri: (it.p == null ? 0 : it.p) }});
     }}
     recs.sort(function (a, b) {{ return (b.pri - a.pri) || (a.x - b.x); }});
     var kept = [];
     for (i = 0; i < recs.length; i++) {{
-      var m = recs[i], hit = false;
+      var m = recs[i], hit = false, k;
       // R476: 障碍框优先于贪心 —— 命中即隐藏、且**不占位**（已不可见，不该再挤掉别人），
       // 与 report.py dedup_mark_labels() 的同一段判据同序同式。框模型与门禁 textBoxes()
       // 同款：x = [x±w/2]，纵向 = [yc-0.8·fs, yc+0.3·fs]，两向都需 > 1px 才算重叠。
-      if (_obs) {{
-        var _ox = Math.min(m.x + m.w / 2, _obs.x1) - Math.max(m.x - m.w / 2, _obs.x0);
-        var _oy = Math.min(m.yc + m.fs * 0.3, _obs.y1) - Math.max(m.yc - m.fs * 0.8, _obs.y0);
-        if (_ox > 1 && _oy > 1) {{ m.it.label.show = false; continue; }}
-      }}
-      for (var k = 0; k < kept.length; k++) {{
+      if (_obsHit(m.x, m.yc, m.w, m.fs, _obs)) {{ m.it.label.show = false; continue; }}
+      for (k = 0; k < kept.length; k++) {{
         if (Math.abs(m.x - kept[k].x) < (m.w + kept[k].w) / 2 + 2 &&
             Math.abs(m.yc - kept[k].yc) < 13) {{ hit = true; break; }}
+      }}
+      // R479: 碰撞时先试「自适应外推」再隐藏 —— 与 report.py dedup_mark_labels(push_out=40,
+      // push_pri=2, push_step=2) **同规则**（同参同序）。位移由小到大扫到第一个可行值；
+      // 推不进去（超出上限 / 会撞筹码条障碍框 / 越过绘图区）就隐藏。被推的条目把 distance
+      // 写回 label ⇒ ECharts 按新位置渲染；下次 relayout 由 d0 复位后重推（幂等，不层叠）。
+      if (hit && m.pri >= 2) {{
+        for (var _t = _PUSH_STEP; _t <= _PUSH_MAX; _t += _PUSH_STEP) {{
+          var _yc2 = m.ybase + m.ysg * (m.off + _t);
+          // 纵向落点约束与 report.py 同口径：标签框留在画布内、不进下方成交量面板。
+          if (_yc2 - m.fs * 0.8 < 2 || _yc2 + m.fs * 0.3 > gridT + plotH + 8) continue;
+          if (_obsHit(m.x, _yc2, m.w, m.fs, _obs)) continue;
+          var _h2 = false;
+          for (k = 0; k < kept.length; k++) {{
+            if (Math.abs(m.x - kept[k].x) < (m.w + kept[k].w) / 2 + 2 &&
+                Math.abs(_yc2 - kept[k].yc) < 13) {{ _h2 = true; break; }}
+          }}
+          if (!_h2) {{ m.it.label.distance = m.it.d0 + _t; m.yc = _yc2; hit = false; break; }}
+        }}
       }}
       m.it.label.show = !hit;
       if (!hit) kept.push(m);
@@ -2408,8 +2652,13 @@ def levels_table(data, results, results_week, results_month, scores):
 
 
 def backtest_table(backtests):
-    """汇总 5 指数信号回测：{sym: {kind: {h: {n, win_rate, avg_ret}}}}"""
-    KINDS = ["一类买", "一类卖", "二类买", "二类卖", "三类买", "三类卖"]
+    """汇总 5 指数信号回测：{sym: {kind: {h: {n, win_rate, avg_ret}}}}
+
+    R478: 新增段级行（段一买/段一卖/段二买/段二卖）。段级样本与笔级**分开统计**、分开成行 ——
+    两族样本性质不同（段级周期长约一个量级、样本少），混计会污染笔级的历史可比性。
+    """
+    KINDS = ["一类买", "一类卖", "二类买", "二类卖", "三类买", "三类卖",
+             "段一买", "段一卖", "段二买", "段二卖"]
     HORIZONS = [5, 10, 20, 60]
     agg = {}
     for sym, bt in backtests.items():
@@ -2439,20 +2688,32 @@ def backtest_table(backtests):
       <colgroup><col style="width:110px"><col style="width:calc((100%% - 110px)/4)"><col style="width:calc((100%% - 110px)/4)"><col style="width:calc((100%% - 110px)/4)"><col style="width:calc((100%% - 110px)/4)"></colgroup>
       <thead><tr><th>信号类型</th><th class="tac">后 5 个交易日</th><th class="tac">后 10 个交易日</th><th class="tac">后 20 个交易日</th><th class="tac">后 60 个交易日</th></tr></thead>
       <tbody>%s</tbody></table>
-      <p style="font-size:12px;color:#64748b;margin-top:8px">统计 5 大指数 2021-01 至今全部信号（买点胜=之后涨，卖点胜=之后跌）。买卖点按缠论标准：一类=背驰拐点，二类=次低/次高折返，三类=回抽不进中枢。样本有限，历史特征，非投资建议。</p>""" % "".join(rows)
+      <p style="font-size:12px;color:#64748b;margin-top:8px">统计 5 大指数 2021-01 至今全部信号（买点胜=之后涨，卖点胜=之后跌）。买卖点按缠论标准：一类=背驰拐点，二类=次低/次高折返，三类=回抽不进中枢；<b>段一/段二 = 线段级别</b>（段一=线段级背驰拐点，段二=段级一类后次级别首个回抽不破前极值），与笔级<b>分行独立统计、不混计</b>。样本有限，历史特征，非投资建议。</p>""" % "".join(rows)
 
 
 def rr_table(data, results, recent_n=8):
     """近期买卖点值博率（R:R）明细：每个指数最近 N 个买卖点的止损/目标/R:R/值博率——
-    缠论实战交易计划必备（每个买卖点须有明确止损位与目标位），此前报告完全缺失该维度。"""
+    缠论实战交易计划必备（每个买卖点须有明确止损位与目标位），此前报告完全缺失该维度。
+
+    R478: ① 并入**段级买卖点**（results[sym]["seg_signals"]）—— 否则「表里有、图上没有」
+    或反之都破坏一致性（本表是用户核对图上标注的唯一清单）；② 新增「级别」列显式区分
+    笔级/段级 —— 同一日期可能两级同时出点，只有 kind 文字区分不够，且两级的止损/目标
+    空间完全不同（段级更大）。排序按日期升序后取最近 N 条（原先按 signals 顺序切片，
+    并入段级后必须显式排序，否则混序）。"""
     rows = []
     for sym, d in data.items():
         r = results[sym]
-        for s in r["signals"][-recent_n:]:
+        # 合并两级信号并显式按日期排序（同级同日时笔级排前，保持与图上 pri 一致的直觉顺序）
+        _all = list(r["signals"]) + list(r.get("seg_signals") or [])
+        _all.sort(key=lambda s: (s.get("date") or "", 1 if s.get("level") == "seg" else 0))
+        for s in _all[-recent_n:]:
             _q = s.get("quality", "—")
             _qc = {"优": RED, "良": GREEN, "中": "#64748b", "差": "#b45309", "—": "#94a3b8"}.get(_q, "#94a3b8")
             _dir_col = RED if s["dir"] == 1 else GREEN
             _vc = "✓" if s.get("vol_confirm") else "—"
+            _lvl = "段级" if s.get("level") == "seg" else "笔级"
+            _lvl_txt = (f'<b style="color:#7c3aed">段级</b>' if _lvl == "段级"
+                        else '<span style="color:#94a3b8">笔级</span>')
             _rr_raw = s.get("rr")
             _rr = ("≥%.1f" % _rr_raw) if (s.get("rr_capped") and _rr_raw is not None) else (
                 ("%.1f" % _rr_raw) if _rr_raw is not None else "—")
@@ -2461,6 +2722,7 @@ def rr_table(data, results, recent_n=8):
             _target = ("%.1f" % s["target"]) if s.get("target") is not None else "—"
             rows.append(f"""<tr data-sym="{sym}" class="linkrow" data-jump>
               <td><b>{d["name"]}</b></td>
+              <td class="tac">{_lvl_txt}</td>
               <td style="color:{_dir_col};font-weight:600">{s["kind"]}</td>
               <td>{s["date"]}</td>
               <td class="tac">{_price}</td>
@@ -2470,12 +2732,12 @@ def rr_table(data, results, recent_n=8):
               <td class="tac">{badge(_q, _qc)}</td>
               <td class="tac">{_vc}</td>
             </tr>""")
-    return """<h3 class="fc-title">近期买卖点值博率（R:R）明细<span class="fc-sub">止损 / 目标 / 风险收益比 —— 缠论实战交易计划必备，此前报告完全缺失</span></h3>
+    return """<h3 class="fc-title">近期买卖点值博率（R:R）明细<span class="fc-sub">止损 / 目标 / 风险收益比 —— 缠论实战交易计划必备 · 含段级（线段级别）信号</span></h3>
       <table class="tbl">
-      <colgroup><col style="width:110px"><col style="width:calc((100%% - 110px)/8)"><col style="width:calc((100%% - 110px)/8)"><col style="width:calc((100%% - 110px)/8)"><col style="width:calc((100%% - 110px)/8)"><col style="width:calc((100%% - 110px)/8)"><col style="width:calc((100%% - 110px)/8)"><col style="width:calc((100%% - 110px)/8)"><col style="width:calc((100%% - 110px)/8)"></colgroup>
-      <thead><tr><th>指数</th><th>买卖点</th><th>日期</th><th class="tac">触发价</th><th class="tac">止损位</th><th class="tac">目标位</th><th class="tac">R:R</th><th class="tac">值博率</th><th class="tac">量✓</th></tr></thead>
+      <colgroup><col style="width:104px"><col style="width:46px"><col style="width:calc((100%% - 150px)/8)"><col style="width:calc((100%% - 150px)/8)"><col style="width:calc((100%% - 150px)/8)"><col style="width:calc((100%% - 150px)/8)"><col style="width:calc((100%% - 150px)/8)"><col style="width:calc((100%% - 150px)/8)"><col style="width:calc((100%% - 150px)/8)"><col style="width:calc((100%% - 150px)/8)"></colgroup>
+      <thead><tr><th>指数</th><th class="tac">级别</th><th>买卖点</th><th>日期</th><th class="tac">触发价</th><th class="tac">止损位</th><th class="tac">目标位</th><th class="tac">R:R</th><th class="tac">值博率</th><th class="tac">量✓</th></tr></thead>
       <tbody>%s</tbody></table>
-      <p style="font-size:12px;color:#64748b;margin-top:8px">R:R = (目标−触发) / (触发−止损)；值博率：优(RR≥2.5)/良(≥1.5)/中(≥1.0)/差(&lt;1)。止损取局部前低或中枢下沿 ZD，目标取近程摆动极值并封顶 6 倍防失真（表中 R:R 标「≥」者为封顶值，真实风险收益比可能更高）。结构参考，非交易建议。</p>""" % "".join(rows)
+      <p style="font-size:12px;color:#64748b;margin-top:8px">R:R = (目标−触发) / (触发−止损)；值博率：优(RR≥2.5)/良(≥1.5)/中(≥1.0)/差(&lt;1)。止损取局部前低或中枢下沿 ZD，目标取近程摆动极值并封顶 6 倍防失真（表中 R:R 标「≥」者为封顶值，真实风险收益比可能更高）。<b>级别</b>列：<span style="color:#94a3b8">笔级</span> = 笔级一/二/三类买卖点；<b style="color:#7c3aed">段级</b> = 线段级别买卖点（段一=段级背驰拐点，段二=段级一类后次级别首个回抽不破前极值）。本表列出的每一条都能在上方日线图上找到标注，反之亦然。结构参考，非交易建议。</p>""" % "".join(rows)
 
 
 def robustness_table(robust, data):
@@ -2535,7 +2797,7 @@ def robustness_table(robust, data):
       <colgroup><col style="width:140px"><col style="width:calc((100%% - 140px)/5)"><col style="width:calc((100%% - 140px)/5)"><col style="width:calc((100%% - 140px)/5)"><col style="width:calc((100%% - 140px)/5)"><col style="width:calc((100%% - 140px)/5)"></colgroup>
       <thead><tr><th>指数</th><th class="tac">早年买方信号胜率*</th><th class="tac">近两年买方信号胜率*</th><th class="tac">变化</th><th class="tac">买方样本量(早/近)</th><th>样本外稳健性</th></tr></thead>
       <tbody>%s</tbody></table>
-      <p style="font-size:12px;color:#64748b;margin-top:8px">买方信号（一类买·三类买，持有 20 日）按 {SPLIT} 多个切分点分别折算胜率后对切分点取均值（walk-forward，R326）。<b>判定一律用切分均值而非跨切分累计</b>——累计会把早年样本重复计数使胜率差失真（实测：上证累计口径 -43pt 实为 -2pt 稳定；沪深300 累计 +12pt 实为 -13pt 显著衰减）。近两年显著下滑(≥15pt)提示过拟合风险；持平/更高则样本外稳定。<b>早年或近两年买方样本&lt;20 时判定为「样本不足·难判定」，不据此发过拟合告警</b>（极小样本易出 100%% 胜率致衰减失真）。样本量列为早年/近两年买方信号累计计数，仅作可靠性参考。不构成投资建议。</p>""".replace("{SPLIT}", split)
+      <p style="font-size:12px;color:#64748b;margin-top:8px">买方信号（一类买·三类买，持有 20 日）按 {SPLIT} 多个切分点分别折算胜率后对切分点取均值（walk-forward，R326）。<b>判定一律用切分均值而非跨切分累计</b>——累计会把早年样本重复计数使胜率差失真（实测：上证累计口径 -43pt 实为 -2pt 稳定；沪深300 累计 +12pt 实为 -13pt 显著衰减）。近两年显著下滑(≥15pt)提示过拟合风险；持平/更高则样本外稳定。<b>早年或近两年买方样本&lt;20 时判定为「样本不足·难判定」，不据此发过拟合告警</b>（极小样本易出 100%% 胜率致衰减失真）。样本量列为早年/近两年买方信号累计计数，仅作可靠性参考。<b>段级买点（段一买·段二买）<u>不在本表范围内</u></b>——全市场 5 指数 2021 至今段级买点合计仅 43 条（段一买 22 / 段二买 21），再按指数×早年/近两年四分后每格只有个位数，切分均值无统计意义；纳入只会产出「100%% 胜率」这类假信号。段级的表现见上方回测汇总表（各周期分列、与笔级不混计）。不构成投资建议。</p>""".replace("{SPLIT}", split)
     return _tbl % "".join(rows)
 
 
@@ -3528,7 +3790,14 @@ def main():
     results = {sym: analyze(d["klines"]) for sym, d in data.items()}
     results_week = {sym: analyze(d["week_klines"], MIN_BI_PCT_WEEK) for sym, d in data.items()}
     results_month = {sym: analyze(d["month_klines"], MIN_BI_PCT_MONTH) for sym, d in data.items()}
-    backtests = {sym: backtest_signals(d["klines"], results[sym], exclude_last=True) for sym, d in data.items()}
+    # R478: 段级信号并入同一 dict（键为 kind，段级 kind 是 段一买/段二买… ⇒ 不与笔级撞键），
+    # 由 backtest_table 的 KINDS 决定展示顺序与分组 ⇒ 表里笔级/段级各成行、各算各的胜率。
+    backtests = {}
+    for sym, d in data.items():
+        _bt = dict(backtest_signals(d["klines"], results[sym], exclude_last=True))
+        _bt.update(backtest_signals(d["klines"], results[sym], exclude_last=True,
+                                    signals=results[sym].get("seg_signals") or []))
+        backtests[sym] = _bt
     # 样本外稳健性检验：按 2024-01-01 切分早年/近两年，检测校准过拟合
     robust = {sym: backtest_robustness(d["klines"], results[sym],
                                         splits=("2022-01-01", "2023-01-01", "2024-01-01"))
@@ -3737,12 +4006,20 @@ def main():
       <div class="chartbox">
         {echart_main(d["klines"], r, sym, r["captured"], sig_age)}
       </div>
-      <div style="margin-top:6px;font-size:12px;line-height:1.75;color:#64748b">标签：<b>1/2/3买·卖</b> = 一类/二类/三类买卖点 ·
-        <b>段顶·次高 / 段底·次低</b> = 线段级二类折返 ·
+      <div style="margin-top:6px;font-size:12px;line-height:1.75;color:#64748b">标签：<b>1/2/3买·卖</b> = <b>笔级</b>一类/二类/三类买卖点（背驰拐点 / 次低次高折返 / 回抽不进中枢）·
+        <b>段1买·段1卖</b> = <b>线段级</b>一类买卖点（线段级背驰拐点，三角比笔级大一圈）·
+        <b>段2买 / 段2卖</b> = <b>线段级</b>二类买卖点（段级一类之后，<b>次级别(笔)</b>首个回抽不破前极值）·
+        <b>段顶 / 段底</b> = 线段端点结构参照位（含 ·背驰 / ·次高 / ·次低）·
         <b>·趋 / ·盘</b> = 趋势 / 盘整背驰 · <b>·量</b> = 量价背离确认 ·
         <span style="background:rgba(229,69,69,0.13);border:1px solid #e54545;border-radius:3px;padding:0 3px;font-weight:700">新 XX 买·卖</span>
         = <b>近 {SIG_NEW_DAYS} 个交易日内才出现</b>的信号（因信号须等其所处「笔」走完才确认，
         其坐标日期会<b>早于</b>诞生日 5~12 个交易日，属正常，非数据错误）</div>
+      <div style="margin-top:4px;font-size:12px;line-height:1.75;color:#94a3b8">
+        ⚠ <b>级别说明（为什么有「段」族）</b>：缠论是级别递归体系（笔 → 线段 → 走势类型）。此前图上<b>只有笔级</b>买卖点，
+        线段级别仅把段端点当结构参照位画出，<b>不产生买卖点</b> —— 后果是「段底背驰（线段级一类买点）之后的次级别回抽
+        不破前低」（= 标准<b>段级二类买点</b>）系统性缺失：实测上证 4 例（2022-05-10 / 2024-03-28 / 2025-05-28 / 2026-07-30）
+        全部漏标。现已补上 <b>段1买·段1卖·段2买·段2卖</b>。<b>段级三类点暂不实现</b> —— 需先在线段序列上重构段级中枢，
+        属独立课题，宁缺勿滥。<b>两级信号各自独立统计</b>（见下方回测表），不混计。</div>
       <div class="verdict"><b>结构解读：</b><p>{cls["detail"]}</p>
       <p style="margin-top:4px"><b>周线级别：</b>{wcls["detail"]}</p>{_sent_row}</div>
       <h3 class="fc-title">未来走势推演</h3>

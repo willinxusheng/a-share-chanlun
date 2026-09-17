@@ -212,6 +212,13 @@ jobs:
           # 失败或渲染 "NaN" 文本); 产物已含 inject_banner 注入态, report.html 存在故不触发
           # 内部重生成。数值泄漏=渲染必然出错, 无条件阻断。
           python audit_report_runtime.py
+          # R478: 接线 audit_signal_coverage —— 硬断言「引擎算出的买卖点 == 产物里的标注」。
+          # 要防的是**静默消失**这一类回归（R472 前 37 条买卖点从未进产物；R476 障碍框恒 null
+          # 导致「改了等于没改」）—— 不崩溃、不报错、没有异常，只是图上少了东西，只有读数能发现。
+          # R479 起段级与笔级**同坐标同向**者会合并进笔级标签（`08-25 2买` → `08-25 2买·段2买`），
+          # 门禁按「自带点 + 合并点」双口径核对，合并逻辑若静默吞掉一条即 FAIL。
+          # 位置刻意放在 report.py 之后：它要用产物自带 OHLC 重建 K 线跑一遍**生产** analyze()。
+          python audit_signal_coverage.py
 
       - name: 标签重叠诊断（非阻塞护栏，仅告警 + 上传 artifact）
         # 实证守卫：R100 日期轴修复(hideOverlap:false + formatter 控显)后，各图表文字

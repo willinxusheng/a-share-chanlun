@@ -466,13 +466,23 @@ def find_signals(bis, zss, beichis, klines=None, merged=None):
             _seen[i] = s
             _dedup.append(s)
     signals = _dedup
-    # 风险收益比（R:R）量化——缠论实战必备：每个买卖点须有明确止损位与目标位才算完整交易计划。
-    # 止损（stop）：买点取该点之前「局部前低」（最近 30 笔窗口内的笔末端最低价）下破一点点；
-    #   卖点取局部前高上破一点点。窗口限制至关重要——此前误用全历史最低点导致止损远低于现价、
-    #   R:R 被严重压低失真（实测中位仅 0.3）；缠论止损是「跌破近期前低/中枢下沿」，非数年极值。
-    #   若窗口内无更低/更高参考（买点即新低），则用价位 ±3% 默认止损，保证 risk>0。
-    # 目标（target）：取该笔之前最近已完成中枢的 ZG（买点向上空间第一目标）/ ZD（卖点向下空间第一目标）；
-    #   无中枢时用价位 ±6% 默认目标。R:R = reward / risk，并按阈值给「值博率」标签（优/良/中/差）。
+    # R478: R:R 计算抽成 attach_rr() 供**笔级与段级**共用（单一来源，防两份数学漂移）。
+    # 抽取是纯搬移：缩进未变（函数体 for 在 4 空格、循环体仍在 8 空格），笔级输出逐字节不变
+    # —— 已用「同数据跑 find_signals 前后 diff」实证（见 _dbg/r478/unit_rr_refactor.py）。
+    return attach_rr(signals, bis, zss, klines, merged)
+
+
+def attach_rr(signals, bis, zss, klines, merged):
+    """风险收益比（R:R）量化——缠论实战必备：每个买卖点须有明确止损位与目标位才算完整交易计划。
+    止损（stop）：买点取该点之前「局部前低」（最近 30 笔窗口内的笔末端最低价）下破一点点；
+      卖点取局部前高上破一点点。窗口限制至关重要——此前误用全历史最低点导致止损远低于现价、
+      R:R 被严重压低失真（实测中位仅 0.3）；缠论止损是「跌破近期前低/中枢下沿」，非数年极值。
+      若窗口内无更低/更高参考（买点即新低），则用价位 ±3% 默认止损，保证 risk>0。
+    目标（target）：取该笔之前最近已完成中枢的 ZG（买点向上空间第一目标）/ ZD（卖点向下空间第一目标）；
+      无中枢时用价位 ±6% 默认目标。R:R = reward / risk，并按阈值给「值博率」标签（优/良/中/差）。
+    原地写入 s["stop"]/s["target"]/s["rr"]/s["quality"]/s["rr_capped"]，并返回 signals。
+    调用约束：signals 里每条的 bi_index 必须是 bis 的下标（笔级/段级同构，段级锚点也是笔）。
+    """
     _LOOK = 30  # 局部前低/前高窗口（日线约 30 笔≈1.5 个月，捕捉近期结构而非历史极值）
     _RR_CAP = 6.0  # R:R 封顶：超出部分为多年极值噪声锚定，对交易计划无意义（此前出现 16~31 倍失真）
     for s in signals:
@@ -558,6 +568,108 @@ def find_signals(bis, zss, beichis, klines=None, merged=None):
         else:
             s["quality"] = "差"
     return signals
+
+
+# ---------- 6b. 段级（线段级别）买卖点 ----------
+SEG_LAG_LOOKBACK = 400   # 段二类：一类段之后「次级别首个反向折返」的搜索上限（笔数，防御式上限）
+
+
+def find_seg_signals(bis_done, segments, seg_beichi, zss, klines, merged):
+    """段级（线段级别）买卖点 —— 级别联立的第二个级别（R478 新增）。
+
+    **为什么需要**：缠论是级别递归体系（笔 → 线段 → 走势类型）。此前引擎只产出**笔级**
+    一/二/三类买卖点；线段级别仅把段端点当「结构参照位」画出来（label 形如「段底·背驰」，
+    优先级 0，与买卖点冲突时让位），**不产生任何买卖点信号**。实测后果（R478）：
+
+      ① 段底背驰（= 段级一类买点）之后的「次级别首个回抽不破前低」（= 段级二类买点）
+         **系统性缺失** —— 二类点只以**笔级**一类买为锚，段级锚点压根不在锚点集合里。
+         上证 4 例全漏：2022-05-10 / 2024-03-28 / 2025-05-28 / **2026-07-30**
+         （末例低点 3767.50 > 07-20 段底 3741.11 ⇒ 标准段级二类买点，正是用户红框 A）。
+      ② 对称地，段顶背驰（05-14 4258.86）之后的次级别回抽（06-23 4175.35）**恰好**被
+         `_seg2_label` 覆盖成「段顶·次高」，但那只因为它同时是**段端点**；段底那次回抽
+         落在**笔**端点（07-30）就漏了 ⇒ 同一机制两侧表现不一致，根因是把「折返」写成
+         必须由**段**充当（缠论要求的是**次级别**折返，即笔）。
+      ③ 段级背驰点本身也从未作为**买卖点**出现在图上。
+
+    定义（与笔级同构，级别换成线段）：
+      段一类买/卖点 = 线段级背驰端点（段底背驰 = 买；段顶背驰 = 卖）。
+      段二类买/卖点 = 段一类之后**次级别（笔）首个反向折返**不破前极值
+                      （段底背驰后首支向下笔低点 > 段底价；破则锚点失效、不再后扫 —— 与
+                      find_signals 的 R338 语义一致，避免把数十日后的普通折返错配成二类）。
+    三类（段级中枢的离开-回抽）**不实现**：段级中枢需先在线段序列上重构中枢，属独立课题；
+    宁缺勿滥 —— 用未经验证的定义去标注，比不标更糟。
+
+    未来函数防护：段端点所在笔必须是**已完成笔**（bis_done 内）。最后一段若仍挂在未完成笔上，
+    该段不产出信号（原「段底·背驰」结构参照位不受影响 —— 那是结构标注，不是交易信号）。
+
+    返回与笔级信号同构（bi_index 指向 bis 下标），可直接喂 attach_rr()。
+    """
+    if not segments or not seg_beichi:
+        return []
+    end2bi = {}
+    for i, b in enumerate(bis_done):
+        end2bi.setdefault(b["end"], i)      # merged 索引 → 已完成笔下标
+    raw = []
+    for sb in seg_beichi:
+        si = sb.get("seg_index")
+        if si is None or si < 0 or si >= len(segments):
+            continue
+        sg = segments[si]
+        ai = end2bi.get(sg["end"])
+        if ai is None:
+            continue                        # 端点笔未完成 / 对不齐 ⇒ 跳过（未来函数防护）
+        anchor = bis_done[ai]
+        typ = sb.get("type")
+        vc = bool(sb.get("vol_confirm", False))
+        if typ == "top":
+            if anchor["dir"] != 1:
+                continue
+            raw.append({"bi_index": ai, "kind": "段一卖点(段顶背驰)", "dir": -1,
+                        "date": anchor["date_end"], "price": anchor["end_price"],
+                        "vol_confirm": vc, "bc_type": "段级顶背驰", "level": "seg",
+                        "anchor_seg": si})
+            want, is_buy = 1, False         # 段二类卖：首个向上折返，高点 < 段顶价
+        elif typ == "bottom":
+            if anchor["dir"] != -1:
+                continue
+            raw.append({"bi_index": ai, "kind": "段一买点(段底背驰)", "dir": 1,
+                        "date": anchor["date_end"], "price": anchor["end_price"],
+                        "vol_confirm": vc, "bc_type": "段级底背驰", "level": "seg",
+                        "anchor_seg": si})
+            want, is_buy = -1, True         # 段二类买：首个向下折返，低点 > 段底价
+        else:
+            continue
+        pr0 = anchor["end_price"]
+        _lim = min(len(bis_done), ai + 1 + SEG_LAG_LOOKBACK)
+        for k in range(ai + 1, _lim):
+            bk = bis_done[k]
+            if bk["dir"] != want:
+                continue
+            ep = bk["end_price"]
+            ok = (ep > pr0) if is_buy else (ep < pr0)
+            if ok:
+                raw.append({"bi_index": k,
+                            "kind": "段二买点(次低不破)" if is_buy else "段二卖点(次高不破)",
+                            "dir": 1 if is_buy else -1,
+                            "date": bk["date_end"], "price": ep,
+                            "vol_confirm": False, "bc_type": "", "level": "seg",
+                            "anchor_seg": si})
+            break                           # 首支反向折返即终止（破位 = 锚点失效，不再后扫）
+    # 去重：同一支笔可能被多个段锚点选中（一类优先，与 find_signals 的 _prio 同序）
+    def _prio(k):
+        return 0 if "段一" in k else 1
+
+    _seen, dedup = {}, []
+    for s in sorted(raw, key=lambda x: (x["bi_index"], _prio(x["kind"]))):
+        i = s["bi_index"]
+        if i in _seen:
+            if _prio(s["kind"]) < _prio(_seen[i]["kind"]):
+                dedup[dedup.index(_seen[i])] = s
+                _seen[i] = s
+        else:
+            _seen[i] = s
+            dedup.append(s)
+    return attach_rr(dedup, bis_done, zss, klines, merged)
 
 
 # ---------- 7. 分类推演 ----------
@@ -1565,6 +1677,7 @@ def analyze(klines, min_bi_pct=MIN_BI_PCT, with_stability=True):
                              "resonance": "", "ma_alignment": None},
                 "bis": [], "merged": [], "zhongshu": [], "dif": [], "dea": [], "hist": [],
                 "beichi": [], "signals": [], "segments": [], "seg_beichi": [],
+                "seg_signals": [],
                 "agreement": {"ok": 0, "total": 0, "rate": 0.0},
                 "captured": [], "capture_rate": 0.0, "stability": None,
                 "gaps": [], "bias": None, "adx": None, "mdd": None, "vol_trend": None}
@@ -1613,6 +1726,10 @@ def analyze(klines, min_bi_pct=MIN_BI_PCT, with_stability=True):
     signals = find_signals(bis_done, zss, beichis, klines, merged)
     segments = build_segments(bis, zss)
     seg_beichi = find_beichi_segment(segments, hist, merged)
+    # R478: 段级（线段级别）买卖点 —— 级别联立第二级。见 find_seg_signals 的说明。
+    # 独立于 signals：笔级统计口径（回测/稳健性表）**一行不改**，段级另成一家，
+    # 图上门两者并列标注、表里分列统计 ⇒ 用户既能看见，又不破坏历史可比性。
+    seg_signals = find_seg_signals(bis_done, segments, seg_beichi, zss, klines, merged)
     ma = ma_alignment(closes) if len(closes) >= 260 else None
     cls = classify(bis, zss, beichis, closes[-1], None, segments, seg_beichi)
     cls["ma_alignment"] = ma
@@ -1631,6 +1748,7 @@ def analyze(klines, min_bi_pct=MIN_BI_PCT, with_stability=True):
         "dif": dif, "dea": dea, "hist": hist,
         "beichi": beichis, "signals": signals, "classify": cls,
         "segments": segments, "seg_beichi": seg_beichi,
+        "seg_signals": seg_signals,
         "agreement": {"ok": ok, "total": tot, "rate": agree},
         "captured": captured, "capture_rate": capture_rate,
         "stability": stability, "gaps": gaps, "bias": bias,
@@ -1639,16 +1757,19 @@ def analyze(klines, min_bi_pct=MIN_BI_PCT, with_stability=True):
 
 
 # ---------- 8. 信号回测 ----------
-def backtest_signals(klines, result, horizons=(5, 10, 20, 60), exclude_last=False):
+def backtest_signals(klines, result, horizons=(5, 10, 20, 60), exclude_last=False, signals=None):
     """对每个买卖点信号，统计其后 h 个交易日的收益与方向胜率。
     买点：ret>0 为胜；卖点：ret<0 为胜。返回 {kind: {h: {n, win_rate, avg_ret}}}
     exclude_last=True 时，丢弃每个信号类型的最近一次出现——避免用「当前结构自身所对应的那支信号」
-    去校准「当前结构之后」的胜率（样本内泄漏，会系统性偏乐观：自身胜率高→据此预测后续也高）。"""
+    去校准「当前结构之后」的胜率（样本内泄漏，会系统性偏乐观：自身胜率高→据此预测后续也高）。
+    R478: 新增 signals= 覆盖参数（默认 None ⇒ 用 result["signals"] 的笔级信号）。
+    段级信号（result["seg_signals"]）走同一套统计口径但**单独成表行**，不与笔级混计 ——
+    两族样本性质不同（段级样本少、周期长），混在一起会污染笔级的历史可比性。"""
     merged, bis = result["merged"], result["bis"]
     n = len(klines)
     # 按类型收集原始样本；exclude_last 时去掉每类最近一次（signals 已按 bi_index 升序）
     by_kind = {}
-    for s in result["signals"]:
+    for s in (result["signals"] if signals is None else signals):
         b = bis[s["bi_index"]]
         idx = merged[b["end"]]["idx_end"]
         entry = klines[idx]["close"]
