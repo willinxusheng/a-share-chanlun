@@ -229,6 +229,12 @@ jobs:
           node verify_overlap.js
           echo "—— 标签重叠诊断报告(重叠对数见 total=) ——"
           cat "$OV_OUT" 2>/dev/null || echo "(_ov.txt 未生成)"
+          # R476: 门禁已扩到**运行时视口档位** —— 除生成期/初始视口外，另对主图扫
+          # start=0..96 共 16 档（改视口 → 触发 chart.on('dataZoom') 的 handler（含 relayout）
+          # → 再真渲染 → 重算框）。判据只认「涉及我方标注」的重叠（轴刻度互撞归 ECharts 的
+          # axisLabel.hideOverlap，不计入）。读数见 sweep_total= / sweep_ours=，预计 0。
+          echo "—— 运行时视口扫描读数 ——"
+          grep -E "^(sweep_total|sweep_ours)=" "$OV_OUT" 2>/dev/null || echo "(无)"
       # R354: 兑现 R104 注释承诺 —— _ov.txt 真正上传 artifact(旧版只有 step 日志, 重叠
       # 回归带病多轮无便捷回溯通道); 仅传报告(<1KB), 全量调试 SVG 留在 RUNNER_TEMP 不进 artifact。
       # R384(09-09): 加 continue-on-error —— 09-09 00:07 实测 GitHub artifact 服务

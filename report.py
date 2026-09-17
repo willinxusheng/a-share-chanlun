@@ -76,6 +76,20 @@ _KIND_SHORT = {
     "三类买": "3买", "三类卖": "3卖",
 }
 
+# R476: 顶部筹码条（graphic rich 文本）的排版常量 —— 与 JS 侧 option.graphic 的 style/rich
+# **单一来源**（JS 里的 fontSize 由这里的值插值，_chip_obs_rect() 也用同一份，不会漂移）。
+#   _KL_BASE_FS = 外层 style.fontSize，只作用于**非 rich 的字面文本**（即片段间的两个空格）
+#   _KL_FS_*    = 各 rich 片段的**实际** fontSize。★ zg/zd 原先没写 fontSize，实测按 **12**
+#   渲染（ECharts 的 rich 片段**不继承外层** fontSize/fontFamily，回落到默认 12px sans-serif，
+#   不是外层的 11）；现补成显式值让配置说真话 —— 渲染结果逐位不变，已由 _dbg/r476/obs_api.js
+#   用 zrender 外接矩形复核（47.04 / 212.8 / 右缘 431.52 前后一致）。
+#   （用独立的裸名而非 dict 下标，是为了在 f-string 里直接插值，不依赖 PEP 701 的嵌套引号。）
+_KL_BASE_FS = 11
+_KL_FS_ZG = 12
+_KL_FS_ZD = 12
+_KL_FS_FIB = 10
+_KL_RICH_FS = {"zg": _KL_FS_ZG, "zd": _KL_FS_ZD, "fib": _KL_FS_FIB}
+
 
 def _label_w(t, extra=0.0):
     """估算标签像素宽度（与 verify_overlap.js 的字宽口径一致），用于确定性去重叠。
@@ -87,8 +101,55 @@ def _label_w(t, extra=0.0):
     return w + 2.2 + extra
 
 
+def _chip_obs_rect(parts, left, top, base_fs, rich_fs):
+    """筹码条（顶部 graphic rich 文本）的**障碍矩形** —— 供去重叠判据把标注框与它做相交检测。
+
+    R476 实测（两路互证：`_dbg/r476/dump_svg.js` 落盘 SVG 直读 + `obs_api.js` 用 zrender
+    自身 API 取外接矩形）；样本 = 5 指数主图：
+
+      · **片段 x 偏移严格累加**，每片段宽 = Σ字符（ASCII 0.56·fs / CJK 1.0·fs）。
+        实测 "ZG 3884" = 7×0.56×12 = 47.04、段落间隔 "  " = 2×0.56×11 = 12.32、
+        "Fib F0 …3939"（38 字符）= 38×0.56×10 = 212.8 ⇒ 累加右缘 = 100+331.52 = **431.52**，
+        与 zrender `getBoundingRect()` + `getComputedTransform()` 报出的 431.52 **逐位相等**。
+      · ★ 反直觉但已实证：**rich 片段不继承外层 style 的 fontSize/fontFamily**。外层写的是
+        `fontSize: 11 / Microsoft YaHei`，而 zg/zd 实际渲染成 **12px sans-serif**（ECharts
+        默认字号），只有**非 rich 的字面文本**（片段间空格）才用外层的 11。⇒ rich 未显式给
+        fontSize 的一律按 **12** 算；照字面按 11 算会把宽度低估 1/12。
+      · 纵向：各片段以 `dominant-baseline="central"` 居中于同一行盒（盒高 = 各片段最大 fs）
+        ⇒ 并集恒为 `[top, top + max_fs]`（实测 local y ∈ [0,12] / [1,10]，加 top=32 → [32,44]）。
+
+    ★ 返回值用**门禁 verify_overlap.js 的 textBoxes 模型**，而非 ECharts 真值框：门禁对每条
+      `<text>` 按 `top = ty - 0.8·fs`、`bottom = ty + 0.3·fs`、右缘再加 `fs·0.2` 框定，相对
+      真值（central 基线 ⇒ `[ty-0.5fs, ty+0.5fs]`）整体上移 0.3·fs。**关键**：门禁对筹码条
+      与标签用的是同一套模型 ⇒ 两者同向平移，**相对重叠量几乎精确**（残差仅
+      0.3·|fs_标签 − fs_筹码条| ≈ 0.3px）。故取门禁模型既不误删、又保证门禁结果为 0。
+      （试过「真值框 ∪ 门禁框」的并集：会把上缘再抬 0.3·fs，实测制造出「贴下缘 3.3px 内
+      的标签被误删」的过保守带 —— 合成用例 E。）
+
+    parts = [(rich_name_or_None, text), ...]（None = 非 rich 字面文本）；返回 (x0, x1, y0, y1)。
+    """
+    _x = float(left)
+    _fs_list = []
+    for name, txt in parts:
+        fs = float(base_fs) if name is None else float(rich_fs.get(name, 12.0))
+        _fs_list.append(fs)
+        for ch in str(txt):
+            _x += fs * (1.0 if ord(ch) > 0x2e80 else 0.56)
+    if not _fs_list:
+        return None
+    _maxfs = max(_fs_list)
+    _cy = float(top) + _maxfs / 2.0        # 行盒中心（各片段以 central 基线居中于最大字号的盒）
+    # ★ 返回**门禁模型**的框，而**不是**「真值框 [top, top+fs] 与门禁框的并集」——
+    #   并集会再把上缘多抬 0.3·fs，造成「贴在筹码条下缘 3.3px 以内的标签被误删」的过保守带
+    #   （合成用例 E 实测：真实视觉不重叠、却被判掉）。理由：门禁对**筹码条与标签用的是同一套
+    #   模型**，两者同向平移 0.3·fs ⇒ **相对重叠量几乎精确**（残差仅 0.3·|fs_标签 − fs_筹码条|
+    #   ≈ 0.3px）。故「两侧统一用门禁模型」既不误删、又能保证门禁结果为 0。
+    return (float(left), _x + 0.2 * _maxfs,      # right：门禁在右缘额外加的 fs·0.2
+            _cy - 0.8 * _maxfs, _cy + 0.3 * _maxfs)
+
+
 def dedup_mark_labels(items, n, y_min, y_max, plot_w, plot_h, grid_l, grid_t,
-                      idx_map, default_pos="top", bgap=True, w_vis=253):
+                      idx_map, default_pos="top", bgap=True, w_vis=253, obs=None):
     """确定性地去重叠 markPoint 标签：按 (优先级 desc, x asc) 贪心保留，与已保留标签框
     重叠的则隐藏。仅修改各 item 的 label['show']，不改变标记符号。
 
@@ -126,7 +187,16 @@ def dedup_mark_labels(items, n, y_min, y_max, plot_w, plot_h, grid_l, grid_t,
     "被隐藏的标签放大后能否回来"与"窗口外元素被渲染器夹到绘图区左缘"这两件事，改由前端
     `relayout()` 在 dataZoom 后按真实视口重算 —— 旧设计让窗口外元素保留 show=True、指望
     用户缩小后由 ECharts 自行重算坐标，但 show 是烙进 JSON 的、ECharts 不会恢复。
-    预测图 boundaryGap=False、全量显示（dataZoom start=0）⇒ x = grid_l + i*bar，与主图不同式。"""
+    预测图 boundaryGap=False、全量显示（dataZoom start=0）⇒ x = grid_l + i*bar，与主图不同式。
+
+    R476: 引入**障碍矩形** obs=(x0,x1,y0,y1) —— 顶部筹码条（graphic rich 文本）不参与贪心，
+    而是一条「谁碰谁让」的硬禁区。理由：R473/R472 的门禁只验**初始视口**，而实测把视口扫到
+    start=10/90/93/96 时，3 个主图共出现 6 对重叠，其中 5 对是**标注 ✕ 筹码条**
+    （`05-14 段顶·背驰` ✕ `Fib …`、`12-13 段顶` ✕ `ZG 4744`/`ZD 4492` 等，最深 11px）——
+    筹码条是 z-index 100 的独立 graphic，既不在 markPoint 集合里、也不参与去重叠，所以
+    贪心判据对它完全无感。障碍框的几何由 `_chip_obs_rect()` 按实测排版律给出（见其 docstring）。
+    ⚠ 若 obs 为 None（如未提供筹码条内容），行为与改动前**逐字节一致**。
+    """
     if n <= 0 or (y_max - y_min) == 0:
         return
     if bgap:
@@ -151,6 +221,16 @@ def dedup_mark_labels(items, n, y_min, y_max, plot_w, plot_h, grid_l, grid_t,
     # 而真实只有 **10.8px** ⇒ 全历史缩放下残留 1~3px 真重叠（真渲染实测 #4/#8/#10 各 1~2 对）。
     # 层号 "l" 仍写进产物（供前端 relayout 与阅读），但纵向位置不再由它推、一律由本律算。
     # distance 缺省取 ECharts 默认 5（预测图 end_points 未显式给出该项）。
+    def _lab_fs(it):
+        """标签字号（缺省 12，与 ECharts 一致）。R476: 拆出来供障碍框判据复用 —— 门禁的
+        textBoxes() 是**按 SVG 里真实 font-size** 框定标签纵向范围的，故障碍框判据也必须用
+        条目自己的 fontSize，不能沿用 _label_w 里写死的 11（那一处是 x 向的保守近似）。"""
+        lab = (it or {}).get("label") or {}
+        try:
+            return float(lab.get("fontSize", 12)) if lab.get("fontSize") is not None else 12.0
+        except (TypeError, ValueError):
+            return 12.0
+
     def _lab_off(it, pos):
         ss = (it or {}).get("symbolSize", 0)
         if isinstance(ss, (list, tuple)):
@@ -164,12 +244,21 @@ def dedup_mark_labels(items, n, y_min, y_max, plot_w, plot_h, grid_l, grid_t,
             dist = float(lab.get("distance", 5)) if lab.get("distance") is not None else 5.0
         except (TypeError, ValueError):
             dist = 5.0
-        try:
-            fsz = float(lab.get("fontSize", 12)) if lab.get("fontSize") is not None else 12.0
-        except (TypeError, ValueError):
-            fsz = 12.0
+        fsz = _lab_fs(it)
         off = ss / 2.0 + dist + fsz / 2.0
         return -off if pos == "top" else off
+
+    def _obs_hit(m, o):
+        """标签框是否与障碍矩形相交。框模型与门禁 verify_overlap.js textBoxes() 同款：
+        x 向取 [x - w/2, x + w/2]（w 来自 _label_w），纵向取 [yc - 0.8·fs, yc + 0.3·fs]
+        （ty 即标签中心）。相交阈值同门禁（两向都必须 > 1px）。"""
+        if not o:
+            return False
+        lx0, lx1 = m["x"] - m["w"] / 2.0, m["x"] + m["w"] / 2.0
+        ly0, ly1 = m["yc"] - m["fs"] * 0.8, m["yc"] + m["fs"] * 0.3
+        ox = min(lx1, o[1]) - max(lx0, o[0])
+        oy = min(ly1, o[3]) - max(ly0, o[2])
+        return ox > 1.0 and oy > 1.0
 
     def y_of(p, pos, it=None):
         return grid_t + (y_max - p) * ppx + _lab_off(it, pos)
@@ -205,10 +294,15 @@ def dedup_mark_labels(items, n, y_min, y_max, plot_w, plot_h, grid_l, grid_t,
             it.pop("_pri", None)
             continue
         recs.append({"x": _x, "yc": y_of(c[1], pos, it), "w": _w, "p": it,
-                     "pri": it.pop("_pri", 0)})
+                     "fs": _lab_fs(it), "pri": it.pop("_pri", 0)})
     recs.sort(key=lambda d: (-d["pri"], d["x"]))
     kept = []
     for m in recs:
+        # R476: 障碍框优先于贪心 —— 命中即隐藏，且**不占位**（已不可见，不该再挤掉别人）。
+        # 放在贪心之前是刻意的：障碍框是「物理上被图形盖住」，与优先级无关。
+        if _obs_hit(m, obs):
+            m["p"]["label"]["show"] = False
+            continue
         if any(abs(m["x"] - k["x"]) < (m["w"] + k["w"]) / 2 + 2 and
                abs(m["yc"] - k["yc"]) < 13 for k in kept):
             m["p"]["label"]["show"] = False
@@ -384,15 +478,24 @@ def echart_main(klines, r, sym, captured=None, sig_age=None):
             })
 
     # 顶部关键价位条（富文本，避免近价标签相互重叠）
-    kl = []
+    # R476: 先建**片段表** kl_parts = [(rich 样式名, 文本), …]，再由此生成 key_levels_text
+    # 与障碍矩形 —— 内容与几何同源，日后改条目不会出现"文字变了、障碍框没变"的漂移。
+    kl_parts = []
     if zg_v is not None:
-        kl.append(f"{{zg|ZG {zg_v}}}")
+        kl_parts.append(("zg", f"ZG {zg_v}"))
     if zd_v is not None:
-        kl.append(f"{{zd|ZD {zd_v}}}")
+        kl_parts.append(("zd", f"ZD {zd_v}"))
     if fib_pairs:
         fib_txt = " ".join(f"{lab} {pv}" for lab, pv in fib_pairs)
-        kl.append(f"{{fib|Fib {fib_txt}}}")
-    key_levels_text = "  ".join(kl)
+        kl_parts.append(("fib", f"Fib {fib_txt}"))
+    key_levels_text = "  ".join(f"{{{n}|{t}}}" for n, t in kl_parts)
+    # 障碍矩形：片段间以**两个空格**分隔，那是非 rich 的字面文本 ⇒ 按外层 fontSize 占位
+    _kl_seq = []
+    for _pi, (_pn, _pt) in enumerate(kl_parts):
+        if _pi:
+            _kl_seq.append((None, "  "))
+        _kl_seq.append((_pn, _pt))
+    _chip_obs = _chip_obs_rect(_kl_seq, 100, 32, _KL_BASE_FS, _KL_RICH_FS)
 
     # 买卖点 markPoint
     # R472: 取消两道**按日期砍信息**的硬过滤，改由「按真实像素去重叠」统一控制可读性。
@@ -613,7 +716,10 @@ def echart_main(klines, r, sym, captured=None, sig_age=None):
     # 下方 JS 的 dataZoom.start 算式（`D.dates.length - 252`）。
     dedup_mark_labels(sig_points + seg_points + cap_points, len(dates), _yMin, _yMax,
                       1100 - 96 - 56, 640 * (1 - 0.40) - 48, 96, 48, date_idx,
-                      bgap=True, w_vis=253)
+                      bgap=True, w_vis=253, obs=_chip_obs)
+    # R476 注：预测图（下方 forecast_echart）**不加**障碍框 —— 它的标签是静态的、
+    # 不经 relayout 重排，且其筹码条（left:100, top:50，6 种 rich 片段）在 verify_overlap.js
+    # 的初始 + 3 档视口扫描里实测零重叠 ⇒ 已被门禁完全覆盖，不需要额外判据。
 
     chart_data = {
         "dates": dates,
@@ -736,6 +842,71 @@ def echart_main(klines, r, sym, captured=None, sig_age=None):
     for (var i = 0; i < t.length; i++) w += (t.charCodeAt(i) > 0x2e80) ? 11.0 : 6.16;
     return w + 2.2 + (extra || 0);
   }}
+  // R476: 筹码条障碍矩形 —— 缩放后标签会挤到它身上（真渲染实测：视口扫到 start=10/90/93/96
+  // 时 3 个主图共 6 对重叠，其中 5 对是「标注 ✕ 筹码条」，最深 11px）。它是 z-index 100 的
+  // 独立 graphic，既不在 markPoint 集合里、也不参与贪心 ⇒ 必须单独当**硬禁区**。
+  // ★ 宽度**不能靠公式猜**：ECharts 的 rich 片段不继承外层 fontSize（实测 zg/zd 渲染成
+  // 12px 而配置写的是 11px），且真实浏览器字体度量 ≠ 我们的 0.56·fs 近似 ⇒ 让渲染器自己报：
+  // zrender 的 displayList 里每个文本元素都有 getBoundingRect()（局部）+ getComputedTransform()
+  // （全局），合成即绝对矩形。canvas/svg 两种 renderer 都维护该列表，浏览器里同样可用。
+  // 片段身份用**内容**匹配（从 option.graphic[0].style.text 解析出各 rich 片段文本），不靠
+  // 坐标猜；片段间的字面空格必然落在首尾片段之间，故只匹配 rich 片段即可覆盖全长。
+  var _KL_OBS_MFS = {max(_KL_RICH_FS.values())};   // 筹码条最大字号（供两模型并集外扩，见下）
+  function _chipObs(opt) {{
+    try {{
+      // ★ 取值必须兼容**两种形态**：配置里写的是扁平数组 `graphic:[{{type,left,top,style}}]`，
+      // 而 `chart.getOption()` 会把它**归一化成** `graphic:[{{elements:[{{…}}]}}]`。
+      // R476 首版只读扁平形态 ⇒ klt 恒为空 ⇒ 障碍框恒为 null（真渲染扫描实测"改了等于没改"，
+      // 由 _dbg/r476/dbg_obs.js 注入自省取到 getOption().graphic[0] 的键名 = ["elements"]）。
+      var _g = (opt.graphic && opt.graphic[0]) || null;
+      var _gst = _g ? (_g.style || (((_g.elements || [])[0] || {{}}).style)) : null;
+      var klt = (_gst && _gst.text) || '';
+      if (!klt) return null;
+      var want = {{}}, parts = klt.split('{{');
+      for (var i = 0; i < parts.length; i++) {{
+        var seg = parts[i].split('}}')[0];
+        var bar = seg.indexOf('|');
+        if (bar > 0) want[seg.slice(bar + 1)] = 1;
+      }}
+      var list = chart.getZr().storage.getDisplayList();
+      // ★ 取极值用 null 哨兵，刻意**不写 JS 的「无穷大」字面量**：audit_report_runtime.py 的
+      //   白名单只认 `var lo = …, hi = …;` 那一种良性循环初值，其余任何一处出现都会被判为
+      //   「数据字面量」并**阻断 CI**（本改动首版即因此把该门禁打成 REAL_EXIT=1、残留 15 处）。
+      //   不去放宽门禁 —— 那是把护栏改软来迁就新代码。（同理：注释里也不写该 token。）
+      var bb = null, hit = 0;
+      for (var j = 0; j < list.length; j++) {{
+        var el = list[j], st = el && el.style;
+        if (!st || typeof st.text !== 'string' || !want[st.text]) continue;
+        var br = el.getBoundingRect ? el.getBoundingRect() : null;
+        if (!br) continue;
+        var mt = el.getComputedTransform ? el.getComputedTransform() : null;
+        var ax = br.x, ay = br.y, aw = br.width, ah = br.height;
+        if (mt) {{
+          var gx1 = ax * mt[0] + ay * mt[2] + mt[4], gy1 = ax * mt[1] + ay * mt[3] + mt[5];
+          var gx2 = (ax + aw) * mt[0] + (ay + ah) * mt[2] + mt[4];
+          var gy2 = (ax + aw) * mt[1] + (ay + ah) * mt[3] + mt[5];
+          ax = Math.min(gx1, gx2); ay = Math.min(gy1, gy2);
+          aw = Math.abs(gx2 - gx1); ah = Math.abs(gy2 - gy1);
+        }}
+        if (!bb) bb = {{ x0: ax, x1: ax + aw, y0: ay, y1: ay + ah }};
+        else {{
+          if (ax < bb.x0) bb.x0 = ax;
+          if (ay < bb.y0) bb.y0 = ay;
+          if (ax + aw > bb.x1) bb.x1 = ax + aw;
+          if (ay + ah > bb.y1) bb.y1 = ay + ah;
+        }}
+        hit++;
+      }}
+      if (!hit || !bb) return null;
+      // 与 report.py _chip_obs_rect() **同口径**：量到的是 ECharts 真值（行盒 [top, top+maxfs]），
+      // 这里换算成**门禁 textBoxes 模型**的框 —— 纵向以行盒中心为基准取
+      // [cy - 0.8·fs, cy + 0.3·fs]、右缘再加 fs·0.2。门禁对筹码条与标签用同一套模型，
+      // 两侧同向平移 ⇒ 相对重叠量几乎精确（见 _chip_obs_rect 的说明）。
+      var _cy = (bb.y0 + bb.y1) / 2;
+      return {{ x0: bb.x0, x1: bb.x1 + 0.2 * _KL_OBS_MFS,
+                y0: _cy - 0.8 * _KL_OBS_MFS, y1: _cy + 0.3 * _KL_OBS_MFS }};
+    }} catch (e) {{ return null; }}
+  }}
   var _MK = D.sigPoints.concat(D.segPoints).concat(D.capPoints);
   var _MKI = {{}};
   for (var _qi = 0; _qi < D.dates.length; _qi++) _MKI[D.dates[_qi]] = _qi;
@@ -744,6 +915,7 @@ def echart_main(klines, r, sym, captured=None, sig_age=None):
     if (!W || W < 300) return;            // 尺寸不可用（SSR 等）⇒ 保留生成期结果
     var n = D.dates.length;
     var opt = chart.getOption();
+    var _obs = _chipObs(opt);   // R476: 筹码条硬禁区（取不到则退化为无禁区 = 改动前行为）
     var dz = (opt.dataZoom && opt.dataZoom[0]) || {{ start: 0, end: 100 }};
     // R476: 与 ECharts category 轴（boundaryGap=True）**严格同式**。旧代码用
     //   s = floor(n*start/100)、bar = plotW/(e-s) —— 两处都与渲染器不符：
@@ -794,12 +966,20 @@ def echart_main(klines, r, sym, captured=None, sig_age=None):
       if (isNaN(_fsz)) _fsz = 12;
       var _off = _ss / 2 + _dist + _fsz / 2;
       recs.push({{ x: x, yc: gridT + (yMax - c[1]) * ppx + (pos === 'top' ? -_off : _off),
-                  w: w, it: it, pri: (it.p == null ? 0 : it.p) }});
+                  w: w, it: it, fs: _fsz, pri: (it.p == null ? 0 : it.p) }});
     }}
     recs.sort(function (a, b) {{ return (b.pri - a.pri) || (a.x - b.x); }});
     var kept = [];
     for (i = 0; i < recs.length; i++) {{
       var m = recs[i], hit = false;
+      // R476: 障碍框优先于贪心 —— 命中即隐藏、且**不占位**（已不可见，不该再挤掉别人），
+      // 与 report.py dedup_mark_labels() 的同一段判据同序同式。框模型与门禁 textBoxes()
+      // 同款：x = [x±w/2]，纵向 = [yc-0.8·fs, yc+0.3·fs]，两向都需 > 1px 才算重叠。
+      if (_obs) {{
+        var _ox = Math.min(m.x + m.w / 2, _obs.x1) - Math.max(m.x - m.w / 2, _obs.x0);
+        var _oy = Math.min(m.yc + m.fs * 0.3, _obs.y1) - Math.max(m.yc - m.fs * 0.8, _obs.y0);
+        if (_ox > 1 && _oy > 1) {{ m.it.label.show = false; continue; }}
+      }}
       for (var k = 0; k < kept.length; k++) {{
         if (Math.abs(m.x - kept[k].x) < (m.w + kept[k].w) / 2 + 2 &&
             Math.abs(m.yc - kept[k].yc) < 13) {{ hit = true; break; }}
@@ -879,11 +1059,14 @@ def echart_main(klines, r, sym, captured=None, sig_age=None):
       type: 'text', left: 100, top: 32, z: 100, silent: true,
       style: {{
         text: D.keyLevelsText,
-        fontFamily: 'Microsoft YaHei', fontSize: 11,
+        fontFamily: 'Microsoft YaHei', fontSize: {_KL_BASE_FS},
+        // R476: 各片段 fontSize 由 report.py 的 _KL_FS_* 插值（单一来源）。原先 zg/zd 省写
+        // fontSize，而 ECharts 的 rich 片段**不继承**外层 fontSize ⇒ 实际按默认 12 渲染；
+        // 现写显式值，使「配置写的就是渲染的」（也才能据此算准障碍矩形）。
         rich: {{
-          zg:  {{ fill: '{GOLD}', fontWeight: 'bold' }},
-          zd:  {{ fill: '{GOLD}', fontWeight: 'bold' }},
-          fib: {{ fill: '#7c3aed', fontSize: 10 }}
+          zg:  {{ fill: '{GOLD}', fontWeight: 'bold', fontSize: {_KL_FS_ZG} }},
+          zd:  {{ fill: '{GOLD}', fontWeight: 'bold', fontSize: {_KL_FS_ZD} }},
+          fib: {{ fill: '#7c3aed', fontSize: {_KL_FS_FIB} }}
         }}
       }}
     }}];
