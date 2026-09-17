@@ -285,8 +285,16 @@ def build_segments(bis, zss=None, min_zigzag=0.06):
             continue
         d = 1 if p1 >= p0 else -1
         segs.append({
-            "dir": d, "start": chunk[0]["start"], "end": chunk[-1]["end"],
-            "start_price": chunk[0]["start_price"], "end_price": chunk[-1]["end_price"],
+            # R472: 起点必须取**本段的极值点本身**（chunk[0]["end"] 恒 == i0），原实现取
+            # chunk[0]["start"]（= 第一笔的起点 = **上一段的终点**），等于把每段起点前移
+            # 一整笔、使相邻线段区间互相重叠。实测 5 指数段间接续率
+            # 0/33 · 0/54 · 0/74 · 0/36 · 0/56 —— **全部断裂**（线段定义上必须首尾相接，
+            # 正确应为 100%）；并连带使 seg_macd_area 的面积区间多算上一笔、
+            # find_beichi_segment 的段背驰判定整体偏移。start_price 同理取 p0
+            # （原取 chunk[0]["start_price"] = 上一个笔端点价），这正是旧数据里
+            # 「dir=+1 而 start_price > end_price」自相矛盾的来源（dir 本就用 p0/p1 判）。
+            "dir": d, "start": i0, "end": i1,
+            "start_price": p0, "end_price": p1,
             "high": max(c["high"] for c in chunk),
             "low": min(c["low"] for c in chunk),
         })
