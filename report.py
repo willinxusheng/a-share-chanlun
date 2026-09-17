@@ -1353,6 +1353,22 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
             if _is_trading_day(dt):
                 kk -= 1
         return dt.strftime("%Y-%m-%d")
+    # R476: 路径终点来源**透明化**（承 R475 核查）。实测三条路径终点全部 = 中枢点位 × 固定系数
+    # （主 mid×0.99 / 次 zd×0.98 / 风险 zd×0.92），属**启发式情景外推，不是缠论推导**；而缠论对
+    # "破位后的量度"有自己的标准算法（中枢高度外推：ZD − (ZG − ZD)）。两者不一致时必须让用户
+    # 看得见 —— 否则很容易误以为「风险 3466」是缠论算出来的（实测它比缠论量度更悲观 184 点）。
+    # 系数按**实测比例**反算展示（而非写死 0.92 等字面量），这样任何分支改动都会自动如实反映。
+    _zsh = zd - (zg - zd)                      # 缠论标准破位量度终点
+    _src_note = (
+        f'<div style="margin-top:6px;font-size:12px;line-height:1.75;color:#94a3b8">'
+        f'⚠ <b>路径终点来源</b>：三条终点 = 中枢点位 × 固定系数（主 <b>{main_p[-1][1] / mid:.2f}</b>×中枢中值 '
+        f'/ 次 <b>{alt_p[-1][1] / zd:.2f}</b>×ZD / 风险 <b>{risk_p[-1][1] / zd:.2f}</b>×ZD），'
+        f'属<b>启发式情景外推、非缠论推导</b>；缠论标准破位量度（中枢高度 ZG−ZD = {zg - zd:.0f} 自 ZD 外推）'
+        f'为 <b>{_zsh:.0f}</b>，与「风险」位相差 <b>{abs(risk_p[-1][1] - _zsh):.0f}</b> 点。'
+        f'中枢 ZG/ZD 本身由 chanlun.py 的三笔重叠定义给出（纯缠论）；'
+        f'置信锥与主/次/风险概率同样来自统计与启发式校准，亦非缠论推导。'
+        f'</div>'
+    )
     # 图例改为图表下方的 HTML 图例条（不再压住推演路径与时间轴）
     legend_html = (
         f'<div class="fc-legend">'
@@ -1369,6 +1385,7 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
         f'趋势外推位 ≈ <b>{trend_end_price:.0f}</b> · '
         f'主路径失效位(有效跌破ZD) ≈ <b>{zd:.0f}</b> · '
         f'结构存续概率(锥) ≈ <b>{_p_hold*100:.0f}%</b></div>'
+        + _src_note
     )
     note = (f"主路径失效位：现价有效跌破 ZD {zd:.0f}（收盘确认）→ 主路径失效、风险路径概率上升；风险路径确认需同时满足「跌破 ZD + 周线笔转向下」。\n"
              f"上方「风险止损位」即该风险路径的<b>向下量度终点</b>（由 ZD 派生的结构参考位）——需要「往下还有多少空间」时读这一栏；确认条件未满足前它只是条件应对的边界，不是对底部的预测。\n"
