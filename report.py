@@ -90,15 +90,29 @@ def dedup_mark_labels(items, n, y_min, y_max, plot_w, plot_h, grid_l, grid_t,
     重叠的则隐藏。仅修改各 item 的 label['show']，不改变标记符号。
 
     R469: 引入优先级 —— 原实现只按 x 排序（"谁靠左谁先占位"），使买卖点与背驰/拐点标签
-    平等竞争，被挤掉的恰好是信息量最高的买卖点。实测（主图窗口 1383 根压进 948px、
-    单标签宽 56~74px ⇒ 一个标签相当于 80~110 个交易日）：上证 9 个买卖点被隐藏 4 个，
-    含 2026-03-12 二类卖、2026-07-01 三类卖，用户主观感受即"图上没有买卖点提示"。
-    现按 item 的 "_pri" 降序优先占位：买卖点=2 > 背驰=1 > 历史拐点=0；"_pri" 在函数内
-    pop 掉，不落入产物 JSON。未提供 "_pri" 的调用方（预测图 end_points）全按 0 处理
-    ⇒ 排序键退化为纯 x 升序，与原行为逐字节一致。"""
+    平等竞争，被挤掉的恰好是信息量最高的买卖点（实测上证 9 个买卖点被隐藏 4 个，含
+    2026-03-12 二类卖、2026-07-01 三类卖，用户主观感受即"图上没有买卖点提示"）。
+    现按 item 的 "_pri" 降序优先占位：买卖点=2 > 背驰=1 > 历史拐点/线段端点=0；"_pri" 在
+    函数内 pop 掉，不落入产物 JSON。未提供 "_pri" 的调用方（预测图 end_points）全按 0
+    处理 ⇒ 排序键退化为纯 x 升序，与原行为逐字节一致。
+
+    R470: x 尺度改按「默认可见窗口」而非全历史 —— 原 `bar = plot_w / n` 把全部 n=1384 根
+    压进 948px（=0.685 px/根），使相隔 76 个交易日的两个标签（2026-03-12 二类卖 vs
+    2026-07-01 三类卖，价差仅 2 点）算得 52px 距离、必然判为重叠而把后者烤死成
+    show:false；但主图 dataZoom 初始窗口只有最近 252 根（=3.76 px/根），同样两个标签实际
+    相距 286px、根本不重叠。尺度差 5.5 倍 ⇒ 生成期系统性过度隐藏，且 show:false 是烙进
+    JSON 的，用户放大后标签也不会回来 —— 这正是"该买卖的点标不出来"的主因。
+    现 x 一律按 252 根可见窗口计算，与 verify_overlap.js 的真实渲染窗口同口径
+    ⇒ 去重叠判据 == 门禁判据。窗口内元素再补一条"标签框左缘不得探入 y 轴刻度区"
+    （可见窗口最左端的点被"居中"标签向左探出，门禁实测与刻度文字撞 6~7px）。
+    窗口之外的元素 x 为负值、彼此仍按真实间距去重，但不参与轴区判据 —— 它们只在用户
+    手动缩小到 1 年以上时才进入视野，届时由 ECharts 重算坐标，保留 show=True 才有意义。
+    预测图 n=150<252 ⇒ _W=n、_x0=0 ⇒ 与改动前逐字节一致（零回归）。"""
     if n <= 0 or (y_max - y_min) == 0:
         return
-    bar = plot_w / n
+    _W = min(n, 252)          # 主图 dataZoom 初始可见根数（与下方 JS dataZoom start 同式）
+    bar = plot_w / max(1, _W)
+    _x0 = n - _W
     ppx = plot_h / (y_max - y_min)
 
     def y_of(p, pos):
@@ -115,8 +129,18 @@ def dedup_mark_labels(items, n, y_min, y_max, plot_w, plot_h, grid_l, grid_t,
             continue
         lab = it.get("label") or {}
         pos = lab.get("position", default_pos)
-        recs.append({"x": grid_l + xi * bar, "yc": y_of(c[1], pos),
-                     "w": _label_w(it.get("value", "")), "p": it,
+        _w = _label_w(it.get("value", ""))
+        _x = grid_l + (xi - _x0) * bar
+        if _x0 <= xi <= n - 1 and _x - _w / 2 < grid_l:
+            # R470: 标签框左缘探入 y 轴刻度区 —— 可见窗口最左端的点被"居中"标签向左探出，
+            # 与刻度文字真实重叠（门禁实测 "09-02 段顶" ✕ "13,000" 6px、"09-04 段底" ✕
+            # "6,500" 7px）。刻度文字右缘在 x=88，此处以 grid_l(96) 判，留 8px 余量。
+            # 仅对窗口内元素生效：窗口外元素的 x 为负值，不参与本判据（它们在用户缩小
+            # 视图后会被 ECharts 重算到正确位置，保留 show=True 才有意义）。
+            it.setdefault("label", {})["show"] = False
+            it.pop("_pri", None)
+            continue
+        recs.append({"x": _x, "yc": y_of(c[1], pos), "w": _w, "p": it,
                      "pri": it.pop("_pri", 0)})
     recs.sort(key=lambda d: (-d["pri"], d["x"]))
     kept = []
@@ -338,28 +362,61 @@ def echart_main(klines, r, sym, captured=None):
     # 线段结构 markLine
     seg_lines = []
     segments = r.get("segments", [])
+    seg_pts = []   # (线段序号, klines 索引, 价格, 方向) —— R470 起供线段端点标注复用
+    for _sk, sg in enumerate(segments):
+        s0 = merged[sg["start"]]["idx_start"]
+        e0 = merged[sg["end"]]["idx_end"]
+        if e0 < s0:
+            s0, e0 = e0, s0
+        if sg["dir"] == 1:
+            idx = max(range(s0, e0 + 1), key=lambda i: klines[i]["high"])
+            pv = klines[idx]["high"]
+        else:
+            idx = min(range(s0, e0 + 1), key=lambda i: klines[i]["low"])
+            pv = klines[idx]["low"]
+        seg_pts.append((_sk, idx, pv, sg["dir"]))
     if len(segments) >= 2:
-        seg_pts = []
-        for sg in segments:
-            s0 = merged[sg["start"]]["idx_start"]
-            e0 = merged[sg["end"]]["idx_end"]
-            if e0 < s0:
-                s0, e0 = e0, s0
-            if sg["dir"] == 1:
-                idx = max(range(s0, e0 + 1), key=lambda i: klines[i]["high"])
-                pv = klines[idx]["high"]
-            else:
-                idx = min(range(s0, e0 + 1), key=lambda i: klines[i]["low"])
-                pv = klines[idx]["low"]
-            seg_pts.append((idx, pv, sg["dir"]))
         recent = seg_pts[-14:]
         for i in range(len(recent) - 1):
-            idx0, v0, _ = recent[i]
-            idx1, v1, _ = recent[i + 1]
+            _, idx0, v0, _ = recent[i]
+            _, idx1, v1, _ = recent[i + 1]
             seg_lines.append([
                 {"coord": [dates[idx0], round(v0, 2)], "lineStyle": {"color": "#334155", "width": 1.5, "type": "dashed", "opacity": 0.5}},
                 {"coord": [dates[idx1], round(v1, 2)]}
             ])
+
+    # R470: 线段端点标注 —— 引擎早已算出线段级背驰（r["seg_beichi"]）与线段端点，但此前
+    # 产物只画了笔级背驰（bc_points），"段级顶/底"在图上完全不可见：实测上证 2026-05-14
+    # 顶 4258.86 是 seg[29] 线段级顶背驰、2026-07-20 底 3741.11 是 seg[32] 段底，二者
+    # 此前都无任何标注 ⇒ 用户主观感受即"该买卖的点没标出来"。
+    # 口径：点取「段内极值」（与 segLines 完全同式，保证连线端点 == 标注点）；线段级背驰者
+    # 后缀"背驰"。线段划分回溯会产生同端点重复（上证 seg[29]/seg[31] 同为 2026-05-14
+    # 4258.86），按 (日期, 价) 去重。
+    seg_points = []
+    _seg_bc_map = {b["seg_index"]: b["type"] for b in r.get("seg_beichi", [])}
+    _seg_cut = n - 500
+    _seg_seen = set()
+    for _sk, _si, _sp, _sd in seg_pts:
+        if _si < _seg_cut:
+            continue
+        _key = (dates[_si], round(_sp, 2))
+        if _key in _seg_seen:
+            continue
+        _seg_seen.add(_key)
+        seg_points.append({
+            # R470: 优先级 0（与历史拐点同级）—— 段端点是结构参照位、不是交易信号；
+            # 与买卖点/背驰落在同一位置时让位（信号优先级更高），单独存在时完整显示。
+            # 配色跟随 sig_points 方向语义（顶=绿/底=红，与卖点倒三角、买点三角一致）。
+            "_pri": 0,
+            "coord": [dates[_si], round(_sp, 2)],
+            "value": f"{dates[_si][5:]} 段{'顶' if _sd == 1 else '底'}"
+                     + ("背驰" if _sk in _seg_bc_map else ""),
+            "itemStyle": {"color": GREEN if _sd == 1 else RED},
+            "symbol": "circle",
+            "symbolSize": 7,
+            "label": {"show": True, "position": "top" if _sd == 1 else "bottom",
+                      "color": GREEN if _sd == 1 else RED, "fontSize": 10, "fontWeight": "bold"}
+        })
 
     # 已知历史拐点
     cap_points = []
@@ -402,8 +459,8 @@ def echart_main(klines, r, sym, captured=None):
     vmax = max(volumes) or 1
     hmax = max(abs(v) for v in hist) or 1
 
-    # 确定性去重叠：买卖点/背驰/拐点标签（ECharts markPoint 的 hideOverlap 在带 position/distance 时不可靠）
-    dedup_mark_labels(sig_points + bc_points + cap_points, len(dates), _yMin, _yMax,
+    # 确定性去重叠：买卖点/背驰/线段端点/拐点标签（ECharts markPoint 的 hideOverlap 在带 position/distance 时不可靠）
+    dedup_mark_labels(sig_points + bc_points + seg_points + cap_points, len(dates), _yMin, _yMax,
                       1100 - 96 - 56, 640 * (1 - 0.40) - 48, 96, 48, date_idx)
 
     chart_data = {
@@ -427,6 +484,7 @@ def echart_main(klines, r, sym, captured=None):
         "fibLines": fib_lines,
         "sigPoints": sig_points,
         "bcPoints": bc_points,
+        "segPoints": seg_points,
         "segLines": seg_lines,
         "capPoints": cap_points,
         "keyLevelsText": key_levels_text,
@@ -560,7 +618,7 @@ def echart_main(klines, r, sym, captured=None):
         itemStyle: {{ color: '#e54545', color0: '#18a058', borderColor: '#e54545', borderColor0: '#18a058' }},
         markArea: {{ data: D.markAreas.concat(D.gapAreas), silent: true }},
         markLine: {{ symbol: 'none', data: D.lastZsLines.concat(D.fibLines).concat(D.segLines), silent: false, labelLayout: {{ moveOverlap: 'shiftY' }} }},
-        markPoint: {{ data: D.sigPoints.concat(D.bcPoints).concat(D.capPoints) }}
+        markPoint: {{ data: D.sigPoints.concat(D.bcPoints).concat(D.segPoints).concat(D.capPoints) }}
       }},
       {{ name: 'MA20', type: 'line', data: D.ma20, symbol: 'none', lineStyle: {{ color: '#0ea5e9', width: 1.1 }} }},
       {{ name: 'MA60', type: 'line', data: D.ma60, symbol: 'none', lineStyle: {{ color: '#a855f7', width: 1.2 }} }},
