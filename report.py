@@ -118,15 +118,37 @@ def dedup_mark_labels(items, n, y_min, y_max, plot_w, plot_h, grid_l, grid_t,
     _x0 = n - _W
     ppx = plot_h / (y_max - y_min)
 
-    # R472: 标签「纵向错层」—— 买卖点贴点（层 0），线段端点等结构位外推一层（层 1）。
-    # 层间距 17px > 重叠判据的 13px ⇒ 两类标签在 y 向互不挤占、可在同一 x 区域共存
-    # （实测上证 2026-06-23「段顶·次高」原被 07-01「3卖」挤掉，错层后两者同时可见）。
-    # 层偏移必须与 ECharts 实际的 label.distance 对齐（层 1 的 distance = 4 + 17 = 21），
-    # 否则门禁（按真实渲染算）会报重叠 —— 层号由 item 的 "l" 字段给出。
-    def y_of(p, pos, ly=0):
-        yy = grid_t + (y_max - p) * ppx
-        base = -11 if pos == "top" else 11
-        return yy + base + ly * (-17 if pos == "top" else 17)
+    # R473: 标签纵向位置改用 ECharts 的**精确放置律**（原为「±11 / 层外推 17px」的拍脑袋模型）。
+    # 用 SSR 真渲染 345 个样本标定（_dbg/r473/calib_offsets.js）⇒ 真实基线 ty 相对锚点 yy 的
+    # 偏移恒为 ∓(symbolSize/2 + distance + fontSize/2)（top 取 −，bottom 取 +），**组内方差为 0**：
+    #   ss=10 d=4  fs=11 → 14.5 | ss=7 d=21 fs=10 → 29.5 | ss=8 d=21 fs=11 → 30.5
+    # 旧模型 yy∓11∓17·ly 与真值差：层 0 top −3.5 / bottom +3.5；层 1 ss7 −1.5 / ss8 −2.5
+    # ⇒ 一旦 top×bottom 混合，**低估收敛量达 6px** —— 模型判「两标签相距 16.8px（≥13 阈值，都保留）」
+    # 而真实只有 **10.8px** ⇒ 全历史缩放下残留 1~3px 真重叠（真渲染实测 #4/#8/#10 各 1~2 对）。
+    # 层号 "l" 仍写进产物（供前端 relayout 与阅读），但纵向位置不再由它推、一律由本律算。
+    # distance 缺省取 ECharts 默认 5（预测图 end_points 未显式给出该项）。
+    def _lab_off(it, pos):
+        ss = (it or {}).get("symbolSize", 0)
+        if isinstance(ss, (list, tuple)):
+            ss = ss[1] if len(ss) > 1 else (ss[0] if ss else 0)
+        try:
+            ss = float(ss)
+        except (TypeError, ValueError):
+            ss = 0.0
+        lab = (it or {}).get("label") or {}
+        try:
+            dist = float(lab.get("distance", 5)) if lab.get("distance") is not None else 5.0
+        except (TypeError, ValueError):
+            dist = 5.0
+        try:
+            fsz = float(lab.get("fontSize", 12)) if lab.get("fontSize") is not None else 12.0
+        except (TypeError, ValueError):
+            fsz = 12.0
+        off = ss / 2.0 + dist + fsz / 2.0
+        return -off if pos == "top" else off
+
+    def y_of(p, pos, it=None):
+        return grid_t + (y_max - p) * ppx + _lab_off(it, pos)
 
     recs = []
     for it in items:
@@ -158,7 +180,7 @@ def dedup_mark_labels(items, n, y_min, y_max, plot_w, plot_h, grid_l, grid_t,
             it.setdefault("label", {})["show"] = False
             it.pop("_pri", None)
             continue
-        recs.append({"x": _x, "yc": y_of(c[1], pos, it.get("l", 0)), "w": _w, "p": it,
+        recs.append({"x": _x, "yc": y_of(c[1], pos, it), "w": _w, "p": it,
                      "pri": it.pop("_pri", 0)})
     recs.sort(key=lambda d: (-d["pri"], d["x"]))
     kept = []
@@ -434,8 +456,9 @@ def echart_main(klines, r, sym, captured=None):
             # 配色跟随 sig_points 方向语义（顶=绿/底=红，与卖点倒三角、买点三角一致）。
             # R472: 取消 `_seg_cut`(n-500) 日期截断（理由同 sig_points 段）。
             "_pri": 0, "p": 0,
-            # R472: 层 1（纵向再外推 17px）—— 结构位标签不占用买卖点的纵向空间，两者可
-            # 在同一 x 区域共存。distance 21 == 买卖点的 4 + 17，与 dedup 的层偏移同口径。
+            # R472/R473: 结构位标签（层 1）—— 靠 distance 21（vs 买卖点的 4）把标签推出
+            # 约 16px，与买卖点在同一 x 区域共存。纵向位置由 ECharts 的真实放置律决定：
+            # dedup 与前端 relayout 都用 ∓(symbolSize/2 + distance + fontSize/2)，不再用层号推算。
             "l": 1,
             "coord": [dates[_si], round(_sp, 2)],
             "value": f"{dates[_si][5:]} 段{'顶' if _sd == 1 else '底'}"
@@ -469,8 +492,8 @@ def echart_main(klines, r, sym, captured=None):
                 "itemStyle": {"color": _pcol},
                 "symbol": "diamond",
                 "symbolSize": 8,
-                # R472: 与 segPoints 同层（l=1）—— 历史拐点是参照系，让出买卖点的纵向空间；
-                # position/distance 显式写出，与 dedup 的层偏移模型保持同口径。
+                # R472/R473: 与 segPoints 同层（l=1）—— 历史拐点是参照系，让出买卖点的纵向空间；
+                # position/distance 显式写出，供 dedup 与 relayout 的 ∓(ss/2+dist+fs/2) 律取值。
                 "label": {"show": True, "position": "top", "distance": 21,
                           "color": _pcol, "fontSize": 11, "fontWeight": "bold"}
             })
@@ -652,9 +675,18 @@ def echart_main(klines, r, sym, captured=None):
         lab.show = false; continue;
       }}
       pos = lab.position || 'top';
-      var _ly = (it.l == null ? 0 : it.l);            // 层号：0=买卖点贴点 / 1=结构位外推
-      recs.push({{ x: x, yc: gridT + (yMax - c[1]) * ppx
-                      + (pos === 'top' ? -11 : 11) + _ly * (pos === 'top' ? -17 : 17),
+      // R473: 纵向位置改与 report.py _lab_off() **逐字同律** —— 真实基线偏移 =
+      // ∓(symbolSize/2 + distance + fontSize/2)（top 取 −）。旧的 "±11 + 层×17" 在
+      // top×bottom 混合时低估收敛量 6px ⇒ 真渲染残留 1~3px 重叠（SSR 标定 345 样本）。
+      var _ss = it.symbolSize;
+      if (Object.prototype.toString.call(_ss) === '[object Array]') _ss = _ss.length > 1 ? _ss[1] : (_ss[0] || 0);
+      _ss = (typeof _ss === 'number' ? _ss : (parseFloat(_ss) || 0));
+      var _dist = (lab.distance == null ? 5 : parseFloat(lab.distance));
+      if (isNaN(_dist)) _dist = 5;
+      var _fsz = parseFloat(lab.fontSize);
+      if (isNaN(_fsz)) _fsz = 12;
+      var _off = _ss / 2 + _dist + _fsz / 2;
+      recs.push({{ x: x, yc: gridT + (yMax - c[1]) * ppx + (pos === 'top' ? -_off : _off),
                   w: w, it: it, pri: (it.p == null ? 0 : it.p) }});
     }}
     recs.sort(function (a, b) {{ return (b.pri - a.pri) || (a.x - b.x); }});
