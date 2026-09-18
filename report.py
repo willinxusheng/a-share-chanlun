@@ -1905,7 +1905,23 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
     # 二者天然不同。当偏离过大(>8%)时明确提示，避免用户把"目标情景"误读为"概率中点"，
     # 也暴露"结构判断相对纯统计更乐观/悲观"这一真实不确定性，使预测更诚实。
     _dev = (_interp(main_p, 1.0) - _medf(1.0)) / _medf(1.0)
-    if abs(_dev) > 0.08:
+    # R490: 判据补充 —— 旧口径只看「两者相差 >8%」，会漏掉最该提醒的一类：主路径与统计期望
+    # 「方向相反」。实测(09-18 上证)主路径 -3.2% vs 均值期望 +0.9%：方向相反，但幅度只差 4.0%
+    # ⇒ 提示不显示，用户看到红线朝下、当日却大涨，页面对此零解释。故补「方向冲突」判据：
+    # 两侧相对现价的方向必须相反，且各自幅度须超过噪声门限(主 2% / 期望 0.5%)，避免贴平时的伪冲突。
+    _r_main = (_interp(main_p, 1.0) - last) / last
+    _r_med = (_medf(1.0) - last) / last
+    _dir_conflict = bool(_r_main * _r_med < 0
+                         and abs(_r_main) > 0.02 and abs(_r_med) > 0.005)
+    if _dir_conflict:
+        note += (f"\n⚠ <b>路径方向提示</b>：结构主路径(目标情景)终点 {_interp(main_p, 1.0):.0f}"
+                 f"（{_r_main*100:+.1f}%）与「统计中位(无偏期望)」终点 {_medf(1.0):.0f}"
+                 f"（{_r_med*100:+.1f}%）<b>方向相反</b>。主路径由缠论结构情景"
+                 f"（当前为「{sc}」）演绎得出，统计中位由近 3 年真实收益分布外推得出，二者口径独立、"
+                 f"本就可能背离 ⇒ 此时主路径应读作「<b>若该结构情景成立会走到哪</b>」的条件推演，"
+                 f"而非对后市的概率中点预测；实际落点更可能靠近统计中位(期望)。"
+                 f"判读时请结合下方「主路径失效位」与该情景的概率一并看，结论宜保守。")
+    elif abs(_dev) > 0.08:
         _d = "偏高" if _dev > 0 else "偏低"
         note += (f"\n⚠ <b>路径偏离提示</b>：结构主路径(目标情景)终点较「统计中位(无偏期望)」{_d} "
                  f"{abs(_dev)*100:.1f}%，反映当前缠论结构判断相对纯历史统计更{'乐观' if _dev > 0 else '悲观'}；"
@@ -1952,6 +1968,7 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
                "regime": _rg, "kappa": round(_kappa, 3),
                "p_hold": round(_p_hold, 3),
                "path_dev": round(_dev, 4),
+               "path_dir_conflict": _dir_conflict,   # R490: 与主路径/期望「方向相反」判据同源，供卡片标签复用
                "zd": round(zd, 2), "zg": round(zg, 2), "last": round(last, 2),
                "trend": round(trend_end_price, 2), "trend_agree": trend_agree, "trend_r2": round(_r2, 3),
                "sigma": round(sigma, 4), "horizon": horizon, "lo": round(lo, 4), "span": round(span, 4),
@@ -2891,7 +2908,10 @@ def forecast_summary_table(data, results, results_week, results_month, forecast_
             syn = badge('数据不足', '#94a3b8')
         _lv = fi.get("level", "稳健")
         _dev = (fi.get("fc", {}) or {}).get("path_dev", 0) or 0
-        _lv_disp = (_lv + "·结构/统计偏离") if abs(_dev) > 0.08 else _lv
+        # R490: 与 forecast 的偏离提示同源(读 fc，不重算判据) —— 方向相反同样标注，避免"推演图提示了、
+        # 汇总表却不提示"的口径分裂
+        _devc = bool((fi.get("fc", {}) or {}).get("path_dir_conflict", False))
+        _lv_disp = (_lv + "·结构/统计偏离") if (abs(_dev) > 0.08 or _devc) else _lv
         _lv_c = {"稳健": GREEN, "边缘": "#d97706", "敏感·待确认": RED}.get(_lv, GREEN)
         stab = _lv_disp
         stab_c = _lv_c
