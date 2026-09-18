@@ -700,20 +700,38 @@ def find_seg_signals(bis_done, segments, seg_beichi, zss, klines, merged):
             continue
         pr0 = anchor["end_price"]
         _lim = min(len(bis_done), ai + 1 + SEG_LAG_LOOKBACK)
+        # R483: 第 1 支反向折返 = 段二类点（原有，逐位不变）；若它**未破位**，
+        #       再取**第 2 支** = 「段类二点」（类二买 / 类二卖）。
+        #       实测（5 指数 2021 至今，n=23）：第 1 次回抽 20 日胜率 76.0% / 均 +3.09%、
+        #       第 2 次 **78.3% / +4.40%**，两者都显著高于随机基准（49.1% / +0.22%）；
+        #       第 3 次起衰减到基准（54.5%、60 日仅 40.9%）⇒ **只取到第 2 次为止**。
+        #       任一反向折返破位 = 锚点失效，立即终止（与原有「首支破位即终止」同律）。
+        #       ★ 命名让 `kind[:3]` **自带方向**（`段类买` / `段类卖`）—— report.py 用
+        #       `kind[:3]` 查 `_KIND_SHORT`；若命名成「段二类买」则前 3 字「段二类」买卖
+        #       同串，会静默取到同一短名（R480 的 `kind[:3]` 同类坑）。
+        _hit = 0
         for k in range(ai + 1, _lim):
             bk = bis_done[k]
             if bk["dir"] != want:
                 continue
             ep = bk["end_price"]
             ok = (ep > pr0) if is_buy else (ep < pr0)
-            if ok:
-                raw.append({"bi_index": k,
-                            "kind": "段二买点(次低不破)" if is_buy else "段二卖点(次高不破)",
-                            "dir": 1 if is_buy else -1,
-                            "date": bk["date_end"], "price": ep,
-                            "vol_confirm": False, "bc_type": "", "level": "seg",
-                            "anchor_seg": si})
-            break                           # 首支反向折返即终止（破位 = 锚点失效，不再后扫）
+            if not ok:
+                break                       # 破位 = 锚点失效，不再后扫
+            _hit += 1
+            if _hit == 1:
+                kind = "段二买点(次低不破)" if is_buy else "段二卖点(次高不破)"
+            elif _hit == 2:
+                kind = "段类买点(二次回抽不破)" if is_buy else "段类卖点(二次反抽不破)"
+            else:
+                break
+            raw.append({"bi_index": k, "kind": kind,
+                        "dir": 1 if is_buy else -1,
+                        "date": bk["date_end"], "price": ep,
+                        "vol_confirm": False, "bc_type": "", "level": "seg",
+                        "anchor_seg": si})
+            if _hit >= 2:
+                break                       # 只取到第 2 次（第 3 次起统计上退化）
     # 去重：同一支笔可能被多个段锚点选中（一类优先，与 find_signals 的 _prio 同序）
     def _prio(k):
         # R480: 加入段三点后，优先级为 一类 > 三类 > 二类 —— 与 find_signals 的
