@@ -7,7 +7,7 @@ import sys
 import math
 import ast
 from datetime import datetime, timedelta, timezone
-from chanlun import analyze, backtest_signals, MIN_BI_PCT_WEEK, health_score, forecast_confidence, forward_vol, adaptive_horizon, classify, realized_vol_annualized, KNOWN_PIVOTS, _date_diff, MIN_BI_PCT_MONTH, backtest_robustness, backtest_paths, _path_targets, market_breadth, regime_factor, classify_regime, SC_BULL, SC_BEAR
+from chanlun import analyze, backtest_signals, MIN_BI_PCT_WEEK, health_score, forecast_confidence, forward_vol, adaptive_horizon, classify, realized_vol_annualized, KNOWN_PIVOTS, _date_diff, MIN_BI_PCT_MONTH, backtest_robustness, backtest_paths, _path_targets, market_breadth, regime_factor, classify_regime, SC_BULL, SC_BEAR, build_seg_zhongshu
 
 W, H_PRICE, H_VOL, H_MACD = 1060, 360, 64, 110
 PAD_L, PAD_R, PAD_T, PAD_B = 12, 78, 24, 26
@@ -84,6 +84,10 @@ _KIND_SHORT = {
     # `kind[:3]` **自带方向**（`段类买`/`段类卖`）—— 本表正是用 `kind[:3]` 查的，
     # 若取名「段二类买」则前 3 字「段二类」买卖同串、静默撞同一个键（R480 同类坑）。
     "段类买": "段类2买", "段类卖": "段类2卖",
+    # R484: 笔级「类二点」（一类点之后**第 2 次**未破位的反向折返）—— 与 R483 段级
+    # 「段类点」同律（量化见 chanlun.find_signals 的注释：第 2 次 68.2%/73.1%，
+    # 不弱于首个 59.3%/62.9%；第 3 次退化）。命名让 `kind[:3]` 自带方向。
+    "类二买": "类2买", "类二卖": "类2卖",
 }
 
 # R478: 段级买卖点在图上的标签后缀（与笔级 sig_points 的 ·趋/·盘/·量 同位置的语义补充）。
@@ -227,6 +231,20 @@ def dedup_mark_labels(items, n, y_min, y_max, plot_w, plot_h, grid_l, grid_t,
     不做链式外推；③ 被推的条目把基准 distance 写进产物的 `d0` 键 —— 前端 `relayout()` 据此
     复位再按同一规则重推，两侧单一口径（否则用户缩放一次，distance 会被反复叠加）。
     ⚠ push_out=0（缺省）时行为与改动前**逐字节一致**（预测图调用点即走此路）。
+
+    ★★ R484：**新增/加宽标签会改变外推量 ⇒ 可能挤掉邻近的低优先级标签**（不是缺陷，是
+    优先级策略的必然结果，但必须量化后再接受）。实测（深证成指 / 创业板指，2026-09-18）：
+    新增笔级类二后，`09-04 类2买·段类2买` 的显示串由 11 字增至 16 字 ⇒ 与外层邻居的 x 向
+    重叠变宽 ⇒ 首个可行位移由 `t=6`(distance 10) 增到 **`t=34`(distance 38)** ⇒ 落点正好压住
+    邻近的 pri-0 `09-16 段底·次低`（其 `yc=250.7`）⇒ 后者被判重叠而隐藏（5 图中 2 图，各 1 条）。
+    **为什么不能"修"**：该处锚点 `yc=222.05`，要让出空间须满足 `|Δy|≥13` ⇒ 只能取 `t ≤ 14`
+    或 `t ≥ 41.65`；而 `t ∈ [2,32]` 已被**已保留的 pri-2 标签群**占满、`t ≥ 41.65` 超出
+    `push_out=40` ⇒ **无可行解**。若让外推"预知"该 pri-0 标签，唯一后果是**把优先级更高的
+    两级共振信号（笔级类2买 ✕ 段级类2买）一起隐藏** —— 更糟。
+    ⇒ 结论：pri-2 交易信号优先于 pri-0 结构参照位（与本文档 R469 的既定策略一致），
+    被牺牲的标签**数据仍在产物里**（`show=False`），非数据丢失。
+    ⇒ 复现"减少可见信息"的判据 = **比对真渲染 SVG 的 `<text>` 集合**（不是比 `show` 标志：
+    运行时 relayout 会重算 `show`，JSON 里的值只是初值）。
     """
     if n <= 0 or (y_max - y_min) == 0:
         return
@@ -506,6 +524,40 @@ def echart_main(klines, r, sym, captured=None, sig_age=None):
              "itemStyle": {"color": "rgba(43,108,176,0.10)"},
              "label": {"show": False}},
             {"xAxis": dates[x1], "yAxis": round(zs["zd"], 2)}
+        ])
+
+    # R484: **段级中枢** markArea —— 补上「段级信号不可核查」的缺口。
+    # 背景：R478/R480/R483 已把「段1/段2/段3/段类2」四族段级买卖点画到图上，而它们的判据
+    # 全部引用**段级中枢**（段三点 = 段级中枢被离开后回抽不重回；段三点止损锚在段级中枢
+    # 下沿/上沿，见 attach_rr 的 zs_ref）。但段级中枢**此前从未进入产物** ⇒ 图上完全不可见：
+    # 用户看到「段3买」和它旁边的止损数字，却找不到这个数字锚在哪个区间 ⇒ 信号无法自证。
+    # 口径：与段三点**同一函数**（chanlun.build_seg_zhongshu，单一来源，不在 report 侧另算），
+    # 取最近 2 个（段级中枢跨度天然比笔中枢大一个量级，画多了会把图糊满）。
+    # ★ 颜色用**青色 + 虚线边框**（#0d9488 系）：与笔中枢的蓝色实心带(#2b6cb0)、缺口的红/绿
+    #   三者在色相与边框样式上都可区分。★ 原本选紫色（#7c3aed 系）—— 已弃用：紫色在产物里
+    #   已被**预测图置信锥**占用（`rgba(124,58,237,0.10/0.12)`），跨图同色会让用户误以为同义。
+    # ★ label 关闭 ⇒ 不产生任何文字元素 ⇒ 不进入标签去重叠的竞争者之列（obs 只含顶部筹码条），
+    #   因此本项对既有标签可见性**零影响**（已由「加前/加后逐键深比较」实证）。
+    seg_zs_areas = []
+    try:
+        _szs = build_seg_zhongshu(r.get("segments") or [], merged)
+    except Exception:
+        _szs = []
+    for zs in _szs[-2:]:
+        try:
+            _x0 = merged[zs["start"]]["idx_start"]
+            _x1 = merged[zs["end"]]["idx_end"]
+        except Exception:
+            continue
+        if _x1 < _x0:
+            _x0, _x1 = _x1, _x0
+        seg_zs_areas.append([
+            {"xAxis": dates[_x0], "yAxis": round(zs["zg"], 2),
+             "itemStyle": {"color": "rgba(13,148,136,0.10)",
+                           "borderColor": "rgba(13,148,136,0.55)",
+                           "borderWidth": 1, "borderType": "dashed"},
+             "label": {"show": False}},
+            {"xAxis": dates[_x1], "yAxis": round(zs["zd"], 2)}
         ])
 
     # 最后中枢 ZG/ZD 金色虚线（标签移至顶部关键价位条，避免近价重叠）
@@ -949,6 +1001,7 @@ def echart_main(klines, r, sym, captured=None, sig_age=None):
         "vmax": vmax,
         "hmax": round(hmax, 3),
         "markAreas": mark_areas,
+        "segZsAreas": seg_zs_areas,
         "lastZsLines": last_zs_lines,
         "gapAreas": gap_areas,
         "fibLines": fib_lines,
@@ -1284,7 +1337,7 @@ def echart_main(klines, r, sym, captured=None, sig_age=None):
       {{
         name: '日K', type: 'candlestick', data: D.ohlc,
         itemStyle: {{ color: '#e54545', color0: '#18a058', borderColor: '#e54545', borderColor0: '#18a058' }},
-        markArea: {{ data: D.markAreas.concat(D.gapAreas), silent: true }},
+        markArea: {{ data: D.markAreas.concat(D.gapAreas).concat(D.segZsAreas || []), silent: true }},
         markLine: {{ symbol: 'none', data: D.lastZsLines.concat(D.fibLines).concat(D.segLines), silent: false, labelLayout: {{ moveOverlap: 'shiftY' }} }},
         markPoint: {{ data: _MK }}
       }},
@@ -2663,7 +2716,8 @@ def backtest_table(backtests):
     R478: 新增段级行（段一买/段一卖/段二买/段二卖）。段级样本与笔级**分开统计**、分开成行 ——
     两族样本性质不同（段级周期长约一个量级、样本少），混计会污染笔级的历史可比性。
     """
-    KINDS = ["一类买", "一类卖", "二类买", "二类卖", "三类买", "三类卖",
+    KINDS = ["一类买", "一类卖", "二类买", "二类卖", "类二买", "类二卖",
+             "三类买", "三类卖",
              "段一买", "段一卖", "段二买", "段二卖", "段三买", "段三卖",
              "段类买", "段类卖"]
     HORIZONS = [5, 10, 20, 60]
@@ -2695,7 +2749,7 @@ def backtest_table(backtests):
       <colgroup><col style="width:110px"><col style="width:calc((100%% - 110px)/4)"><col style="width:calc((100%% - 110px)/4)"><col style="width:calc((100%% - 110px)/4)"><col style="width:calc((100%% - 110px)/4)"></colgroup>
       <thead><tr><th>信号类型</th><th class="tac">后 5 个交易日</th><th class="tac">后 10 个交易日</th><th class="tac">后 20 个交易日</th><th class="tac">后 60 个交易日</th></tr></thead>
       <tbody>%s</tbody></table>
-      <p style="font-size:12px;color:#64748b;margin-top:8px">统计 5 大指数 2021-01 至今全部信号（买点胜=之后涨，卖点胜=之后跌）。买卖点按缠论标准：一类=背驰拐点，二类=次低/次高折返，三类=回抽不进中枢；<b>段一/段二/段类二/段三 = 线段级别</b>（段一=线段级背驰拐点，段二=段级一类后次级别<b>首个</b>回抽不破前极值，段类二=<b>第 2 次</b>同类回抽，段三=<b>段级中枢</b>被离开后次级别回抽不重新进入），与笔级<b>分行独立统计、不混计</b>。<b>段三点样本量小</b>（5 指数 2021 至今合计 33 条，其中上证仅 2 条）—— 读数只作方向参考，尤其中短期胜率在 n&lt;15 时易出 100%% 这类假值。<b>段类二</b>为 R483 新增（首个之后<b>第 2 次</b>未破位的反向折返；实测 20 日胜率 78.3%% / 均 +4.40%%，与首个回抽同级、远优于随机基准 49.1%% / +0.22%%；<b>第 3 次</b>起退化到基准，故不再后取）。样本有限，历史特征，非投资建议。</p>""" % "".join(rows)
+      <p style="font-size:12px;color:#64748b;margin-top:8px">统计 5 大指数 2021-01 至今全部信号（买点胜=之后涨，卖点胜=之后跌）。买卖点按缠论标准：一类=背驰拐点，二类=次低/次高折返，三类=回抽不进中枢；<b>段一/段二/段类二/段三 = 线段级别</b>（段一=线段级背驰拐点，段二=段级一类后次级别<b>首个</b>回抽不破前极值，段类二=<b>第 2 次</b>同类回抽，段三=<b>段级中枢</b>被离开后次级别回抽不重新进入），与笔级<b>分行独立统计、不混计</b>。<b>段三点样本量小</b>（5 指数 2021 至今合计 33 条，其中上证仅 2 条）—— 读数只作方向参考，尤其中短期胜率在 n&lt;15 时易出 100%% 这类假值。<b>段类二</b>为 R483 新增（首个之后<b>第 2 次</b>未破位的反向折返；实测 20 日胜率 78.3%% / 均 +4.40%%，与首个回抽同级、远优于随机基准 49.1%% / +0.22%%；<b>第 3 次</b>起退化到基准，故不再后取）。<b>类二（笔级）</b>为 R484 新增，与段类二同律：笔级一类后<b>第 2 次</b>折返不破前极值（实测 20 日胜率 68.2%%(买)/73.1%%(卖)，不弱于首个 59.3%%/62.9%%，第 3 次退化到 58.8%%/59.1%%）。同一轮已量化并<b>决定不扩</b>三类的第 2 次起（笔 73.1%%→61.5%%、段 81.5%%→66.7%%，两侧一致退化）。样本有限，历史特征，非投资建议。</p>""" % "".join(rows)
 
 
 def rr_table(data, results, recent_n=8):
@@ -4014,11 +4068,14 @@ def main():
         {echart_main(d["klines"], r, sym, r["captured"], sig_age)}
       </div>
       <div style="margin-top:6px;font-size:12px;line-height:1.75;color:#64748b">标签：<b>1/2/3买·卖</b> = <b>笔级</b>一类/二类/三类买卖点（背驰拐点 / 次低次高折返 / 回抽不进中枢）·
+        <b>类2买 / 类2卖</b> = <b>笔级</b>「类二」买卖点（笔级一类之后，次级别(笔)<b>第 2 次</b>折返不破前极值）·
         <b>段1买·段1卖</b> = <b>线段级</b>一类买卖点（线段级背驰拐点，三角比笔级大一圈）·
         <b>段2买 / 段2卖</b> = <b>线段级</b>二类买卖点（段级一类之后，<b>次级别(笔)</b>首个回抽不破前极值）·
         <b>段3买 / 段3卖</b> = <b>线段级</b>三类买卖点（<b>段级中枢</b>被离开后，次级别(笔)回抽<b>不重新进入</b>段级中枢）·
         <b>段类2买 / 段类2卖</b> = <b>线段级</b>「类二」买卖点（段级一类之后，次级别(笔)<b>第 2 次</b>回抽不破前极值）·
         <b>段顶 / 段底</b> = 线段端点结构参照位（含 ·背驰 / ·次高 / ·次低）·
+        <span style="background:rgba(43,108,176,0.10);border:1px solid #2b6cb0;border-radius:3px;padding:0 3px">蓝带</span> = <b>笔中枢</b>区间（最近 8 个）·
+        <span style="background:rgba(13,148,136,0.10);border:1px dashed #0d9488;border-radius:3px;padding:0 3px">青带</span> = <b>段级中枢</b>区间（最近 2 个，虚线框）—— <b>段3买/段3卖 的止损锚就在这里</b>（段级中枢下沿/上沿）·
         <b>·趋 / ·盘</b> = 趋势 / 盘整背驰 · <b>·量</b> = 量价背离确认 ·
         <span style="background:rgba(229,69,69,0.13);border:1px solid #e54545;border-radius:3px;padding:0 3px;font-weight:700">新 XX 买·卖</span>
         = <b>近 {SIG_NEW_DAYS} 个交易日内才出现</b>的信号（因信号须等其所处「笔」走完才确认，
@@ -4034,7 +4091,13 @@ def main():
         ★ <b>为什么补「段类二」</b>：标准二类点只取「<b>首个</b>不破位的反向折返」，而实测（5 指数 2021 至今）
         <b>第 2 次</b>同样有效 —— 20 日胜率 <b>78.3%</b> / 均 <b>+4.40%</b>（首 76.0% / +3.09%，
         随机基准 49.1% / +0.22%）；第 3 次起退化到基准（54.5%，60 日仅 40.9%）⇒ 只补到第 2 次为止。
-        任一反向折返<b>破位</b>即锚点失效、不再后扫。</div>
+        任一反向折返<b>破位</b>即锚点失效、不再后扫。<br>
+        ★ <b>R484 系统性补全</b>：把「每锚点只取首个」这条去重律在<b>全部信号族 × 两级</b>上逐格量化后 ——
+        ① <b>笔级二类</b>与段级同病（第 2 次 20 日胜率 <b>68.2%(买)/73.1%(卖)</b>，
+        <b>均不弱于</b>首个 59.3%/62.9%，第 3 次退化到 58.8%/59.1%）⇒ 已补 <b>类2买 / 类2卖</b>；
+        ② <b>三类族不动</b>：第 2 次起<b>两侧一致退化</b>（笔 73.1%→61.5%→56.4%，
+        段 81.5%→66.7%→70.6%）⇒ 中枢的「首个回抽」才是离开确认，后续回抽退化为中枢震荡，
+        补齐只会稀释读数 —— 这是<b>有证据的「不补」</b>，不是遗漏。</div>
       <div class="verdict"><b>结构解读：</b><p>{cls["detail"]}</p>
       <p style="margin-top:4px"><b>周线级别：</b>{wcls["detail"]}</p>{_sent_row}</div>
       <h3 class="fc-title">未来走势推演</h3>
