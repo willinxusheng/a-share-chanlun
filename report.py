@@ -1707,11 +1707,10 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
         p_risk = 0.05
         p_alt = round(_rem - p_risk, 2)
 
-    H = 300
-    PAD_T3, PAD_B3 = 30, 34
-    plot_w = W - PAD_L - PAD_R
-    hist_w = plot_w * 0.40
-    proj_w = plot_w * 0.60
+    # R491: 删除旧 SVG 渲染的几何死代码块（H=300 / PAD_T3 / PAD_B3 / plot_w / hist_w / proj_w）——
+    # forecast_svg 自 R476 起只负责算数，渲染全部交给 forecast_echart（ECharts），其 grid 为
+    # left:96/right:88/top:64/bottom:80（见 dedup_mark_labels 调用点），与下面这套常量无关。
+    # 实证：本块 6 个常量在函数体内引用次数 = 定义处 1 次（plot_w 3 次全在本块内），零外部消费。
 
     # ---- 经验分位扇形置信带（#预测精度·核心）：用真实历史 horizon 对数收益分布的分位，
     # 生成非对称 P05/P25/P75/P95 扇形锥，并以「实测漂移中位路径」为中线锚定——
@@ -1800,27 +1799,13 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
         else:
             _sp = (_base_dn25 if abs(z) < 1.0 else _base_dn) * kf
         return last * math.exp(_mean * f + (1.0 if z > 0 else -1.0) * _sp * math.sqrt(f))
-    band_ext = []
-    for _f in (0.25, 0.5, 0.75, 1.0):
-        band_ext.append(_bandf(_f, 1.645))   # 经验上沿(P95)
-        band_ext.append(_bandf(_f, -1.645))  # 经验下沿(P05)
-    band_ext.append(_medf(1.0))
-    all_prices = tail + [v for _, v in main_p + alt_p + risk_p] + [zg, zd] + band_ext + [trend_end_price] \
-        + [g["top"] for g in _gap_refs] + [g["bottom"] for g in _gap_refs]
-    lo, hi = min(all_prices), max(all_prices)
-    pad = (hi - lo) * 0.06
-    lo, hi = lo - pad, hi + pad
-    span = hi - lo or 1
-
-    def y(v):
-        return PAD_T3 + (H - PAD_T3 - PAD_B3) * (1 - (v - lo) / span)
-
-    def xh(i):
-        return PAD_L + hist_w * i / (len(tail) - 1)
-
-    def xp(f):
-        return PAD_L + hist_w + proj_w * f
-
+    # R491: 删除 band_ext / all_prices / lo / hi / pad / span / y() / xh() / xp() 一整套死代码。
+    # 它们只服务于 `lo`/`ymax`(=lo+span) 两个字段，而该二字段**在预测图 JS 里零引用**
+    # （A22 实证：D.lo / D.ymax 从不出现），真正控制 y 轴的是下面 core_prices 推出的
+    # ymin_core/ymax_core（SSR 实测：两者与 grid top/bottom 严格对齐）。
+    # ★ 隐患由此消除：`lo`/`span` 的名字看起来就是「y 轴范围」，与真值 ymin_core/ymax_core
+    #   是两套口径并存，维护时极易误改；删掉比留着更安全。
+    # 实证引用计数：xh()/xp() 各 1 次（=定义处，零调用）；all_prices 2 次（定义+min）；band_ext 仅服务 all_prices。
     _hist_k = klines[-len(tail):]
     _hd = [k["date"] for k in _hist_k]
     _last_dt = datetime.strptime(klines[-1]["date"], "%Y-%m-%d")
@@ -1839,6 +1824,18 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
             if _is_trading_day(dt):
                 kk -= 1
         return dt.strftime("%Y-%m-%d")
+    # ---- R491: 「主路径」命名 vs 概率排序 诚实提示（承 R490 的方向冲突同类）----
+    # 实测(2026-09-18)：3/5 指数 p_main 并非最大 —— 上证 主32% < 次39%；沪深300 主34% < 风险53%；
+    # 深证成指 主35% < 风险45%。而图上该线叫「结构演绎主路径」、端点叫「主目标 3788」，
+    # 命名天然读作"最可能的走势"，与真实概率排序相反，且页面对此零解释 ⇒ 用户会拿一条
+    # 概率最低的线当基准。判据取 3pp 噪声门限（避免与最大值几乎并列时的伪提示）。
+    # ★ 本块必须在 legend_html / fc_data 之前（两处都要用 _p_top），否则 UnboundLocalError
+    #   —— 曾把本块放在 _dev 之后（即 legend_html 之后），本地实跑 4/5 指数直接降级占位。
+    _p_max = max(p_main, p_alt, p_risk)
+    _p_top = "main" if p_main == _p_max else ("alt" if p_alt == _p_max else "risk")
+    _p_top_name = {"main": "结构演绎主路径", "alt": "次路径", "risk": "风险路径"}[_p_top]
+    _p_named_mismatch = bool(_p_max - p_main > 0.03)
+
     # R476: 路径终点来源**透明化**（承 R475 核查）。实测三条路径终点全部 = 中枢点位 × 固定系数
     # （主 mid×0.99 / 次 zd×0.98 / 风险 zd×0.92），属**启发式情景外推，不是缠论推导**；而缠论对
     # "破位后的量度"有自己的标准算法（中枢高度外推：ZD − (ZG − ZD)）。两者不一致时必须让用户
@@ -1856,13 +1853,23 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
         f'</div>'
     )
     # 图例改为图表下方的 HTML 图例条（不再压住推演路径与时间轴）
+    # R491: 三处措辞更正（均有实测依据，详见本轮审计）：
+    #  ①「统计期望路径」→「统计期望路径」：图上该线取值 = last*exp(窗口**均值**·f)，用的是均值
+    #    而非中位数（实测 5 指数均值比中位高 0.80~1.70pp，sz399006：+1.94% vs +0.24%）⇒ 原名名实不符。
+    #  ② 置信锥口径披露 κ：图例原写「经验分位 P05–P95（真实分布·非对称）」，而实测带宽是经验分位的
+    #    1.26~2.42 倍（= κ 覆盖修正，故实测覆盖率才达名义 90%）⇒ 只写"经验分位/真实分布"失实，
+    #    现明确写出「经验分位 × κ」及本指数 κ 值。
+    #  ③ 概率最高者加「★概率最高」标记：因"主路径"是结构命名、不代表概率最大（3/5 指数如此）。
+    _pstar = "★概率最高 " if _p_top == "main" else ""
+    _astar = "★概率最高 " if _p_top == "alt" else ""
+    _rstar = "★概率最高 " if _p_top == "risk" else ""
     legend_html = (
         f'<div class="fc-legend">'
-        f'<span><i class="ln ln-dash" style="background:{RED}"></i>结构演绎主路径 ≈ {p_main * 100:.0f}%（目标 {main_p[-1][1]:.0f}，{((main_p[-1][1]/last-1)*100):+.1f}%）</span>'
-        f'<span><i class="ln" style="background:{RED}"></i>统计中位路径（均值期望 {_medf(1.0):.0f}，{((_medf(1.0)/last-1)*100):+.1f}%）</span>'
-        f'<span><i class="ln ln-dash" style="background:#94a3b8"></i>次路径：中枢内震荡 ≈ {p_alt * 100:.0f}%</span>'
-        f'<span><i class="ln ln-dot" style="background:{GREEN}"></i>风险路径：跌破ZD转空 ≈ {p_risk * 100:.0f}%</span>'
-        f'<span><i class="ln ln-band"></i>置信锥 经验分位 P05–P95 / P25–P75（真实分布·非对称）</span>'
+        f'<span><i class="ln ln-dash" style="background:{RED}"></i>{_pstar}结构演绎主路径 ≈ {p_main * 100:.0f}%（目标 {main_p[-1][1]:.0f}，{((main_p[-1][1]/last-1)*100):+.1f}%）</span>'
+        f'<span><i class="ln" style="background:{RED}"></i>统计期望路径（窗口均值 {_medf(1.0):.0f}，{((_medf(1.0)/last-1)*100):+.1f}%）</span>'
+        f'<span><i class="ln ln-dash" style="background:#94a3b8"></i>{_astar}次路径：中枢内震荡 ≈ {p_alt * 100:.0f}%</span>'
+        f'<span><i class="ln ln-dot" style="background:{GREEN}"></i>{_rstar}风险路径：跌破ZD转空 ≈ {p_risk * 100:.0f}%</span>'
+        f'<span><i class="ln ln-band"></i>预测带 = 经验分位(P05–P95 / P25–P75) × 覆盖修正 κ={_kappa:.2f}（故带宽大于名义分位，实测覆盖≈90%）</span>'
         f'<span><i class="ln ln-trend"></i>趋势外推 {trend_end_price:.0f}（R²={_r2:.2f}{"，弱拟合" if trend_weak else ""}）</span>'
         f'</div>'
         f'<div class="fc-targets">结构演绎目标(主路径终点) ≈ <b>{main_p[-1][1]:.0f}</b>（<b style="color:{RED}">{((main_p[-1][1]/last-1)*100):+.1f}%</b>） · '
@@ -1873,10 +1880,14 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
         f'结构存续概率(锥) ≈ <b>{_p_hold*100:.0f}%</b></div>'
         + _src_note
     )
+    # R491: 本指数 horizon 日 P05–P95 带**实际带宽**（供说明文案动态披露，替代原先硬编码的
+    # 「60 日…~119%」——那是创业板的历史读数，写到所有指数身上既错指数、又错 horizon
+    # （horizon 由 adaptive_horizon 决定，实测为 30 而非 60））。
+    _bw = math.exp(_mean + _sp_up) - math.exp(_mean - _sp_dn)
     note = (f"主路径失效位：现价有效跌破 ZD {zd:.0f}（收盘确认）→ 主路径失效、风险路径概率上升；风险路径确认需同时满足「跌破 ZD + 周线笔转向下」。\n"
              f"上方「风险止损位」即该风险路径的<b>向下量度终点</b>（由 ZD 派生的结构参考位）——需要「往下还有多少空间」时读这一栏；确认条件未满足前它只是条件应对的边界，不是对底部的预测。\n"
-             f"红色阴影为基于<b>真实历史 {horizon} 日对数收益分布</b>推演的<b>经验分位扇形置信带</b>（P05–P95 外层 / P25–P75 内层）：与对称 ±σ 带不同，它直接由本指数历史兑现统计得出、天然包含 A 股肥尾与涨跌不对称，"
-        f"故<b>上下带非对称</b>——按真实历史经验分位分别给上下沿定宽（替代对称 ±1.645σ 等宽假设）：本指数近 3 年 {horizon} 日对数收益呈右偏，上行离散（P95–P50）约为下行的 1.5–2.5 倍，故<b>上行带更宽</b>，如实容纳单边急涨的肥尾。R57+R58 口径：① 校准窗口由全历史改为<b>近 3 年</b>，剔除 2015 股灾等早期崩溃收益导致的 era-shift 偏悲观；② 中心由中位改为<b>窗口均值（期望）</b>，A 股含正漂移、中位低估中枢，使方向判定正确率由约 36% 升至约 54%；③ 近窗口已含当前波动，<b>不再叠加 regime 因子</b>（此前双重放大使创业板带宽虚胖至 ±60%+）。覆盖修正系数 κ（R168 重标定 + R171 regime 细化）：walk-forward 实测(同回测引擎, 5指数 N=180/horizon)表明 κ=1.8 时牛/震荡实测覆盖达 96~98%(过宽、名义90%被高估、带几乎无信息量)，故 R168 将 κ 由 1.8 降至 1.4，聚合精确命中名义 90%(T+8 89.4%、T+30 91.1%)。但 R171 分 regime 重扫(动态 exec 真实 forecast_svg, 遍历 κ∈[1.4,2.3])发现：单一 bull κ 无法同时让 H8/H30 都≈90%——bull H8 在 κ=1.4 仅 79.2%(N=53, 牛市短期急涨急跌使 30日带对 T+8 偏窄)，而 bull H30 在 κ=1.4 已 90.6%、κ=1.6 即过宽到 96.2%(无信息量带)。故 R171 取折中 bull=1.5：bull H8 79.2%→86.8%(接近名义90%、健康)、bull H30 92.5%(未过宽)；range 维持 1.4(聚合 H8/H30 均 93.2%)、bear 维持 2.3(下行富尾安全垫)。早期「κ=1.4→86%/κ=1.8→90.2%」系 R57/R58 改窗口与改中心前的旧口径、已 stale。√t 缩放假设仍成立(覆盖率随 horizon 分桶均匀)。<b>κ 按市场环境自适应(R108)</b>：牛 <b>{_KAPPA_NEAR['bull']:.2f}/{_KAPPA['bull']:.2f}</b>(近端/远端) / 震荡 <b>{_KAPPA['range']:.2f}</b> / 熊市 <b>{_KAPPA['bear']:.2f}</b>(关15 实证熊市 T+30 原 κ=1.8 漏覆盖 33.3%、LRuc=7.1 拒绝 99%，放宽后给下行富尾补安全垫——A 股熊市下跌更急更肥尾，近 3 年经验分位低估了极端下行)。R223：仅牛市加「近端(f=0)加宽」斜坡(1.5→1.60)修 T+8 漏覆盖 86.8%→≈90+(walk-forward 实测复核见 backtest_diff)；震荡/熊市维持 R171 原值不动——过度收窄属安全侧过宽非缺陷，且盲目降 range κ 会把创业板 T+30 本已偏低覆盖(86.1%)进一步压低(假绿)，故仅精准修牛市近端这一真缺陷。中线路径为「实测漂移期望（均值）」而非手工情景路径，置信带中线统计诚实；带宽随时间按 √t 扩张（随机游走特性），近月不确定性即已显著，并非线性外推的针状。<b>代价</b>：创业板等超高波动指数 60 日 P05–P95 带宽达 ~119%，这是其真实波动的诚实反映，而非缺陷。\n"
+             f"红色阴影为基于<b>真实历史 {horizon} 日对数收益分布</b>推演的<b>经验分位扇形预测带</b>（P05–P95 外层 / P25–P75 内层）：与对称 ±σ 带不同，它直接由本指数历史兑现统计得出、天然包含 A 股肥尾与涨跌不对称，"
+        f"故<b>上下带非对称</b>——按真实历史经验分位分别给上下沿定宽（替代对称 ±1.645σ 等宽假设）：本指数近 3 年 {horizon} 日对数收益呈右偏，上行离散（P95–P50）实测为下行（P50–P05）的 <b>{_base_up / _base_dn:.2f} 倍</b>，故<b>上行带更宽</b>，如实容纳单边急涨的肥尾。<b>⚠ 带宽口径（R491 补披露）</b>：图上带的上下沿<b>不是</b>名义经验分位本身，而是<b>经验分位 × 覆盖修正 κ</b>——本指数 κ=<b>{_kappa:.2f}</b>，故实际带宽（{horizon} 日 P05–P95 ≈ <b>{_bw*100:.0f}%</b>）显著大于名义分位区间（{horizon} 日 ≈ {(_q95 - _q05)*100:.0f}%）；κ 的作用是补偿有限样本估计误差与非平稳，使<b>实测覆盖率</b>回到名义 90%（否则名义 90% 的区间实际只覆盖约 85%）。κ>1 属设计而非缺陷，但读图时不应把带沿直接当作「历史 5%/95% 分位」。R57+R58 口径：① 校准窗口由全历史改为<b>近 3 年</b>，剔除 2015 股灾等早期崩溃收益导致的 era-shift 偏悲观；② 中心由中位改为<b>窗口均值（期望）</b>，A 股含正漂移、中位低估中枢，使方向判定正确率由约 36% 升至约 54%；③ 近窗口已含当前波动，<b>不再叠加 regime 因子</b>（此前双重放大使创业板带宽虚胖至 ±60%+）。覆盖修正系数 κ（R168 重标定 + R171 regime 细化）：walk-forward 实测(同回测引擎, 5指数 N=180/horizon)表明 κ=1.8 时牛/震荡实测覆盖达 96~98%(过宽、名义90%被高估、带几乎无信息量)，故 R168 将 κ 由 1.8 降至 1.4，聚合精确命中名义 90%(T+8 89.4%、T+30 91.1%)。但 R171 分 regime 重扫(动态 exec 真实 forecast_svg, 遍历 κ∈[1.4,2.3])发现：单一 bull κ 无法同时让 H8/H30 都≈90%——bull H8 在 κ=1.4 仅 79.2%(N=53, 牛市短期急涨急跌使 30日带对 T+8 偏窄)，而 bull H30 在 κ=1.4 已 90.6%、κ=1.6 即过宽到 96.2%(无信息量带)。故 R171 取折中 bull=1.5：bull H8 79.2%→86.8%(接近名义90%、健康)、bull H30 92.5%(未过宽)；range 维持 1.4(聚合 H8/H30 均 93.2%)、bear 维持 2.3(下行富尾安全垫)。早期「κ=1.4→86%/κ=1.8→90.2%」系 R57/R58 改窗口与改中心前的旧口径、已 stale。√t 缩放假设仍成立(覆盖率随 horizon 分桶均匀)。<b>κ 按市场环境自适应(R108)</b>：牛 <b>{_KAPPA_NEAR['bull']:.2f}/{_KAPPA['bull']:.2f}</b>(近端/远端) / 震荡 <b>{_KAPPA['range']:.2f}</b> / 熊市 <b>{_KAPPA['bear']:.2f}</b>(关15 实证熊市 T+30 原 κ=1.8 漏覆盖 33.3%、LRuc=7.1 拒绝 99%，放宽后给下行富尾补安全垫——A 股熊市下跌更急更肥尾，近 3 年经验分位低估了极端下行)。R223：仅牛市加「近端(f=0)加宽」斜坡(1.5→1.60)修 T+8 漏覆盖 86.8%→≈90+(walk-forward 实测复核见 backtest_diff)；震荡/熊市维持 R171 原值不动——过度收窄属安全侧过宽非缺陷，且盲目降 range κ 会把创业板 T+30 本已偏低覆盖(86.1%)进一步压低(假绿)，故仅精准修牛市近端这一真缺陷。中线路径为「实测漂移期望（均值）」而非手工情景路径，置信带中线统计诚实；带宽随时间按 √t 扩张（随机游走特性），近月不确定性即已显著，并非线性外推的针状。<b>代价</b>：高波动指数（如创业板）本指数 {horizon} 日 P05–P95 带宽可达 <b>{_bw*100:.0f}%</b>，这是其真实波动的诚实反映（含 κ 覆盖修正），而非缺陷。\n"
              f"本图为目的（分类框架）而非点位预测：缠论给出的是「不跌破 ZD 则结构延续、跌破则转弱」的条件应对，不是对具体价位的预测。\n"
              f"趋势外推（青色虚线，对最近 {min(horizon,90)} 日收盘做对数线性回归外推 {horizon} 日）是与结构路径相互独立的验证方法，"
              + (f"但其拟合优度极低（R²={_r2:.2f}），该独立验证参考性很弱、近乎噪声，不宜据此增减仓位；"
@@ -1915,17 +1926,28 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
                          and abs(_r_main) > 0.02 and abs(_r_med) > 0.005)
     if _dir_conflict:
         note += (f"\n⚠ <b>路径方向提示</b>：结构主路径(目标情景)终点 {_interp(main_p, 1.0):.0f}"
-                 f"（{_r_main*100:+.1f}%）与「统计中位(无偏期望)」终点 {_medf(1.0):.0f}"
+                 f"（{_r_main*100:+.1f}%）与「统计期望（窗口均值）」终点 {_medf(1.0):.0f}"
                  f"（{_r_med*100:+.1f}%）<b>方向相反</b>。主路径由缠论结构情景"
-                 f"（当前为「{sc}」）演绎得出，统计中位由近 3 年真实收益分布外推得出，二者口径独立、"
+                 f"（当前为「{sc}」）演绎得出，统计期望由近 3 年真实收益分布外推得出，二者口径独立、"
                  f"本就可能背离 ⇒ 此时主路径应读作「<b>若该结构情景成立会走到哪</b>」的条件推演，"
-                 f"而非对后市的概率中点预测；实际落点更可能靠近统计中位(期望)。"
+                 f"而非对后市的概率中点预测；实际落点更可能靠近统计期望（窗口均值）。"
                  f"判读时请结合下方「主路径失效位」与该情景的概率一并看，结论宜保守。")
     elif abs(_dev) > 0.08:
         _d = "偏高" if _dev > 0 else "偏低"
-        note += (f"\n⚠ <b>路径偏离提示</b>：结构主路径(目标情景)终点较「统计中位(无偏期望)」{_d} "
+        note += (f"\n⚠ <b>路径偏离提示</b>：结构主路径(目标情景)终点较「统计期望（窗口均值）」{_d} "
                  f"{abs(_dev)*100:.1f}%，反映当前缠论结构判断相对纯历史统计更{'乐观' if _dev > 0 else '悲观'}；"
-                 f"实际落点更可能靠近统计中位(期望)，主路径应视为「方向性目标」而非「概率中点」，结论宜保守看待。")
+                 f"实际落点更可能靠近统计期望（窗口均值），主路径应视为「方向性目标」而非「概率中点」，结论宜保守看待。")
+    # ---- R491: 「主路径」命名 vs 概率排序（判据已在 legend_html 之前定义，此处只出提示）----
+    if _p_named_mismatch:
+        _rank = sorted((("结构演绎主路径", p_main), ("次路径", p_alt), ("风险路径", p_risk)),
+                       key=lambda t: -t[1])
+        note += (f"\n⚠ <b>路径命名提示</b>：图中「结构演绎主路径」是<b>结构情景的名字</b>"
+                 f"（由当前中枢/笔结构演绎得出），<b>不代表它概率最大</b>。本报告三路径实际概率排序为 "
+                 + " > ".join(f"{n} {v*100:.0f}%" for n, v in _rank)
+                 + f" ⇒ 概率最高的是「<b>{_p_top_name}</b>」（<b>{_p_max*100:.0f}%</b>），"
+                   f"「主路径」仅 <b>{p_main*100:.0f}%</b>。判读时请以概率排序为准，"
+                   f"把「主路径」读作「<b>若该结构情景成立会走到哪</b>」的条件推演，"
+                   f"而非「最可能走势」；三线并列时看下面「路径命中率自校验」的经验兑现率。")
     # ---- R224: p_main 样本外校准诚实标注（仅展示层, 不动 p_main 数值/带/p_hold, 关13 安全）----
     # 依据 audit_probability_calibration (walk-forward, 5指数, 锚点每15交易日) + prob_cal_holdout 留出法验证:
     #   T+8 实际方向命中≈43%(Brier≈0.25 近随机); T+30 低 p_main 箱实际后市多涨>60%(逆向α)。
@@ -1965,15 +1987,17 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
                      "f75l": round(l75, 2), "f75h": round(u75 - l75, 2)})
     fc_data = {"hist": hist, "proj": proj, "p_main": p_main, "p_alt": p_alt, "p_risk": p_risk,
                "closes_all": closes, "n_all": n,  # R119b: 透传全量历史收盘价，供推演图均线基于全量铺垫(左对齐/年线不缺失)
-               "regime": _rg, "kappa": round(_kappa, 3),
+               # R491: 删除 9 个死键（regime / kappa / trend_agree / trend_r2 / horizon / lo / span /
+               #   med_term / q50 / q_sd / hist_dates）。判据 = 带引号键名在 fc_data 定义块**之外**
+               #   零出现（逐行扫描 report.py 全文）。其中 lo/span 与真正生效的 ymin_core/ymax_core
+               #   是两套 y 轴口径并存，名字又极像 ⇒ 删掉消除误改隐患。
                "p_hold": round(_p_hold, 3),
                "path_dev": round(_dev, 4),
                "path_dir_conflict": _dir_conflict,   # R490: 与主路径/期望「方向相反」判据同源，供卡片标签复用
+               "p_top_slot": _p_top,                 # R491: 概率最高的路径槽位(main/alt/risk)，供汇总表/卡片标签复用
                "zd": round(zd, 2), "zg": round(zg, 2), "last": round(last, 2),
-               "trend": round(trend_end_price, 2), "trend_agree": trend_agree, "trend_r2": round(_r2, 3),
-               "sigma": round(sigma, 4), "horizon": horizon, "lo": round(lo, 4), "span": round(span, 4),
-               "med_term": round(_medf(1.0), 2), "q50": round(_q50, 4), "q_sd": round((_sp_up + _sp_dn) / 2, 4),
-               "hist_dates": [_hd[i] for i in range(len(tail))],
+               "trend": round(trend_end_price, 2),
+               "sigma": round(sigma, 4),
                "gap_refs": [{"type": g["type"], "top": round(g["top"], 2), "bottom": round(g["bottom"], 2), "date": g["date"]} for g in _gap_refs],
                # R210: 真联动——透传市场情绪预测序列(fear/greed 指数, 0-100), 由 forecast_echart 叠加第二条 Y 轴。
                # 缺失/非 dict 时置 None, 下游优雅降级(仅不画情绪线, 不影响价格推演)。
@@ -1991,7 +2015,7 @@ def forecast_echart(sym, fc_data):
     x_hist = [h[0] for h in hist]
     x_proj = [p["date"] for p in proj]
     xcats = x_hist + x_proj
-    x_full = xcats
+    # R491: 原 `x_full = xcats` 仅为 fdata 的 "xfull" 键服务，而该键在预测图 JS 里零引用 ⇒ 一并删除。
     # R210: 市场情绪预测(恐惧贪婪指数 0-100)与价格推演图真联动——按日期对齐到 xcats:
     # 历史段(无情绪历史序列)填 None, 未来段填对应中位/p25/p75。最低点用于标注"情绪已先行见底"。
     sent_med = [None] * len(xcats)
@@ -2078,10 +2102,11 @@ def forecast_echart(sym, fc_data):
     f95h = [None] * (n_hist - 1) + [0] + [round(p["f95h"], 2) for p in proj]
     f75l = [None] * (n_hist - 1) + [last] + [p["f75l"] for p in proj]
     f75h = [None] * (n_hist - 1) + [0] + [round(p["f75h"], 2) for p in proj]
-    lo = fc_data["lo"]
-    ymax = round(lo + fc_data["span"], 2)
+    # R491: 原此处有 `lo = fc_data["lo"]; ymax = round(lo + fc_data["span"], 2)` —— 二者只喂给
+    # fdata 的 "lo"/"ymax" 两个**零消费**键（见下），随死代码块一并删除。
+    # 真正控制绘图区纵向范围的是 core_lo/core_hi（→ ymin_core/ymax_core）。
     tail_prices = [h[1] for h in hist]
-    # 推演图均线（R119/R120b）：基于全量历史真实收盘价 + 统计中位路径 拼接算 MA20/60/120/年线(250)，
+    # 推演图均线（R119/R120b）：基于全量历史真实收盘价 + 统计期望路径 拼接算 MA20/60/120/年线(250)，
     # 切片对齐推演图可见窗口——hist 段由全量历史(1363根)铺垫，长周期均线起点左对齐、年线不缺失；
     # 仅历史段(hist)绘制均线，未来预测段置 None 不画（用户要求预测部分不显示均线）。
     _closes_all = fc_data.get("closes_all") or [h[1] for h in hist]
@@ -2152,7 +2177,7 @@ def forecast_echart(sym, fc_data):
     vline = [{"xAxis": x_hist[-1], "lineStyle": {"type": "dashed", "color": "#334155", "width": 2.0},
               "label": {"show": False}}]
     # R135 修复：端点"主/次/风险"须与 tooltip 定义一致——"主"对应结构演绎路径(structural main)，
-    # 而非统计中位路径(med)。此前 _em 取 proj[-1]["med"]，使端点"主"标的是统计中位线、与 tooltip
+    # 而非统计期望路径(med)。此前 _em 取 proj[-1]["med"]，使端点"主"标的是统计中位线、与 tooltip
     # "主路径=结构演绎+p_main"自相矛盾。现改为 proj[-1]["main"]，三者即结构主/次/风险路径终点。
     _em, _ea, _er = proj[-1]["main"], proj[-1]["alt"], proj[-1]["risk"]
     # R162: 端点标注加涨跌幅(%)——此前仅纯数字"主 4212", 用户看不出方向幅度、易被统计中位线(平)带偏。
@@ -2187,13 +2212,13 @@ def forecast_echart(sym, fc_data):
 
     fdata = {
         "keyLevelsText": key_levels_text,
-        "xcats": xcats, "xfull": x_full, "n_hist": n_hist, "proj": proj,
+        "xcats": xcats, "n_hist": n_hist, "proj": proj,
         "hist": hist_s, "main": main_s, "alt": alt_s, "risk": risk_s, "trend": trend_s,
         "ma20": ma20_s, "ma60": ma60_s, "ma120": ma120_s, "ma250": ma250_s,
-        "lo": round(lo, 2), "ymax": ymax, "ymin_core": round(core_lo, 2), "ymax_core": round(core_hi, 2),
+        "ymin_core": round(core_lo, 2), "ymax_core": round(core_hi, 2),
         "hlines": hlines, "vline": vline, "endPoints": end_points,
         "med": med_s, "f95l": f95l, "f95h": f95h, "f75l": f75l, "f75h": f75h,
-        "p_main": p_main, "p_alt": p_alt, "p_risk": p_risk, "proj_raw": proj,
+        "p_main": p_main, "p_alt": p_alt, "p_risk": p_risk,
         # R210: 真联动情绪数据——按 xcats 日期对齐的中位/分位序列 + 最低点(供 JS 叠加第二条 Y 轴)
         "sentMed": sent_med, "sentLo": sent_lo, "sentHi": sent_hi, "sentMin": sent_min,
         "sent_bt": _sf_bt, "sent_st": _sf_st,
@@ -2273,13 +2298,13 @@ def forecast_echart(sym, fc_data):
           + '<span style="color:'+gray+'">次路径 '+p.alt.toFixed(2)+'</span> '+Math.round(D.p_alt*100)+'%<br>'
           + '<span style="color:'+grn+'">风险路径 '+p.risk.toFixed(2)+'</span> '+Math.round(D.p_risk*100)+'%<br>'
           + '<span style="color:'+cyan+'">趋势外推 '+p.trend.toFixed(2)+'</span><br>'
-          + '<span style="color:#64748b">经验分位 P05~P95 '+s95+'</span><br>'
+          + '<span style="color:#64748b">预测带 P05~P95 '+s95+'</span><br>'
           + '<span style="color:#64748b">P25~P75 '+s75+'</span>'
           + (sm != null ? '<br><span style="color:#7c3aed">市场情绪 '+sm.toFixed(1)
             + (sm <= D.sent_bt ? ' · 情绪低迷，通常领先价格见底' : (sm >= D.sent_st ? ' · 情绪高涨，警惕过热回落' : ' · 中性区')) + '</span>' : '');
       }}
     }},
-    legend: {{ data: ['历史','统计中位路径','结构演绎路径','次路径','风险路径','趋势外推','MA20','MA60','MA120','MA250','置信锥 P05–P95','置信锥 P25–P75','市场情绪中位','情绪P25~P75'], top: 2, itemGap: 8, textStyle: {{ fontSize: 11 }} }},
+    legend: {{ data: ['历史','统计期望路径','结构演绎路径','次路径','风险路径','趋势外推','MA20','MA60','MA120','MA250','预测带 P05–P95','预测带 P25–P75','市场情绪中位','情绪P25~P75'], top: 2, itemGap: 8, textStyle: {{ fontSize: 11 }} }},
     grid: {{ left: 96, right: 88, top: 64, bottom: 80 }},
     xAxis: {{ type: 'category', data: D.xcats, boundaryGap: false, axisTick: {{ show: false }}, axisPointer: {{ label: {{ show: true, backgroundColor: 'rgba(43,108,176,0.85)', color: '#fff', borderColor: 'transparent', padding: [2,6], borderRadius: 3, fontSize: 11 }} }}, axisLabel: {{ fontSize: 11, margin: 6, interval: 0, autoHide: false, hideOverlap: false, showMinLabel: false, showMaxLabel: false,
         formatter: __makeFcFormatter() }} }},
@@ -2294,7 +2319,7 @@ def forecast_echart(sym, fc_data):
     ],
     series: [
       {{ name: '历史', type: 'line', data: D.hist, symbol: 'none', smooth: true, lineStyle: {{ color: '#2b6cb0', width: 1.8 }} }},
-      {{ name: '统计中位路径', type: 'line', data: D.med, symbol: 'none', smooth: true, lineStyle: {{ color: '#e54545', width: 1.6 }}, z: 5 }},
+      {{ name: '统计期望路径', type: 'line', data: D.med, symbol: 'none', smooth: true, lineStyle: {{ color: '#e54545', width: 1.6 }}, z: 5 }},
       {{ name: '结构演绎路径', type: 'line', data: D.main, symbol: 'none', smooth: true, lineStyle: {{ color: '#e54545', width: 2.0, type: 'dashed', opacity: 0.85 }}, z: 6 }},
       {{ name: '次路径', type: 'line', data: D.alt, symbol: 'none', smooth: true, lineStyle: {{ color: '#94a3b8', width: 2.0, type: 'dashed' }}, z: 7 }},
       {{ name: '风险路径', type: 'line', data: D.risk, symbol: 'none', smooth: true, lineStyle: {{ color: '#18a058', width: 2.0, type: 'dashed' }}, z: 8 }},
@@ -2303,10 +2328,10 @@ def forecast_echart(sym, fc_data):
       {{ name: 'MA60', type: 'line', data: D.ma60, symbol: 'none', smooth: false, lineStyle: {{ color: '#a855f7', width: 1, opacity: 0.9 }} }},
       {{ name: 'MA120', type: 'line', data: D.ma120, symbol: 'none', smooth: false, lineStyle: {{ color: '#f59e0b', width: 1, opacity: 0.9 }} }},
       {{ name: 'MA250', type: 'line', data: D.ma250, symbol: 'none', smooth: false, lineStyle: {{ color: '#dc2626', width: 1.2, opacity: 0.95 }} }},
-      {{ name: '置信锥 P05–P95', type: 'line', data: D.f95l, stack: 'b95', symbol: 'none', lineStyle: {{ opacity: 0 }}, areaStyle: {{ opacity: 0 }}, tooltip: {{ show: false }}, silent: true }},
-      {{ name: '置信锥 P05–P95', type: 'line', data: D.f95h, stack: 'b95', symbol: 'none', lineStyle: {{ opacity: 0 }}, areaStyle: {{ color: 'rgba(229,69,69,0.06)' }}, tooltip: {{ show: false }}, silent: true }},
-      {{ name: '置信锥 P25–P75', type: 'line', data: D.f75l, stack: 'b75', symbol: 'none', lineStyle: {{ opacity: 0 }}, areaStyle: {{ opacity: 0 }}, tooltip: {{ show: false }}, silent: true }},
-      {{ name: '置信锥 P25–P75', type: 'line', data: D.f75h, stack: 'b75', symbol: 'none', lineStyle: {{ opacity: 0 }}, areaStyle: {{ color: 'rgba(229,69,69,0.12)' }}, tooltip: {{ show: false }}, silent: true }},
+      {{ name: '预测带 P05–P95', type: 'line', data: D.f95l, stack: 'b95', symbol: 'none', lineStyle: {{ opacity: 0 }}, areaStyle: {{ opacity: 0 }}, tooltip: {{ show: false }}, silent: true }},
+      {{ name: '预测带 P05–P95', type: 'line', data: D.f95h, stack: 'b95', symbol: 'none', lineStyle: {{ opacity: 0 }}, areaStyle: {{ color: 'rgba(229,69,69,0.06)' }}, tooltip: {{ show: false }}, silent: true }},
+      {{ name: '预测带 P25–P75', type: 'line', data: D.f75l, stack: 'b75', symbol: 'none', lineStyle: {{ opacity: 0 }}, areaStyle: {{ opacity: 0 }}, tooltip: {{ show: false }}, silent: true }},
+      {{ name: '预测带 P25–P75', type: 'line', data: D.f75h, stack: 'b75', symbol: 'none', lineStyle: {{ opacity: 0 }}, areaStyle: {{ color: 'rgba(229,69,69,0.12)' }}, tooltip: {{ show: false }}, silent: true }},
       // R210: 真联动——市场情绪(恐惧贪婪指数)叠加第二条 Y 轴(0-100), 与价格推演同图对照"情绪领先价格见底"
       {{ name: '情绪P25', type: 'line', yAxisIndex: 1, data: D.sentLo, stack: 'sP', symbol: 'none', lineStyle: {{ opacity: 0 }}, areaStyle: {{ opacity: 0 }}, tooltip: {{ show: false }}, silent: true }},
       {{ name: '情绪P25~P75', type: 'line', yAxisIndex: 1, data: D.sentHi, stack: 'sP', symbol: 'none', lineStyle: {{ opacity: 0 }}, areaStyle: {{ color: 'rgba(124,58,237,0.10)' }}, tooltip: {{ show: false }}, silent: true }},
@@ -2326,12 +2351,16 @@ def forecast_echart(sym, fc_data):
         text: D.keyLevelsText,
         fontFamily: 'Microsoft YaHei', fontSize: 11,
         rich: {{
-          year:  {{ fill: '#64748b', fontSize: 10 }},
-          zg:    {{ fill: '{GOLD}', fontWeight: 'bold' }},
-          zd:    {{ fill: '{GOLD}', fontWeight: 'bold' }},
-          last:  {{ fill: '#64748b', fontWeight: 'bold' }},
-          gapup: {{ fill: '{RED}', fontSize: 10 }},
-          gapdn: {{ fill: '{GREEN}', fontSize: 10 }}
+          // R491: 六个片段**统一显式 fontSize** —— 此前 zg/zd/last 未设字号，rich 片段
+          // **不继承外层 style.fontSize**（反直觉），实际渲染成 ECharts 默认 12px，而
+          // year/gapup/gapdn 是 10px ⇒ 同一条 keyLevels 串里混排两种字号（SSR 实测：
+          // "ZG 3884" fs=12 与 "缺口压力 3912-3927" fs=10 并排）。现全部显式 11px（= 配置意图）。
+          year:  {{ fill: '#64748b', fontSize: 11 }},
+          zg:    {{ fill: '{GOLD}', fontWeight: 'bold', fontSize: 11 }},
+          zd:    {{ fill: '{GOLD}', fontWeight: 'bold', fontSize: 11 }},
+          last:  {{ fill: '#64748b', fontWeight: 'bold', fontSize: 11 }},
+          gapup: {{ fill: '{RED}', fontSize: 11 }},
+          gapdn: {{ fill: '{GREEN}', fontSize: 11 }}
         }}
       }}
     }}];
@@ -2913,6 +2942,13 @@ def forecast_summary_table(data, results, results_week, results_month, forecast_
         _devc = bool((fi.get("fc", {}) or {}).get("path_dir_conflict", False))
         _lv_disp = (_lv + "·结构/统计偏离") if (abs(_dev) > 0.08 or _devc) else _lv
         _lv_c = {"稳健": GREEN, "边缘": "#d97706", "敏感·待确认": RED}.get(_lv, GREEN)
+        # R491: 概率最高者打 ★（与推演图图例条同一判据、同一来源 fc["p_top_slot"]，不重算）——
+        # 因为"主路径"是结构命名、不代表概率最大（实测 3/5 指数如此），汇总表只列三个百分比
+        # 却不标谁最大，用户仍需自己比大小 ⇒ 补 ★ 让排序一眼可见。
+        _top = (fi.get("fc", {}) or {}).get("p_top_slot")
+        _mp = "★" if _top == "main" else ""
+        _ap = "★" if _top == "alt" else ""
+        _rp = "★" if _top == "risk" else ""
         stab = _lv_disp
         stab_c = _lv_c
         rows.append(f"""<tr data-sym="{sym}" class="linkrow" data-jump>
@@ -2920,9 +2956,9 @@ def forecast_summary_table(data, results, results_week, results_month, forecast_
           <td>{badge(cls["scenario"], sc_color)}</td>
           <td>{badge(mcls["scenario"], m_color)}</td>
           <td class="tac">{syn}</td>
-          <td class="tac"><b style="color:{RED}">{(fi.get("p_main") or 0)*100:.0f}%</b>{prob_bar(fi.get("p_main") or 0, RED)}</td>
-          <td class="tac"><b style="color:#64748b">{(fi.get("p_alt") or 0)*100:.0f}%</b>{prob_bar(fi.get("p_alt") or 0, "#64748b")}</td>
-          <td class="tac"><b style="color:{GREEN}">{(fi.get("p_risk") or 0)*100:.0f}%</b>{prob_bar(fi.get("p_risk") or 0, GREEN)}</td>
+          <td class="tac"><b style="color:{RED}">{_mp}{(fi.get("p_main") or 0)*100:.0f}%</b>{prob_bar(fi.get("p_main") or 0, RED)}</td>
+          <td class="tac"><b style="color:#64748b">{_ap}{(fi.get("p_alt") or 0)*100:.0f}%</b>{prob_bar(fi.get("p_alt") or 0, "#64748b")}</td>
+          <td class="tac"><b style="color:{GREEN}">{_rp}{(fi.get("p_risk") or 0)*100:.0f}%</b>{prob_bar(fi.get("p_risk") or 0, GREEN)}</td>
           <td class="tac"><b style="color:{BLUE}">{(fi.get("p_hold") or 0)*100:.0f}%</b>{prob_bar(fi.get("p_hold") or 0, BLUE)}</td>
           <td class="tac">{fi.get("zd") or 0:.0f}</td>
           <td class="tac">{badge(stab, stab_c)}</td>
@@ -2932,7 +2968,7 @@ def forecast_summary_table(data, results, results_week, results_month, forecast_
       <colgroup><col style="width:90px"><col style="width:calc((100% - 90px)/9)"><col style="width:calc((100% - 90px)/9)"><col style="width:calc((100% - 90px)/9)"><col style="width:calc((100% - 90px)/9)"><col style="width:calc((100% - 90px)/9)"><col style="width:calc((100% - 90px)/9)"><col style="width:calc((100% - 90px)/9)"><col style="width:calc((100% - 90px)/9)"><col style="width:calc((100% - 90px)/9)"></colgroup>
       <thead><tr><th>指数</th><th>日线分类</th><th>月线背景</th><th class="tac">级别联立</th><th class="tac">主路径概率</th><th class="tac">次路径概率</th><th class="tac">风险概率</th><th class="tac">结构存续(锥)</th><th class="tac">失效位 ZD</th><th class="tac">结论稳定性</th></tr></thead>
       <tbody>{"".join(rows)}</tbody></table>
-      <p style="font-size:12px;color:#64748b;margin-top:8px">概率为「级别共振+置信度+回测胜率」启发式估算，主/次/风险已归一(合计100%)，结构存续(锥)为独立参照不计入。稳健度三级：<b style="color:{GREEN}">稳健</b>=极性趋势 20 日内不变；<b style="color:#d97706">边缘</b>=趋势守住但末笔年轻；<b style="color:{RED}">敏感·待确认</b>=极性翻转、已下调主路径概率。末笔仅~7根K线者宜轻仓等周线确认。</p>"""
+      <p style="font-size:12px;color:#64748b;margin-top:8px">概率为「级别共振+置信度+回测胜率」启发式估算，主/次/风险已归一(合计100%)，结构存续(锥)为独立参照不计入。<b>★ = 当前概率最高的路径</b>——「主路径」是结构情景命名，<b>不等于概率最大</b>（实测多数指数的最概率路径是风险或次路径），请以 ★ 标注的概率排序为准。稳健度三级：<b style="color:{GREEN}">稳健</b>=极性趋势 20 日内不变；<b style="color:#d97706">边缘</b>=趋势守住但末笔年轻；<b style="color:{RED}">敏感·待确认</b>=极性翻转、已下调主路径概率。末笔仅~7根K线者宜轻仓等周线确认。</p>"""
 
 
 # ================= 年度收益表 =================
