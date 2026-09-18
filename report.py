@@ -2337,8 +2337,16 @@ def forecast_echart(sym, fc_data):
       {{ name: '情绪P25~P75', type: 'line', yAxisIndex: 1, data: D.sentHi, stack: 'sP', symbol: 'none', lineStyle: {{ opacity: 0 }}, areaStyle: {{ color: 'rgba(124,58,237,0.10)' }}, tooltip: {{ show: false }}, silent: true }},
       {{ name: '市场情绪中位', type: 'line', yAxisIndex: 1, data: D.sentMed, symbol: 'circle', symbolSize: 3.5, smooth: true, connectNulls: false,
         lineStyle: {{ color: '#7c3aed', width: 2.2 }}, z: 11,
+        // R491b: 「情绪见底」标注的 label 由 top 改 bottom —— 它此前与「主目标」标注（同为 top）
+        //   在「情绪谷底」与「价格路径终点」像素位置接近时**垂直相撞**。线上 CI artifact 实证
+        //   3 处（#7 1px / #9 9px / #11 4px，均为 "情绪见底" 撞 "主目标 XXXX (+N%)"）；
+        //   用改前代码(a16aff2) + 同一份数据复跑，得到**逐字相同**的重叠 ⇒ 非 R491 引入的既有缺陷。
+        //   几何量化(R476 标定的精确律，自校验 |误差| ≤ 2px)：情绪见底标签框中心 yc=264.8 在**下方**、
+        //   主目标 yc=258.4/262.7 在**上方**，两者 Δyc 仅 6.5px / 2.1px，远小于门禁 13px 判据 ⇒ 必撞。
+        //   ⚠ 不能靠"加大 distance"修：情绪见底本就在主目标**下方**，往上推只会更近。改 bottom 后
+        //   垂直错开 53px，且标签框下缘 321 < 绘图区下缘 360（grid_bottom=80），未探出画布。
         markPoint: {{ data: D.sentMin ? [{{ coord: [D.sentMin.date, D.sentMin.val], value: '情绪见底', itemStyle: {{ color: '#7c3aed' }}, symbol: 'pin', symbolSize: 32,
-          label: {{ show: true, position: 'top', color: '#7c3aed', fontSize: 11, fontWeight: 'bold' }} }}] : [] }} }},
+          label: {{ show: true, position: 'bottom', color: '#7c3aed', fontSize: 11, fontWeight: 'bold' }} }}] : [] }} }},
       {{ name: '参考', type: 'line', data: [], silent: true,
         markLine: {{ symbol: 'none', data: D.hlines.concat(D.vline), labelLayout: {{ moveOverlap: 'shiftY' }} }},
         markPoint: {{ data: D.endPoints }} }}
