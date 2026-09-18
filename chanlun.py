@@ -781,6 +781,37 @@ def find_seg_signals(bis_done, segments, seg_beichi, zss, klines, merged):
 
 
 # ---------- 7. 分类推演 ----------
+# R492: 段级背驰「当前是否仍然有效」的活跃窗口（单位 = 段数，自末段往回数）。
+# 依据：find_beichi_segment 扫 range(2, len(segs)) **含最后一项** ⇒ 某条段级背驰刚出现时
+# 必然锚在末段（gap=0，R487 实测买 30/30、卖 19/19 全为 0），此后每生成一个新段 gap +1。
+# 取 2 = 末段与其前 2 段（≈ 结构上仍在"最近一轮"内）。⚠ 这是**语义口径**而非拟合参数：
+# 它回答"当下还有没有一条段级背驰在起作用"，不是"历史上有没有出现过"。
+SEG_BC_ACTIVE_GAP = 2
+
+
+def pick_recent_bc(recent_bc):
+    """R492(Ⓑ)：窗口内顶/底背驰**并存**时，取「更新的那一个」。
+
+    返回 (主背驰类型 or None, 是否并存)。
+
+    旧实现是 `if bc_top: ... elif bc_bot:`，即**顶背驰无条件优先** —— 只要窗口内有顶背驰，
+    哪怕它是 3 笔前的、而更新的底背驰刚形成，也一律判"见顶"。实测（R490）深证成指近 500 日
+    有 **15 天（3.0%）**顶底并存（如 2026-03-12 top=bi175 / bottom=bi176，更新的 bottom 被忽略）。
+    语义上「力度衰竭方向」应该以**最近一次衰竭**为准（更新的那笔才是当下的结构状态），
+    故改为按 `bi_index` 取最新；并存本身作为事实**如实报出**（见 classify 的 detail 附注），
+    不静默丢弃另一方向。★ 本函数是判定顶/底背驰优先级的**唯一来源**（classify 与
+    forecast_confidence 共用），避免出现两处方向相反的第二份副本（旧实现两处恰好相反：
+    861 行顶优先、1740 行底优先）。"""
+    if not recent_bc:
+        return None, False
+    _top = any(b["type"] == "top" for b in recent_bc)
+    _bot = any(b["type"] == "bottom" for b in recent_bc)
+    if _top and _bot:
+        _newest = max(recent_bc, key=lambda b: b["bi_index"])
+        return _newest["type"], True
+    return ("top" if _top else "bottom"), False
+
+
 def classify(bis, zss, beichis, close, wcls=None, segments=None, seg_beichi=None, mcls=None):
     if not bis:
         # R166: 早返回必须补齐正常路径(约L721-726)的全部键，否则下游
@@ -820,8 +851,22 @@ def classify(bis, zss, beichis, close, wcls=None, segments=None, seg_beichi=None
         _bc_qual = ""
 
     # 段级背驰（走势段级别的更高层级背离，#2）
-    seg_bot = any(b["type"] == "bottom" for b in (seg_beichi or []))
-    seg_top = any(b["type"] == "top" for b in (seg_beichi or []))
+    # R492: ★★ 修复「恒真」缺陷 —— 旧实现 `any(... for b in seg_beichi)` 扫的是**全历史**
+    #   段级背驰（find_beichi_segment 返回 2021 至今全部，实测上证 6 条 / 创业板 13 条），
+    #   于是 seg_bot/seg_top 几乎恒为 True。线上 radar.json 实证（2026-09-18，6916 标的）：
+    #   seg_bot=True **6412（92.7%）**、seg_top=True **6424（92.9%）** ⇒ 两处后果：
+    #   ① 本函数 detail 里"且走势段级别同步出现顶/底背驰"**只要笔级背驰成立就必然输出** ——
+    #      实测当前上证**没有**活跃的段级顶背驰（最近的段级顶背驰是 2026-05-14 seg#29，
+    #      其后 5 段都没有）⇒ 该句是虚假陈述；
+    #   ② radar 的 `strong = 2 if (bc_type=="趋势背驰" or seg_bot) else 1` 强度升级被
+    #      **96% 的信号**触发 ⇒ 强度字段失去区分度（"背驰见底机会"333 条里 320 条 seg_bot=True）。
+    #   判据改为「**近段仍然活跃**」（定义见 SEG_BC_ACTIVE_GAP）—— 回答的是"当下还有没有一条
+    #   段级背驰在起作用"，而非"历史上有没有出现过"。
+    _n_seg = len(segments or [])
+    _active_seg_bc = [b for b in (seg_beichi or [])
+                      if _n_seg - 1 - b["seg_index"] <= SEG_BC_ACTIVE_GAP]
+    seg_bot = any(b["type"] == "bottom" for b in _active_seg_bc)
+    seg_top = any(b["type"] == "top" for b in _active_seg_bc)
 
     # 日×周区间套（#2）：日线背驰与周线趋势方向组合，给出更高一级共振判断
     nest = ""
@@ -858,7 +903,18 @@ def classify(bis, zss, beichis, close, wcls=None, segments=None, seg_beichi=None
             mdesc = "月线方向待明(%s)" % m_scen
         nest = (nest + "；" + mdesc) if nest else mdesc
 
-    if bc_top:  # R155: 背驰信号优先于 last 笔方向——底/顶背驰后必有反向笔(last 已回调/反弹)，
+    # R492(Ⓑ): 顶/底并存时**取更新的那个**（旧实现是 `if bc_top...elif bc_bot`，顶背驰
+    #   无条件优先 —— 详见 pick_recent_bc 的说明与实测数据）。判据只在这里算一次。
+    _bc_main, _bc_tie = pick_recent_bc(recent_bc)
+    if _bc_tie:
+        _tie_note = ("【顶底背驰并存】本窗口内同时存在顶背驰(bi#%d)与底背驰(bi#%d)，"
+                     "已按**更近发生**的那一笔判方向；另一方向亦已出现，意为多空力度同时衰竭，"
+                     "仓位宜更保守、并以下方失效位为准。"
+                     % (max(b["bi_index"] for b in recent_bc if b["type"] == "top"),
+                        max(b["bi_index"] for b in recent_bc if b["type"] == "bottom")))
+    else:
+        _tie_note = ""
+    if _bc_main == "top":  # R155: 背驰信号优先于 last 笔方向——底/顶背驰后必有反向笔(last 已回调/反弹)，
                 # 若再加 last.dir 约束会把最标准的「底背驰+反弹」「顶背驰+回调」结构错判为多头/空头延续，
                 # 实证 5 指数中 4 个底背驰因此被忽略、看板失真。去掉约束让背驰优先显示。
         # R140 修复：detail 面积比须取「顶背驰」类型，而非 recent_bc[-1]——当 recent_bc 混合
@@ -870,7 +926,8 @@ def classify(bis, zss, beichis, close, wcls=None, segments=None, seg_beichi=None
             detail += "，且走势段级别同步出现顶背驰"
         detail += ("，构成顶背驰%s。短线警惕一类卖点确认，回落目标先看最近中枢ZG(%.1f)。"
                    % (_bc_qual, last_zs["zg"] if last_zs else close))
-    elif bc_bot:  # R155: 同上，背驰信号优先于 last 笔方向
+        detail += _tie_note
+    elif _bc_main == "bottom":  # R155: 同上，背驰信号优先于 last 笔方向
         _ar = next((b["area_ratio"] for b in reversed(recent_bc) if b["type"] == "bottom"), 0.0)
         scenario = "背驰见底机会"
         detail = "最近向下笔价格创新低但MACD绿柱面积明显萎缩（面积比 %.2f）" % _ar
@@ -878,6 +935,7 @@ def classify(bis, zss, beichis, close, wcls=None, segments=None, seg_beichi=None
             detail += "，且走势段级别同步出现底背驰"
         detail += ("，构成底背驰%s。关注一类买点后的反弹，第一压力看最近中枢ZD(%.1f)。"
                    % (_bc_qual, last_zs["zd"] if last_zs else close))
+        detail += _tie_note
     elif last["dir"] == 1 and pos == "中枢上方":
         scenario = "多头延续"
         detail = "当前向上笔运行于最后中枢上方，走势处于强势区。只要不跌破中枢上沿ZG(%.1f)，按多头延续对待；若回踩ZG不破，构成三类买点。" % (last_zs["zg"] if last_zs else close)
@@ -1719,6 +1777,10 @@ def forecast_confidence(r, wcls, bt, breadth_bias=0):
     if _d0 in (1, -1) and _w0 in (1, -1):
         c += 20 if _d0 == _w0 else -10
     recent_bc = [b for b in r["beichi"] if b["bi_index"] >= len(r["bis"]) - 4]  # R173(BUG4)
+    # ⚠ R492 说明（有意保持"叠加"语义，勿与上面的方向判据合并）：这两项是**两个独立的风险
+    #   因子**——顶背驰扣分表达"见顶风险"，底背驰加分表达"见底机会"，并存时净 −5 正是
+    #   "多空力度同时衰竭、方向不明"的诚实表达。而下面 `_want_kind` 是**二选一**（选哪个
+    #   方向的胜率），必须唯一 ⇒ 才统一到 pick_recent_bc。两者语义不同，不可同源化。
     if any(b["type"] == "top" for b in recent_bc):
         c -= 15
     if any(b["type"] == "bottom" for b in recent_bc):
@@ -1732,8 +1794,11 @@ def forecast_confidence(r, wcls, bt, breadth_bias=0):
     # 方向感知胜率校准（R158）：按当前结构方向选对应买卖点 20 日同向胜率，避免方向错配——
     # 底背驰(看多)用一类买、顶背驰(看空)用一类卖，无背驰按趋势方向选。此前固定优先"一类买"，
     # 顶背驰指数会错用看多胜率，使看空置信度被错误抬升/压低（latent：当前 5 指数均底背驰/无背驰故未触发）。
-    _bc_top0 = any(b["type"] == "top" for b in recent_bc)
-    _bc_bot0 = any(b["type"] == "bottom" for b in recent_bc)
+    # R492(Ⓑ): 与 classify 用**同一判据**取主背驰方向（旧实现此处底优先、classify 顶优先，
+    #   两处对并存窗口给出相反方向 ⇒ 会出现"场景判见顶、胜率却按见底取"的自相矛盾）。
+    _bc_main0, _ = pick_recent_bc(recent_bc)
+    _bc_top0 = (_bc_main0 == "top")
+    _bc_bot0 = (_bc_main0 == "bottom")
     _sc0 = cls["scenario"]
     _bull_sc = _sc0 in SC_BULL
     _bear_sc = _sc0 in SC_BEAR

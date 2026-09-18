@@ -2999,7 +2999,18 @@ def main():
         "title": "A股全市场缠论雷达",
         "asof": asof, "build_time": datetime.datetime.now(
             datetime.timezone(datetime.timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S"),
-        "version": "P3b-r28",   # r28=R464+R467+R467b: **腾讯三台镜像的调度族**(R464 当时未单独 bump,
+        "version": "P3b-r29",   # r29=R492: **`seg_bot`/`seg_top` 语义修复**(chanlun.classify 不再
+                                #   用「全历史 any」而改「近 3 段活跃」)。这是**有正确性影响的变更**：
+                                #   线上 radar.json 实证(2026-09-18, 6916 标的)修复前 seg_bot=True
+                                #   **6412(92.7%)**、seg_top=True **6424(92.9%)** —— 即该字段实际表达的
+                                #   是"本标的历史上曾出现过段级背驰", 几乎恒真。它被 `signal_of()`
+                                #   用于强度升级 `strong = 2 if (趋势背驰 or seg_bot) else 1`
+                                #   ⇒ **96% 的信号**都被升到 strong=2, 强度字段失去区分度
+                                #   （"背驰见底机会"333 条里 320 条 seg_bot=True）。修复后该字段
+                                #   回到它本来的语义:「当下是否还有一条段级背驰在起作用」。
+                                #   ⚠ 因此 radar.json 的 seg_bot/seg_top 占比会**大幅下降**（属修复
+                                #   而非退化）；下游若见到 strong=2 变少，是新口径的正常结果。
+        # r28=R464+R467+R467b: **腾讯三台镜像的调度族**(R464 当时未单独 bump,
                                 #   本轮与之同族, 一并标 r28)。三者都只改"**先问哪台**", 取到的数据
                                 #   一律不变(三台同源逐字节一致), 故属**零正确性变更**。
                                 #   · R464(已在 HEAD, 首次落版本号): 已证失败的主机**排到队尾**但不删除

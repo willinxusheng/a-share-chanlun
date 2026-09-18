@@ -7,7 +7,7 @@ import sys
 import math
 import ast
 from datetime import datetime, timedelta, timezone
-from chanlun import analyze, backtest_signals, MIN_BI_PCT_WEEK, health_score, forecast_confidence, forward_vol, adaptive_horizon, classify, realized_vol_annualized, KNOWN_PIVOTS, _date_diff, MIN_BI_PCT_MONTH, backtest_robustness, backtest_paths, _path_targets, market_breadth, regime_factor, classify_regime, SC_BULL, SC_BEAR, build_seg_zhongshu
+from chanlun import analyze, backtest_signals, MIN_BI_PCT_WEEK, health_score, forecast_confidence, forward_vol, adaptive_horizon, classify, realized_vol_annualized, KNOWN_PIVOTS, _date_diff, MIN_BI_PCT_MONTH, backtest_robustness, backtest_paths, _path_targets, market_breadth, regime_factor, classify_regime, SC_BULL, SC_BEAR, build_seg_zhongshu, SEG_BC_ACTIVE_GAP
 
 W, H_PRICE, H_VOL, H_MACD = 1060, 360, 64, 110
 PAD_L, PAD_R, PAD_T, PAD_B = 12, 78, 24, 26
@@ -447,6 +447,13 @@ def _smooth(pts, tension=1.0, nd=3):
 # `bis_done = bis[:-1]`，防未来函数，是正确设计），笔的确认天然滞后。
 # 这里不改滞后（那是正确设计），只把「新」这件事**如实呈现**给用户。
 SIG_NEW_DAYS = 3     # 距今 ≤ N 个交易日内诞生的信号 ⇒ 图上加「新」前缀 + 底色
+# R492: 「段级背驰新鲜度」—— 段端点距末根 ≤ N 个交易日者，视为**刚刚出现**的段级背驰，
+# 在图上加「新」标识并进页面顶部「今日结构信号」横幅。为什么单给段级背驰开这个口径：
+# R487 实测它是**唯一"当日可操作"**的实时判据（出现日只比段端点晚 1 个交易日、100% 锚在末段），
+# 而买卖点标签结构性滞后（220 次诞生中"坐标=当天"0 次）。取 5 = 一个交易周，覆盖
+# "刚出现"到"仍在本周内"的窗口。★ 与 SIG_NEW_DAYS(3) 口径不同、不可互换：那个问的是
+# "这条信号诞生几天了"（有限重放），这个问的是"它的结构端点离最新一根多远"（直接索引差）。
+SEG_BC_FRESH_DAYS = 5
 SIG_LOOKBACK = 6     # 有限重放深度（> SIG_NEW_DAYS 即可判"非新"；留 2 档余量防风噪）
 
 
@@ -771,26 +778,49 @@ def echart_main(klines, r, sym, captured=None, sig_age=None):
         if _key in _seg_seen:
             continue
         _seg_seen.add(_key)
+        # ---- R492: 新鲜段级背驰的「新」标识（口径见 SEG_BC_FRESH_DAYS）----
+        # 动因：段级背驰是 R487 实测的**唯一当日可操作判据**，但它此前与另外 59 个线段端点
+        # 标签**同级竞争**（_pri=0、fontSize 10）、且没有任何"这是刚出的"标记 ⇒ 用户扫一眼
+        # 根本分不出哪个是今天的、哪个是三个月前的（实测当前 5 指数活跃段级背驰的坐标跨度
+        # 从 2 个交易日前到 44 个交易日前）。
+        _is_bc = _sk in _seg_bc_map
+        _bc_fresh = bool(_is_bc and (n - 1 - _si) <= SEG_BC_FRESH_DAYS)
+        _seg_lbl = (f"{dates[_si][5:]} 段{'顶' if _sd == 1 else '底'}"
+                    + ("·背驰" if _is_bc
+                       else ("·" + _seg2_label[_sk] if _sk in _seg2_label else "")))
+        if _bc_fresh:
+            _seg_lbl = "新 " + _seg_lbl
+        _seg_lab = {"show": True, "position": "top" if _sd == 1 else "bottom",
+                    "color": GREEN if _sd == 1 else RED,
+                    "fontSize": 11 if _bc_fresh else 10,
+                    "fontWeight": "bold", "distance": 21}
+        if _bc_fresh:
+            # 与买卖点「新」同一套视觉（同色系浅底 + 细边框），但**保持 distance 21 不变**
+            # —— 纵向位置律不受影响，"结构位"与"交易信号"的层差仍一眼可分。
+            _seg_lab.update({
+                "backgroundColor": "rgba(24,160,88,0.13)" if _sd == 1 else "rgba(229,69,69,0.13)",
+                "borderColor": GREEN if _sd == 1 else RED,
+                "borderWidth": 1, "borderRadius": 3, "padding": [1, 3]})
         seg_points.append({
             # R470: 优先级 0（与历史拐点同级）—— 段端点是结构参照位、不是交易信号；
             # 与买卖点/背驰落在同一位置时让位（信号优先级更高），单独存在时完整显示。
             # 配色跟随 sig_points 方向语义（顶=绿/底=红，与卖点倒三角、买点三角一致）。
             # R472: 取消 `_seg_cut`(n-500) 日期截断（理由同 sig_points 段）。
-            "_pri": 0, "p": 0,
+            # R492: 但**新鲜的段级背驰**提为 pri=1 —— 它是当下唯一实时可操作的判据，
+            #   与"半年前某个普通段端点"同级竞争不合理。仍低于买卖点(2)⇒不会挤掉交易信号。
+            "_pri": 1 if _bc_fresh else 0, "p": 1 if _bc_fresh else 0,
             # R472/R473: 结构位标签（层 1）—— 靠 distance 21（vs 买卖点的 4）把标签推出
             # 约 16px，与买卖点在同一 x 区域共存。纵向位置由 ECharts 的真实放置律决定：
             # dedup 与前端 relayout 都用 ∓(symbolSize/2 + distance + fontSize/2)，不再用层号推算。
             "l": 1,
+            # R492: 供前端 _labW 补 8px 宽度外扩（与 sig_points 的 "new" 同义）
+            "new": _bc_fresh,
             "coord": [dates[_si], round(_sp, 2)],
-            "value": f"{dates[_si][5:]} 段{'顶' if _sd == 1 else '底'}"
-                     + ("·背驰" if _sk in _seg_bc_map
-                        else ("·" + _seg2_label[_sk] if _sk in _seg2_label else "")),
+            "value": _seg_lbl,
             "itemStyle": {"color": GREEN if _sd == 1 else RED},
             "symbol": "circle",
             "symbolSize": 7,
-            "label": {"show": True, "position": "top" if _sd == 1 else "bottom",
-                      "color": GREEN if _sd == 1 else RED, "fontSize": 10, "fontWeight": "bold",
-                      "distance": 21}
+            "label": _seg_lab
         })
 
     # R478: 段级（线段级别）买卖点 —— 级别联立的第二级（引擎见 chanlun.find_seg_signals）。
@@ -1866,7 +1896,7 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
     legend_html = (
         f'<div class="fc-legend">'
         f'<span><i class="ln ln-dash" style="background:{RED}"></i>{_pstar}结构演绎主路径 ≈ {p_main * 100:.0f}%（目标 {main_p[-1][1]:.0f}，{((main_p[-1][1]/last-1)*100):+.1f}%）</span>'
-        f'<span><i class="ln" style="background:{RED}"></i>统计期望路径（窗口均值 {_medf(1.0):.0f}，{((_medf(1.0)/last-1)*100):+.1f}%）</span>'
+        f'<span><i class="ln" style="background:#d4a017"></i>统计期望路径（琥珀金·窗口均值 {_medf(1.0):.0f}，{((_medf(1.0)/last-1)*100):+.1f}%）</span>'
         f'<span><i class="ln ln-dash" style="background:#94a3b8"></i>{_astar}次路径：中枢内震荡 ≈ {p_alt * 100:.0f}%</span>'
         f'<span><i class="ln ln-dot" style="background:{GREEN}"></i>{_rstar}风险路径：跌破ZD转空 ≈ {p_risk * 100:.0f}%</span>'
         f'<span><i class="ln ln-band"></i>预测带 = 经验分位(P05–P95 / P25–P75) × 覆盖修正 κ={_kappa:.2f}（故带宽大于名义分位，实测覆盖≈90%）</span>'
@@ -1959,6 +1989,15 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
     _p_cv.append("置信带覆盖率诚实提示：walk-forward 回测显示，部分高波动指数（如创业板）T+30 置信带覆盖率约 86%，略低于 90% 名义目标——区间端点仅供参考，不构成精确点位预测")
     if _p_cv:
         note += "\n" + "；".join("⚠ " + _s for _s in _p_cv) + "。"
+    # ---- R492(Ⓒ): 「预测情绪低点」标注口径说明 ----
+    # 该标注的价值在于「情绪常领先价格」这一对照，但旧名「情绪见底」用了完成态动词，
+    # 最容易被读成"当下情绪已经见底、可以买"。此处把口径写在说明里，与图上标签同名。
+    if isinstance(sent_fc, dict) and sent_fc.get("dates"):
+        note += ("\n紫标记「<b>预测情绪低点</b>」= 紫色<b>情绪预测曲线</b>在未来投影段取到<b>最小值</b>的那个"
+                 "交易日（只描述曲线的形状位置），<b>不是</b>「当前市场情绪已经见底」，也不构成买卖信号。"
+                 "它的用处是与价格路径的底部时点做对照——历史上情绪常在价格见底<b>之前</b>先到低位，"
+                 "故该点日期可作为「情绪侧何时最悲观」的参照；实际下单仍须以结构判据（主路径失效位 ZD）"
+                 "与下方经验校准锚为准。")
     # ---- 悬浮交互数据：历史区真实收盘价 + 投影区密集采样（供 JS initForecast）----
     hist = [[_hd[i], round(tail[i], 2)] for i in range(len(tail))]
     proj = []
@@ -2319,7 +2358,12 @@ def forecast_echart(sym, fc_data):
     ],
     series: [
       {{ name: '历史', type: 'line', data: D.hist, symbol: 'none', smooth: true, lineStyle: {{ color: '#2b6cb0', width: 1.8 }} }},
-      {{ name: '统计期望路径', type: 'line', data: D.med, symbol: 'none', smooth: true, lineStyle: {{ color: '#e54545', width: 1.6 }}, z: 5 }},
+      // R492(Ⓐ): 统计期望路径由红改**琥珀金** —— 它与「结构演绎路径」此前**同为 #e54545**
+      //   （一实线一虚线），而两者方向可以相反（上证 −3.2% vs +0.9%）⇒ 同一张图上两条红线
+      //   反向张开，用户极易看成"同一条线的两条边"。改为琥珀金后一眼可分：红=缠论结构演绎，
+      //   金=统计基准。★ 选色已核对全图用色（历史蓝/次路径灰/风险绿/趋势青/MA 四色/情绪紫），
+      //   琥珀金仅用于 keyLevels 文字、未被任何折线占用。
+      {{ name: '统计期望路径', type: 'line', data: D.med, symbol: 'none', smooth: true, lineStyle: {{ color: '#d4a017', width: 1.6 }}, z: 5 }},
       {{ name: '结构演绎路径', type: 'line', data: D.main, symbol: 'none', smooth: true, lineStyle: {{ color: '#e54545', width: 2.0, type: 'dashed', opacity: 0.85 }}, z: 6 }},
       {{ name: '次路径', type: 'line', data: D.alt, symbol: 'none', smooth: true, lineStyle: {{ color: '#94a3b8', width: 2.0, type: 'dashed' }}, z: 7 }},
       {{ name: '风险路径', type: 'line', data: D.risk, symbol: 'none', smooth: true, lineStyle: {{ color: '#18a058', width: 2.0, type: 'dashed' }}, z: 8 }},
@@ -2345,7 +2389,12 @@ def forecast_echart(sym, fc_data):
         //   主目标 yc=258.4/262.7 在**上方**，两者 Δyc 仅 6.5px / 2.1px，远小于门禁 13px 判据 ⇒ 必撞。
         //   ⚠ 不能靠"加大 distance"修：情绪见底本就在主目标**下方**，往上推只会更近。改 bottom 后
         //   垂直错开 53px，且标签框下缘 321 < 绘图区下缘 360（grid_bottom=80），未探出画布。
-        markPoint: {{ data: D.sentMin ? [{{ coord: [D.sentMin.date, D.sentMin.val], value: '情绪见底', itemStyle: {{ color: '#7c3aed' }}, symbol: 'pin', symbolSize: 32,
+        // R492(Ⓒ): 标注文字由「情绪见底」改「预测情绪低点」—— 该点 = **情绪预测曲线未来段
+        //   最小值所在的时刻**（sent_med 未来段 argmin），与"当前情绪已经见底"完全无关；
+        //   旧措辞「见底」是完成态动词，最容易被读成"现在就是底、可以买"。改后「预测」限定
+        //   时态、「情绪低点」只描述曲线位置，不再隐含行情见底。⚠ 文字由 4 字增至 6 字，
+        //   标签变宽约 22px ⇒ 已重跑重叠门禁（verify_overlap）确认不新增重叠。
+        markPoint: {{ data: D.sentMin ? [{{ coord: [D.sentMin.date, D.sentMin.val], value: '预测情绪低点', itemStyle: {{ color: '#7c3aed' }}, symbol: 'pin', symbolSize: 32,
           label: {{ show: true, position: 'bottom', color: '#7c3aed', fontSize: 11, fontWeight: 'bold' }} }}] : [] }} }},
       {{ name: '参考', type: 'line', data: [], silent: true,
         markLine: {{ symbol: 'none', data: D.hlines.concat(D.vline), labelLayout: {{ moveOverlap: 'shiftY' }} }},
@@ -4027,6 +4076,11 @@ def main():
                   f'<i style="width:{_wr:.0f}%;background:{GREEN}"></i></div>'
                   f'<span style="width:150px;text-align:right;color:#475569;font-variant-numeric:tabular-nums">'
                   f'{_c["bull"]} 多 / {_c["bear"]} 空 / {_c["neutral"]} 中</span></div>')
+    # R492: 当前活跃的段级背驰（供顶部「今日结构信号」横幅）。
+    # ★★ 必须定义在**所有消费点之前** —— 首次实现把它放在主循环旁（即 today_banner 构造之后），
+    #   实跑直接 `UnboundLocalError`。这与 R491 的 `_p_top` 是**同一个错误**（"判据块放在消费点
+    #   之后"），第二次踩。⇒ 新增任何变量时，先把它放到**最早**的消费点之前，再回来写消费代码。
+    today_signals = []
     breadth_banner = (f'<div class="panel" style="border-left:4px solid {_bcolor};margin:4px 0 16px">'
                       f'<h4 style="font-size:15px;color:{BLUE};margin-bottom:10px">跨指数市场广度综合研判 '
                       f'<span style="font-size:12px;color:#64748b;font-weight:400">日 / 周 / 月三级区间套（数据截至 {last_date}）</span></h4>'
@@ -4037,6 +4091,92 @@ def main():
                       f'<b style="color:{_bcolor}">{bd["composite"]["score"]:+.2f}</b>（{bd["composite"]["label"]}）· '
                       f'已折算为「全市场对齐度」±8 反馈进各指数推演置信度。</p>'
                       f'</div>')
+
+    # ---- R492: 「今日结构信号」横幅（页面顶部常驻）----
+    # 回答用户的问题「当天最新 K 线出现背驰，你以什么标识提醒我」：把**当前活跃**的段级
+    # 背驰直接置顶列出（含端点日期与距今天数），并按新鲜度分成「新」与「仍在窗口内」两档。
+    # 口径与 classify（SEG_BC_ACTIVE_GAP）/ 图上「新」标识（SEG_BC_FRESH_DAYS）完全同源。
+    # ★★ 就地收集，**不能**放到下面的主循环里 —— 本块执行时主循环还没跑（它在本块之后），
+    #   用主循环收集会拿到空列表。实测踩过：横幅显示"今日 5 个指数均无活跃的段级背驰"，
+    #   而同一份产物里图上明明有「新 09-16 段底·背驰」（= 数据在、传递链断了）。
+    for _sym_t, _d_t in data.items():
+        _r_t = results.get(_sym_t)
+        if not isinstance(_r_t, dict):
+            continue
+        # 包 try：展示层增强，异常不应阻断报告；但**必须打印**（防御式 except 不许静默）
+        try:
+            _segs_t = _r_t.get("segments", [])
+            _nseg_t = len(_segs_t)
+            _kl_t = _d_t["klines"]
+            _mg_t = _r_t["merged"]
+            for _b in _r_t.get("seg_beichi", []):
+                _gi = _nseg_t - 1 - _b["seg_index"]
+                if _gi < 0 or _gi > SEG_BC_ACTIVE_GAP:
+                    continue
+                _ei = _mg_t[_segs_t[_b["seg_index"]]["end"]]["idx_end"]
+                _days = len(_kl_t) - 1 - _ei
+                today_signals.append({
+                    "sym": _sym_t, "name": _d_t.get("name", _sym_t), "type": _b["type"],
+                    "date": _kl_t[_ei]["date"], "days": _days,
+                    "area": round(_b["area_ratio"], 3),
+                    "fresh": _days <= SEG_BC_FRESH_DAYS,
+                })
+        except Exception as _es:
+            print(f"[warn] {_sym_t} 今日段级背驰收集失败（{type(_es).__name__}: {_es}）"
+                  f"，该指数不参与顶部横幅", file=sys.stderr)
+    _t_fresh = sorted([s for s in today_signals if s["fresh"]], key=lambda s: s["days"])
+    _t_rest = sorted([s for s in today_signals if not s["fresh"]], key=lambda s: s["days"])
+    _t_rows = []
+    for _s in _t_fresh + _t_rest:
+        _is_bot = (_s["type"] == "bottom")
+        _col = RED if _is_bot else GREEN
+        _bgc = "rgba(229,69,69,0.13)" if _is_bot else "rgba(24,160,88,0.13)"
+        _newtxt = "新 " if _s["fresh"] else ""
+        _dirtxt = "段底" if _is_bot else "段顶"
+        _t_rows.append(
+            f'<div style="display:flex;align-items:center;gap:10px;padding:5px 0;'
+            f'border-bottom:1px dashed #eef2f7;font-size:13px">'
+            f'<span style="min-width:74px;font-weight:600;color:#334155">{_s["name"]}</span>'
+            f'<b style="background:{_bgc};border:1px solid {_col};border-radius:3px;'
+            f'padding:0 4px;color:{_col}">{_newtxt}{_dirtxt}·背驰</b>'
+            f'<span style="color:#64748b">端点 <b style="color:{_col}">{_s["date"]}</b>'
+            f'（{_s["days"]} 个交易日前）</span>'
+            f'<span style="color:#94a3b8">段内 MACD 面积比 {_s["area"]}</span></div>')
+    if _t_fresh:
+        _t_head = (f'有 <b style="color:{RED}">{len(_t_fresh)} 个指数</b>出现 '
+                   f'<b style="color:{RED}">新鲜的段级背驰</b>（端点距最新一根 ≤ '
+                   f'{SEG_BC_FRESH_DAYS} 个交易日）—— 表内以「新」标记。')
+        _t_bd = "#f0a0a0"
+    elif today_signals:
+        _t_head = (f'今日<b>无新增</b>段级背驰；下列 {len(today_signals)} 个指数的段级背驰'
+                   f'仍在其结构窗口内（近 {SEG_BC_ACTIVE_GAP + 1} 段）。')
+        _t_bd = "#cbd5e1"
+    else:
+        _t_head = "今日 5 个指数均无活跃的段级背驰。"
+        _t_bd = "#cbd5e1"
+    today_banner = (
+        f'<div class="panel" style="border-left:4px solid {_t_bd};margin:4px 0 16px">'
+        f'<h4 style="font-size:15px;color:{BLUE};margin-bottom:6px">今日结构信号 '
+        f'<span style="font-size:12px;color:#64748b;font-weight:400">数据截至 {last_date} · '
+        f'段级背驰 = 目前唯一「盘后即可算出」的实时判据</span></h4>'
+        f'<p style="font-size:13px;color:#334155;line-height:1.7;margin-bottom:4px">{_t_head}</p>'
+        + "".join(_t_rows) +
+        f'<p style="font-size:12px;color:#64748b;line-height:1.75;margin-top:8px;background:#f8fafc;'
+        f'border-radius:6px;padding:8px 12px">'
+        f'★ <b>为什么只提醒段级背驰</b>：引擎的买卖点标签必须等其所在「笔」走完才确认，'
+        f'实测最新一根 K 线上<b>不会出现任何买卖点标签</b>（220 次信号诞生中「坐标日期 = 当天」'
+        f'<b>0 次</b>，低于随机交易日的 3.4%）；而段级背驰由线段序列<b>实时</b>算出，'
+        f'出现日只比段端点晚 <b>1 个交易日</b>、<b>100% 锚在末段</b> —— '
+        f'这是当下唯一「收盘后就能算出来」的结构判据。<br>'
+        f'★ <b>经验参考</b>（5 指数 2021 至今；口径 = 标注出现后<b>次日开盘</b>买入、持有 H 个交易日）：'
+        f'看到「段底·背驰」后 H=20 胜率 <b>70.0%</b>（随机基准 49.1%，二项单侧 <b>p≈0.017</b>）、'
+        f'H=60 均值 <b>+5.34%</b>；而改等买卖点标签出现，H=20 只有 45.9%（<b>低于随机基准</b>）。<br>'
+        f'⚠ <b>但段底背驰不等于「立刻满仓」</b>：出现后该线段继续创新低 <b>17/30 = 56.7%</b>'
+        f'（中位再跌 4.52%、P90 15.88%），且标注价平均比可见日收盘低 2.24% ⇒ '
+        f'应<b>分批建仓</b>，并以「主路径失效位 ZD」为证伪位。<br>'
+        f'★ <b>图上怎么看</b>：新鲜的段级背驰带 <b>「新」前缀 + 浅色底框</b>'
+        f'（与「新 买卖点」同一套视觉），标注形如 <b>{last_date[5:]} 段底·背驰</b>；'
+        f'未被标「新」的段端点是<b>结构参照位</b>、不是新信号。</p></div>')
 
     gen_time = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M") + " (UTC+8)"
 
@@ -4986,6 +5126,7 @@ def main():
     <p>数据区间：2021-01-04 ~ {last_date} · 生成时间：{gen_time}<br>日线+周线+月线 · 前复权</p>
   </header>
   {freshness_banner}
+  {today_banner}
   {cert_html}
   <nav class="toc">
     <a href="#s1"><span class="num">一</span>决策总览</a>
