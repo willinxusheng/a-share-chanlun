@@ -200,6 +200,27 @@ h1{font-size:21px;font-weight:700;letter-spacing:.4px;line-height:1.3}   /* R323
 .bcbar.bot{border-left-color:#18a058;background:linear-gradient(180deg,#f1fdf7,#fff 60%)}
 .bcbar.top{border-left-color:#e54545;background:linear-gradient(180deg,#fff4f4,#fff 60%)}
 .bcbar.none{border-left-color:#94a3b8;background:#fafbfc}
+/* R497: 状态四档 —— 让「刚出」与「已非新出」一眼可分。
+   旧实现只有 head 末尾一个小「新」徽章，而标题**一律**写「段级底背驰 · 机会 / 顶背驰 · 风险」
+   ⇒ 端点已是 44 个交易日前的存量背驰与刚出的背驰**标题完全一样**，会被读成"刚出"。
+   实测（74 票冒烟）：seg 非空 23%、其中 fresh 仅 5.4%；seg.days min=5 / 中位=10 / max=44
+   —— 也就是说**绝大多数**段级背驰都是"看着像刚出、其实很旧"。
+   仍不新创色：只调既有语义色的饱和度 + 描边/阴影强度（命名沿用 .bot/.top）。 */
+.bcbar.fresh{border-left-width:6px;box-shadow:0 0 0 1px rgba(15,23,42,.04),0 3px 12px rgba(15,23,42,.07)}
+.bcbar.bot.fresh{border-left-color:#0e7d4a;background:linear-gradient(180deg,#d9f7e8,#fff 64%)}
+.bcbar.top.fresh{border-left-color:#b91c1c;background:linear-gradient(180deg,#ffe0e0,#fff 64%)}
+/* stale（存量）保留**淡方向色**，别做成纯白 —— 否则整卡看不出是顶是底，方向只剩 head 文字色
+   一个线索（渲染器实测：纯白底 rgb(252,253,254) 时方向全靠 .bch 的 color 撑）。
+   区分度靠**饱和度 + 边框样式**：fresh = 饱和渐变 + 6px 实线；stale = 极淡渐变 + 4px 虚线。 */
+.bcbar.stale{border-left-style:dashed}
+.bcbar.bot.stale{border-left-color:#7ecfa6;background:linear-gradient(180deg,#f4fdf8,#fff 62%)}
+.bcbar.top.stale{border-left-color:#eda3a3;background:linear-gradient(180deg,#fff7f7,#fff 62%)}
+.bcbar.nodata{border-style:dashed;border-left-color:#cbd5e1;background:#fafbfc}
+.bcbar.nodata .bch{color:#64748b;font-weight:600}
+.bcbar .bcm{display:inline-block;font-size:11px;font-weight:700;padding:1px 7px;border-radius:6px;background:#eef2f7;color:#475569;white-space:nowrap}
+.bcbar.bot.fresh .bcm{background:#0e7d4a;color:#fff}
+.bcbar.top.fresh .bcm{background:#b91c1c;color:#fff}
+.bcbar .bclast{font-variant-numeric:tabular-nums}
 .bcbar .bch{font-weight:700;font-size:13.5px;color:#1e293b;display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
 .bcbar.bot .bch{color:#0e7d4a}
 .bcbar.top .bch{color:#c92a2a}
@@ -210,7 +231,9 @@ h1{font-size:21px;font-weight:700;letter-spacing:.4px;line-height:1.3}   /* R323
 .bcbar .bcbi{display:inline-flex;flex-wrap:wrap;gap:3px 9px;align-items:baseline;padding:3px 10px;border-radius:8px;background:#f8fafc;border:1px dashed #d7dee8;font-size:11.5px;color:#64748b}
 .bcbar .bcnote{flex-basis:100%;font-size:11.5px;color:#7a8699;line-height:1.8;margin-top:1px}
 .bcbar .bcnote b{color:#475569}
-@media (max-width:820px){.bcbar{gap:6px 10px;padding:10px 12px}.bcbar .bch{font-size:12.5px}}
+/* R497: 窄屏必须放开 .bch 的 nowrap —— 新 head 比旧的长（含「刚出」/「已非新出」后缀），
+   实测 375px 档下仍 nowrap 会把「· 机会」挤出卡片外。放宽为可折行 + 略缩字号。 */
+@media (max-width:820px){.bcbar{gap:6px 10px;padding:10px 12px}.bcbar .bch{font-size:12.5px;white-space:normal;flex-wrap:wrap}.bcbar .bcm{font-size:10.5px;padding:1px 6px}}
 #mainChart{width:100%;height:620px}
 .mini-chart{width:100%;height:300px}
 /* ===== 表格(成分股信号列表) ===== */
@@ -602,11 +625,18 @@ a{color:var(--primary);text-decoration:none}
 <script>
 /* ============================================================
    全市场缠论雷达 v3 · 行业为根 + 个股K线内嵌切换
-   数据: radar/radar.json (scan_radar.py P3b-r30) · 前端 R496b(标注偏移锚 + 只受 draw_n 约束) · R252+R253+R445+R446 · R253-hotfix: 修 drawChart 不清 loading 残留 + legend 重复声明
+   数据: radar/radar.json (scan_radar.py P3b-r30) · 前端 R497(背驰提示条按新鲜度四档: 刚出/已非新出/无活跃/未携带) · R496b(标注偏移锚 + 只受 draw_n 约束) · R252+R253+R445+R446 · R253-hotfix: 修 drawChart 不清 loading 残留 + legend 重复声明
    R495: ①三类 K 线（行业/个股/ETF）补**段级买卖点**（段1/段2/段3/段类2 的买/卖，大号三角）
          + **段级中枢**（青带，段级三类点的判据锚点）—— 此前雷达只有**笔级**，与主界面不是一套标准
          （根因：scan_radar.analyze_one 只取 signals[-14:]，r["seg_signals"]/segments/seg_beichi 全丢弃）。
          ②新增「最新 K 线是否背驰」提示条（行业/个股共用 bcBarHtml，数据来自后端 st.bc_state，前端只呈现）。
+   R497: 提示条**按新鲜度四档**（刚出 / 已非新出 / 无活跃 / 未携带）。R495 的标题**一律**写
+         「段级底背驰 · 机会 / 顶背驰 · 风险」，只在末尾挂一个小「新」徽章 ⇒ 端点已是 44 个
+         交易日前的**存量**背驰与刚出的**标题一模一样**，必被读成"刚出"（实测 74 票冒烟：
+         seg 非空 23%、其中 fresh 仅 5.4%、days 中位 10 ⇒ 多数是"看着像刚出、其实很旧"）。
+         另修两处**静默**：`bcBarHtml` 的 `if(!bs)return ""` 与 `refreshBcBar` 的 `_st?:""
+         —— 都会让用户分不清「没有背驰」与「没拿到数据」（两者结论相反）。**数据源与判据均未改**
+         （仍全取自后端 st.bc_state），本次纯呈现层。
          ③修**中文子串当类型判据**（规则 19）：「类二买点(二次回抽不破)」三个 indexOf 分支全不命中
          ⇒ cls="" ⇒ **整族被静默丢弃**（笔级类二点在雷达图上从未显示过）。改为查 KIND_SHORT 表
          （与主界面 _KIND_SHORT 同表同键），未登记 kind 降级保留 kind[:3] 而非变空。
@@ -2098,23 +2128,42 @@ function ldName(s){s=s||"";return s.length>6?s.slice(0,6)+"…":s}
 function bcBarHtml(st){
   st=st||{};
   var bs=st.bc_state;
-  if(!bs)return "";                       // 旧快照（radar.json 无该键）⇒ 不渲染，不报错
+  var _last=st.last||"";
+  /* R497: 旧实现此处是 `if(!bs)return "";` —— **静默**。但 HTML 与 radar.json 是**独立部署**
+     （见本文件既有说明：新前端上线到下次 CI 扫描之间，线上仍是旧 JSON）⇒ 在那个窗口里点开
+     任何票都**一条提示都没有**，用户**无法区分「没有背驰」与「没拿到数据」**——两者结论相反。
+     改为显式说明，且**不给方向色**（灰底虚线），避免被误读成一个结论。 */
+  if(!bs){
+    return '<div class="bcbar nodata"><span class="bch">ℹ️ 本轮快照未携带该标的的背驰状态</span>'
+      +'<span class="bck">radar.json 版本 <b>'+esc((typeof M!=="undefined"&&M&&M.version)||"?")+'</b> 早于该字段上线（R495），'
+      +'或该票本轮未跑全量结构分析 ⇒ <b>无法判断末根是否背驰</b>。'
+      +'<b>这不等于「没有背驰」</b>，只是本轮数据没带上，下次扫描后自动恢复。</span></div>';
+  }
   var seg=bs.seg||null, mb=bs.bi||null, cls="none", head="", body=[], notes=[];
   if(seg){
     var bot=(seg.dir==="bottom");
-    cls=bot?"bot":"top";
-    head=(bot?"🟢 段级底背驰 · 机会":"🔴 段级顶背驰 · 风险")+(seg.fresh?'<span class="bcnew">新</span>':"");
-    body.push('<span><span class="bck">确认于</span> <span class="bcv">'+esc(seg.date)+'</span></span>');
-    body.push('<span><span class="bck">距今</span> <span class="bcv">'+seg.days+'</span><span class="bck"> 个交易日</span></span>');
+    /* R497: 标题**必须带上新鲜度** —— 旧实现标题一律「段级底背驰 · 机会 / 顶背驰 · 风险」，
+       只在末尾挂一个小「新」徽章 ⇒ 端点已是 44 个交易日前的**存量**背驰与刚出的背驰**标题一模一样**，
+       必然被读成"刚出"。实测（74 票冒烟）：seg 非空 23%，其中 fresh 仅 5.4% ⇒ 多数是"看着像刚出、其实很旧"。 */
+    cls=(bot?"bot":"top")+(seg.fresh?" fresh":" stale");
+    head=(bot?"🟢 段级底背驰 · 机会":"🔴 段级顶背驰 · 风险")
+      +(seg.fresh?'<span class="bcm">刚出</span>':'<span class="bcm">已非新出</span>');
+    /* 末根 / 信号锚点**并排对照** —— 用户问的是"最新 K 线"，只给"距今 N 个交易日"没有基准就无从判断。 */
+    body.push('<span><span class="bck">末根</span> <span class="bcv bclast">'+esc(_last||"-")+'</span>'
+      +'<span class="bck"> · 信号锚点</span> <span class="bcv bclast">'+esc(seg.date)+'</span>'
+      +'<span class="bck"> · </span><span class="bcv bclast">'+seg.days+'</span><span class="bck"> 个交易日前</span>'
+      +(seg.fresh
+        ? '<span class="bck"> ⇒ 端点紧贴末根，<b>属末根附近新长出的背驰</b></span>'
+        : '<span class="bck"> ⇒ <b>不是最新 K 线上的新信号</b>（结构窗口内仍活跃）</span>')+'</span>');
     body.push('<span><span class="bck">段内 MACD 面积比</span> <span class="bcv">'+(+seg.area).toFixed(2)+'</span>'
       +'<span class="bck">&nbsp;(&lt; '+bs.area_th+' = 力度衰竭 ⇒ 背驰成立)</span></span>');
     body.push('<span><span class="bck">结构位置</span> <span class="bcv">倒数第 '+(seg.gap+1)+'</span><span class="bck"> 段</span></span>');
     if(seg.both)notes.push('⚠ <b>顶底背驰并存</b>（活跃窗口内共 '+seg.n_active+' 条）—— 此处按<b>更新的那一段</b>给结论，'
       +'另一方向同样成立，<b>勿只读单向</b>（R492：旧实现是"顶无条件优先"，会把更新的底背驰吞掉）');
     notes.push('判据：段级背驰「活跃」= 端点所在段距末段 ≤ <b>'+bs.gap_th+'</b> 段（<b>段数</b>口径）；'
-      +'「新」= 端点距末根 ≤ <b>'+bs.fresh_th+'</b> 个交易日（<b>时间</b>口径）—— 两者不同，可差很多');
+      +'「刚出」= 端点距末根 ≤ <b>'+bs.fresh_th+'</b> 个交易日（<b>时间</b>口径）—— 两者不同，可差很多');
   } else {
-    head="无活跃段级背驰";
+    head="末根无活跃段级背驰";
     body.push('<span class="bck">已扫描 '+(st.seg_n||0)+' 段 · 段级背驰 '+(st.segbc_n||0)+' 条；'
       +'最近一条距末段已超过活跃窗口（&gt; '+bs.gap_th+' 段）⇒ 当下没有起作用的段级背驰</span>');
   }
@@ -2297,13 +2346,15 @@ function pickInd(k){
 /* R495: 背驰提示条的**唯一刷新入口** —— 两条"切到个股 K 线"的路径（switchTab 与
    pickStkInInd）都必须调用它。前者走 switchTab，后者**不走**（直接改 curTab 再 drawChart）
    ⇒ 若各写一遍必然漏一处，提示条会停在行业结论上，而图已经是个股 —— 图与结论不同源。
-   数据源：个股取 UNI[sym].st，行业取 INDS[k].st。 */
+   数据源：个股取 UNI[sym].st，行业取 INDS[k].st。
+   R497: 原 `_st?bcBarHtml(_st):""` 在 _st 为空时**静默清空** —— 与 bcBarHtml 的 `!bs` 静默是同一个病：
+   用户分不清「这条票没有背驰」与「没拿到数据」。改为恒渲染（无 st 时走 nodata 说明态）。 */
 function refreshBcBar(){
   var bw=$("bcBarWrap");if(!bw)return;
   var _st=null;
   if(curTab==="stk"&&curStk)_st=(UNI[curStk]||{}).st;
   else if(curInd)_st=(INDS[curInd]||{}).st;
-  bw.innerHTML=_st?bcBarHtml(_st):"";
+  bw.innerHTML=bcBarHtml(_st||{});
 }
 function switchTab(tab){
   curTab=tab;
