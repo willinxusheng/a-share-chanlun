@@ -233,7 +233,16 @@ h1{font-size:21px;font-weight:700;letter-spacing:.4px;line-height:1.3}   /* R323
 .bcbar .bcnote b{color:#475569}
 /* R497: 窄屏必须放开 .bch 的 nowrap —— 新 head 比旧的长（含「刚出」/「已非新出」后缀），
    实测 375px 档下仍 nowrap 会把「· 机会」挤出卡片外。放宽为可折行 + 略缩字号。 */
-@media (max-width:820px){.bcbar{gap:6px 10px;padding:10px 12px}.bcbar .bch{font-size:12.5px;white-space:normal;flex-wrap:wrap}.bcbar .bcm{font-size:10.5px;padding:1px 6px}}
+@media (max-width:820px){.bcbar{gap:6px 10px;padding:10px 12px}.bcbar .bch{font-size:12.5px;white-space:normal;flex-wrap:wrap}.bcbar .bcm{font-size:10.5px;padding:1px 6px}
+/* R498: 行业/ETF 板块的排序 tab 在窄屏**不可达** —— 实测 375px 下 10 个 tab 只有 3 个可见。
+   根因: `.tabs` 是 flex 容器、子项 `white-space:nowrap`, 而 flex item 的 `min-width:auto`
+   使它被内容撑到 951px(实测 scrollWidth), 超出 `.head` 后被 `.ind-panel{overflow:hidden}` 裁掉;
+   且 `.tabs` 自身 `overflow-x:visible` ⇒ **不能滚动, 被裁的 tab 彻底不可达**。
+   ★ 这**不是**本轮引入(改前 9 个 tab 时已有 6 个不可达), 但本轮新增的入口也落在窗口外 ⇒ 一并修。
+   修法: 允许收缩到容器宽 + 自身横向滚动; 子项 `flex:0 0 auto` 防被压扁。
+   宽屏不受影响 —— 只加在窄屏媒体查询里, 基础规则一行未动。 */
+.ind-panel .head .tabs{min-width:0;max-width:100%;overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch}
+.ind-panel .head .tabs a{flex:0 0 auto}}
 #mainChart{width:100%;height:620px}
 .mini-chart{width:100%;height:300px}
 /* ===== 表格(成分股信号列表) ===== */
@@ -288,6 +297,15 @@ h1{font-size:21px;font-weight:700;letter-spacing:.4px;line-height:1.3}   /* R323
 .badge2.y{background:#fff4e0;color:#9a6700}
 .badge2.z{background:#eef2f8;color:#64748b}
 .badge2.o{background:#e0f2fe;color:#075985}
+/* R498: 行业/ETF板块**自身**背驰徽章 —— 与 .badge2(成分股信号密度) 严格区分:
+   前者答「该板块指数**自己**出背驰了吗」(读 st.bc_state.seg), 后者答「成分股里有多少只出背驰」。
+   两者长期共用一个「顶背驰区」说法 ⇒ 用户在行业列表上找"哪个行业出背驰"时会看错层次。
+   配色沿页内既有方向色: 顶=红(风险) / 底=绿(机会); 新鲜(fresh)⇒实底白字最醒目。 */
+.bcself{display:inline-block;font-size:10px;font-weight:700;line-height:1.7;padding:1px 6px;border-radius:5px;white-space:nowrap;flex:0 0 auto;border:1px solid transparent}
+.bcself.t{background:var(--up-soft);color:#c92a2a;border-color:#f5c2c2}
+.bcself.b{background:var(--down-soft);color:#087f5b;border-color:#a7dcc0}
+.bcself.t.fr{background:#c92a2a;color:#fff;border-color:#c92a2a}
+.bcself.b.fr{background:#087f5b;color:#fff;border-color:#087f5b}
 /* ===== 详情抽屉(个股) ===== */
 .subcrumb{font-size:13px;color:var(--muted);padding:16px 16px 0;display:flex;align-items:center;gap:7px;flex-wrap:wrap}
 .subcrumb a{color:var(--primary);text-decoration:none;cursor:pointer;font-weight:600}
@@ -597,6 +615,9 @@ a{color:var(--primary);text-decoration:none}
           <a id="tabRsiL" class="on" onclick="sortInds('rsiL')">📉 RSI 超卖优先</a>
           <a id="tabRsi" onclick="sortInds('rsi')">📈 RSI 超买优先</a>
           <a id="tabSig" onclick="sortInds('sig')">📊 信号集中</a>
+          <!-- R498: 与「信号集中」是**两个层次** —— 前者=成分股里有多少只出背驰(密度),
+               本 tab=该板块指数**自己**的段级背驰新鲜度(读 st.bc_state.seg)。 -->
+          <a id="tabBc" onclick="sortInds('bc')" title="按该板块指数**自身**的段级背驰新鲜度排序 —— 与左侧「📊 信号集中」(成分股里有多少只出背驰) 是两个不同层次：这个答「哪个板块自己刚出背驰」，那个答「哪个板块的成分股信号最密集」">⛓ 自身背驰</a>
           <a id="tabTrend" onclick="sortInds('trend')">🚀 趋势强度</a>
           <a id="tabRs" onclick="sortInds('rs')">🎯 相对强度</a>
           <a id="tabDip" onclick="sortInds('dip')">🪂 跌透优先</a>
@@ -625,7 +646,7 @@ a{color:var(--primary);text-decoration:none}
 <script>
 /* ============================================================
    全市场缠论雷达 v3 · 行业为根 + 个股K线内嵌切换
-   数据: radar/radar.json (scan_radar.py P3b-r30) · 前端 R497(背驰提示条按新鲜度四档: 刚出/已非新出/无活跃/未携带) · R496b(标注偏移锚 + 只受 draw_n 约束) · R252+R253+R445+R446 · R253-hotfix: 修 drawChart 不清 loading 残留 + legend 重复声明
+   数据: radar/radar.json (scan_radar.py P3b-r30) · 前端 R498(行业/ETF板块**自身**背驰: 列内徽章 + ⛓ 自身背驰排序 + regime 加「成分」限定词) · R497(背驰提示条按新鲜度四档: 刚出/已非新出/无活跃/未携带) · R496b(标注偏移锚 + 只受 draw_n 约束) · R252+R253+R445+R446 · R253-hotfix: 修 drawChart 不清 loading 残留 + legend 重复声明
    R495: ①三类 K 线（行业/个股/ETF）补**段级买卖点**（段1/段2/段3/段类2 的买/卖，大号三角）
          + **段级中枢**（青带，段级三类点的判据锚点）—— 此前雷达只有**笔级**，与主界面不是一套标准
          （根因：scan_radar.analyze_one 只取 signals[-14:]，r["seg_signals"]/segments/seg_beichi 全丢弃）。
@@ -779,6 +800,25 @@ function zsPosBadge(x){
   var side=p.pct<=0?"上":"下";
   return ' <span class="zsb mid" title="板块指数收盘于末中枢内 ('+side+'半区, 距'+(p.pct<=0?"上沿 ":"下沿 ")+Math.abs(p.pct).toFixed(1)+'%)">中枢内</span>';
 }
+/* R498: 板块**自身**段级背驰徽章 —— 答「这个板块指数自己刚出背驰了吗」。
+   ⚠️ 与同行其它标记**不同源, 不可互相推断**(这是本轮要修的层次混淆):
+     · regime 胶囊「顶背驰区/底背驰区」的判据 = 成分股**信号密度**的 95% Wilson 下界(见 regimeTip)
+     · zsPosBadge = 收盘价与末中枢的位置关系
+     · 本徽章读 st.bc_state.seg = **该板块指数自身**的段级背驰
+   用户在行业列表上找"哪个行业出背驰"时, 只有本徽章是答案; 密度徽章只说明"这个板块里有多少只
+   成分股出了背驰", 两者可以完全背离(实测存在"成分信号密集但板块自身无背驰"与反向的板块)。 */
+function bcSelfBadge(x){
+  var bs=(x.st||{}).bc_state||{}, sg=bs.seg;
+  if(!sg)return "";
+  var t=(sg.dir==="top"), d=(sg.days==null?"?":sg.days);
+  var cls="bcself "+(t?"t":"b")+(sg.fresh?" fr":"");
+  var tip="【板块指数自身的段级背驰】信号锚点 "+esc(sg.date||"-")+" —— 该背驰笔的结束日, 距末根 "+d+" 个交易日"
+    +(sg.fresh?"（不超过 "+bs.fresh_th+" 日, 标为新）":"（超过 "+bs.fresh_th+" 日, 属存量, 非末根附近新出）")
+    +" · 段内 MACD 面积比 "+(sg.area!=null?(+sg.area).toFixed(2):"-")+"（低于 "+bs.area_th+" 即力度衰竭, 背驰成立）"
+    +" · 结构位置 倒数第 "+(sg.gap+1)+" 段 · "+(t?"顶背驰=风险(红)":"底背驰=机会(绿)")
+    +"｜注意: 与同行「顶背驰区/底背驰区」标签**无关** —— 那是成分股信号密度, 本徽章才是板块自身。";
+  return ' <span class="'+cls+'" title="'+tip+'">自身'+(t?"顶":"底")+' '+d+'天</span>';
+}
 // R304: 概要条位置温度 — 统计 32 板块: 上沿上方 / 中枢内 / 破位
 function zsTemp(){
   var up=0,mid=0,dn=0;
@@ -786,6 +826,16 @@ function zsTemp(){
   return {up:up,mid:mid,dn:dn,n:up+mid+dn};
 }
 function regimeCls(r){if(!r)return "flat";if(r.indexOf("顶")>=0)return "top";if(r.indexOf("底")>=0)return "bot";if(r.indexOf("涨")>=0)return "up";if(r.indexOf("跌")>=0)return "dn";return "flat"}
+/* R498: regime 标签的**显示限定词** —— 后端「顶背驰区/底背驰区」的判据是**成分股信号计数**
+   (见 scan_radar._regime_of: n_top/n_bot 双条件 + 位置门控 1/2/3), 与「板块自身出背驰」无关。
+   原样显示会被直读成"这个板块自己出背驰了" —— 而那正是用户在行业列表里要找的东西(层次混淆)。
+   ⚠️ 只改**显示**, 不改 x.regime 原值: regimeCls(判色, 走 indexOf "顶"/"底") 与 regimeMismatch
+   (用原串核对新判据) 一律仍读原值, 加前缀不影响二者。 */
+function regimeLabelOf(r){
+  if(!r)return "-";
+  if(r.indexOf("背驰区")<0)return r;
+  return (r.indexOf("成分")===0)?r:("成分"+r);
+}
 // R260: regime 胶囊 tooltip — 说明板块标签=成分信号聚合 + 板块自身位置/RSI, 防"已深跌仍标顶背驰区"式误读
 function regimeTip(x,k){
   if(!x)return "";
@@ -1298,8 +1348,29 @@ function renderSigRadar(){
     Object.keys(indAgg).forEach(function(k){indTop.push({k:k,n:indAgg[k]});});
     indTop.sort(function(a,b){return b.n-a.n||(a.k<b.k?-1:1);});
     indTop=indTop.slice(0,2);
+    /* R498: 板块**自身**段级背驰计数 —— ⚠️ 与上面的 indAgg(成分股信号密集度) 是两个层次, 不可混。
+       用途: 用户流程是「主看板看大盘 → 雷达看行业 → 看 ETF → 看个股」, 本条是"行业"那一环的入口指引 ——
+       让他在**不点开任何板块**的情况下知道该不该去下面那张表。点它直接切到「⛓ 自身背驰」排序。
+       三态分开报: 无键(旧快照) / 有键但全无 seg / 有新的。 */
+    var nSelfNew=0,nSelfAny=0,nBcKey=0;
+    Object.keys(INDS).forEach(function(k){
+      var _bs=((INDS[k]||{}).st||{}).bc_state;
+      if(_bs===undefined)return;
+      nBcKey++;
+      var _sg=_bs&&_bs.seg;
+      if(!_sg)return;
+      nSelfAny++;
+      if(_sg.fresh)nSelfNew++;
+    });
     smark='<div class="smark">'+
       '<span>📡 全市场信号 <b class="tt">顶'+top.length+'</b>/<b class="bb">底'+bot.length+'</b> · 近端≤5天 <b>'+nNear+'</b></span>'+
+      /* R498: 板块自身背驰入口 —— 与右侧「🎯 近端集中」是**两个层次**: 前者=板块指数自己出的段级背驰,
+         后者=成分股里信号最密集的行业。用户流程「先看大盘 → 再看哪个行业」的"行业"那一环就从这里进。 */
+      (nBcKey
+        ?(nSelfNew
+          ? '<span style="cursor:pointer" onclick="sortInds(\'bc\');var _e=document.getElementById(\'indList\');if(_e&&_e.scrollIntoView)_e.scrollIntoView({behavior:\'smooth\',block:\'start\'})" title="板块指数自身的段级背驰中, 信号锚点距末根不超过阈值的数量 —— 与右侧「🎯 近端集中」(成分股里信号最密集的行业)是两个层次。点击按此排序并跳到下方「行业 · ETF 板块」表。">⛓ 板块自身新背驰 <b>'+nSelfNew+'</b> ↓</span>'
+          : '<span title="板块指数自身当前无「新」段级背驰(仍有 '+nSelfAny+' 个板块处在活跃段级背驰窗口内) —— 与右侧「🎯 近端集中」(成分股密集度)是两个层次。">⛓ 板块自身 <b>'+nSelfAny+'</b>(无新出)</span>')
+        : '<span style="color:#b0b9c6" title="本轮快照各板块 st 无 bc_state 键 ⇒ 尚未携带板块自身背驰数据(线上仍是 r30 之前的构建), 下一交易日重扫后生效。注意这不等于「所有板块都没有背驰」。">⛓ 板块自身数据未携带</span>')+
       (nRes?'<span>💰资金共振 <b style="color:#c92a2a">'+nRes+'</b></span>':'')+
       (nDiv?'<span>⚠️背离警示 <b style="color:#f59f00">'+nDiv+'</b></span>':'')+
       (nTopDn?'<span title="顶信号已从背驰高点回落超过3%的数量(横截面口径, 非时间序列回测)">顶信号已回落&gt;3% <b class="fd">'+nTopDn+'/'+top.length+'</b></span>':'')+
@@ -1832,7 +1903,7 @@ function renderRevPool(){
     '<div style="padding:6px 0 8px">'+phdrHtml+rowsHtml+moreHtml+'</div>'+
     '<div class="foot">候选=底背驰(fresh&gt;10) + 距历史高≥30% + 现价&gt;背驰低点 · 止损参考=背驰低点(跌破失效) · 数据截至 '+esc(M.asof||"-")+' · 仅供研究参考，不构成投资建议</div>';
 }
-var IND_TABS=["tabRsiL","tabRsi","tabSig","tabTrend","tabRs","tabDip","tabFlow","tabCap","tabChg"];
+var IND_TABS=["tabRsiL","tabRsi","tabSig","tabBc","tabTrend","tabRs","tabDip","tabFlow","tabCap","tabChg"];   // R498: +tabBc(板块自身背驰)
 function sortInds(mode){
   curSortMode=mode;
   IND_TABS.forEach(function(id){var e=$(id);if(e)e.classList.remove("on")});
@@ -1852,6 +1923,15 @@ function indScore(mode,k){
     // 改由徽章配色、状态标签与说明栏表达, 不再塞进排序权重。
     var m=indM(k);
     return Math.max(m.lt||0,m.lb||0)*10+Math.min(m.lt||0,m.lb||0);
+  }
+  if(mode==="bc"){   // R498: 板块**自身**段级背驰新鲜度(读 st.bc_state.seg)
+    //  · 与 "sig" 是两个层次: sig=成分股里多少只出背驰(密度) / bc=板块指数自己刚出的段级背驰
+    //  · days = 信号锚点(该背驰**笔**的结束日)距末根交易日数; fresh = days<=bs.fresh_th
+    //  · 降序口径下: fresh 段恒在非 fresh 之前, 同档按 days 升序(越贴近末根越靠前)
+    var sg=((x.st||{}).bc_state||{}).seg;
+    if(!sg)return -1;
+    var bd=(sg.days==null?999:sg.days);
+    return (sg.fresh?100000:50000)-bd*10;
   }
   if(mode==="cap")return x.cap||0;
   if(mode==="chg")return Math.abs(x.chg1d||0);
@@ -2023,6 +2103,22 @@ function regimeMismatch(){
 function indRuleHtml(){
   var ks=Object.keys(INDS),n=ks.length,lit=0;
   ks.forEach(function(k){var s=sigStrong(INDS[k],indM(k));if(s.top||s.bot)lit++;});
+  /* R498: 板块**自身**段级背驰计数 + 「数据是否携带」探测。
+     ★ 两态必须分开报: `无 bc_state 键`(旧快照) 与 `有键但 seg 为空`(真的没有背驰) 结论相反,
+       混成一句会把"没数据"读成"没背驰"(与 R497 修的同型静默)。 */
+  var _nBc=0,_nSelf=0;
+  ks.forEach(function(k){var _bs=((INDS[k]||{}).st||{}).bc_state;
+    if(_bs===undefined)return;_nBc++;if(_bs&&_bs.seg)_nSelf++;});
+  var selfHtml=(_nBc===0)
+    ? '<br><span class="warn">⚠ <b>本轮快照未携带「板块自身背驰」数据</b>(各板块 st 无 bc_state 键) —— '
+      +'线上仍是 P3b-r28 及更早的构建; 下一交易日全市场重扫产出 r30 后自动生效, 此提示随之消失。'
+      +'⚠ 这<b>不等于</b>「所有板块都没有背驰」。</span>'
+    : '<br>⛓ <b>自身背驰</b> = 该板块指数<b>自己</b>的段级背驰(后端 st.bc_state.seg)。信号锚点 = 该背驰<b>笔</b>'
+      +'的结束日(<b>不是最后一根 K 线</b> —— 引擎要求笔走完才确认, 故锚点天然滞后几根); 「新」= 锚点距末根不超过阈值交易日。'
+      +'当前 <b>'+_nSelf+'/'+n+'</b> 个板块自身有活跃段级背驰。'
+      +'<br><span class="warn">⚠️ <b>层次区分(最易混处)</b>: 行内 <b>「自身顶/底 N天」</b> 徽章 = 板块指数<b>自己</b>的段级背驰; '
+      +'<b>「顶N底N」</b> 徽章 / 左侧色条 / 「走势状态」列标签 = 该板块<b>成分股</b>里有多少只出了背驰。'
+      +'两者是不同层次, <b>实测可完全背离</b>, 不可互相推断。</span>';
   var mm=regimeMismatch();
   var mmHtml=mm.length?('<br><span class="warn">⚠ <b>口径待对齐</b>: 「走势状态」标签仍由后端按<b>旧判据(绝对数≥2)</b>生成, '
     +'其中 <b>'+mm.join("、")+'</b> 共 '+mm.length+' 个在新判据(密度下界≥'+DENS_LB_STRONG+'%)下不成立 —— '
@@ -2044,6 +2140,7 @@ function indRuleHtml(){
     +'<span class="us">贴着分界线的板块(|动量变化| &lt; '+ROT_LINE.toFixed(2)+'pp/日)用<b>虚线边框</b>标出, 其象限归属区分度低。'
     +'四个名字都只是<b>方位</b>(强/弱 × 加速/减速), 不是评级, 也不含买卖建议。</span>'
     +'<br><span class="warn">以上全部为<b>描述性</b>指标(位置/动量/密度), 不含买卖判断 —— 与 R443 回测结论一致: 顶背驰风险维度有效(−0.80pp, p=0.018), 底背驰机会未获证实(+0.58pp, p=0.13)。</span>'
+    +selfHtml
     +mmHtml;
 }
 /* ===== 行业迷你SVG ===== */
@@ -2275,10 +2372,12 @@ function renderInds(){
       +(m.dt==null?"-":m.dt.toFixed(2)+"%")+" / 底"+(m.db==null?"-":m.db.toFixed(2)+"%")+"｜95% Wilson 置信下界(排序/色条/状态标签的唯一判据, 小样本自动降权): 顶"
       +(m.lt||0).toFixed(2)+"% / 底"+(m.lb||0).toFixed(2)+"%｜显著集中门槛=下界≥"+DENS_LB_STRONG+"% 且只数≥"+SIG_ABS_MIN+"(达标才有左侧色条)";
     html+='<div class="ind-row'+hl+strongCls+'" onclick="pickInd(\''+esc(k)+'\')">'+
-      '<div class="nm"><div class="nmr"><span class="nmt">'+esc(k)+'</span>'+(sg?'<span class="badge2 '+(x.n_sig_top?(x.n_sig_bot?'y':'r'):'g')+'" title="'+bTip+'">'+bTxt+'</span>':'')+'</div>'+
+      /* R498: 名称后**先**给「板块自身背驰」徽章, 再给「成分股信号密度」徽章 ——
+         用户流程是"哪个行业出背驰", 前者才是答案; 后者只说明信号在成分股里的密集程度。 */
+      '<div class="nm"><div class="nmr"><span class="nmt">'+esc(k)+'</span>'+bcSelfBadge(x)+(sg?'<span class="badge2 '+(x.n_sig_top?(x.n_sig_bot?'y':'r'):'g')+'" title="'+bTip+'">'+bTxt+'</span>':'')+'</div>'+
       (x.leader?'<a class="indlead" title="'+(x.is_etf?"场内规模最大的基金 · 点击直达":"该行业总市值最大的龙头股 · 点击直达")+'" onclick="event.stopPropagation();prevStkSrc=\'home\';showStk(\''+esc(x.leader.sym)+'\')">👑 '+esc(x.leader.name)+'</a>':'')+'</div>'+
       '<div class="meta ta-r"><span class="cap">'+capTxt+'</span><br><span class="cnt">'+(x.is_etf?(x.n_member||0)+"/"+(x.n_total||0)+"只":(x.n_member||0)+"只")+'</span>'+(mvLine?'<br>'+mvLine:'')+'</div>'+
-      '<div><span class="regime '+rCls+'" title="'+regimeTip(x,k)+'">'+esc(x.regime||"-")+'</span>'+zsPosBadge(x)+rotChip(k)+'</div>'+
+      '<div><span class="regime '+rCls+'" title="'+regimeTip(x,k)+'">'+esc(regimeLabelOf(x.regime))+'</span>'+zsPosBadge(x)+rotChip(k)+'</div>'+
       '<div class="spark">'+sparkSVG(x.spark,160,34)+'</div>'+
       '<div class="mp" title="多周期动量(该板块合成指数近5/20/60根累计涨幅)｜距高=距近一年(250根)最高价回撤｜分位=收盘价在近一年 [最低, 最高] 区间中的位置(0%=区间最低, 100%=区间最高)">'+mpCell(m)+'</div>'+
       '<div class="ffv '+ffCls(x.netflow)+'" title="当日主力净流入(超大+大单) · '+(x.netflow_n||0)+'只成分加总, 正=流入 负=流出">'+ffTxt(x.netflow)+'</div>'+
@@ -2320,7 +2419,7 @@ function pickInd(k){
   var html='<div id="indDetailPanel" class="panel" style="scroll-margin-top:70px;margin-top:14px;background:#fff;border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow);overflow:hidden">'+
     '<div class="det-head">'+
       '<h2 class="det-title">'+esc(k)+(ind.is_etf?' <span class="badge2 o">ETF</span>':'')+' <span class="det-sub">'+grpLbl+' · '+capLbl+' '+capTxt+' · '+(ind.n_member||0)+'只通过门禁'+(ind.n_total?' / 全 '+(ind.n_total||0)+'':'')+' · 指数'+pct(ind.chg1d,2)+'</span></h2>'+
-      '<span class="regime '+regimeCls(ind.regime)+'" title="'+regimeTip(ind)+'">'+esc(ind.regime||"-")+'</span>'+
+      '<span class="regime '+regimeCls(ind.regime)+'" title="'+regimeTip(ind)+'">'+esc(regimeLabelOf(ind.regime))+'</span>'+
       '<div class="det-tabs">'+
         '<a id="tInd" class="ind-tab '+(curTab==="ind"?"on":"")+'" onclick="switchTab(\'ind\')">📊 行业 K 线</a>'+
         '<a id="tStk" class="ind-tab '+(curTab==="stk"?"on":"")+'" onclick="switchTab(\'stk\')">📈 个股 K 线'+(curStk?(" · "+esc((UNI[curStk]||{}).name||curStk)):"")+'</a>'+
