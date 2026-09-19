@@ -5228,7 +5228,7 @@ def main():
   .tb-tbl th:last-child  {{ border-radius:0 10px 0 0; }}
   .tb-tbl td {{
     padding:9px 10px; border-bottom:1px solid #eef2f7; vertical-align:middle;
-    font-variant-numeric: tabular-nums; color:#334155;
+    font-variant-numeric: tabular-nums; color:#334155; white-space:nowrap;
   }}
   .tb-tbl tbody tr:last-child td {{ border-bottom:none; }}
   .tb-tbl tbody tr:hover td {{ background:#f5f9ff; }}
