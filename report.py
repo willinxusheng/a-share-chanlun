@@ -7,7 +7,7 @@ import sys
 import math
 import ast
 from datetime import datetime, timedelta, timezone
-from chanlun import analyze, backtest_signals, MIN_BI_PCT_WEEK, health_score, forecast_confidence, forward_vol, adaptive_horizon, classify, realized_vol_annualized, KNOWN_PIVOTS, _date_diff, MIN_BI_PCT_MONTH, backtest_robustness, backtest_paths, _path_targets, market_breadth, regime_factor, classify_regime, SC_BULL, SC_BEAR, build_seg_zhongshu, SEG_BC_ACTIVE_GAP
+from chanlun import analyze, backtest_signals, MIN_BI_PCT_WEEK, health_score, forecast_confidence, forward_vol, adaptive_horizon, classify, realized_vol_annualized, KNOWN_PIVOTS, _date_diff, MIN_BI_PCT_MONTH, backtest_robustness, backtest_paths, _path_targets, market_breadth, regime_factor, classify_regime, SC_BULL, SC_BEAR, build_seg_zhongshu, SEG_BC_ACTIVE_GAP, BC_AREA_RATIO_TH
 
 W, H_PRICE, H_VOL, H_MACD = 1060, 360, 64, 110
 PAD_L, PAD_R, PAD_T, PAD_B = 12, 78, 24, 26
@@ -4126,57 +4126,104 @@ def main():
                   f"，该指数不参与顶部横幅", file=sys.stderr)
     _t_fresh = sorted([s for s in today_signals if s["fresh"]], key=lambda s: s["days"])
     _t_rest = sorted([s for s in today_signals if not s["fresh"]], key=lambda s: s["days"])
+    # R494 深度美化：每行做成「方向 + 新鲜度」两维分层的表格行。
+    # · 信号胶囊：新鲜 = 实心渐变（醒目）/ 常态 = 浅色描边（克制）；色相由方向决定（段底=红看多 / 段顶=绿看空）。
+    # · 面积比做成**带阈值刻度的横条**：满标 1.0，0.85 处是 find_beichi_segment 的判据线
+    #   （a_cur < a_prev * 0.85），读者一眼能看出"离成立线还有多远"，比一个裸数字多一层信息。
+    #   ★ 条形只做**同一口径内的横向比较**（比值已按前一段归一化），不跨指标解读。
+    # ★ 阈值刻度位置来自**引擎常量** BC_AREA_RATIO_TH（chanlun.find_beichi_segment 的判据），
+    #   展示层不另写一份 0.85 —— 否则判据一改，图上的刻度会与实际判据静默不一致（规则 20）。
+    _th_pct = BC_AREA_RATIO_TH * 100.0
     _t_rows = []
     for _s in _t_fresh + _t_rest:
         _is_bot = (_s["type"] == "bottom")
-        _col = RED if _is_bot else GREEN
-        _bgc = "rgba(229,69,69,0.13)" if _is_bot else "rgba(24,160,88,0.13)"
-        _newtxt = "新 " if _s["fresh"] else ""
-        _dirtxt = "段底" if _is_bot else "段顶"
+        _fresh = _s["fresh"]
+        if _is_bot:
+            _tagcls = "tb-tag--bot-f" if _fresh else "tb-tag--bot"
+        else:
+            _tagcls = "tb-tag--top-f" if _fresh else "tb-tag--top"
+        _tagtxt = ("新 " if _fresh else "") + ("段底" if _is_bot else "段顶") + "·背驰"
+        _fillcls = "tb-fill--bot" if _is_bot else "tb-fill--top"
+        _pw = max(2.0, min(100.0, _s["area"] * 100.0))
+        _agecls = "tb-age--f" if _fresh else "tb-age--n"
+        _rowattr = ' class="tb-fresh"' if _fresh else ""
         _t_rows.append(
-            f'<div style="display:flex;align-items:center;gap:10px;padding:5px 0;'
-            f'border-bottom:1px dashed #eef2f7;font-size:13px">'
-            f'<span style="min-width:74px;font-weight:600;color:#334155">{_s["name"]}</span>'
-            f'<b style="background:{_bgc};border:1px solid {_col};border-radius:3px;'
-            f'padding:0 4px;color:{_col}">{_newtxt}{_dirtxt}·背驰</b>'
-            f'<span style="color:#64748b">端点 <b style="color:{_col}">{_s["date"]}</b>'
-            f'（{_s["days"]} 个交易日前）</span>'
-            f'<span style="color:#94a3b8">段内 MACD 面积比 {_s["area"]}</span></div>')
+            f'<tr{_rowattr}>'
+            f'<td><span class="tb-name">{_s["name"]}</span></td>'
+            f'<td><span class="tb-tag {_tagcls}">{_tagtxt}</span></td>'
+            f'<td>{_s["date"]}</td>'
+            f'<td><span class="tb-age {_agecls}">{_s["days"]} 个交易日</span></td>'
+            f'<td><span class="tb-bar"><span class="tb-v">{_s["area"]}</span>'
+            f'<span class="tb-track"><span class="tb-fill {_fillcls}" style="width:{_pw:.1f}%"></span>'
+            f'<span class="tb-thr" style="left:{_th_pct:.1f}%"></span></span></span></td></tr>')
+    if _t_rows:
+        # 阈值说明放**表头一次**（而不是每行重复 5 遍），行内只留刻度线
+        _tbl_html = ('<div class="tb-tblwrap"><table class="tb-tbl"><thead><tr>'
+                     '<th>指数</th><th>结构信号</th><th>端点日期</th><th>距今</th>'
+                     f'<th>段内 MACD 面积比（越小越衰竭 · 竖线 = 背驰成立阈值 {BC_AREA_RATIO_TH}）</th>'
+                     '</tr></thead><tbody>' + "".join(_t_rows) + '</tbody></table></div>')
+    else:
+        _tbl_html = ('<div class="tb-empty"><b>今日无待观察的结构信号</b><br>'
+                     '5 个主要指数的段级背驰均已超出结构窗口（近 3 段），无需为此盯盘。</div>')
     if _t_fresh:
-        _t_head = (f'有 <b style="color:{RED}">{len(_t_fresh)} 个指数</b>出现 '
-                   f'<b style="color:{RED}">新鲜的段级背驰</b>（端点距最新一根 ≤ '
-                   f'{SEG_BC_FRESH_DAYS} 个交易日）—— 表内以「新」标记。')
-        _t_bd = "#f0a0a0"
+        _n_f = len(_t_fresh)
+        _t_head = (f'有 <b>{_n_f} 个指数</b>出现 <b>新鲜的段级背驰</b>'
+                   f'（端点距最新一根 ≤ {SEG_BC_FRESH_DAYS} 个交易日）—— 表内以「新」标记。')
+        _state_cls, _state_txt = "tb-state--alert", f"{_n_f} 个指数 · 新鲜的段级背驰"
+        _sum_cls = ""
     elif today_signals:
         _t_head = (f'今日<b>无新增</b>段级背驰；下列 {len(today_signals)} 个指数的段级背驰'
-                   f'仍在其结构窗口内（近 {SEG_BC_ACTIVE_GAP + 1} 段）。')
-        _t_bd = "#cbd5e1"
+                   f'仍在其结构窗口内（近 {SEG_BC_ACTIVE_GAP + 1} 段）—— 属<b>持续观察</b>，'
+                   f'不是今日新信号。')
+        _state_cls, _state_txt = "tb-state--calm", f"{len(today_signals)} 个区间 · 无新增"
+        _sum_cls = " tb-sum--calm"
     else:
-        _t_head = "今日 5 个指数均无活跃的段级背驰。"
-        _t_bd = "#cbd5e1"
+        _t_head = '今日 5 个指数均无活跃的段级背驰 —— 这是<b>常态</b>，不必每天等到信号才动手。'
+        _state_cls, _state_txt = "tb-state--calm", "今日无活跃信号"
+        _sum_cls = " tb-sum--calm"
+    # 头部图标：简洁的脉冲波形（纯内联 SVG，不用 emoji，避免与正文符号混淆）
+    _tb_ico = ('<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#fff" '
+               'stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">'
+               '<path d="M3 15l4.5-5.5 3.5 3.5L15.5 6 21 12"/></svg>')
+    # ⚠ 风险条**常驻不折叠**（衡量"信号 ≠ 买入令"的护栏，不该藏进展开区）；
+    # 其余 3 条为解释性内容，收进折叠区，避免顶部常驻卡片一屏全是文字。
+    _warn_html = (
+        '<div class="tb-note tb-note--warn tb-warn"><h5><i class="tb-k"></i>'
+        '⚠ 段底背驰 ≠ 立刻满仓</h5>'
+        '出现后该线段继续创新低 <b>17/30 = 56.7%</b>（中位再跌 4.52%、P90 15.88%），'
+        '且标注价平均比可见日收盘低 2.24% ⇒ 应<b>分批建仓</b>，'
+        '并以「主路径失效位 ZD」为证伪位。</div>')
+    _notes_html = (
+        '<div class="tb-note tb-note--info"><h5><i class="tb-k"></i>为什么只提醒段级背驰</h5>'
+        '引擎的买卖点标签必须等其所在「笔」走完才确认，实测最新一根 K 线上'
+        '<b>不会出现任何买卖点标签</b>（220 次信号诞生中「坐标日期 = 当天」<b>0 次</b>，'
+        '低于随机交易日的 3.4%）；而段级背驰由线段序列<b>实时</b>算出：出现日只比段端点晚 '
+        '<b>1 个交易日</b>、<b>100% 锚在末段</b> —— 这是当下唯一'
+        '「收盘后就能算出来」的结构判据。</div>'
+        '<div class="tb-note tb-note--perf"><h5><i class="tb-k"></i>经验参考</h5>'
+        '5 指数 2021 至今；口径 = 标注出现后<b>次日开盘买入</b>、持有 H 个交易日。'
+        '看到「段底·背驰」后 H=20 胜率 <b>70.0%</b>（随机基准 49.1%，二项单侧 <b>p≈0.017</b>）、'
+        'H=60 均值 <b>+5.34%</b>；而改等买卖点标签出现，H=20 只有 45.9%（<b>低于随机基准</b>）。</div>'
+        '<div class="tb-note tb-note--how"><h5><i class="tb-k"></i>图上怎么看</h5>'
+        '新鲜的段级背驰带 <b>「新」前缀 + 浅色底框</b>（与「新 买卖点」同一套视觉），'
+        f'标注形如 <b>{last_date[5:]} 段底·背驰</b>；未被标「新」的段端点是'
+        '<b>结构参照位</b>、不是新信号。</div>')
     today_banner = (
-        f'<div class="panel" style="border-left:4px solid {_t_bd};margin:4px 0 16px">'
-        f'<h4 style="font-size:15px;color:{BLUE};margin-bottom:6px">今日结构信号 '
-        f'<span style="font-size:12px;color:#64748b;font-weight:400">数据截至 {last_date} · '
-        f'段级背驰 = 目前唯一「盘后即可算出」的实时判据</span></h4>'
-        f'<p style="font-size:13px;color:#334155;line-height:1.7;margin-bottom:4px">{_t_head}</p>'
-        + "".join(_t_rows) +
-        f'<p style="font-size:12px;color:#64748b;line-height:1.75;margin-top:8px;background:#f8fafc;'
-        f'border-radius:6px;padding:8px 12px">'
-        f'★ <b>为什么只提醒段级背驰</b>：引擎的买卖点标签必须等其所在「笔」走完才确认，'
-        f'实测最新一根 K 线上<b>不会出现任何买卖点标签</b>（220 次信号诞生中「坐标日期 = 当天」'
-        f'<b>0 次</b>，低于随机交易日的 3.4%）；而段级背驰由线段序列<b>实时</b>算出，'
-        f'出现日只比段端点晚 <b>1 个交易日</b>、<b>100% 锚在末段</b> —— '
-        f'这是当下唯一「收盘后就能算出来」的结构判据。<br>'
-        f'★ <b>经验参考</b>（5 指数 2021 至今；口径 = 标注出现后<b>次日开盘</b>买入、持有 H 个交易日）：'
-        f'看到「段底·背驰」后 H=20 胜率 <b>70.0%</b>（随机基准 49.1%，二项单侧 <b>p≈0.017</b>）、'
-        f'H=60 均值 <b>+5.34%</b>；而改等买卖点标签出现，H=20 只有 45.9%（<b>低于随机基准</b>）。<br>'
-        f'⚠ <b>但段底背驰不等于「立刻满仓」</b>：出现后该线段继续创新低 <b>17/30 = 56.7%</b>'
-        f'（中位再跌 4.52%、P90 15.88%），且标注价平均比可见日收盘低 2.24% ⇒ '
-        f'应<b>分批建仓</b>，并以「主路径失效位 ZD」为证伪位。<br>'
-        f'★ <b>图上怎么看</b>：新鲜的段级背驰带 <b>「新」前缀 + 浅色底框</b>'
-        f'（与「新 买卖点」同一套视觉），标注形如 <b>{last_date[5:]} 段底·背驰</b>；'
-        f'未被标「新」的段端点是<b>结构参照位</b>、不是新信号。</p></div>')
+        '<section class="tb">'
+        '<div class="tb-head"><div class="tb-id">'
+        f'<span class="tb-ico">{_tb_ico}</span>'
+        '<div><h3>今日结构信号</h3>'
+        f'<span class="tb-sub">数据截至 {last_date} · 段级背驰 = 目前唯一'
+        '「盘后即可算出」的实时判据</span>'
+        '</div></div>'
+        f'<span class="tb-state {_state_cls}"><span class="tb-dot"></span>{_state_txt}</span>'
+        '</div>'
+        f'<div class="tb-sum{_sum_cls}">{_t_head}</div>'
+        + _tbl_html + _warn_html +
+        '<details class="tb-fold"><summary><span class="tb-caret">▶</span>口径与统计说明'
+        '<span style="font-weight:400;color:#64748b">（3 条 · 点击展开）</span></summary>'
+        '<div class="tb-notes">' + _notes_html + '</div></details>'
+        '</section>')
 
     gen_time = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M") + " (UTC+8)"
 
@@ -5116,6 +5163,169 @@ def main():
     .sent-zone-cap {{ font-size: 10px; gap: 8px; margin-top: 4px; }}
     .sent-acc {{ font-size: 10.5px; padding: 6px 8px; margin: -4px 0 8px; }}
     .sent-footnote {{ font-size: 10px; padding: 7px 9px; margin-top: 9px; }}
+  }}
+
+  /* ===== R494 「今日结构信号」横幅深度美化 =====
+     目标：把该横幅并入 R153 增强层的视觉语言（渐变顶条 / 分层阴影 / radius-lg·md·sm 三级圆角 /
+     色条提示块 / tabular-nums 数字），与 .card / .panel / .kpi / .tbl 同一套令牌。
+     R492 首版用的是更早一代的样式（6px 圆角 + #f8fafc 平底 + 自造方角徽章 + 一整坨灰字注解），
+     与主看板其余模块不在同一层级上，这正是"没融进去"的原因。
+     ★ 纯展示层：不触碰任何数据口径，chart_data（var D = ）应逐键全等。 */
+  .tb {{
+    position: relative; margin: 14px 0 18px; overflow: hidden;
+    border-radius: var(--radius-lg); border: 1px solid var(--border);
+    background: linear-gradient(180deg,#ffffff 0%,#fdfefe 55%,#fbfdff 100%);
+    box-shadow: var(--shadow-md);
+  }}
+  /* 顶部语义渐变条：段底背驰(红·看多) → 橙 → 琥珀金(提醒) */
+  .tb::before {{
+    content:""; display:block; height:4px;
+    background: linear-gradient(90deg,#e54545 0%,#ef7a3d 48%,#d4a017 100%);
+  }}
+  .tb-head {{
+    display:flex; align-items:center; justify-content:space-between;
+    gap:14px; flex-wrap:wrap; padding:16px 22px 0;
+  }}
+  .tb-id {{ display:flex; align-items:center; gap:11px; min-width:0; }}
+  .tb-ico {{
+    width:32px; height:32px; flex:none; border-radius:10px;
+    display:flex; align-items:center; justify-content:center;
+    background: var(--grad-accent); box-shadow: 0 5px 14px rgba(43,108,176,.30);
+  }}
+  .tb-id h3 {{ margin:0; font-size:18px; font-weight:800; color:#1e3a5f; letter-spacing:.2px; line-height:1.2; }}
+  .tb-id .tb-sub {{ display:block; font-size:11.5px; font-weight:400; color:var(--muted); margin-top:3px; }}
+  /* 状态胶囊：新鲜=红(需关注) / 无新增=灰 */
+  .tb-state {{
+    display:inline-flex; align-items:center; gap:7px; padding:6px 14px; border-radius:999px;
+    font-size:12.5px; font-weight:700; white-space:nowrap; font-variant-numeric: tabular-nums;
+  }}
+  .tb-state--alert {{ background:linear-gradient(135deg,#fff1f1,#ffe4e4); color:var(--up); border:1px solid #fbc9c9; }}
+  .tb-state--calm  {{ background:linear-gradient(135deg,#f8fafc,#eef2f7); color:#475569; border:1px solid var(--border2); }}
+  .tb-dot {{ width:7px; height:7px; border-radius:50%; background:currentColor; flex:none; }}
+  @media (prefers-reduced-motion: no-preference) {{
+    .tb {{ animation: rise .5s ease backwards; }}
+    .tb-state--alert .tb-dot {{ animation: tbpulse 1.9s ease-in-out infinite; }}
+  }}
+  @keyframes tbpulse {{ 0%,100% {{ opacity:1; transform:scale(1); }} 50% {{ opacity:.3; transform:scale(.75); }} }}
+  /* 一句话研判条 */
+  .tb-sum {{
+    margin:13px 22px 0; padding:11px 15px; border-radius:var(--radius-sm);
+    font-size:13.5px; line-height:1.72; color:#334155;
+    background:linear-gradient(180deg,#f6faff,#edf5ff);
+    border:1px solid #d8e8fb; border-left:3px solid var(--primary);
+  }}
+  .tb-sum b {{ color:var(--up); }}
+  .tb-sum--calm {{ background:linear-gradient(180deg,#fafbfc,#f2f6fa); border-color:#e2e8f0; border-left-color:#94a3b8; }}
+  .tb-sum--calm b {{ color:#475569; }}
+  /* 数据表：对齐 .tbl（表头渐变 + 悬停 + 等宽数字） */
+  .tb-tbl {{ width:calc(100% - 44px); margin:14px 22px 0; border-collapse:separate; border-spacing:0; font-size:13px; }}
+  .tb-tbl th {{
+    font-size:11px; font-weight:700; color:#475569; letter-spacing:.5px; text-align:left;
+    padding:8px 10px; white-space:nowrap;
+    background:linear-gradient(180deg,#f1f5f9,#e6edf5);
+  }}
+  .tb-tbl th:first-child {{ border-radius:10px 0 0 0; }}
+  .tb-tbl th:last-child  {{ border-radius:0 10px 0 0; }}
+  .tb-tbl td {{
+    padding:9px 10px; border-bottom:1px solid #eef2f7; vertical-align:middle;
+    font-variant-numeric: tabular-nums; color:#334155;
+  }}
+  .tb-tbl tbody tr:last-child td {{ border-bottom:none; }}
+  .tb-tbl tbody tr:hover td {{ background:#f5f9ff; }}
+  /* 新鲜行：浅底 + 左侧竖强调条 */
+  .tb-tbl tr.tb-fresh td {{ background:#fff8f8; }}
+  .tb-tbl tr.tb-fresh:hover td {{ background:#fff2f2; }}
+  .tb-tbl tr.tb-fresh td:first-child {{ box-shadow: inset 3px 0 0 var(--up); }}
+  .tb-name {{ font-weight:700; color:var(--ink); letter-spacing:.2px; white-space:nowrap; }}
+  /* 信号胶囊：新鲜=实心渐变(醒目) / 常态=浅色描边(克制) */
+  .tb-tag {{
+    display:inline-flex; align-items:center; gap:5px; padding:3px 10px; border-radius:999px;
+    font-size:12px; font-weight:700; white-space:nowrap;
+  }}
+  .tb-tag--bot-f {{ background:linear-gradient(135deg,#e54545,#f07171); color:#fff; box-shadow:0 2px 9px rgba(229,69,69,.30); }}
+  .tb-tag--bot   {{ background:#fdeeee; color:#c0392b; border:1px solid #f5c9c9; }}
+  .tb-tag--top-f {{ background:linear-gradient(135deg,#18a058,#41be7e); color:#fff; box-shadow:0 2px 9px rgba(24,160,88,.28); }}
+  .tb-tag--top   {{ background:#eafaf1; color:#0f7a44; border:1px solid #b9ebcf; }}
+  .tb-age {{ font-weight:700; white-space:nowrap; }}
+  .tb-age--f {{ color:var(--up); }}
+  .tb-age--n {{ color:#64748b; font-weight:400; }}
+  /* 面积比条形：满标 1.0，0.85 处为背驰阈值刻度。
+     口径依据（chanlun.find_beichi_segment）：a_cur < a_prev * 0.85 才记为段级背驰
+     ⇒ 0.85 是判据本身的分界，标出来读者才能看出"离成立线有多远"，而非只有一个裸数字。 */
+  .tb-bar {{ display:flex; align-items:center; gap:9px; min-width:170px; }}
+  .tb-bar .tb-v {{ font-size:12.5px; font-weight:700; color:#334155; min-width:34px; }}
+  .tb-track {{
+    position:relative; flex:1; height:8px; min-width:78px; border-radius:4px;
+    background:linear-gradient(90deg,#f1f5f9,#e6edf5); overflow:hidden;
+  }}
+  .tb-fill {{ position:absolute; left:0; top:0; bottom:0; border-radius:4px; }}
+  .tb-fill--bot {{ background:linear-gradient(90deg,#e54545,#f0836f); }}
+  .tb-fill--top {{ background:linear-gradient(90deg,#18a058,#4cc48a); }}
+  .tb-thr {{ position:absolute; top:-2px; bottom:-2px; width:1px; background:#94a3b8; opacity:.85; }}
+  .tb-empty {{
+    margin:14px 22px 0; padding:18px; text-align:center; font-size:13px; line-height:1.8; color:var(--muted);
+    background:linear-gradient(180deg,#fafbfc,#f3f6fa); border:1px dashed var(--border2); border-radius:var(--radius-sm);
+  }}
+  .tb-empty b {{ color:#475569; }}
+  /* 注解区：默认折叠（顶部常驻卡片不该一屏全是文字），4 张色条小卡对齐 .exec / .fc-note 语言 */
+  .tb-fold {{ margin:14px 22px 18px; }}
+  .tb-fold > summary {{
+    cursor:pointer; list-style:none; display:inline-flex; align-items:center; gap:7px;
+    padding:7px 14px; border-radius:999px; font-size:12.5px; font-weight:700; color:#1e5a9c;
+    background:linear-gradient(135deg,#f2f8ff,#e8f2ff); border:1px solid #d8e8fb;
+    transition: box-shadow .18s ease, transform .18s ease;
+  }}
+  .tb-fold > summary::-webkit-details-marker {{ display:none; }}
+  .tb-fold > summary:hover {{ box-shadow:0 5px 14px rgba(43,108,176,.18); transform:translateY(-1px); }}
+  .tb-fold[open] > summary {{ margin-bottom:12px; }}
+  .tb-caret {{ display:inline-block; transition: transform .2s ease; font-size:9px; }}
+  .tb-fold[open] .tb-caret {{ transform: rotate(90deg); }}
+  .tb-notes {{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }}
+  .tb-note {{ border-radius:var(--radius-sm); padding:11px 14px; font-size:12.5px; line-height:1.78; color:#334155; border:1px solid; }}
+  .tb-note h5 {{ margin:0 0 6px; font-size:12.5px; font-weight:800; letter-spacing:.2px; display:flex; align-items:center; gap:6px; }}
+  .tb-note .tb-k {{ display:inline-block; width:5px; height:13px; border-radius:2px; flex:none; }}
+  .tb-note b {{ color:#0f172a; }}
+  .tb-note--info {{ background:linear-gradient(180deg,#f6faff,#eef6ff); border-color:#dbeafe; }}
+  .tb-note--info h5 {{ color:#1e5a9c; }} .tb-note--info .tb-k {{ background:#2b6cb0; }}
+  .tb-note--perf {{ background:linear-gradient(180deg,#f5fdf9,#eafaf1); border-color:#c9eeda; }}
+  .tb-note--perf h5 {{ color:#0f7a44; }} .tb-note--perf .tb-k {{ background:#18a058; }}
+  .tb-note--warn {{ background:linear-gradient(180deg,#fffdf5,#fff8e8); border-color:#f5e2a8; }}
+  .tb-note--warn h5 {{ color:#9a6b00; }} .tb-note--warn .tb-k {{ background:#d4a017; }}
+  .tb-note--how {{ background:linear-gradient(180deg,#fafbfc,#f1f5f9); border-color:#e2e8f0; }}
+  .tb-note--how h5 {{ color:#475569; }} .tb-note--how .tb-k {{ background:#94a3b8; }}
+  /* ⚠ 风险条**常驻、不折叠**：它是"别把信号当买入令"的护栏，不该被藏进展开区；
+     只有解释性内容（为什么只提醒段级背驰 / 经验参考 / 图上怎么看）才按需展开。 */
+  .tb-warn {{ margin:14px 22px 0; }}
+  /* 折叠区 3 张卡：前两张并排、第三张通栏（避免第三张半宽留白） */
+  .tb-notes > .tb-note:nth-child(3) {{ grid-column: 1 / -1; }}
+  /* 窄屏：注解单列、条形收窄 */
+  @media (max-width: 820px) {{
+    .tb-head {{ padding:14px 14px 0; }}
+    .tb-id h3 {{ font-size:16px; }}
+    .tb-sum, .tb-fold, .tb-warn {{ margin-left:14px; margin-right:14px; }}
+    .tb-tblwrap {{ margin-left:14px; margin-right:14px; }}
+    .tb-tbl {{ font-size:12px; }}
+    .tb-empty {{ margin-left:14px; margin-right:14px; }}
+    .tb-notes {{ grid-template-columns:1fr; }}
+    .tb-notes > .tb-note:nth-child(3) {{ grid-column:auto; }}
+    .tb-bar {{ min-width:108px; }}
+  }}
+  /* 横屏交易终端模式：压缩纵向占用 */
+  @media (orientation: landscape) and (max-height: 560px) {{
+    .tb {{ margin:9px 0 11px; border-radius:var(--radius-md); }}
+    .tb-head {{ padding:10px 14px 0; gap:9px; }}
+    .tb-id h3 {{ font-size:15px; }}
+    .tb-id .tb-sub {{ display:none; }}
+    .tb-sum {{ margin:9px 14px 0; padding:8px 11px; font-size:11.5px; }}
+    .tb-tblwrap {{ margin:9px 14px 0; }}
+    .tb-tbl {{ font-size:11px; }}
+    .tb-tbl td {{ padding:5px 7px; }}
+    .tb-bar {{ min-width:104px; }}
+    .tb-fold {{ margin:9px 14px 12px; }}
+    .tb-warn {{ margin:9px 14px 0; }}
+    .tb-notes {{ gap:7px; }}
+    .tb-note {{ font-size:11px; padding:8px 10px; line-height:1.6; }}
+    .tb-empty {{ margin:9px 14px 0; padding:11px; font-size:11.5px; }}
   }}
 </style>
 </head>

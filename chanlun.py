@@ -8,6 +8,13 @@ MIN_BI_PCT = 0.018       # 日线单笔最小幅度过滤
 MIN_BI_PCT_WEEK = 0.04   # 周线单笔最小幅度过滤
 MIN_BI_PCT_MONTH = 0.08  # 月线单笔最小幅度过滤（月线波动更大，阈值相应提高）
 
+# R494: 背驰面积比阈值 —— 相邻同向结构价格创新极值、但 MACD 面积萎缩到前者的 85% 以下 ⇒ 记为背驰。
+# 原本 4 处硬编码 0.85（笔级 find_beichi 2 处 + 段级 find_beichi_segment 2 处）提为常量，
+# 是为了让**展示层引用同一来源**：report.py 要在「今日结构信号」横幅里把这条阈值画成条形刻度
+# 并写进表头，若在展示层另写一遍 0.85 就是第二份副本 —— 判据一旦调整，图上的刻度会与引擎
+# 实际判据静默不一致（规则 20）。★ 数值未变，纯重构，无正确性影响。
+BC_AREA_RATIO_TH = 0.85
+
 # 牛/熊情景集合（与 report.SC_BULL/SC_BEAR 对齐）。R161 上移至模块顶部作单一来源，
 # 供 classify/forecast_confidence/_polarity 等处引用，杜绝多处内联定义造成的口径分裂
 # （历史上因集合不完整已修 3 处 bug：R159 _base_p、R160 KPI 与 trend_type 护栏）。
@@ -197,9 +204,9 @@ def find_beichi(bis, hist, merged):
         a_prev = bi_macd_area(prev, hist, merged)
         if a_prev <= 0:
             continue
-        if cur["dir"] == 1 and cur["end_price"] > prev["end_price"] and a_cur < a_prev * 0.85:
+        if cur["dir"] == 1 and cur["end_price"] > prev["end_price"] and a_cur < a_prev * BC_AREA_RATIO_TH:
             out.append({"bi_index": i, "type": "top", "area_ratio": a_cur / a_prev})
-        if cur["dir"] == -1 and cur["end_price"] < prev["end_price"] and a_cur < a_prev * 0.85:
+        if cur["dir"] == -1 and cur["end_price"] < prev["end_price"] and a_cur < a_prev * BC_AREA_RATIO_TH:
             out.append({"bi_index": i, "type": "bottom", "area_ratio": a_cur / a_prev})
     return out
 
@@ -325,9 +332,9 @@ def find_beichi_segment(segs, hist, merged):
         a_prev = seg_macd_area(prev, hist, merged)
         if a_prev <= 0:
             continue
-        if cur["dir"] == 1 and cur["high"] > prev["high"] and a_cur < a_prev * 0.85:
+        if cur["dir"] == 1 and cur["high"] > prev["high"] and a_cur < a_prev * BC_AREA_RATIO_TH:
             out.append({"seg_index": i, "type": "top", "area_ratio": a_cur / a_prev})
-        if cur["dir"] == -1 and cur["low"] < prev["low"] and a_cur < a_prev * 0.85:
+        if cur["dir"] == -1 and cur["low"] < prev["low"] and a_cur < a_prev * BC_AREA_RATIO_TH:
             out.append({"seg_index": i, "type": "bottom", "area_ratio": a_cur / a_prev})
     return out
 
