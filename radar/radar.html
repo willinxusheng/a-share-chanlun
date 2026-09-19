@@ -602,7 +602,7 @@ a{color:var(--primary);text-decoration:none}
 <script>
 /* ============================================================
    全市场缠论雷达 v3 · 行业为根 + 个股K线内嵌切换
-   数据: radar/radar.json (scan_radar.py P3b-r29) · 前端 R495 · R252+R253+R445+R446 · R253-hotfix: 修 drawChart 不清 loading 残留 + legend 重复声明
+   数据: radar/radar.json (scan_radar.py P3b-r30) · 前端 R496b(标注偏移锚 + 只受 draw_n 约束) · R252+R253+R445+R446 · R253-hotfix: 修 drawChart 不清 loading 残留 + legend 重复声明
    R495: ①三类 K 线（行业/个股/ETF）补**段级买卖点**（段1/段2/段3/段类2 的买/卖，大号三角）
          + **段级中枢**（青带，段级三类点的判据锚点）—— 此前雷达只有**笔级**，与主界面不是一套标准
          （根因：scan_radar.analyze_one 只取 signals[-14:]，r["seg_signals"]/segments/seg_beichi 全丢弃）。
@@ -3015,23 +3015,80 @@ function chanMarkOption(mark,dates,kmin,kmax,klForMatch){
   if(klForMatch && klForMatch.length){
     var kMap = {};
     for(var ki=0;ki<klForMatch.length;ki++){ kMap[klForMatch[ki].date]=klForMatch[ki]; }
+    /* R496: 两代 mark 编码共存期（HTML 随 Pages 立即部署、数据等下次扫描 ⇒ 线上真会出现
+       "新前端 + 旧数据"）必须**同时**认两种锚：
+         · 旧(无 mk.enc): 锚是日期字符串 "2026-06-08"
+         · 新(mk.enc=2) : 锚是**距末根的偏移**数字（后端省体积: 12B 日期 → 4B 数字）
+       故所有取 K 线的位置统一走 kAt()，不要再直接 kMap[...]（直接索引对数字锚恒 undefined
+       ⇒ 标注会被静默剔除、图上看起来"没标"）。 */
+    var kN = klForMatch.length;
+    function kAt(v){
+      if(typeof v==="number"){ var t=kN-1-v; return (t>=0&&t<kN)?klForMatch[t]:null; }
+      return kMap[v]||null;
+    }
+    // R496: 新编码自检 —— 后端 k 线末根日期与本端(腾讯)末根不一致说明两源版本不同步,
+    //   偏移锚可能整体平移 1~2 根。不阻断(差 1 根视觉上看不出)，但**不静默**。
+    try{
+      if(m.mk && m.mk.enc===2 && m.mk.dn && klForMatch[kN-1] && klForMatch[kN-1].date!==m.mk.dn){
+        if(window.console)console.warn("[R496] mark 末根日期与 K 线末根不一致: mark="+m.mk.dn+
+          " kline="+klForMatch[kN-1].date+" ⇒ 标注可能整体平移, 已按偏移锚绘制");
+      }
+    }catch(e){}
+    /* R496b: **契约自检** —— 后端按 `mk.draw_n`（该端前端"画得出的 K 线根数"）过滤标注,
+       本端实际 K 线根数是 kN。两者不一致意味着契约可能漂了：
+         · draw_n < kN 且后端根数 n > draw_n ⇒ 后端**少发**了本该画得出的（图上"少几条"，不报错）
+         · draw_n > kN 且后端根数 n > kN     ⇒ 后端**多发**了本端画不出的（kAt 会剔除，白费体积）
+       ★ 必须带上 `n`（后端实际根数）才判得准：次新股两端都只有 ~300 根，
+         draw_n=660 > kN=300 但 off ≤ n-1 = 299 < 300 ⇒ **一根都没被丢**，
+         此时报警就是假警报（这正是"判据要含与边界的距离"那类坑）。后端的 CI 已硬断言
+         draw_n 与 radar.html getStkData 的 660 / 行业 320 一致，此处做**端到端**复核。
+         数据是旧版（无 enc=2）时 draw_n 缺失 ⇒ 跳过。同样"不静默"。 */
+    try{
+      var _dn = (m.mk && m.mk.enc===2) ? +m.mk.draw_n : 0, _n2 = (m.mk||{}).n || 0;
+      if(_dn && _n2 && window.console){
+        if(_dn > kN && _n2 > kN){
+          console.warn("[R496b] 后端 draw_n="+_dn+" > 本端根数 kN="+kN+" 且后端 n="+_n2+
+            " ⇒ 后端多发了本端画不出的标注(已按 kAt 剔除)。需同步 scan_radar.FE_KLINE_N 与 radar.html 取数根数");
+        }else if(_dn < kN && _n2 > _dn){
+          console.warn("[R496b] 后端 draw_n="+_dn+" < 本端根数 kN="+kN+" 且后端 n="+_n2+
+            " ⇒ 后端少发了本该显示的标注(图上会少几条)。需同步 scan_radar.FE_KLINE_N 与 radar.html 取数根数");
+        }
+      }
+    }catch(e){}
     // mark.bc=[type, date, price] → top 取 high, bottom 取 low
     if(m.bc && m.bc.length){
       var bcOut = [];
       for(var bi=0;bi<m.bc.length;bi++){
         var b = m.bc[bi]; if(!b || b.length<3) continue;
-        var k = kMap[b[1]]; if(!k) continue;       // 日期不在 K 线 → 剔除(早期飞脱)
+        var k = kAt(b[1]); if(!k) continue;       // 日期不在 K 线 → 剔除(早期飞脱)
         var isTop = b[0]==="top"||b[0]===1||String(b[0]).indexOf("顶")>=0;
         bcOut.push([b[0], b[1], isTop ? k.high : k.low]);
       }
       m.bc = bcOut;
     }
-    // mark.line=[date_start, start_price, date_end, end_price, dir] → 按 dir 取 high/low
+    // mark.line 两代形态 → 先**归一化成旧形态**再锚定, 使下游消费点零改动：
+    //   旧 = [[date_start, px, date_end, px, dir], ...]  每笔一条
+    //   新 = [off, px, off, px, ...]  **扁平端点序列**（R496）
+    //        —— 依据：笔端点实测 100% 首尾相连（bis[i].end==bis[i+1].start 且价同，
+    //           上证 166/166、深证 198/198），故 (n笔×2 端点) 可去重成 (n笔+1) 端点，体积 -60%。
+    //        dir 由端点价升降推得 —— 实测 1311 笔 dir 与 sign(end_price-start_price) **零反例**
+    //        （结构上必然：向上笔终点价必高于起点价）。
     if(m.line && m.line.length){
+      var lnIn = m.line;
+      if(!Array.isArray(lnIn[0])){                 // 扁平端点序列（数字锚）
+        var _pts=[], _j, _k;
+        for(_j=0;_j+1<lnIn.length;_j+=2) _pts.push([lnIn[_j], lnIn[_j+1]]);
+        var _flat=[];
+        for(_k=0;_k+1<_pts.length;_k++){
+          var _d = (_pts[_k+1][1] > _pts[_k][1]) ? 1 : -1;
+          _flat.push([_pts[_k][0], _pts[_k][1], _pts[_k+1][0], _pts[_k+1][1], _d]);
+        }
+        lnIn = _flat;
+      }
       var lnOut = [];
-      for(var li=0;li<m.line.length;li++){
-        var l = m.line[li]; if(!l || l.length<5) continue;
-        var ks = kMap[l[0]], ke = kMap[l[2]]; if(!ks || !ke) continue;
+      for(var li=0;li<lnIn.length;li++){
+        var l = lnIn[li]; if(!l || l.length<5) continue;
+        var ks = kAt(l[0]), ke = kAt(l[2]); if(!ks || !ke) continue;
         var d = +l[4];
         lnOut.push([l[0], d===1 ? ks.high : ks.low, l[2], d===1 ? ke.high : ke.low, l[4]]);
       }
@@ -3042,7 +3099,7 @@ function chanMarkOption(mark,dates,kmin,kmax,klForMatch){
       var sgOut = [];
       for(var si=0;si<m.sig.length;si++){
         var g = m.sig[si]; if(!g || g.length<4) continue;
-        var kg = kMap[g[2]]; if(!kg) continue;
+        var kg = kAt(g[2]); if(!kg) continue;
         var buy = (g[0]===1||g[0]==="1");
         // R336: 锚定方向修正 —— sig 的 dir/price 后端语义: 买点=低位确认(实测一买 price≈当日low),
         // 卖点=高位确认(≈当日high)。原 buy→high/sell→low 把红"一买"标到当日最高价上方、绿"一卖"
@@ -3056,7 +3113,7 @@ function chanMarkOption(mark,dates,kmin,kmax,klForMatch){
       var zsOut = [];
       for(var zi=0;zi<m.zs.length;zi++){
         var z = m.zs[zi]; if(!z || z.length<4) continue;
-        if(kMap[z[2]] && kMap[z[3]]) zsOut.push(z);
+        if(kAt(z[2]) && kAt(z[3])) zsOut.push(z);
       }
       m.zs = zsOut;
     }
@@ -3067,7 +3124,7 @@ function chanMarkOption(mark,dates,kmin,kmax,klForMatch){
       var sg2Out = [];
       for(var s2=0;s2<m.segsig.length;s2++){
         var g2 = m.segsig[s2]; if(!g2 || g2.length<4) continue;
-        var kg2 = kMap[g2[2]]; if(!kg2) continue;
+        var kg2 = kAt(g2[2]); if(!kg2) continue;
         var buy2 = (g2[0]===1||g2[0]==="1");
         sg2Out.push([g2[0], g2[1], g2[2], buy2 ? kg2.low : kg2.high]);
       }
@@ -3078,7 +3135,7 @@ function chanMarkOption(mark,dates,kmin,kmax,klForMatch){
       var sz2Out = [];
       for(var z2=0;z2<m.segzs.length;z2++){
         var zz = m.segzs[z2]; if(!zz || zz.length<4) continue;
-        if(kMap[zz[2]] && kMap[zz[3]]) sz2Out.push(zz);
+        if(kAt(zz[2]) && kAt(zz[3])) sz2Out.push(zz);
       }
       m.segzs = sz2Out;
     }
@@ -3086,7 +3143,12 @@ function chanMarkOption(mark,dates,kmin,kmax,klForMatch){
     m = mark;  // 无 K 线匹配时直接用原 mark (向后兼容旧快照)
   }
   var di={};dates.forEach(function(d,i){di[d]=i});
-  function xi(dt){return di[dt]!=null?di[dt]:null}
+  // R496: xi() 同时接受两种锚 —— 日期字符串(旧) / 距末根偏移数字(enc=2)。
+  //   下游所有"用 mark 的锚去查 x 轴位置"的地方都走它, 故只改这一处即可全覆盖。
+  function xi(v){
+    if(typeof v==="number"){ var t=dates.length-1-v; return (t>=0&&t<dates.length)?t:null; }
+    return di[v]!=null?di[v]:null;
+  }
   // R263+R268: mark 偏离 K 线可视范围的防御 — band 已用"末段可视 K 线 min/max"(R268 visKlMinMax),
   // buffer 1.2×/0.7× 是末段边缘留少量余量(早期 R263 1.6× 系数在"全段 K 线 vs 可视窗口"差异大时会
   // 把飞脱 mark 也放行, 如 sh588870 ETF 末段 [0.95,1.85] ×1.6 = 2.96, 早期中枢 [1.95,2.30] 仍通过)

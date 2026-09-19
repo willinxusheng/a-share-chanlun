@@ -106,14 +106,49 @@ jobs:
           #   seg_signals/segments 接口变动或返回空，前端只会"图上少了段级点"——不报错，
           #   也不进任何既有门禁。阈值取得宽松（样本实测个股 6/6、行业 5/5 均有），
           #   只拦灾难态；首次上线后按线上实测值收紧。
+          # R496: 断言口径改读 `_eng` 后缀（**引擎侧全量**）—— 因为 mark 六类已从"按条数
+          #   截断"改为"只受 draw_n（前端画得出的 K 线根数）约束"；**mark 里只含前端画得出的**，
+          #   若断言仍读 mark 计数，就成了**用守卫去迁就前端契约**（前端根数一变断言跟着变，
+          #   跨轮不可比）。引擎侧计数回答的正是本断言的原本意图："引擎有没有产出这一族"。
+          #   另加一组**落盘覆盖度**断言（引擎有产出 ≠ mark 有落盘，两者互补）。
           sm = m.get("seg_mark") or {}
-          assert sm.get("n_uni_segsig", 0) > 100, "段级买卖点标注过少: %s" % sm
-          assert sm.get("n_uni_segzs", 0) > 100, "段级中枢标注过少: %s" % sm
-          assert sm.get("n_ind_segsig", 0) > 0, "行业段级标注为空: %s" % sm
-          print("段级标注: 个股 %d/%d 有 segsig(共 %d 条) · 段级中枢 %d 只 · 行业 %d/%d · 活跃段级背驰 %d 只"
-                % (sm.get("n_uni_segsig", 0), sm.get("n_uni", 0), sm.get("n_uni_segsig_total", 0),
-                   sm.get("n_uni_segzs", 0), sm.get("n_ind_segsig", 0), sm.get("n_ind", 0),
+          assert sm.get("n_uni_segsig_eng", 0) > 100, "引擎段级买卖点为空: %s" % sm
+          assert sm.get("n_uni_segzs_eng", 0) > 100, "引擎段级中枢为空: %s" % sm
+          assert sm.get("n_ind_segsig_eng", 0) > 0, "行业引擎段级标注为空: %s" % sm
+          _nu = sm.get("n_uni", 0) or 1
+          assert sm.get("n_uni_mark_sig", 0) > 0.5 * _nu, "笔级买卖点落盘覆盖过少: %s" % sm
+          assert sm.get("n_uni_mark_line", 0) > 0.5 * _nu, "笔折线落盘覆盖过少: %s" % sm
+          # R496b: 落盘**总条数**下界 —— 用实测均值×0.5 兜（样本实测 sig 均值 24.75/只、
+          #   line 端点均值 179/只）× 6900 只 ⇒ sig ≈ 17 万、line 端点 ≈ 124 万。
+          #   这里只拦"退回按条数截断"这类灾难态（旧代码 sig 恒 ≤14/只 ⇒ 总数 ≤ 9.7 万）。
+          assert sm.get("n_uni_sig_total", 0) > 80000, "笔级买卖点总条数异常(疑似退回按条数截断): %s" % sm
+          assert sm.get("n_uni_line_pts_total", 0) > 500000, "笔折线总点数异常(疑似退回按条数截断): %s" % sm
+          # R496b: 「后端产出 ⊆ 前端可绘制」不变量 —— 这是**静默损耗**的唯一防线。
+          #   个股/ETF 后端缠论跑全历史(~1380 根) 而前端 getStkData 只取 660 根；
+          #   行业后端跑合成全历史(~1386 根) 而前端行业K线就是入库的 320 根。
+          #   ⇒ off 超过该端上界的标注会被前端 xi() 返回 null **静默剔除**（图上只是"少几条"，
+          #     不报任何错）。R496b 前实测：行业 sig 23 条丢 5 条；上证最近 3 笔中枢里有
+          #     off=1083 的（前端 320 根画不出）；笔折线首端点越界到 322~339。
+          #   故此处按**各端 K 线根数**硬断言偏移上界（与前端 radar.html 的取数根数联动）。
+          assert sm.get("fe_kline_n") == 660, "前端个股K线根数契约与 CI 预期不符(改 radar.html getStkData 须同步): %s" % sm.get("fe_kline_n")
+          assert sm.get("ind_kline_n") == 320, "行业K线根数契约与 CI 预期不符: %s" % sm.get("ind_kline_n")
+          _uo = sm.get("uni_off_max", -1)
+          assert 0 <= _uo <= sm.get("fe_kline_n", 0) - 1, \
+            "个股标注偏移越界(前端会静默剔除): uni_off_max=%s, 前端K线=%s" % (_uo, sm.get("fe_kline_n"))
+          _io = sm.get("ind_off_max", -1)
+          assert 0 <= _io <= sm.get("ind_kline_n", 0) - 1, \
+            "行业标注偏移越界(前端会静默剔除): ind_off_max=%s, 行业K线=%s" % (_io, sm.get("ind_kline_n"))
+          print("段级标注(引擎侧): 个股 segsig %d/%d · 段级中枢 %d · 行业 segsig %d/%d · 活跃段级背驰 %d 只"
+                % (sm.get("n_uni_segsig_eng", 0), sm.get("n_uni", 0), sm.get("n_uni_segzs_eng", 0),
+                   sm.get("n_ind_segsig_eng", 0), sm.get("n_ind", 0),
                    sm.get("n_bc_state_seg", 0)))
+          print("落盘覆盖(只受 draw_n 约束): 笔级点 %d/%d 只(共 %d 条) · 笔折线 %d 只(共 %d 点) · 背驰 %d 只"
+                % (sm.get("n_uni_mark_sig", 0), sm.get("n_uni", 0),
+                   sm.get("n_uni_sig_total", 0), sm.get("n_uni_mark_line", 0),
+                   sm.get("n_uni_line_pts_total", 0), sm.get("n_uni_mark_bc", 0)))
+          print("窗口一致性: 个股 off_max=%s/%s · 行业 off_max=%s/%s(不变量: 后端产出 ⊆ 前端可绘制)"
+                % (sm.get("uni_off_max"), sm.get("fe_kline_n", 0) - 1,
+                   sm.get("ind_off_max"), sm.get("ind_kline_n", 0) - 1))
           print("自检通过: 有效%d 信号%d asof=%s" % (m["n_ok"], m["n_signal"], m["asof"]))
           PY
 

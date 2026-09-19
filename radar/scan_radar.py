@@ -193,6 +193,41 @@ SINA_LEN = 1500                # 新浪兜底K线根数(~6年, 2021至今全覆�
 EM_KLINE_LEN = 1600            # 东财前复权K线根数(2021起含裕量)
 SPARK_N = 150                  # 信号票内嵌迷你K线根数(前端实操卡用)
 IND_KLINE_N = 320              # 行业K线入库根数(画行业走势; 合成全量更长仅用于行业缠论)
+# R496b: 前端**个股/ETF**详情页取的 K 线根数 —— 契约常量，不是"大概值"。
+#   来源：radar.html getStkData() 的 `?param=<sym>,day,,,660,qfq`。
+#   ★ 为什么后端必须知道它：个股 mark 的偏移 `off` 是「距末根」的绝对量，后端缠论跑的是
+#     全部历史（~1380 根），而前端只画 660 根 ⇒ **off > 659 的标注前端 xi() 返回 null
+#     被静默剔除**（图上"比后端少几条"，无任何报错）。故 analyze_one 用它做 draw_n 上界：
+#     不变量 = **后端永不发出前端画不出的标注**。
+FE_KLINE_N = 660
+# R496 详情页 K 线标注 —— **唯一判据 = 「前端画得出的 K 线根数」**（= analyze_one 的 draw_n）。
+#
+# 历史教训（为什么最终收敛成"只有一个上界"）：
+#   ① R495 及之前：mark 六类全按**条数**截断（`bis[-10:]` / `signals[-14:]` / `_ssig[-20:]`
+#      / `zss[-3:]` / `bc[-6:]` / `_segzs[-2:]`）。笔的密度因票而异 ⇒ 实测上证「笔折线只
+#      覆盖末 11% 的 K 线、笔级买卖点只覆盖末 18%」，而 dataZoom 默认就显示末 70%
+#      ⇒ **可视窗口内大面积"有信号却没标"**（用户主观感受 = "买卖点没标全"）。
+#      这与主界面 report.py 当年 R472 删掉的 `cutoff = n-500` 是同一类错的**第二个副本**。
+#   ② R496 初版：改成"按末 460 根窗口"（= 覆盖默认 dataZoom 可视区 462 根）。**但仍然错**：
+#      · 后端缠论跑全历史（个股 ~1380 根 / 行业合成 ~1386 根），前端只画 FE_KLINE_N=660
+#        （行业 320）⇒ `off` 越界的标注**后端照发、前端 `xi()` 返回 null 静默丢掉**
+#        （实测上证行业 sig 23 条丢 5 条；个股最近 3 个笔中枢里有 off=1083 的）。
+#      · 段级信号**稀疏**，旧代码 `_ssig[-20:]`（按条数）覆盖的历史比 460 根窗口**更长**
+#        ⇒ 460 窗口反而把旧版**画得出**的段级点丢了（无头渲染实测 sz000001 段级买点 14→10）。
+#      ⇒ 「稠密族够覆盖 / 稀疏族不缩水」用单一根数窗口**无法同时满足**。
+#   ③ R496b（最终）：**去掉额外窗口，只留 draw_n 一个上界** —— 即"前端能画的全部"。
+#      可证性质（这也是选它的核心理由）：新集合 = {元素 | 全部锚 off ≤ draw_n-1}，
+#      旧集合 = {按条数取末 K 个}，其**可绘制子集**必然 ⊆ 新集合
+#      ⇒ **对每个族都严格不缩水**（数学上 ⊇，不依赖样本）。
+#
+# 体积（实测，非估算）：样本均值 460→2335 B/只、660→2983 B/只 ⇒ 全市场外推 15.4MB → 19.7MB。
+#   · 因为是"末 660 根内的元素"，元素数只取决于**信号密度、不随历史增长** ⇒ 体积**有封顶**。
+#   · git 侧代价很小：14 版 marks.json 未压缩合计 138.4MB，而整个 pack 仅 16.76MiB
+#     （git 对每日快照的 delta 压缩很有效，≈1.2MB/版）。
+#   · 线上 Pages 走 gzip（实测 9.99MB → 1.65MB 传输）⇒ 19.7MB ≈ 3.2MB 传输。
+#     故不保留额外的"省体积窗口"：为省 ~1MB 传输而牺牲"齐全"不划算（旭总诉求 = 标注齐全）。
+#   ★ 若日后确要压体积：正解不是加窗口，而是把 marks.json **按代码前缀分片**、点开个股时
+#     再按需取（静态站也能做，fetch 同目录分片）。此项已登记为待议，本轮不做。
 CONCURRENCY = 4
 TX_INTERVAL = 0.35             # 腾讯全局限速 ~2.9 rps (P0实证突发连发会501)
 EM_INTERVAL = 0.25             # 东财全局限速 ~4 rps (K线下行接口, 温和节流)
@@ -1550,10 +1585,28 @@ def shallow_stats(sym, ks, sanitized=False):
     }
 
 
-def analyze_one(sym, ks):
+def analyze_one(sym, ks, draw_n=None):
     """chanlun.analyze -> 精简摘要(雷达schema) + 轻量绘图标注 mark。
     返回 (st, err, mark)。mark 仅供前端详情页叠画, 门禁剔除票也尽量给(可点看结构)。
-    R271: 入口统一过 _sanitize_ks 净化(日期有序去重/OHLC自洽/契约窗), 坏数据不进引擎。"""
+    R271: 入口统一过 _sanitize_ks 净化(日期有序去重/OHLC自洽/契约窗), 坏数据不进引擎。
+
+    `draw_n` = 该端前端**实际画得出的 K 线根数**（个股/ETF FE_KLINE_N=660 / 行业 IND_KLINE_N=320）。
+      · mark 的偏移 `off` 是「距末根」的绝对量，后端缠论跑的是**全历史**（个股 ~1380 根、
+        行业合成 ~1386 根）而前端只画 draw_n 根 ⇒ `off > draw_n-1` 的标注前端
+        `xi()`/`kAt()` 返回 null 会被**静默剔除**：图上只表现为"比后端少几条"，**不报任何错**。
+      · 故 mark 的**唯一上界**就是 draw_n：**不变量 = 后端产出 ⊆ 前端可绘制**（一条都不多发）。
+      · ★ 为什么不再加一层"末 N 根窗口"（R496 初版曾用 460）：单一根数窗口**无法同时**满足
+        「稠密族(笔/笔级点)够覆盖」与「稀疏族(段级/背驰)不缩水」—— 段级信号稀疏，旧代码按
+        **条数**取 `_ssig[-20:]` 覆盖的历史比 460 根**更长**，加窗口反而丢了旧版画得出的点
+        （无头渲染实测 sz000001 段级买点 14→10）。只留 draw_n 则对每个族都**数学上 ⊇ 旧版**
+        （新集合 = {off ≤ draw_n-1 的全部元素} ⊇ {按条数取末 K 个的可绘制子集}）。
+        体积论证与"若要压体积的正解"见 FE_KLINE_N 常量处注释。
+      · 默认 None ⇒ **在调用时**解析成模块常量（而非 `= FE_KLINE_N` 默认值）。★ 这不是风格
+        问题：默认值在 `def` 时求值 = 把常量**抄了第二份**，改常量（含测试里 monkeypatch 的
+        正控）对已绑定默认值**静默无效** —— R496b 踩过：`verify_enc.py` 的正控把窗口调到
+        200/60 读数**一模一样**（假绿）。"""
+    # ★ 在**调用时**解析默认值（单一来源 = 模块常量）—— 见 docstring 末段。
+    draw_n = FE_KLINE_N if draw_n is None else int(draw_n)
     ks = _sanitize_ks(ks)
     if not ks:
         return None, "ks_bad", {}
@@ -1597,6 +1650,16 @@ def analyze_one(sym, ks):
         _segs = r.get("segments") or []
         _sbc = r.get("seg_beichi") or []
         _ssig = r.get("seg_signals") or []
+        # R496: 段级中枢**在此一次算好**（原来在 mark 段现算）。理由有二：
+        #   ① st 需要 `segzs_n`（引擎侧段级中枢个数）—— CI 断言用它而不是 mark 条数：
+        #      mark 已是"只发前端画得出的"（受 draw_n 约束），若断言仍读 mark 计数，就等于
+        #      "用守卫去迁就窗口"，且跨轮不可比（改了前端根数断言也跟着变）。
+        #   ② 避免同一语义出现第二份副本（规则 20）。★ 位置纪律：必须放在**最早**
+        #      消费点（`st = {`）之前 —— 这正是 R492 踩过的坑。
+        try:
+            _segzs = cl.build_seg_zhongshu(_segs, merged)
+        except Exception:   # noqa: BLE001
+            _segzs = []
         st = {
             "n_bars": _sh["n_bars"], "first": _sh["first"], "last": _sh["last"],
             "span_days": _sh["span_days"],
@@ -1611,7 +1674,10 @@ def analyze_one(sym, ks):
             "bottom_bc": bottom, "top_bc": top,
             "seg_bot": bool(cls.get("seg_bc_bottom")), "seg_top": bool(cls.get("seg_bc_top")),
             # R495: 段级信号只数（供详情页"段级 N 条"展示；笔级只数沿用既有 sig_n）。
+            # R496: 以上四项均为**引擎侧全量**计数（与 mark 的 draw_n 上界无关）——
+            #   产物里的 mark 只含"前端画得出的近端"，两者不要互相替代（见 meta.seg_mark 说明）。
             "segsig_n": len(_ssig), "seg_n": len(_segs), "segbc_n": len(_sbc),
+            "segzs_n": len(_segzs),
             # R495: 「最新 K 线是否背驰」的显式状态 —— 前端详情页提示条的**唯一判据来源**。
             #   ⚠️ 与上面 seg_bot/seg_top 的区别：那两项是**方向布尔**（供信号强度与情景判定，
             #   下游 96% 的信号在用），本项是给**人看**的状态包（方向/确认日/距今交易日/新鲜度/
@@ -1619,42 +1685,117 @@ def analyze_one(sym, ks):
             #   判据与它们**同源**（都走 cl.SEG_BC_ACTIVE_GAP 活跃窗口）⇒ 不会给出相反结论。
             "bc_state": _bc_state_of(ks, bis, bc, _segs, _sbc, merged),
         }
-        # 轻量绘图标注(详情页叠画用): 近中枢矩形 + 近背驰点 + 近笔折线(限通过票)
-        mark = {"zs": [], "bc": [], "line": [], "sig": []}
+        # R496: mark 六类改为**只受 draw_n 约束**（= 前端画得出的全部），不再按条数/根数截断。
+        #   修的是"可视窗口内大面积有信号却没标"（R495 前六类全按**条数**截断：`bis[-10:]`
+        #   /`signals[-14:]`/`_ssig[-20:]`/`bc[-6:]`/`zss[-3:]`/`_segzs[-2:]`）：
+        #   实测上证笔折线只覆盖末 11% K 线、笔级买卖点只覆盖末 18%，而 dataZoom 默认显示末 70%。
+        #   ★ 为什么不设"末 N 根窗口"（R496 初版曾用 460）——见 FE_KLINE_N 常量处与 docstring：
+        #     单一根数窗口无法同时满足稠密族与稀疏族；只留 draw_n 则对每族都数学上 ⊇ 旧版。
+        #
+        #   ★ 编码（为压 marks.json 体积 —— 该文件被 CI 每次扫描 git add+commit，体积=仓库增量）：
+        #     ① **日期 → 距末根偏移** `off = n-1-idx`：`"2026-06-08"`(12B) → `1312`(4B)。
+        #        选偏移而非绝对索引：后端源（tx/sina）与前端的腾讯源**末端必然对齐**
+        #        （同一市场同一交易日），中段停牌差异只影响中段；绝对索引会被中段差异**整体平移**。
+        #     ② **笔折线 → 端点序列**（扁平一维）：笔端点实测 100% 首尾相连
+        #        （`bis[i]['end']==bis[i+1]['start']` 且价同：上证 166/166、深证 198/198），
+        #        故 (n笔 × 2 端点) 可去重成 (n笔+1) 端点 —— 体积 -60%。
+        #     ③ `mk` = 自检包：前端据此选用新解码路径，并把 `dn` 与本端末根日期比对，
+        #        不一致时 console.warn（平移风险），**不静默**。
+        #   ★ 中枢（zs/segzs）仍各取"最近 3 / 2 个"：与主界面同密度（主界面 8 个/1386 根），
+        #     且它们只有 3/2 个、体积可忽略；取全部会把图糊满。**不是**按 off 截断，故不涉及
+        #     "发了画不出"（每个都还要过 `_ok` 两端判据）。
+        #   enc=2 元素格式：
+        #     zs/segzs   [zg, zd, off_start, off_end]
+        #     bc         [type, off, price]
+        #     line       [off, px, off, px, ...]        ← 扁平端点序列，首尾相连
+        #     sig/segsig [dir, kind, off, price]
+        _n1 = n - 1
+        # 唯一上界 = 前端画得出（draw_n-1）。off 越小越新，0 = 末根。
+        _draw_max = draw_n - 1
+
+        def _off(mi, side="e"):
+            """merged 索引 → 距末根偏移（0=末根）；越界/缺值返回 None。"""
+            try:
+                mi = int(mi)
+            except (TypeError, ValueError):
+                return None
+            if not (0 <= mi < len(merged)):
+                return None
+            ix = merged[mi]["idx_start" if side == "s" else "idx_end"]
+            return None if ix is None else (_n1 - int(ix))
+
+        def _ok(*offs):
+            """**全部**给定偏移都必须在前端画得出的范围内。
+            · 整条才画得出的族（笔折线 / 中枢）：前端是 `if(!kAt(a)||!kAt(b)) continue`
+              —— 只要一端画不出就整条丢，故后端必须在**发之前**就按同一判据过滤。
+            · 单点族传一个偏移，语义相同（不必再分两套判据：R496 初版就是因为
+              "点族上界 / 整条上界"分开两套而漏掉了笔折线首端点与中枢）。"""
+            return all(o is not None and 0 <= o <= _draw_max for o in offs)
+
+        mark = {"zs": [], "bc": [], "line": [], "sig": [], "segsig": [], "segzs": [],
+                "mk": {"enc": 2, "n": n, "draw_n": draw_n,
+                       "d0": ks[max(0, n - draw_n)]["date"], "dn": last["date"]}}
+        # 笔中枢：最近 3 个（与主界面"最近 8 个/1386 根"同密度；R496 未改语义）
+        # R496b: 判据是 `_ok`（**两端**都要在前端画得出范围内）而非只判"取到了值"。
+        #   原因：前端对中枢是 `if(kAt(z[2])&&kAt(z[3])) zsOut.push(z)` —— 只要一端越界
+        #   整条就被丢。实测 上证 的最近 3 笔中枢里就有 off=1083 的（前端 320 根显然画不出）
+        #   ⇒ 后端原先照发、前端静默丢弃。
         for z in zss[-3:]:
-            mark["zs"].append([round(z["zg"], 2), round(z["zd"], 2), z["date_start"], z["date_end"]])
-        for b in bc[-6:]:
-            i = b["bi_index"]
-            if 0 <= i < len(bis):
-                mark["bc"].append([b["type"], bis[i]["date_end"], round(bis[i]["end_price"], 2)])
-        for b in bis[-10:]:
-            mark["line"].append([b["date_start"], round(b["start_price"], 2),
-                                 b["date_end"], round(b["end_price"], 2), b["dir"]])
-        # R271: 分类买卖点(一/二/三类) — 前端个股/行业K线叠画「一买/二买/三买/一卖/二卖/三卖」。
-        # signals 已由 find_signals 去重(每笔仅一类信号, 优先级 一类>三类>二类), 携带 date/price,
-        # 直接取近端 14 条入库; 一类点与 bc 背驰点同源, 前端有 sig 时不再重复画通用背驰三角。
-        # 格式 [dir(1买/-1卖), kind全名, date_end, price] — 与 zs/bc/line 一致的紧凑数组。
-        mark["sig"] = [[s["dir"], s["kind"], s["date"], round(s["price"], 2)]
-                       for s in signals[-14:]]
-        # R495: 段级（线段级别）标注 —— 与主界面 report.py 的 segSigPoints / 段级中枢**同源同口径**。
-        #   此前本函数只取笔级 signals[-14:]，而 r["seg_signals"] / r["segments"] / r["seg_beichi"]
-        #   三份**引擎已算好**的段级数据被整体丢弃 ⇒ 雷达三类 K 线（行业/个股/ETF）上从来没有
-        #   「段1买」这类标注，与主界面（段1/段2/段3/段类2 的买/卖齐备）明显不一致。
-        #   段级一类点 = 段级背驰端点（笔级 find_signals 结构上抓不到它），是级别联立的第二级，
-        #   其止损/目标空间与笔级完全不同 ⇒ 缺了会让用户把段级二类当成笔级二类来用。
-        #   （`_segs`/`_sbc`/`_ssig` 已在上方 `st` 构造前统一取出，此处复用同一份。）
-        # 近 20 条（主界面对段级不截断，雷达受 marks.json 体积约束取近端；实测上证全历史
-        # 1386 根仅 20 条、且段级周期长约一个量级 ⇒ 20 条已覆盖近端全部可操作段级点）。
-        mark["segsig"] = [[s["dir"], s["kind"], s["date"], round(s["price"], 2)]
-                          for s in _ssig[-20:]]
-        # 段级中枢（图上青带）：段级三类点的判据锚点，主界面 R484 已画。取最近 2 个
-        # —— 段级中枢跨度天然比笔中枢大一个量级，画多了会把图糊满（与主界面同取法）。
-        try:
-            _segzs = cl.build_seg_zhongshu(_segs, merged)
-        except Exception:   # noqa: BLE001
-            _segzs = []
-        mark["segzs"] = [[round(z["zg"], 2), round(z["zd"], 2), z["date_start"], z["date_end"]]
-                         for z in _segzs[-2:]]
+            _zs0, _zs1 = _off(z["start"], "s"), _off(z["end"], "e")
+            if not _ok(_zs0, _zs1):
+                continue
+            mark["zs"].append([round(z["zg"], 2), round(z["zd"], 2), _zs0, _zs1])
+        # 笔级背驰点：前端可画范围内全部（原 bc[-6:] ⇒ 按条数，覆盖不足）
+        for b in bc:
+            i = int(b.get("bi_index", -1))
+            if not (0 <= i < len(bis)):
+                continue
+            _x = _off(bis[i]["end"], "e")
+            if not _ok(_x):
+                continue
+            mark["bc"].append([b["type"], _x, round(bis[i]["end_price"], 2)])
+        # 笔折线：前端可画范围内全部，端点序列（首端点单独补，其后每笔只追加终点）
+        # R496b: 首端点也必须过 `_ok`（原先只判 `is None`）—— 实测 R496 初版首端点会越界到
+        #   off=322~339（>319），前端 `kAt()` 返回 null ⇒ 该笔被剔、折线少一截。
+        #   端点序列的性质：整笔要求**两端**都可画，故越界的那一笔直接不入列（前端同样会丢它，
+        #   故**视觉零变化**），且序列仍保持首尾相连（不变量：bis[i].end == bis[i+1].start）。
+        _ln = []
+        for b in bis:
+            _x = _off(b["end"], "e")
+            if not _ok(_x):
+                continue
+            if not _ln:
+                _s0 = _off(b["start"], "s")
+                if not _ok(_s0, _x):
+                    continue
+                _ln += [_s0, round(b["start_price"], 2)]
+            _ln += [_x, round(b["end_price"], 2)]
+        mark["line"] = _ln
+        # 分类买卖点（笔级）：前端可画范围内全部。原来 signals[-14:] ⇒ 只覆盖末 10~20% K 线。
+        for s in signals:
+            i = int(s.get("bi_index", -1))
+            if not (0 <= i < len(bis)):
+                continue
+            _x = _off(bis[i]["end"], "e")
+            if not _ok(_x):
+                continue
+            mark["sig"].append([s["dir"], s["kind"], _x, round(s["price"], 2)])
+        # 段级（线段级别）买卖点：前端可画范围内全部。R495 加、原来 _ssig[-20:]（同样按条数）。
+        for s in _ssig:
+            i = int(s.get("bi_index", -1))
+            if not (0 <= i < len(bis)):
+                continue
+            _x = _off(bis[i]["end"], "e")
+            if not _ok(_x):
+                continue
+            mark["segsig"].append([s["dir"], s["kind"], _x, round(s["price"], 2)])
+        # 段级中枢：最近 2 个（与主界面同取法 —— 段级中枢跨度天然比笔中枢大一个量级）。
+        # `_segzs` 已在 `st` 构造前算好并复用（单一来源，不在两处各算一遍）。
+        for z in _segzs[-2:]:
+            _sz0, _sz1 = _off(z["start"], "s"), _off(z["end"], "e")
+            if not _ok(_sz0, _sz1):     # 同 zs —— 两端都要在前端可画范围内
+                continue
+            mark["segzs"].append([round(z["zg"], 2), round(z["zd"], 2), _sz0, _sz1])
         return st, None, mark
     except Exception as e:   # noqa: BLE001
         # R274: st/mark 构造段异常保护 —— chanlun 输出 schema 基本稳定, 但个别极端数据
@@ -2997,7 +3138,12 @@ def main():
         iks = synth_industry_kline(members, got)
         if not iks:
             continue
-        ist, ierr, imark = analyze_one("ind_" + ind, iks)
+        # R496b: 行业**必须**显式给 draw_n=IND_KLINE_N —— 该端只入库 IND_KLINE_N 根 K 线
+        #   （下方 ist["kline"] = iks[-IND_KLINE_N:]），而缠论跑的是 iks 合成全历史
+        #   （~1386 根）⇒ 偏移会远超 320。若沿用个股的 660：`off ∈ [320,659]` 的标注
+        #   后端照发、前端 `xi()` 因超出 `dates.length-1` 返回 null 被**静默剔除**
+        #   （实测上证 sig 23 条里 5 条 off=322/331/368/382/447 属此类，无任何报错）。
+        ist, ierr, imark = analyze_one("ind_" + ind, iks, draw_n=IND_KLINE_N)
         if not ist:
             continue
         ist["src"] = "synth"
@@ -3131,7 +3277,25 @@ def main():
         "title": "A股全市场缠论雷达",
         "asof": asof, "build_time": datetime.datetime.now(
             datetime.timezone(datetime.timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S"),
-        "version": "P3b-r29",   # r29=R492: **`seg_bot`/`seg_top` 语义修复**(chanlun.classify 不再
+        "version": "P3b-r30",   # r30=R496: **详情页 K 线标注(mark)编码与口径重做**。对**信号/门禁
+                                #   零影响**（`st` 逐键深比较：除新增 `segzs_n` 外全等，正控生效），
+                                #   但**产物契约变了**，故按规则 bump：
+                                #   ① 锚改**偏移**：`off = n-1-idx`（0=末根），`dates[i]` 12B → 数字 4B；
+                                #      前端 `kAt()/xi()` 同时认日期锚与偏移锚 ⇒ 新旧数据都能画（已实证）。
+                                #   ② **去掉按条数/根数截断**，唯一上界 = `draw_n`（前端画得出的 K 线
+                                #      根数：个股/ETF 660、行业 320）。旧代码六类全按条数截断
+                                #      (`bis[-10:]`/`signals[-14:]`/`_ssig[-20:]`/`bc[-6:]`/`zss[-3:]`/
+                                #      `_segzs[-2:]`) ⇒ 实测上证笔折线只覆盖末 11%、笔级买卖点只覆盖末
+                                #      18%，而 dataZoom 默认显示末 70% = **可视区内大面积"有信号却没标"**。
+                                #      这与主界面 report.py 当年 R472 删掉的 `cutoff = n-500` 同型
+                                #      （主界面已改像素判据，雷达是第二个副本，本轮补上）。
+                                #   ③ 笔折线改**扁平端点序列**（笔端点实测 100% 首尾相连 ⇒ 去重后
+                                #      体积 -60%）；因元素取"全部 off≤draw_n-1"，体积有封顶、不随历史增长。
+                                #   ④ 新增 `meta.seg_mark`（引擎侧全量 + 落盘覆盖度两组计数）+ 偏移上界，
+                                #      供 CI 硬断言"后端产出 ⊆ 前端可绘制"（这类静默损耗不报任何错）。
+                                #   ⚠ 下游预期变化：marks.json 由 9.99MB → ~18MB（Pages 走 gzip，
+                                #      实传 ~1.65MB → ~3.2MB）；图上笔折线/买卖点会**显著变多**（属修复）。
+                                # r29=R492: **`seg_bot`/`seg_top` 语义修复**(chanlun.classify 不再
                                 #   用「全历史 any」而改「近 3 段活跃」)。这是**有正确性影响的变更**：
                                 #   线上 radar.json 实证(2026-09-18, 6916 标的)修复前 seg_bot=True
                                 #   **6412(92.7%)**、seg_top=True **6424(92.9%)** —— 即该字段实际表达的
@@ -3494,6 +3658,31 @@ def main():
     #   供 CI 自检硬断言 + 线上人工核对，与 meta.marks_n 同性质。
     #   ⚠️ 分段统计: marks_out=个股/ETF（写 marks.json）; industries.*.mark=行业（写 radar.json）。
     _ind_marks = [(v.get("mark") or {}) for v in industries.values()]
+    # R496b: 偏移上界的**结构性自检量** —— 「后端落盘窗口」与「前端画得出的窗口」是否一致。
+    #   不变量：行业 mark 的 off 必须 ≤ IND_KLINE_N-1。若后端窗口大于该端入库的 K 线根数，
+    #   多出来的标注前端 `xi()` 会返回 null 并**静默剔除**（图上"比后端少几条"，无任何提示）。
+    #   R496b 之前实测：行业 sig 23 条中 5 条 off ∈ {322,331,368,382,447} 属此类。
+    #   落成数字供 CI 硬断言 —— 这类"发得出、画不出"的损耗没有任何报错，只能靠断言兜。
+    #   ★ enc=2 各族的偏移下标（**不要猜**，见 mark 段注释）：
+    #       bc [type, off, price] → 1 · sig/segsig [dir, kind, off, price] → 2
+    #       zs/segzs [zg, zd, off_s, off_e] → 2,3 · line [off, px, ...] → 偶数下标
+    _OFF_IDX = {"bc": (1,), "sig": (2,), "segsig": (2,), "zs": (2, 3), "segzs": (2, 3)}
+
+    def _off_max_of(ms):
+        mx = -1
+        for m in ms:
+            for k, idxs in _OFF_IDX.items():
+                for e in (m.get(k) or []):
+                    for j in idxs:
+                        if isinstance(e, list) and len(e) > j and isinstance(e[j], int):
+                            mx = max(mx, e[j])
+            _ln = m.get("line") or []
+            if _ln and not isinstance(_ln[0], list):   # 扁平端点序列（enc=2）
+                for j in range(0, len(_ln), 2):
+                    if isinstance(_ln[j], int):
+                        mx = max(mx, _ln[j])
+        return mx
+
     meta["seg_mark"] = {
         "n_uni": len(universe),
         "n_uni_segsig": sum(1 for m in marks_out.values() if m.get("segsig")),
@@ -3504,6 +3693,37 @@ def main():
         "n_ind_segzs": sum(1 for m in _ind_marks if m.get("segzs")),
         "n_bc_state_seg": sum(1 for row in universe.values()
                               if ((row.get("st") or {}).get("bc_state") or {}).get("seg")),
+        # ===== R496: 两组计数，**不要互相替代** =====
+        # ① `_eng` 后缀 = **引擎侧全量**（与 mark 的 draw_n 上界无关）—— CI 自检断言读这一组。
+        #    理由：mark 只含"前端画得出的"，若断言仍读 mark 计数，就等于**用守卫去迁就前端
+        #    契约**（哪天前端 K 线根数变了断言跟着变，跨轮不可比）；引擎侧计数回答的是
+        #    "引擎有没有产出这一族"，正是 R495 那条断言原本的意图（防整族静默为空）。
+        "n_uni_segsig_eng": sum(1 for row in universe.values()
+                                if ((row.get("st") or {}).get("segsig_n") or 0) > 0),
+        "n_uni_segzs_eng": sum(1 for row in universe.values()
+                               if ((row.get("st") or {}).get("segzs_n") or 0) > 0),
+        "n_ind_segsig_eng": sum(1 for v in industries.values()
+                                if ((v.get("st") or {}).get("segsig_n") or 0) > 0),
+        "n_ind_segzs_eng": sum(1 for v in industries.values()
+                               if ((v.get("st") or {}).get("segzs_n") or 0) > 0),
+        # ② 落盘覆盖度（**观测用**：R496 把六类从"按条数截断"改成"只受 draw_n 约束"，
+        #    这组数字回答"改完到底有多少只标带上了标注"）。
+        "n_uni_mark_sig": sum(1 for m in marks_out.values() if m.get("sig")),
+        "n_uni_mark_line": sum(1 for m in marks_out.values() if m.get("line")),
+        "n_uni_mark_bc": sum(1 for m in marks_out.values() if m.get("bc")),
+        "n_uni_sig_total": sum(len(m.get("sig") or []) for m in marks_out.values()),
+        "n_uni_line_pts_total": sum(len(m.get("line") or []) for m in marks_out.values()),
+        "n_ind_mark_sig": sum(1 for m in _ind_marks if m.get("sig")),
+        "n_ind_mark_line": sum(1 for m in _ind_marks if m.get("line")),
+        # ===== R496b: 「后端产出 ⊆ 前端可绘制」不变量 =====
+        # `_off_max` = 该端**全部**族（含中枢/笔折线）的偏移最大值。
+        #   个股/ETF 上界 = FE_KLINE_N-1（前端 getStkData 取 660 根）
+        #   行业      上界 = IND_KLINE_N-1（前端行业K线就是入库的那 320 根）
+        #   越界即"后端发了、前端 xi() 返回 null 静默丢掉" ⇒ CI 硬断言拦（这类损耗无任何报错）。
+        "fe_kline_n": FE_KLINE_N,
+        "ind_kline_n": IND_KLINE_N,
+        "ind_off_max": _off_max_of(_ind_marks),
+        "uni_off_max": _off_max_of(list(marks_out.values())),
     }
     out = {"meta": meta,
            "signals": [{"sym": s, **sig} for s, sig in signals],
