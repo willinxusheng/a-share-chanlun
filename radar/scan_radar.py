@@ -1379,6 +1379,103 @@ def _bc_tail(bc, bis, btype, n_last=10, ks=None):
     return out
 
 
+def _seg_extrema(seg, ks, merged):
+    """段内极值点 —— 与 report.py `seg_pts` **逐字同式**：段顶 = 段内 high 最大，
+    段底 = 段内 low 最小。返回 (klines 索引, 价)；索引不可用时返回 (None, None)。
+
+    ★ 为什么不直接用 `seg["end_price"]`：线段端点价是**笔端点**价，而段内极值才是
+    "这段走势真正打到哪"。多数时候二者相同（段末笔就是极值笔），但段内存在更深回踩 /
+    更高冲高时不同 —— 主界面线段端点标注用的是极值口径，两处必须一致，否则同一根线段
+    在雷达与主界面会标在**两个不同价位**上（规则 11：对照类论断两侧口径都要有一手出处）。"""
+    s0 = merged[seg["start"]]["idx_start"]
+    e0 = merged[seg["end"]]["idx_end"]
+    if e0 < s0:
+        s0, e0 = e0, s0
+    s0 = max(0, s0)
+    e0 = min(len(ks) - 1, e0)
+    if e0 < s0:
+        return None, None
+    if seg["dir"] == 1:
+        i = max(range(s0, e0 + 1), key=lambda j: ks[j]["high"])
+        return i, ks[i]["high"]
+    i = min(range(s0, e0 + 1), key=lambda j: ks[j]["low"])
+    return i, ks[i]["low"]
+
+
+def _bc_state_of(ks, bis, bc, segs, seg_bc, merged):
+    """R495: 「最新 K 线是否背驰」状态 —— 雷达详情页头部提示的**唯一判据来源**。
+
+    **段级为主口径**：R487 实证当天可操作的只有段级背驰（H20 70.0%, p≈0.017），
+    笔级标签 45.9% 不如随机 ⇒ 结论由段级给，笔级只作对照（不并列成"两个平级结论"）。
+
+    ⚠️ 两个「活跃」不是一回事，必须**同时**报出（最容易被误读的一处）：
+       seg.gap  = 自末段往回数的**段数**（结构活跃度，判据 cl.SEG_BC_ACTIVE_GAP）
+       seg.days = 端点距末根的**交易日根数**（时间新鲜度，判据 cl.SEG_BC_FRESH_DAYS）
+       实测上证 2026-09-18 那条活跃段级底背驰：gap=1（"就在最近一轮"）而 days=44
+       （44 个交易日前）—— 只报 gap 会被读成"昨天刚出的"。
+
+    ⚠️ 顶/底并存时取**更新的那一段/那一笔**（max seg_index / max bi_index），与
+    `cl.pick_recent_bc` 同律（R492 修的就是"顶无条件优先 ⇒ 更新的底被忽略"）；
+    并存这一事实本身如实报出（both），不静默丢弃另一方向。
+
+    ⚠️ 段级与笔级的 days **统一为交易日根数** —— 下方笔级刻意不复用 `_bc_tail` 的
+    `fresh_days`（那是**自然日**口径，既有的 st["bottom_bc"] 字段沿用不改），否则同一
+    提示条里两个天数含义相反。笔级仍用 `_bc_tail` 判定"是否近端背驰"（保留既有门槛）。
+    """
+    out = {"seg": None, "bi": None,
+           # ★ 阈值随数据下发，前端**不写第二份副本**（规则 20：别名/阈值表禁第二份副本，
+           #   否则引擎调参后前端文案仍写着旧数字，两处静默不一致）。
+           #   gap_th  = 段级背驰「仍活跃」的段数窗口（cl.SEG_BC_ACTIVE_GAP）
+           #   fresh_th= 「新鲜」的交易日窗口（cl.SEG_BC_FRESH_DAYS）
+           #   area_th = 背驰成立的 MACD 面积比上限（cl.BC_AREA_RATIO_TH）
+           "gap_th": cl.SEG_BC_ACTIVE_GAP, "fresh_th": cl.SEG_BC_FRESH_DAYS,
+           "area_th": cl.BC_AREA_RATIO_TH}
+    n = len(ks)
+    # ---- 段级（主口径）----
+    if segs and seg_bc:
+        _act = [b for b in seg_bc
+                if (len(segs) - 1 - int(b.get("seg_index", -1))) <= cl.SEG_BC_ACTIVE_GAP]
+        if _act:
+            _pk = max(_act, key=lambda b: int(b["seg_index"]))
+            _si = int(_pk["seg_index"])
+            _i, _p = _seg_extrema(segs[_si], ks, merged)
+            _td = (n - 1 - _i) if _i is not None else None
+            out["seg"] = {
+                "dir": _pk["type"],              # bottom=底背驰(机会) / top=顶背驰(风险)
+                "seg_index": _si,
+                "gap": len(segs) - 1 - _si,
+                "date": (ks[_i]["date"] if _i is not None else ""),
+                "price": (round(_p, 2) if _p is not None else None),
+                "days": _td,
+                "fresh": bool(_td is not None and _td <= cl.SEG_BC_FRESH_DAYS),
+                "area": round(float(_pk.get("area_ratio", 0) or 0), 3),
+                "both": len({b["type"] for b in _act}) > 1,
+                "n_active": len(_act),
+            }
+    # ---- 笔级（对照）----
+    _pair = []
+    for _d, _x in (("bottom", _bc_tail(bc, bis, "bottom", ks=ks)),
+                   ("top", _bc_tail(bc, bis, "top", ks=ks))):
+        if not _x:
+            continue
+        _bi = next((int(z["bi_index"]) for z in bc
+                    if z.get("type") == _d
+                    and 0 <= int(z.get("bi_index", -1)) < len(bis)
+                    and bis[int(z["bi_index"])]["date_end"] == _x["bi_date_end"]), None)
+        _i = next((i for i, k in enumerate(ks) if k["date"] == _x["bi_date_end"]), None)
+        _pair.append((_d, _x, -1 if _bi is None else _bi,
+                      None if _i is None else n - 1 - _i))
+    if _pair:
+        _d, _x, _bi_i, _td = max(_pair, key=lambda t: t[2])
+        out["bi"] = {"dir": _d, "date": _x["bi_date_end"], "price": _x["end_price"],
+                     "days": _td,                 # ★ 交易日根数（与 seg.days 同口径）
+                     "fresh": bool(_td is not None and _td <= cl.SEG_BC_FRESH_DAYS),
+                     "area": _x.get("area_ratio"), "bc_type": _x.get("bc_type", ""),
+                     "broken": bool(_x.get("broken")), "bi_index": _bi_i,
+                     "both": len({t[0] for t in _pair}) > 1}
+    return out
+
+
 _KS_MIN_BARS = 30    # R271: 净化绝对底线(防字段错乱/空壳) —— 次新30~120根仍进分析, 由门禁"次新"剔除展示
 # R275: 净化丢弃 bar 累计(诊断用) —— 坏根是 R265~R269 多轮结构错位里的隐性来源, R271 加净化防线后
 # 却无任何丢弃量化; 此计数汇入 meta.sanit_drop_bars, 供排查"某日结构错位=数据坏根激增"直接对照。
@@ -1492,6 +1589,14 @@ def analyze_one(sym, ks):
         scenario = cls.get("scenario", "")
         bottom = _bc_tail(bc, bis, "bottom", ks=ks)
         top = _bc_tail(bc, bis, "top", ks=ks)
+        # R495: 段级（线段级别）三份引擎产物 —— 在此统一取出，`st` 与 `mark` 共用一份
+        #   （下方 mark 段级块不再重取，避免同一语义出现第二份副本）。
+        #   ⚠️ 必须取在**最早**的消费点之前：本块放在 `st = {` 之前是因为 st["bc_state"]
+        #      要用它——这正是 R492 踩过的坑（新增变量放到消费点之后 ⇒ 运行时 NameError 或
+        #      静默取到旧值）。自查口令：「这个变量在构造它的那一刻是否已被填好？」
+        _segs = r.get("segments") or []
+        _sbc = r.get("seg_beichi") or []
+        _ssig = r.get("seg_signals") or []
         st = {
             "n_bars": _sh["n_bars"], "first": _sh["first"], "last": _sh["last"],
             "span_days": _sh["span_days"],
@@ -1505,6 +1610,14 @@ def analyze_one(sym, ks):
             "zs_last": zs_last, "stop_days": _sh["stop_days"],
             "bottom_bc": bottom, "top_bc": top,
             "seg_bot": bool(cls.get("seg_bc_bottom")), "seg_top": bool(cls.get("seg_bc_top")),
+            # R495: 段级信号只数（供详情页"段级 N 条"展示；笔级只数沿用既有 sig_n）。
+            "segsig_n": len(_ssig), "seg_n": len(_segs), "segbc_n": len(_sbc),
+            # R495: 「最新 K 线是否背驰」的显式状态 —— 前端详情页提示条的**唯一判据来源**。
+            #   ⚠️ 与上面 seg_bot/seg_top 的区别：那两项是**方向布尔**（供信号强度与情景判定，
+            #   下游 96% 的信号在用），本项是给**人看**的状态包（方向/确认日/距今交易日/新鲜度/
+            #   面积比/顶底并存/是否已破），回答的是"当下还能不能按背驰读"。
+            #   判据与它们**同源**（都走 cl.SEG_BC_ACTIVE_GAP 活跃窗口）⇒ 不会给出相反结论。
+            "bc_state": _bc_state_of(ks, bis, bc, _segs, _sbc, merged),
         }
         # 轻量绘图标注(详情页叠画用): 近中枢矩形 + 近背驰点 + 近笔折线(限通过票)
         mark = {"zs": [], "bc": [], "line": [], "sig": []}
@@ -1523,6 +1636,25 @@ def analyze_one(sym, ks):
         # 格式 [dir(1买/-1卖), kind全名, date_end, price] — 与 zs/bc/line 一致的紧凑数组。
         mark["sig"] = [[s["dir"], s["kind"], s["date"], round(s["price"], 2)]
                        for s in signals[-14:]]
+        # R495: 段级（线段级别）标注 —— 与主界面 report.py 的 segSigPoints / 段级中枢**同源同口径**。
+        #   此前本函数只取笔级 signals[-14:]，而 r["seg_signals"] / r["segments"] / r["seg_beichi"]
+        #   三份**引擎已算好**的段级数据被整体丢弃 ⇒ 雷达三类 K 线（行业/个股/ETF）上从来没有
+        #   「段1买」这类标注，与主界面（段1/段2/段3/段类2 的买/卖齐备）明显不一致。
+        #   段级一类点 = 段级背驰端点（笔级 find_signals 结构上抓不到它），是级别联立的第二级，
+        #   其止损/目标空间与笔级完全不同 ⇒ 缺了会让用户把段级二类当成笔级二类来用。
+        #   （`_segs`/`_sbc`/`_ssig` 已在上方 `st` 构造前统一取出，此处复用同一份。）
+        # 近 20 条（主界面对段级不截断，雷达受 marks.json 体积约束取近端；实测上证全历史
+        # 1386 根仅 20 条、且段级周期长约一个量级 ⇒ 20 条已覆盖近端全部可操作段级点）。
+        mark["segsig"] = [[s["dir"], s["kind"], s["date"], round(s["price"], 2)]
+                          for s in _ssig[-20:]]
+        # 段级中枢（图上青带）：段级三类点的判据锚点，主界面 R484 已画。取最近 2 个
+        # —— 段级中枢跨度天然比笔中枢大一个量级，画多了会把图糊满（与主界面同取法）。
+        try:
+            _segzs = cl.build_seg_zhongshu(_segs, merged)
+        except Exception:   # noqa: BLE001
+            _segzs = []
+        mark["segzs"] = [[round(z["zg"], 2), round(z["zd"], 2), z["date_start"], z["date_end"]]
+                         for z in _segzs[-2:]]
         return st, None, mark
     except Exception as e:   # noqa: BLE001
         # R274: st/mark 构造段异常保护 —— chanlun 输出 schema 基本稳定, 但个别极端数据
@@ -3356,6 +3488,23 @@ def main():
     # radar.json 白名单不再含 "mark"; 行业合成标的(industries.*.mark, 仅32个)保留在 radar.json。
     marks_out = {s: row["mark"] for s, row in universe.items() if row.get("mark")}
     meta["marks_n"] = len(marks_out)
+    # R495: 段级标注产出率 —— **防静默失效**（与规则 4「白名单静默剥离」同族的坑）：
+    #   mark 是整块写入、不经白名单，但若 chanlun 的 seg_signals / segments 接口改名或
+    #   在某种数据形态下返回空，前端只会"图上少了段级点"——**不报任何错**。这里落成数字，
+    #   供 CI 自检硬断言 + 线上人工核对，与 meta.marks_n 同性质。
+    #   ⚠️ 分段统计: marks_out=个股/ETF（写 marks.json）; industries.*.mark=行业（写 radar.json）。
+    _ind_marks = [(v.get("mark") or {}) for v in industries.values()]
+    meta["seg_mark"] = {
+        "n_uni": len(universe),
+        "n_uni_segsig": sum(1 for m in marks_out.values() if m.get("segsig")),
+        "n_uni_segzs": sum(1 for m in marks_out.values() if m.get("segzs")),
+        "n_uni_segsig_total": sum(len(m.get("segsig") or []) for m in marks_out.values()),
+        "n_ind": len(_ind_marks),
+        "n_ind_segsig": sum(1 for m in _ind_marks if m.get("segsig")),
+        "n_ind_segzs": sum(1 for m in _ind_marks if m.get("segzs")),
+        "n_bc_state_seg": sum(1 for row in universe.values()
+                              if ((row.get("st") or {}).get("bc_state") or {}).get("seg")),
+    }
     out = {"meta": meta,
            "signals": [{"sym": s, **sig} for s, sig in signals],
            "industries": industries,

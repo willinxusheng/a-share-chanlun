@@ -7,7 +7,7 @@ import sys
 import math
 import ast
 from datetime import datetime, timedelta, timezone
-from chanlun import analyze, backtest_signals, MIN_BI_PCT_WEEK, health_score, forecast_confidence, forward_vol, adaptive_horizon, classify, realized_vol_annualized, KNOWN_PIVOTS, _date_diff, MIN_BI_PCT_MONTH, backtest_robustness, backtest_paths, _path_targets, market_breadth, regime_factor, classify_regime, SC_BULL, SC_BEAR, build_seg_zhongshu, SEG_BC_ACTIVE_GAP, BC_AREA_RATIO_TH
+from chanlun import analyze, backtest_signals, MIN_BI_PCT_WEEK, health_score, forecast_confidence, forward_vol, adaptive_horizon, classify, realized_vol_annualized, KNOWN_PIVOTS, _date_diff, MIN_BI_PCT_MONTH, backtest_robustness, backtest_paths, _path_targets, market_breadth, regime_factor, classify_regime, SC_BULL, SC_BEAR, build_seg_zhongshu, SEG_BC_ACTIVE_GAP, BC_AREA_RATIO_TH, SEG_BC_FRESH_DAYS
 
 W, H_PRICE, H_VOL, H_MACD = 1060, 360, 64, 110
 PAD_L, PAD_R, PAD_T, PAD_B = 12, 78, 24, 26
@@ -453,7 +453,9 @@ SIG_NEW_DAYS = 3     # 距今 ≤ N 个交易日内诞生的信号 ⇒ 图上加
 # 而买卖点标签结构性滞后（220 次诞生中"坐标=当天"0 次）。取 5 = 一个交易周，覆盖
 # "刚出现"到"仍在本周内"的窗口。★ 与 SIG_NEW_DAYS(3) 口径不同、不可互换：那个问的是
 # "这条信号诞生几天了"（有限重放），这个问的是"它的结构端点离最新一根多远"（直接索引差）。
-SEG_BC_FRESH_DAYS = 5
+# R495: 数值已提到引擎侧 `chanlun.SEG_BC_FRESH_DAYS`（**单一来源**）—— 雷达 scan_radar.py 的
+# 「最新 K 线是否背驰」提示与本处「新」标识问的是同一件事，各写一个数字必然静默漂移。
+# 语义与依据见 chanlun.py 该常量处的注释（含 SEG_BC_ACTIVE_GAP 的区分说明）。
 SIG_LOOKBACK = 6     # 有限重放深度（> SIG_NEW_DAYS 即可判"非新"；留 2 档余量防风噪）
 
 

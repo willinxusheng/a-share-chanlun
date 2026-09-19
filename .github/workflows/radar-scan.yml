@@ -101,6 +101,19 @@ jobs:
           m = d["meta"]
           assert m["n_ok"] > 4000, "有效分析过少: %s" % m["n_ok"]
           assert m["n_signal"] >= 0
+          # R495: 段级标注 / 背驰状态产出率 —— 防「整族静默为空」。
+          #   为什么必须硬断言: mark 里的新键是**整块写入**、不经白名单，若 chanlun 的
+          #   seg_signals/segments 接口变动或返回空，前端只会"图上少了段级点"——不报错，
+          #   也不进任何既有门禁。阈值取得宽松（样本实测个股 6/6、行业 5/5 均有），
+          #   只拦灾难态；首次上线后按线上实测值收紧。
+          sm = m.get("seg_mark") or {}
+          assert sm.get("n_uni_segsig", 0) > 100, "段级买卖点标注过少: %s" % sm
+          assert sm.get("n_uni_segzs", 0) > 100, "段级中枢标注过少: %s" % sm
+          assert sm.get("n_ind_segsig", 0) > 0, "行业段级标注为空: %s" % sm
+          print("段级标注: 个股 %d/%d 有 segsig(共 %d 条) · 段级中枢 %d 只 · 行业 %d/%d · 活跃段级背驰 %d 只"
+                % (sm.get("n_uni_segsig", 0), sm.get("n_uni", 0), sm.get("n_uni_segsig_total", 0),
+                   sm.get("n_uni_segzs", 0), sm.get("n_ind_segsig", 0), sm.get("n_ind", 0),
+                   sm.get("n_bc_state_seg", 0)))
           print("自检通过: 有效%d 信号%d asof=%s" % (m["n_ok"], m["n_signal"], m["asof"]))
           PY
 

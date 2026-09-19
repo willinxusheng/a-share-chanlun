@@ -192,6 +192,25 @@ h1{font-size:21px;font-weight:700;letter-spacing:.4px;line-height:1.3}   /* R323
 .chart-note{font-size:11.5px;color:var(--muted);padding:8px 16px 9px;line-height:1.8}
 .legend-tag{display:inline-flex;align-items:center;font-size:11.5px;margin-right:16px;color:var(--muted);line-height:1}
 .legend-tag i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px}
+/* ===== R495: 「最新 K 线是否背驰」提示条（行业/个股/ETF 同一组件）=====
+   视觉沿用主看板令牌语言：左侧 4px 语义色条 + 圆角卡片 + 渐变底，与 .panel/.chart-note 同族。
+   颜色语义**沿用雷达既有口径**（顶背驰=红风险 / 底背驰=绿机会，与列表徽章 .up/.down 一致），
+   不自创新色 —— 同一页里两套色语义是误读的温床。 */
+.bcbar{display:flex;flex-wrap:wrap;align-items:baseline;gap:7px 14px;margin:10px 0 0;padding:11px 15px;border:1px solid var(--border);border-left:4px solid #cbd5e1;border-radius:12px;background:#fff;font-size:12.5px;line-height:1.85;color:#475569}
+.bcbar.bot{border-left-color:#18a058;background:linear-gradient(180deg,#f1fdf7,#fff 60%)}
+.bcbar.top{border-left-color:#e54545;background:linear-gradient(180deg,#fff4f4,#fff 60%)}
+.bcbar.none{border-left-color:#94a3b8;background:#fafbfc}
+.bcbar .bch{font-weight:700;font-size:13.5px;color:#1e293b;display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.bcbar.bot .bch{color:#0e7d4a}
+.bcbar.top .bch{color:#c92a2a}
+.bcbar .bcnew{display:inline-block;font-size:10.5px;font-weight:700;padding:1px 6px;border-radius:999px;background:#fdecec;color:#c92a2a;border:1px solid rgba(229,69,69,.45)}
+.bcbar.bot .bcnew{background:#e6f9f0;color:#0e7d4a;border-color:rgba(24,160,88,.45)}
+.bcbar .bck{color:#94a3b8;font-weight:400}
+.bcbar .bcv{font-weight:700;font-variant-numeric:tabular-nums;color:#1e293b}
+.bcbar .bcbi{display:inline-flex;flex-wrap:wrap;gap:3px 9px;align-items:baseline;padding:3px 10px;border-radius:8px;background:#f8fafc;border:1px dashed #d7dee8;font-size:11.5px;color:#64748b}
+.bcbar .bcnote{flex-basis:100%;font-size:11.5px;color:#7a8699;line-height:1.8;margin-top:1px}
+.bcbar .bcnote b{color:#475569}
+@media (max-width:820px){.bcbar{gap:6px 10px;padding:10px 12px}.bcbar .bch{font-size:12.5px}}
 #mainChart{width:100%;height:620px}
 .mini-chart{width:100%;height:300px}
 /* ===== 表格(成分股信号列表) ===== */
@@ -583,7 +602,14 @@ a{color:var(--primary);text-decoration:none}
 <script>
 /* ============================================================
    全市场缠论雷达 v3 · 行业为根 + 个股K线内嵌切换
-   数据: radar/radar.json (scan_radar.py P3b-r18) · 前端 R252+R253+R445+R446 · R253-hotfix: 修 drawChart 不清 loading 残留 + legend 重复声明
+   数据: radar/radar.json (scan_radar.py P3b-r29) · 前端 R495 · R252+R253+R445+R446 · R253-hotfix: 修 drawChart 不清 loading 残留 + legend 重复声明
+   R495: ①三类 K 线（行业/个股/ETF）补**段级买卖点**（段1/段2/段3/段类2 的买/卖，大号三角）
+         + **段级中枢**（青带，段级三类点的判据锚点）—— 此前雷达只有**笔级**，与主界面不是一套标准
+         （根因：scan_radar.analyze_one 只取 signals[-14:]，r["seg_signals"]/segments/seg_beichi 全丢弃）。
+         ②新增「最新 K 线是否背驰」提示条（行业/个股共用 bcBarHtml，数据来自后端 st.bc_state，前端只呈现）。
+         ③修**中文子串当类型判据**（规则 19）：「类二买点(二次回抽不破)」三个 indexOf 分支全不命中
+         ⇒ cls="" ⇒ **整族被静默丢弃**（笔级类二点在雷达图上从未显示过）。改为查 KIND_SHORT 表
+         （与主界面 _KIND_SHORT 同表同键），未登记 kind 降级保留 kind[:3] 而非变空。
    K线: 行业=radar.json 内嵌合成; 个股=腾讯 fqkline (CORS 已开)
    R258: ①个股volume去/100(腾讯=手) ②行业tooltip量=成交额亿元 ③spark=[o,h,l,c]close索引修复
         ④pickInd重置curStk/tab ⑤fresh=0排序 ⑥hashchange stk真渲染 ⑦浮层/图实例清理+竞态令牌 ⑧fetch no-cache
@@ -2058,6 +2084,58 @@ function indMovers(k){
 }
 function ldName(s){s=s||"";return s.length>6?s.slice(0,6)+"…":s}
 /* ===== 行业详情头部专业指标带(点开行业即见完整面板) ===== */
+/* ===== R495: 「最新 K 线是否背驰」提示条（行业 / 个股 / ETF 共用同一函数）=====
+   数据全部来自后端 `st.bc_state`（scan_radar._bc_state_of），前端**只呈现、不重算** ——
+   图上标注与提示条若各算一遍，迟早出现"图上画了背驰、条里说没有"的自相矛盾（规则 15/20）。
+   阈值（gap_th / fresh_th / area_th）也由后端随数据下发，前端不写第二份副本（规则 20）。
+
+   ★ 口径分层（用户最容易误读的一处，必须同时报出）：
+       seg.gap  = 自末段往回数的**段数** ⇒ 结构上还在不在"最近一轮"（活跃）
+       seg.days = 端点距末根的**交易日数** ⇒ 时间上是不是刚出的（新鲜）
+     两者可差极大：上证 2026-09-18 那条段级底背驰 gap=1 而 days=44。
+   ★ 段级为主口径、笔级只作对照：R443 五年回测里段级底背驰 20 日胜率 70.0%(p≈0.017)，
+     是唯一过显著性的**当日可操作**判据；笔级标签 45.9% 不如随机 ⇒ 不能并列成两个平级结论。 */
+function bcBarHtml(st){
+  st=st||{};
+  var bs=st.bc_state;
+  if(!bs)return "";                       // 旧快照（radar.json 无该键）⇒ 不渲染，不报错
+  var seg=bs.seg||null, mb=bs.bi||null, cls="none", head="", body=[], notes=[];
+  if(seg){
+    var bot=(seg.dir==="bottom");
+    cls=bot?"bot":"top";
+    head=(bot?"🟢 段级底背驰 · 机会":"🔴 段级顶背驰 · 风险")+(seg.fresh?'<span class="bcnew">新</span>':"");
+    body.push('<span><span class="bck">确认于</span> <span class="bcv">'+esc(seg.date)+'</span></span>');
+    body.push('<span><span class="bck">距今</span> <span class="bcv">'+seg.days+'</span><span class="bck"> 个交易日</span></span>');
+    body.push('<span><span class="bck">段内 MACD 面积比</span> <span class="bcv">'+(+seg.area).toFixed(2)+'</span>'
+      +'<span class="bck">&nbsp;(&lt; '+bs.area_th+' = 力度衰竭 ⇒ 背驰成立)</span></span>');
+    body.push('<span><span class="bck">结构位置</span> <span class="bcv">倒数第 '+(seg.gap+1)+'</span><span class="bck"> 段</span></span>');
+    if(seg.both)notes.push('⚠ <b>顶底背驰并存</b>（活跃窗口内共 '+seg.n_active+' 条）—— 此处按<b>更新的那一段</b>给结论，'
+      +'另一方向同样成立，<b>勿只读单向</b>（R492：旧实现是"顶无条件优先"，会把更新的底背驰吞掉）');
+    notes.push('判据：段级背驰「活跃」= 端点所在段距末段 ≤ <b>'+bs.gap_th+'</b> 段（<b>段数</b>口径）；'
+      +'「新」= 端点距末根 ≤ <b>'+bs.fresh_th+'</b> 个交易日（<b>时间</b>口径）—— 两者不同，可差很多');
+  } else {
+    head="无活跃段级背驰";
+    body.push('<span class="bck">已扫描 '+(st.seg_n||0)+' 段 · 段级背驰 '+(st.segbc_n||0)+' 条；'
+      +'最近一条距末段已超过活跃窗口（&gt; '+bs.gap_th+' 段）⇒ 当下没有起作用的段级背驰</span>');
+  }
+  var biTxt;
+  if(mb){
+    biTxt='<span class="bcbi"><b>笔级对照</b>'
+      +(mb.dir==="bottom"?"底背驰":"顶背驰")+' '+esc(mb.date)
+      +' · 距今 '+mb.days+' 交易日'
+      +(mb.fresh?' · <span class="bcnew">新</span>':'')
+      +(mb.broken?' · <b style="color:#c92a2a">端点已被击穿</b>（该背驰结构已破坏）':'')
+      +(mb.both?' · 顶底并存':'')
+      +'</span>';
+  } else {
+    biTxt='<span class="bcbi"><b>笔级对照</b> 近端无笔级背驰</span>';
+  }
+  notes.push('读法：背驰 = 价格创了新高/新低、MACD 力度反而萎缩（面积比 &lt; '+bs.area_th+'）。'
+    +'R443 五年重放（step=5 全市场）：<b>段级</b>底背驰 20 日胜率 <b>70.0%</b>(p≈0.017，唯一过显著性、且是唯一"当日可操作"的判据)；'
+    +'<b>笔级</b>标签 45.9%（不如随机）⇒ 本条以段级给结论、笔级仅作对照。结构判断，非投资建议。');
+  return '<div class="bcbar '+cls+'"><span class="bch">'+head+'</span>'+body.join("")+biTxt
+    +'<span class="bcnote">'+notes.join("<br>")+'</span></div>';
+}
 function detailStrip(ind,k){
   var rv=ind.rsi14,pp=rsiPctileOf(ind);
   var capTxt=(ind.cap==null)?"-":(ind.cap>=10000?(ind.cap/10000).toFixed(2)+"万亿":ind.cap.toFixed(0)+"亿");
@@ -2200,7 +2278,10 @@ function pickInd(k){
       '</div>'+
     '</div>'+
     '<div id="dstripWrap">'+detailStrip(ind,k)+'</div>'+
-    '<div class="chart-note"><span class="legend-tag"><i style="background:#e54545"></i>涨</span><span class="legend-tag"><i style="background:#18a058"></i>跌</span><span class="legend-tag"><i style="background:#7f77dd"></i>笔</span><span class="legend-tag"><i style="background:rgba(127,119,221,.25)"></i>中枢</span><span class="legend-tag"><i style="background:#c92a2a"></i>顶背驰(红▼)</span><span class="legend-tag"><i style="background:#087f5b"></i>底背驰(绿▲)</span></div>'+
+    // R495: 「最新 K 线是否背驰」提示条 —— 紧贴指标带, 在 K 线图之前(先给结论再看图)。
+    //   切到「个股 K 线」tab 时由 switchTab 换成该票的结构(见 switchTab 内注释)。
+    '<div id="bcBarWrap" style="padding:0 16px">'+bcBarHtml(ind.st||{})+'</div>'+
+    '<div class="chart-note"><span class="legend-tag"><i style="background:#e54545"></i>涨</span><span class="legend-tag"><i style="background:#18a058"></i>跌</span><span class="legend-tag"><i style="background:#7f77dd"></i>笔</span><span class="legend-tag"><i style="background:rgba(127,119,221,.25)"></i>中枢</span><span class="legend-tag"><i style="background:#0d9488"></i>段级中枢</span><span class="legend-tag"><i style="background:#c92a2a"></i>顶背驰(红▼)</span><span class="legend-tag"><i style="background:#087f5b"></i>底背驰(绿▲)</span><span class="legend-tag">◤大号三角=段级买卖点(段1/段2/段3/段类2)</span></div>'+
     '<div id="mainChart"><div class="loading sk">K线渲染中…</div></div>'+
     '</div>';
   html+='<div class="sec-t">'+(ind.is_etf?"成分基金":"成分股")+' <span class="cnt">'+k+' · 通过门禁成分(共 '+(ind.n_member||0)+') · 点击任意一行 → 主图K线即时切换(不跳页)</span></div>'+
@@ -2213,11 +2294,23 @@ function pickInd(k){
   var dp=$("indDetailPanel");
   setTimeout(function(){if(dp)dp.scrollIntoView({behavior:"smooth",block:"start"})},60);
 }
+/* R495: 背驰提示条的**唯一刷新入口** —— 两条"切到个股 K 线"的路径（switchTab 与
+   pickStkInInd）都必须调用它。前者走 switchTab，后者**不走**（直接改 curTab 再 drawChart）
+   ⇒ 若各写一遍必然漏一处，提示条会停在行业结论上，而图已经是个股 —— 图与结论不同源。
+   数据源：个股取 UNI[sym].st，行业取 INDS[k].st。 */
+function refreshBcBar(){
+  var bw=$("bcBarWrap");if(!bw)return;
+  var _st=null;
+  if(curTab==="stk"&&curStk)_st=(UNI[curStk]||{}).st;
+  else if(curInd)_st=(INDS[curInd]||{}).st;
+  bw.innerHTML=_st?bcBarHtml(_st):"";
+}
 function switchTab(tab){
   curTab=tab;
   var tI=$("tInd"),tS=$("tStk");
   if(tI)tI.className="ind-tab "+(tab==="ind"?"on":"");
   if(tS)tS.className="ind-tab "+(tab==="stk"?"on":"");
+  refreshBcBar();   // R495: 提示条随 tab 换数据源（见 refreshBcBar 注释）
   drawChart();
 }
 /* 行业 K 线 vs 个股 K 线(同一 mainChart, 切换数据源) */
@@ -2439,6 +2532,7 @@ function pickStkInInd(sym){
   if(tI){tI.className="ind-tab";}
   // 重渲染列表(高亮选中股)
   if(curInd)renderIndStkList(curInd);
+  refreshBcBar();   // R495: 本路径**不走 switchTab** ⇒ 必须显式刷新，否则提示条停在行业结论上
   // 重画图(切到个股)
   drawChart();
   // 同步浮层表头列宽(panel 宽度变化极小, 但保险)
@@ -2664,8 +2758,8 @@ function showStk(sym){
   var infoCol='<div style="font-size:12px;line-height:2.1;color:#475569;padding:6px 2px'+(hasMini?'':';grid-column:1/-1')+'">'+
       '<b style="font-size:13px">缠论结构</b><br>· 笔数 '+(s.bi_n||0)+' / 中枢 '+(s.zs_n||0)+' / 背驰 '+(s.bc_n||0)+' / 买卖点 '+(s.sig_n||0)+'<br>· 末段中枢 '+(s.zs_last?("["+s.zs_last.zd+" ~ "+s.zs_last.zg+"] 结束于 "+s.zs_last.date_end):"无")+'<br>· 分笔自洽率 '+(s.agree!=null?(s.agree*100).toFixed(1)+"%": "-")+' ('+(s.agree_n||0)+'笔)'+
       '<br>· 近60日均额 '+(s.avg_amt60!=null?(s.avg_amt60>=1e4?(s.avg_amt60/1e4).toFixed(1)+"亿":s.avg_amt60.toFixed(0)+"万")+"/日":"-")+' · 振幅中位 '+(s.med_amp!=null?s.med_amp+"%":"-")+'<br>· 一字板 '+(s.one_word||0)+'日 · 距高点回撤 '+(s.dd!=null?(s.dd*100).toFixed(1)+"%":"-")+'</div>';
-  var stkHtml=banner+
-    '<div class="panel"><div class="chart-note"><span class="legend-tag"><i style="background:#e54545"></i>涨</span><span class="legend-tag"><i style="background:#18a058"></i>跌</span><span class="legend-tag"><i style="background:#7f77dd"></i>笔</span><span class="legend-tag"><i style="background:rgba(127,119,221,.25)"></i>中枢</span><span class="legend-tag"><i style="background:#c92a2a"></i>顶背驰(红▼)</span><span class="legend-tag"><i style="background:#087f5b"></i>底背驰(绿▲)</span></div><div id="stkChart" style="width:100%;height:620px"><div class="loading sk">行情加载中…</div></div></div>'+
+  var stkHtml=banner+bcBarHtml(s)+
+    '<div class="panel"><div class="chart-note"><span class="legend-tag"><i style="background:#e54545"></i>涨</span><span class="legend-tag"><i style="background:#18a058"></i>跌</span><span class="legend-tag"><i style="background:#7f77dd"></i>笔</span><span class="legend-tag"><i style="background:rgba(127,119,221,.25)"></i>中枢</span><span class="legend-tag"><i style="background:#0d9488"></i>段级中枢</span><span class="legend-tag"><i style="background:#c92a2a"></i>顶背驰(红▼)</span><span class="legend-tag"><i style="background:#087f5b"></i>底背驰(绿▲)</span><span class="legend-tag">◤大号三角=段级买卖点(段1/段2/段3/段类2)</span></div><div id="stkChart" style="width:100%;height:620px"><div class="loading sk">行情加载中…</div></div></div>'+
     '<div class="chart-note" style="line-height:1.85;text-align:left;color:#475569;margin-top:6px">图上 <b>止损 / 入场参考 / 止盈参考</b> 三条线是<b>结构位</b>（背驰低点 / 现价下方 R/2 / 中枢上沿或 2R），<b>不是经实证优化的离场位</b>。R449 五年回测（292 票 · 73,054 个观察点 · 2022-01~2026-08）：63 条「止盈 × 止损 × 持有期」组合<b>无一条</b>产生可检测超额（最高 +0.07pp，p=0.45；0 条通过 Bonferroni α=0.00079），且<b>无规则持有的平均收益 +2.37% 高于任何组合</b>。原因：收益几乎全部来自头部 5% 的段（贡献 114%），止盈线的本质是砍右尾。<b>读法</b>：当结构参考位用，别当卖点。<br>⚠️ <b>结构失效时怎么画（R452/R453）</b>：若现价已跌破背驰低点，则<b>撤下该买点的三条行动线</b>（止损 / 入场参考 / 止盈参考），<b>只改画一条灰色点线</b> —— 跌破标「背驰低点·<b>已失效</b>」，现价<b>恰好等于</b>背驰低点（临界）标「背驰低点·<b>临界贴住</b>」（后者按 R336 口径<b>仍在池中</b>，只是现价即止损位、R=0 时入场/止盈线无意义）；两种标签都只把该位标出来供你判断<b>反抽到哪算结构修复</b>，<b>不是支撑、不是入场位</b>（见上方警示条）；若该票另有顶背驰结构，那套线按下方 R454 规则独立处理（两套结构互不相干，可同时失效）。<br>⚠️ <b>顶背驰失效时怎么画（R454）</b>：若现价<b>已上破顶背驰高点</b>（<b>严格大于</b>，收盘价口径），则<b>撤下「顶确认·破位离场」与「反抽减仓参考」两条减仓/离场行动线</b>，<b>只改画一条灰色点线「顶背驰高点·已失效」</b> —— 价格续创新高即「新高但力度衰竭」的前提不成立，该<b>看跌判据已被证伪</b>，按它操作比不画更危险；灰线只作<b>判据锚点</b>（理解这个看跌结论是在哪个价位被否掉的），<b>不是压力位、更不是做空位</b>。⚠️ 判据失效 <b>≠</b> 风险解除：只说明<b>不能按见顶结构减仓</b>，是否存在新的见顶结构须按<b>新顶背驰 + 新中枢</b>重新评估。<b>顶侧判据刻意用严格 &gt;</b>，而底侧用 &lt;=（含相等）—— 底侧把「相等」也算失效，是因为 R=现价−止损=0 会让入场/止盈线与现价<b>重合退化</b>（数学问题，与结构无关）；顶侧两条线取中枢位、与背驰高点无关，「相等」（贴住前高但未破）时顶背驰<b>仍成立</b>，故线照画。<b>两侧判据不同是正确设计，不是笔误。</b><br>⚠️ <b>同价合线（R451/R452）</b>：当两个体系的参考位落在<b>同一个价</b>时（最常见：底背驰的止盈参考 = 顶背驰的反抽位 = 末中枢上沿），图上只画一条，并在标签里用「<b>·亦X</b>」标出<b>被合并那条的来源</b> —— 如「止盈参考·亦中枢上沿」，或「止损·亦中枢下沿」（= 背驰低点与中枢下沿重合，双支撑）。<b>不是漏画</b>。</div>'+
     '<div class="sec-t">结构明细 <span class="cnt">来自扫描快照(截至 '+esc(s.last||"")+')</span></div>'+
     '<div class="panel" style="padding:10px 16px"><div class="chart-sec">'+miniCol+infoCol+'</div></div>'+
@@ -2826,7 +2920,10 @@ function indKlineOption(kl,kind){   // kind:"ind"=行业合成(量=成交额亿�
         var sigLine="";
         // R336: 命中判定修正 —— scatter(买点/卖点) 的 dataIndex 是系列内序号(0..n-1), 原 q.dataIndex===i
         // (i=K线类别索引) 恒不等 → "📌 缠论 一买/二买…" 行从未显示过; 改用散点 x 值(日期索引)判定
-        (ps||[]).forEach(function(q){if((q.seriesName==="买点"||q.seriesName==="卖点")&&q.data&&q.data.meta&&q.data.value&&q.data.value[0]===i){sigLine="<br/>📌 缠论 <b style='color:#f59f00'>"+q.data.meta+"</b>";}});
+        // R495: 系列名白名单补**段级**—— 段级买卖点用独立系列名("段级买点"/"段级卖点"),
+        //   不加进来则悬停到段级三角时 tooltip 里**看不到它的全名**(只看到笔级的 📌 行或什么都没有),
+        //   用户无法从图上得知"这个段1买点是段级还是笔级"。段级标签里已带"段"前缀, 但 tooltip 才是全名出处。
+        (ps||[]).forEach(function(q){if((q.seriesName==="买点"||q.seriesName==="卖点"||q.seriesName==="段级买点"||q.seriesName==="段级卖点")&&q.data&&q.data.meta&&q.data.value&&q.data.value[0]===i){sigLine="<br/>📌 缠论 <b style='color:#f59f00'>"+q.data.meta+"</b>";}});
         return "<div style='font-size:12px;font-weight:700;margin-bottom:3px'>"+k.date+"</div>"+
           "开 "+k.open+"　收 <b style='color:"+colChg+"'>"+k.close+"</b>　涨跌 <b style='color:"+colChg+"'>"+chgTxt+"</b>"+
           "<br/>高 "+k.high+"　低 "+k.low+(rsiRaw[i]!=null?"<br/>RSI14 <b style='color:#b39ddb'>"+(+rsiRaw[i].toFixed(1))+"</b>":"")+
@@ -2888,6 +2985,24 @@ function sliderDateTip(el,chart,opt){
   el.addEventListener("mouseleave",onOut);
   el.__sliderTip=function(){el.removeEventListener("mousemove",onMove);el.removeEventListener("mouseleave",onOut);if(tip.parentNode)tip.parentNode.removeChild(tip)};
 }
+/* R495: 信号 kind → 图上短名。★ 与主界面 report.py 的 `_KIND_SHORT` **同表同键**（键 = kind
+   前 3 字）—— 两侧各写一套匹配规则必然静默漂移。
+   动因: 旧实现是 `k.indexOf("一类")>=0?"一":(k.indexOf("二类")>=0?"二":(k.indexOf("三类")>=0?"三":""))`
+   —— ① 中文子串当类型判据(规则 19)、② 引擎实际产出的 `类二买点(二次回抽不破)` 三个分支
+   全不命中 ⇒ cls="" ⇒ **整族被静默丢弃**(笔级类二点在雷达图上从未显示过, 而主界面 R484
+   已量化它 20 日 68.2%/73.1%, 不弱于首个折返)。改查表, 未登记的 kind **降级保留** kind[:3]
+   原样显示(不静默变空, 否则下次引擎改名又是"图上莫名少了点")。 */
+var KIND_SHORT={
+  "一类买":"1买","一类卖":"1卖","二类买":"2买","二类卖":"2卖","三类买":"3买","三类卖":"3卖",
+  "类二买":"类2买","类二卖":"类2卖",
+  "段一买":"段1买","段一卖":"段1卖","段二买":"段2买","段二卖":"段2卖",
+  "段三买":"段3买","段三卖":"段3卖","段类买":"段类2买","段类卖":"段类2卖"
+};
+function sigShort(kind){
+  var k=String(kind||""), k3=k.slice(0,3);
+  if(KIND_SHORT[k3])return KIND_SHORT[k3];
+  return k3;
+}
 function chanMarkOption(mark,dates,kmin,kmax,klForMatch){
   var ser=[];
   if(!mark)return ser;
@@ -2945,6 +3060,28 @@ function chanMarkOption(mark,dates,kmin,kmax,klForMatch){
       }
       m.zs = zsOut;
     }
+    /* R495: 段级买卖点（m.segsig）与笔级**同一份 R282 修复** —— 不锚定的话, 数据源单位
+       差异(份额折算遗留)会让段级点整体偏离 K 线 N 倍, 而笔级是对齐的 ⇒ 图上出现
+       "笔级贴线、段级飞天"的分裂观感。方向取极值与 sig 同律(买点=低位确认→low)。 */
+    if(m.segsig && m.segsig.length){
+      var sg2Out = [];
+      for(var s2=0;s2<m.segsig.length;s2++){
+        var g2 = m.segsig[s2]; if(!g2 || g2.length<4) continue;
+        var kg2 = kMap[g2[2]]; if(!kg2) continue;
+        var buy2 = (g2[0]===1||g2[0]==="1");
+        sg2Out.push([g2[0], g2[1], g2[2], buy2 ? kg2.low : kg2.high]);
+      }
+      m.segsig = sg2Out;
+    }
+    // R495: 段级中枢（m.segzs）两端日期不在 K 线则剔除 —— 与 m.zs 逐字同口径
+    if(m.segzs && m.segzs.length){
+      var sz2Out = [];
+      for(var z2=0;z2<m.segzs.length;z2++){
+        var zz = m.segzs[z2]; if(!zz || zz.length<4) continue;
+        if(kMap[zz[2]] && kMap[zz[3]]) sz2Out.push(zz);
+      }
+      m.segzs = sz2Out;
+    }
   } else {
     m = mark;  // 无 K 线匹配时直接用原 mark (向后兼容旧快照)
   }
@@ -2981,38 +3118,66 @@ function chanMarkOption(mark,dates,kmin,kmax,klForMatch){
         borderColor:"#7f77dd",borderWidth:1,shadowColor:"rgba(127,119,221,.35)",shadowBlur:3},
       data:areas}});
   }
+  // R495: 段级中枢（青带）—— 段级三类点的判据锚点，无它则「段3买/段3卖」在图上不可核查。
+  //   主界面 R484 已画（青带·虚线框，取最近 2 个），雷达此前完全没有。
+  //   ★ 色相刻意与笔中枢（紫 #7f77dd）不同：两者是**不同级别**、跨度差一个量级，
+  //     混成一个颜色会被读成"同一个中枢被画了两次"。
+  if(m.segzs&&m.segzs.length){
+    var sarcs=[];
+    m.segzs.forEach(function(z){var x1=xi(z[2]),x2=xi(z[3]);if(x1==null||x2==null)return;
+      var zd=+z[1],zg=+z[0];
+      if(!isFinite(zd)||!isFinite(zg))return;
+      var lo=Math.min(zd,zg),hi=Math.max(zd,zg);
+      if(band&&(lo<kmin||hi>kmax))return;   // 与笔中枢同判据: 越出可视末段即排除(防飞脱)
+      sarcs.push([{name:"段级中枢",xAxis:x1,yAxis:zg,itemStyle:{color:"rgba(13,148,136,.10)",borderColor:"#0d9488",borderWidth:1,borderType:"dashed"}},{xAxis:x2,yAxis:zd}]);});
+    if(sarcs.length)ser.push({name:"段级中枢",type:"line",data:[],markArea:{silent:true,itemStyle:{color:"transparent"},
+      label:{show:true,position:"insideBottom",color:"#0f766e",fontSize:11,fontWeight:"700",distance:5,
+        backgroundColor:"rgba(255,255,255,.96)",padding:[2,6],borderRadius:4,
+        borderColor:"#0d9488",borderWidth:1,shadowColor:"rgba(13,148,136,.35)",shadowBlur:3},
+      data:sarcs}});
+  }
   // R271: 一/二/三类买卖点叠画 — mark.sig=[dir(1买/-1卖), kind全名, date_end, price]。
-  // 一类买卖点本就是背驰点, 有 sig 时用分类点(一买/二买/三买/一卖/二卖/三卖)替代通用背驰三角,
-  // 避免同一点双标; 旧快照(radar.json 无 sig 字段)回退 legacy 背驰三角渲染。
+  // R495: 补齐**段级**（mark.segsig）—— 与主界面 report.py 的 segSigPoints 同源同口径。
+  //   此前只画笔级 ⇒ 雷达三类 K 线（行业/个股/ETF）上从来没有「段1买」这类标注，而主界面
+  //   段1/段2/段3/段类2 的买卖点齐备 ⇒ 用户会据此以为"雷达和主界面不是一套标准"。
+  //   段级三角比笔级**大一圈**（15 vs 13）：两级同时出现时一眼分得出哪个是线段级别（主界面同律）。
   // 颜色语义与主看板一致: 买点=红(看涨) 卖点=绿(看跌); 趋势背驰·趋/盘整背驰·盘 后缀, 悬停 tooltip 显全名。
-  var sig=(m.sig||[]),bu=[],sl=[];
-  sig.forEach(function(g){
-    if(!g||g.length<4)return;
-    var x=xi(g[2]);if(x==null)return;
-    var p=+g[3];if(!isFinite(p)||!inRange(p))return;
-    var k=String(g[1]||"");
-    var cls=k.indexOf("一类")>=0?"一":(k.indexOf("二类")>=0?"二":(k.indexOf("三类")>=0?"三":""));
-    if(!cls)return;
-    var buy=(g[0]===1||g[0]==="1");
-    var tag=cls+(buy?"买":"卖");
-    // R399: 级别后缀匹配词对齐生产端 kind —— chanlun.find_signals 的 kind 实为
-    // "一类买点(底背驰)·趋势/·盘整"(缩写后缀, marks.json 全量 10 种实证 0 次含
-    // "趋势背驰/盘整背驰"全词), 原 indexOf("趋势背驰") 恒 -1 → 图上标签的 ·趋/·盘
-    // 后缀从未显示(级别信息只剩悬停 tooltip, R271/R293 意图未达)。修: 匹配 "·趋势"
-    // "·盘整" 缩写, 兼容老快照全词。
-    if(k.indexOf("·趋势")>=0||k.indexOf("趋势背驰")>=0)tag+="·趋";
-    else if(k.indexOf("·盘整")>=0||k.indexOf("盘整背驰")>=0)tag+="·盘";
-    (buy?bu:sl).push({value:[x,p],meta:k+" "+g[2],label:{formatter:tag}});
-  });
-  if(bu.length||sl.length){
-    // R293: 分类买卖点标签强化 —— 白底+主题色描边+圆角+阴影+字号↑, 让"一买/二买/三买/一卖/二卖/三卖"清晰醒目不被 K 线遮住
-    function sigSer(name,data,col,rot,pos){return {name:name,type:"scatter",data:data,symbol:"triangle",symbolRotate:rot,symbolSize:13,itemStyle:{color:col,borderColor:"#fff",borderWidth:1},z:7,clip:true,
-      label:{show:true,fontSize:10,fontWeight:"700",color:col,position:pos,distance:4,
+  function collectSig(arr){
+    var bu=[],sl=[];
+    (arr||[]).forEach(function(g){
+      if(!g||g.length<4)return;
+      var x=xi(g[2]);if(x==null)return;
+      var p=+g[3];if(!isFinite(p)||!inRange(p))return;
+      var k=String(g[1]||"");
+      var tag=sigShort(k);
+      if(!tag)return;
+      // R399: 级别后缀匹配词对齐生产端 kind —— chanlun.find_signals 的 kind 实为
+      // "一类买点(底背驰)·趋势/·盘整"(缩写后缀, marks.json 全量 10 种实证 0 次含
+      // "趋势背驰/盘整背驰"全词), 原 indexOf("趋势背驰") 恒 -1 → 图上标签的 ·趋/·盘
+      // 后缀从未显示(级别信息只剩悬停 tooltip, R271/R293 意图未达)。修: 匹配 "·趋势"
+      // "·盘整" 缩写, 兼容老快照全词。
+      if(k.indexOf("·趋势")>=0||k.indexOf("趋势背驰")>=0)tag+="·趋";
+      else if(k.indexOf("·盘整")>=0||k.indexOf("盘整背驰")>=0)tag+="·盘";
+      var buy=(g[0]===1||g[0]==="1");
+      (buy?bu:sl).push({value:[x,p],meta:k+" "+g[2],label:{formatter:tag}});
+    });
+    return [bu,sl];
+  }
+  var _sg=collectSig(m.sig);
+  var bu=_sg[0],sl=_sg[1];
+  var _ags=collectSig(m.segsig);       // R495: 段级（旧快照无 segsig 键 ⇒ 空数组，不报错）
+  var sbu=_ags[0],ssl=_ags[1];
+  if(bu.length||sl.length||sbu.length||ssl.length){
+    // R293: 分类买卖点标签强化 —— 白底+主题色描边+圆角+阴影+字号↑, 让标签清晰醒目不被 K 线遮住
+    function sigSer(name,data,col,rot,pos,ss,fs){return {name:name,type:"scatter",data:data,symbol:"triangle",symbolRotate:rot,symbolSize:ss,itemStyle:{color:col,borderColor:"#fff",borderWidth:1},z:7,clip:true,
+      label:{show:true,fontSize:fs,fontWeight:"700",color:col,position:pos,distance:4,
         backgroundColor:"rgba(255,255,255,.96)",borderColor:col,borderWidth:1,borderRadius:3,padding:[1,2],
         shadowColor:"rgba(0,0,0,.18)",shadowBlur:2},
       emphasis:{scale:1.3}}}
-    if(bu.length)ser.push(sigSer("买点",bu,"#e54545",0,"insideBottom"));
-    if(sl.length)ser.push(sigSer("卖点",sl,"#18a058",180,"insideTop"));
+    if(bu.length)ser.push(sigSer("买点",bu,"#e54545",0,"insideBottom",13,10));
+    if(sl.length)ser.push(sigSer("卖点",sl,"#18a058",180,"insideTop",13,10));
+    if(sbu.length)ser.push(sigSer("段级买点",sbu,"#e54545",0,"insideBottom",15,11));
+    if(ssl.length)ser.push(sigSer("段级卖点",ssl,"#18a058",180,"insideTop",15,11));
     return ser;
   }
   var tp=[],bp=[];
