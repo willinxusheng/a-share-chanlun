@@ -57,6 +57,28 @@ h1{font-size:21px;font-weight:700;letter-spacing:.4px;line-height:1.3}   /* R323
 .bar .pill.hot .v{color:#c77700}
 .bar .pill.cool .v{color:#087f5b}
 .bar .idx-ld{color:#94a3b8;font-weight:400;font-size:13px}
+/* R499（拍板项③）: 操作链路导航条 —— 「大盘 → 行业 → 个股/ETF」三级。
+   ★ 为什么加：R498 修的是「层次混淆」（把**行业自身背驰**读成**个股信号**）。修法当时只有
+     「加解释」一种；但用户的实际流程是「先看大盘 → 再看哪个行业 → 再看个股/ETF」，
+     三级之间**只能靠滚动 + 猜**。本导航把三级**显式命名 + 一键可达**，是同一问题的建设性解法。
+   ★ 为什么不放在 `.sigrad .smark` 摘要行（原计划处）：`#sigRadar` 有 `display:none` 分支
+     （无信号时整块隐藏，见 renderSigRadar）⇒ 放在那里的导航**会跟着消失**；
+     而 `#viewHome` 首行恒在 ⇒ 放这里才"任何时候都在"。
+   ★ 三个锚点各自指向**该级的本体块**，不是装饰：`#barRow`(大盘5指标) / `#indList`(行业列表)
+     / `#sigRadar`(个股·ETF 信号)。三级数量由 renderFlow() 实时填（与各块同源）。
+   ★ 排版：**单行 flex + wrap**；与 `.bar .pill` 共用令牌；高度压到 ~28px，不抢首屏。
+   ★ 窄屏：≤500px 只保留「序号+短名」，副标题与计数由 title 承载（防撑高）。 */
+.flownav{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:12px 0 0;font-size:11.5px;color:var(--muted)}
+.flownav .st{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border:1px solid var(--border);
+  border-radius:20px;background:#fff;box-shadow:var(--shadow);text-decoration:none;color:var(--ink);transition:box-shadow .15s,border-color .15s}
+.flownav .st:hover{box-shadow:var(--shadow-lg);border-color:#c9d6e4}
+.flownav .st .no{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;
+  background:var(--primary);color:#fff;font-size:9.5px;font-weight:700;line-height:1}
+.flownav .st .nm{font-weight:700}
+.flownav .st .ct{color:var(--muted);font-weight:400}
+.flownav .sep{color:#c3ceda;font-weight:700}
+.flownav .note{color:#a8b4c2}
+@media(max-width:500px){.flownav .st .ct{display:none}.flownav .note{display:none}}
 /* ===== 行业列表(平铺 + 专业信息) ===== */
 .ind-panel{margin-top:16px;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden}
 .ind-panel .head{display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid #eef2f7;flex-wrap:wrap}
@@ -68,6 +90,18 @@ h1{font-size:21px;font-weight:700;letter-spacing:.4px;line-height:1.3}   /* R323
 .ind-rule b{color:var(--ink);font-weight:700}
 .ind-rule .warn{color:#b45309}
 .ind-panel .head .tabs{display:flex;gap:3px;background:#eef2f7;border-radius:9px;padding:3px}
+/* R499: 把排序 tab 的「可收缩 + 可横滚」从 ≤820 媒体查询**提到基础规则**。
+   R498 把它加在 `@media(max-width:820px)` 里（见下方该块内注释保留），但**溢出窗口不是 ≤820，
+   而是 761~约1050px** —— 实测（`pw_who_overflows.js @900px`）：
+     · `.tabs` 自然宽 951px，`.head` 内容宽 862px ⇒ 超 89px；
+     · 该档 `.tabs.overflow-x=visible`（媒体查询未命中）⇒ **不能滚动**，
+       而 `.ind-panel{overflow:hidden}` 把它裁掉 ⇒ 右端 tab 的**右界 972 > 容器右界 882**
+       ⇒ 「⚡ 涨跌极端」「💰 市值优先」**看不见也点不到**（= 信息丢失，非"只是不好看"）。
+   修法：基础规则就给 `min-width:0 + max-width:100% + overflow-x:auto`，全档位生效。
+   ★ 宽屏无副作用：内容放得下时 `overflow-x:auto` 不产生滚动条、不改变任何几何
+   （实测 ≥1100px 档与改前**逐像素相同**）。子项 `flex:0 0 auto` 防被压扁。 */
+.ind-panel .head .tabs{min-width:0;max-width:100%;overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch}
+.ind-panel .head .tabs a{flex:0 0 auto}
 .ind-panel .head .tabs a{font-size:12px;padding:4.5px 11px;border-radius:7px;cursor:pointer;color:var(--muted);text-decoration:none;line-height:1.5;transition:background .15s,color .15s;white-space:nowrap}
 .ind-panel .head .tabs a:hover{color:var(--ink)}
 .ind-panel .head .tabs a.on{background:#fff;color:var(--ink);font-weight:700;box-shadow:0 1px 3px rgba(0,0,0,.08)}
@@ -91,6 +125,17 @@ h1{font-size:21px;font-weight:700;letter-spacing:.4px;line-height:1.3}   /* R323
 .ind-row .nm .nmr{display:flex;flex-wrap:wrap;align-items:center;gap:2px 6px;min-width:0}
 .ind-row .nm .nmt{white-space:nowrap;flex:0 0 auto}
 .ind-row .nm .badge2{flex:0 0 auto}
+/* R499: 「成分股信号密度」徽章（`.badge2`，内容形如「顶1(1.4%) 底2(2.9%)」）在窄格会被裁掉一半。
+   ★ 先记清机制（R499 一次**打偏**的教训）：
+     我最初只在 ≤760 媒体查询里加 `white-space:normal` —— **完全无效**。因为该徽章是 `.nmr`
+     （flex 容器）的 flex item，且规则 `flex:0 0 auto` 把它锁成 `flex-shrink:0` + `flex-basis:auto`
+     ⇒ 其宽度恒为 **max-content（实测 134px）**，**没有宽度约束可折行**，`white-space` 形同虚设。
+   ⇒ 正确修法 = **允许收缩**（`flex-shrink:1`，默认 `min-width:auto` 会挡住"缩到 min-content 以下"
+     ⇒ 只折行、不裁字）+ 放开折行（`white-space:normal`，只在**空格处**断，不会把「顶1(1.4%)」拆散）。
+   ★ 为什么放**基础规则**而不是媒体查询：实测该徽章在 **900~约1050px** 也会被裁
+     （`.nm` 轨道 120 vs 内容 134，溢 14px）；≥1100px 放得下 ⇒ 不折行 ⇒ **宽屏零变化**。
+   实测收口：改后 320~1440px 全 17 档 `.nm` 格内被裁 = 0。 */
+.ind-row .nm .badge2{flex:0 1 auto;white-space:normal}
 .ind-row .meta{display:inline-grid;grid-template-columns:max-content;justify-content:end;row-gap:0;font-size:11px;color:var(--muted);line-height:1.6;font-variant-numeric:tabular-nums}
 .ind-row .meta .cap,.ind-row .meta .cnt{grid-column:1;text-align:center;white-space:nowrap}   /* R306→R307→R308: meta 用 grid 列宽=max(cap,cnt 文本宽) 自适应, 两行文本**视觉重心对齐**(center), 不再 min-width 拉死短文本占满列 */
 /* R269: 数据准确性警示 — 源降级/数据陈旧(全局 sticky 横幅) + 个股行情缓存滞后(图表内黄条) */
@@ -238,11 +283,12 @@ h1{font-size:21px;font-weight:700;letter-spacing:.4px;line-height:1.3}   /* R323
    根因: `.tabs` 是 flex 容器、子项 `white-space:nowrap`, 而 flex item 的 `min-width:auto`
    使它被内容撑到 951px(实测 scrollWidth), 超出 `.head` 后被 `.ind-panel{overflow:hidden}` 裁掉;
    且 `.tabs` 自身 `overflow-x:visible` ⇒ **不能滚动, 被裁的 tab 彻底不可达**。
-   ★ 这**不是**本轮引入(改前 9 个 tab 时已有 6 个不可达), 但本轮新增的入口也落在窗口外 ⇒ 一并修。
-   修法: 允许收缩到容器宽 + 自身横向滚动; 子项 `flex:0 0 auto` 防被压扁。
-   宽屏不受影响 —— 只加在窄屏媒体查询里, 基础规则一行未动。 */
-.ind-panel .head .tabs{min-width:0;max-width:100%;overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch}
-.ind-panel .head .tabs a{flex:0 0 auto}}
+   ★ 这**不是**R498 引入(改前 9 个 tab 时已有 6 个不可达), 但 R498 新增的入口也落在窗口外 ⇒ 一并修。
+   ★★ R499 更正: R498 把修法放在本媒体查询(≤820px)里 —— **不够**。实测溢出窗口是 761~约1050px
+   (900px 档 `.tabs` 951 > `.head` 862, 超 89px 且不可滚), 因为 flex item 的 min-width:auto 让
+   `.tabs` 被内容撑到 951px, 而 951px 一直到视口约 1050px 才放得下。
+   ⇒ 该修法**已上移为基础规则**(见文件上方 `.ind-panel .head .tabs` 处), 此处不再重复。 */
+}
 #mainChart{width:100%;height:620px}
 .mini-chart{width:100%;height:300px}
 /* ===== 表格(成分股信号列表) ===== */
@@ -530,12 +576,113 @@ h1{font-size:21px;font-weight:700;letter-spacing:.4px;line-height:1.3}   /* R323
      市值/规模·成分(2) · 近120日走势(4) · 主力净流入(6), 保留
      板块(1) · 走势状态(3) · 动量·位置(5) · 涨跌(7) · RSI·振幅·门禁(8) + 箭头(9)。
      nth-child 序号按 DOM 计, display:none 不改变序号 ⇒ 6 条轨道对应 1/3/5/7/8/9。 */
-  .ind-grid,.ind-row{grid-template-columns:minmax(70px,1.3fr) minmax(58px,.78fr) minmax(86px,1fr) minmax(40px,.5fr) minmax(66px,.86fr) 14px;gap:4px;padding:8px 10px}
+  /* R499: 轨道最小值**按各格实测内容需求**重设（原 70/58/86/40/66 是手估，三项低于内容需求）。
+     ★ 权威读数出处 = `_dbg/r499/pw_verify499.js`（改前 HEAD 版 vs 改后，**同一份夹具同一把尺**）：
+        改前 320px: panel-grid-row 溢出 88 / 64 / 82 · 格内被裁 37 处 · 文本压邻格 20 处
+        改前 375px: 溢出 33 / 9 / 27 · 37 处 · 21 处     ← R498 登记的「9px」就是这里的 grid(表头)，属实
+        改前 412px: 溢出 0 / 0 / 0 · 37 处 · 21 处       ← 容器不溢了，但**格内仍在压/被裁**
+        改前 500px: 溢出 0 / 0 / 0 · 22 处 · 11 处
+        改前 900px: 溢出 panel 105（grid/row 皆 0）· 1 处 · 0 处  ← 桌面档也有，见 `.tabs` 那条 R499 注释
+     ⚠️ 写本注释时的坑（R499 亲踩一次，别再犯）：**CSS 注释里不得出现「星号紧跟斜杠」的相邻序列**
+        （即 U+002A 后面紧接 U+002F —— 这两字符相邻就构成注释终止符）。我原本把上表写成
+        markdown 加粗后紧跟斜杠（加粗的收尾星号 + 后面的斜杠），恰好拼出了该序列
+        ⇒ **注释被提前闭合**，残文被当作 CSS 代码 ⇒ 解析器**整条丢弃紧随其后的轨道规则**
+        （症状：`.ind-row` 算出 9 条轨道、末列 20px，即退回 ≤980 那条模板；`document.styleSheets`
+        里该 media 块少一条规则）。**而花括号计数仍然配平**（注释里的花括号被一起数了）⇒ 查不出来。
+        现成自检：`python3 _dbg/r499/check_css_sanity.py radar/radar.html`（剥离注释后再计数 +
+        报出代码层游离的终止符）。以后改 CSS 注释后必跑一次。
+     ⇒ 「容器溢出」只是表象；**格内被裁 / 文本压邻格**才是主体（改前连续 320~520px 每档都中招）。
+     四处**根因各不相同**（都靠定位脚本量出来，不是猜的）。下表「需求」= 权威口径（最宽一行实画宽
+     + 该格 padding/border，随轨道变化会变，故取保守值）：
+       · `.mp`(动量·位置) 需 **106px**、原轨道只给 86 ⇒ 被裁 20px，且右界压到 `.chg` 的**数字**上
+         （实测重叠 15~16px ⇒ 两组数字会读混）。修法 = 按需求给宽（下方轨道给 114）。
+       · `.chg`(涨跌) 需 **62px**（含 `.vsub`「强于沪 X.Xpp」那行）、原轨道 40 ⇒ 差 22px。
+       · `.ctr`(RSI·振幅) 需 **98px**（`.ctr-top` 是「RSI 徽章 + 58px 定宽温度条」的**不换行 flex**）、
+         原轨道 66 ⇒ 差 32px。修法 = 放开 `flex-wrap`（见下 `.ctr-top` 一条），放开后需求降到 ≤71。
+       · `.nm` 的「成分股信号密度」徽章需 **134px**（max-content）⇒ 见基础规则那条 R499 注释。
+     ★ 各格实测需求（501px 档，min-content/最宽行口径）: `.nm`72 · `.div`**58** · `.mp`106 ·
+       `.chg`62 · `.ctr`≤71 · `.arrow`6。**注意 `.div` 的轨道最小值给的是 79、高于其需求 58** ——
+       这是**有意保留的松量，不必再"优化"**：501px 档实测轨道为 [83,79,114,62,71,14]=423、可用约 427
+       ⇒ **每列都已贴在最小值上**；即便把 `.div` 收到 58、`.mp` 收到 106，全部松量给 `.nm` 也只有约
+       **116px < 134px** ⇒ **电子那枚合并徽章在本档折行是不可避免的**（`flex-shrink:1` 后它会折成
+       2~3 行、信息不丢；这正是期望行为）。**别再为此调轨道**（R499 已用运行时注入试算定案）。
+     ⇒ 按上列最小值合计 74+79+114+62+71+14 = 414 + gap 5×4 + padding 2×10 = **454px**
+       ⇒ 视口 ≥约 490px 才放得下 ⇒ **≤500px 另走紧凑档**（见下方 R499 块），本档覆盖 501~760。 */
+  .ind-grid,.ind-row{grid-template-columns:minmax(74px,1.25fr) minmax(79px,.85fr) minmax(114px,1.3fr) minmax(62px,.62fr) minmax(71px,.95fr) 14px;gap:4px;padding:8px 10px}
+  .ctr-top{flex-wrap:wrap}
   .ind-grid>*:nth-child(2),.ind-row>*:nth-child(2),
   .ind-grid>*:nth-child(4),.ind-row>*:nth-child(4),
   .ind-grid>*:nth-child(6),.ind-row>*:nth-child(6){display:none}
   .ind-row .nm{font-size:13px}
   .ind-row .mp{font-size:9.5px}
+}
+/* R499: ≤500px「紧凑档」—— 修 R498 登记的「窄屏残留溢出」。★ 先写清**真凶量在哪**（定位脚本 _dbg/r499）：
+   375px 改前实测（`pw_verify499.js`）：可用宽 337，`panel` 溢 **33px** / 表头 `.ind-grid` 溢 **9px** /
+   行 `.ind-row` 溢 **27px**（R498 记的"9px"指的是**表头**那一项，属实但不完整）。
+   被推出容器的是**装饰箭头 `›`** 与末格 `.rsi-bar`。
+   ★ 更关键：同类问题**范围比登记的大得多** —— 改前 320/360/375/390/412/440/480/500/501/520 每档都有
+     **格内被裁 22~37 处 + 文本压邻格 10~21 处**（不只 375px，也不只"9px"）。
+   ⇒ 只"再压窄"会把更多字裁掉/叠上 ⇒ 必须**按各格实测内容需求重排**，放不下就**减列**：
+     本档实测需求（最宽一行实画宽口径）: `.nm`72 + `.div`58 + `.mp`**106** + `.chg`**62** + `.ctr`≤71 ；
+     375px 时行宽仅 337 ⇒ 扣 padding 16 + gap ⇒ 轨道额度约 301px ⇒ **五列不可能都读全**
+     （即使全按最低需求也要 369px）。
+   ★ 减哪一列（有依据，不是随手）：**保留 RSI·振幅(`.ctr`)** —— 因为列表**默认排序就是 `rsiL`
+     (RSI 超卖优先)**，藏了它就会出现"排了序却没有排序依据"；故减掉 `动量·位置`（`.mp`，
+     需求最宽 106px 且为最次要的诊断列，桌面端与详情页仍完整可见）。
+   ★ 断点定 500 而不是 400：≤760 档重设后需求合计 438px ⇒ 视口 <约476 放不下 ⇒ 取 500 留余量。
+   ★ 260~500 档同时也让 `.mp` 与箭头退场，剩下的四列在 320px 屏（可用 282）也放得下。
+   本档做法（四处）：
+     ① 隐藏 `.mp`(第5列) 与「›」箭头(第9列) —— **整行本来就可点**（`onclick="pickInd(...)"`），箭头是纯装饰；
+     ② gap 4→3、padding 10px→8px；
+     ③ 轨道按实测需求：74/79/46/剩余给 RSI ⇒ 硬性最小 199 ⇒ 连 320px 屏也放得下；
+        末列用 `minmax(0,1fr)` + `overflow:hidden` 兜底，宁可它自己省略也不把前三列推出去；
+     ④ `.nm` 徽章允许折行由**基础规则**保证（见上方 `.badge2` 那条 R499 注释，全档位生效）。
+   ★ 覆盖实测（改后）：320 / 360 / 375 / 390 / 412 / 440 / 480 / 500 全绿
+     （容器不溢、格内不裁、文本不压）；501~760 走上面 6 列档；761+ 走桌面档 */
+@media(max-width:500px){
+  .ind-grid,.ind-row{grid-template-columns:minmax(74px,1.2fr) minmax(79px,.85fr) minmax(62px,.6fr) minmax(0,1fr);gap:3px;padding:8px}
+  .ind-grid>*:nth-child(5),.ind-row>*:nth-child(5),
+  .ind-grid>*:nth-child(9),.ind-row>*:nth-child(9){display:none}
+  /* 兜底：末列允许收缩并在格内裁（实测本档 ≥360px 不会触发；320px 下靠下一条隐藏温度条） */
+  .ind-grid>*:nth-child(8),.ind-row>*:nth-child(8){min-width:0;overflow:hidden}
+}
+/* R499: ≤360px 追加两条（实测 320px 档才触发，360px 档本身是 0 余量所以一并覆盖以免 1px 抖动）：
+   ① `.ind-rule` 的轮动图例 `.rotleg .lg` 是 `white-space:nowrap` 的 flex 项 ⇒ 最长的图例项
+      （"领先加速 强, 且能突破 · 趋势跟随的入场区(有动能)"）在 282px 容器里放不下，
+      把说明条撑宽 14px 后被 `.ind-panel{overflow:hidden}` 裁掉 —— 与 R497 修 `.bch` 同型（放开 nowrap）。
+   ② `.rsi-bar` 是 58px 定宽装饰性温度条：320px 档轨道只剩 65px，留它会让同格的数字被挤。
+      数字（RSI 值/振幅/门禁）才是判据本体，温度条只是辅助 ⇒ 最窄档只留数字。 */
+@media(max-width:360px){
+  .rotleg .lg{white-space:normal}
+  .ctr-top .rsi-bar{display:none}
+  /* R499 ③：320px 档放不下四列 —— 实测最小需求 74+79+62+58 = 273，加 gap 9 + padding 16 = 298
+     > 可用 282 ⇒ 缺 16px。`.chg` 里的「强于沪 X.Xpp」是**相对强弱的辅助说明**，
+     本格判据本体是**涨跌幅**本身 ⇒ 最窄档只留数字（与本档隐藏 `.rsi-bar` 同一取舍）。
+     隐藏后 `.chg` 需求从 62 降到 46，轨道同步回调 ⇒ 320px 档也放得下。 */
+  .chg .vsub{display:none}
+  /* R499 ④：320px 档收尾 —— `.nm` 的「成分股信号密度」徽章仍被裁 2px。
+     ★ 先按**一手读数**记清机制（不是"再压窄一点"，也不是"手估 74→76"）：
+       `.badge2` 是 `.nmr`（flex-wrap）的 flex 项，其宽度下限 = **自身 min-content**。
+       `white-space:normal` 下断行机会只存在于**空格**与**汉字/拉丁边界** ⇒ 内容
+       「顶19(19.6%) 底1(1.0%)」的 min-content = 「19(19.6%)」宽 + 左右 padding
+       = 61.4 + 14 = **75.4px** > 轨道 74 ⇒ 溢 2px。
+       实测（`_dbg/r499/pw_badge.js`，用 CSS 自身的 `width:min-content` 口径）：
+         顶9(9.9%)=60.6 · 顶19(19.6%) 底1(1.0%)=**75.4** · 顶9(100.0%)=75.4
+         顶99(100.0%)=82.8 · 顶120(45.6%)=82.8 · 顶999(100.0%)=90.2
+       ⇒ 只把轨道加到 76 能兜住**当前数据**，但兜不住「两位计数 + 100.0% 密度」（82.8）
+         与三位计数（90.2）—— 那不是"调对了"，只是**数据恰好没到**。
+     ⇒ 两条一起改，使本档**有界**（而不是"刚好"）：
+       ① 轨道最小 74→76（2px 从末列 `.ctr` 的 1fr 余量里让）。
+          ★ 余量已实测（`pw_fix320.js` 变体扫描）：`.ctr` 轨道 56 时**零被裁**；
+            nm 加到 86 / ctr 降到 46 仍零被裁；直到 nm=96 / ctr=36 才轮到 `.ctr` 被裁 4~7px
+            ⇒ 取 76 后 `.ctr` 还剩约 14px 余量，**不是贴死**。
+       ② 本档收徽章左右内边距 7→5 ⇒ min-content = 最长片段 + 10：
+            两位计数+100.0% = 57.8+10 = 67.8 ✅ · 三位计数 = 65.2+10 = **75.2 < 76** ✅
+          ⇒ 覆盖到三位计数（≥1000 只成分股的板块不存在），本档不再有可被裁的数据形态。
+       ③ 不选"降字号"（9.5px 视觉变差）也不选"插零宽空格让数字断开"（会切断数字、
+          影响复制/文本口径）；此处取舍只动 padding 与轨道，判据本体与文字一字未改。 */
+  .nm .badge2{padding:1px 5px}
+  .ind-grid,.ind-row{grid-template-columns:minmax(76px,1.2fr) minmax(79px,.85fr) minmax(46px,.6fr) minmax(0,1fr);gap:3px;padding:8px}
 }
 /* R393: .stk-grid(行业成分信号列表 名称/信号/趋势/末中枢/笔/中枢/自洽/涨跌/净流入/回撤/›) 窄屏适配
    —— 全文件唯一无 980 变体的 grid 列表: 11列 min 宽约 650px(150+9×40+20+gap), 手机容器(约340px)
@@ -598,6 +745,9 @@ a{color:var(--primary);text-decoration:none}
 <div class="wrap">
   <!-- 一级: 行业总览 -->
   <div id="viewHome">
+    <!-- R499（拍板项③）: 操作链路导航 —— 大盘 → 行业 → 个股/ETF。
+         恒在（不随 #sigRadar 的隐藏分支消失）; 内容由 renderFlow() 填, 与各块同源计数。 -->
+    <nav class="flownav" id="flowNav" aria-label="操作链路导航"></nav>
     <!-- 概要条: 仅 5 个核心指标(剔除旧版冗余) -->
     <div class="bar" id="barRow"></div>
     <!-- R444: 信号实证效力条 —— R443 五年回测结论常驻(顶风险有效 / 底机会未证实), 点击展开证据表 -->
@@ -1006,6 +1156,33 @@ function renderBar(){
     return '<div class="pill '+(p.c||"")+'"'+(p.tip?' title="'+esc(p.tip)+'"':'')+'><div class="l">'+esc(p.l)+'</div><div class="v">'+p.v+'</div></div>';
   }).join("");
   renderEfBar();   // R444: 信号实证效力条(与概要条同源渲染; 计数取 meta.scen_cnt, 与 pill 同口径)
+  renderFlow();    // R499: 操作链路导航(与概要条同批渲染 ⇒ 计数同源同时刻, 不会一先一后)
+}
+/* ===== R499（拍板项③）: 操作链路导航 「大盘 → 行业 → 个股/ETF」 =====
+   三级判据**完全不同**, 混在一起读就是 R498 修掉的「层次混淆」, 故这里用**导航**而非"合并汇总":
+     ① 大盘  = 指数强弱基准 + 横截面温度(概要条 5 指标), 锚 #barRow
+     ② 行业  = 申万一级 + ETF 板块的**板块指数**自身结构, 锚 #indList
+     ③ 个股/ETF = 全市场**成分股**近端背驰信号(顶风险/底机会), 锚 #sigRadar
+   ★ 计数口径与各块同源: ② 取 INDS 键数(与 renderInds 同一集合);
+     ③ 取 SIG 长度(与 renderSigRadar 同一集合)。① 无计数(它是基准, 用不上"个数")。
+   ★ 每枚 chip 的 title 写明**该级判据**, 使导航同时充当"层次图例"(这是加它的主因之一)。 */
+function renderFlow(){
+  var el=$("flowNav");if(!el)return;
+  var nInd=Object.keys(INDS).length;
+  var steps=[
+    {no:"1",nm:"大盘",ct:"",href:"#barRow",
+     tip:"① 大盘层：上证指数强弱基准 + 横截面温度（超买/超卖行业数、站上沿/中枢内/破位、覆盖与门禁数）。点击跳到概要条。"},
+    {no:"2",nm:"行业",ct:nInd?nInd+" 个板块":"",href:"#indList",
+     tip:"② 行业层：申万一级 + ETF 板块**板块指数自身**的段级背驰（st.bc_state.seg）。注意与③的层次区分 —— 实测可完全背离，不可互相推断。点击跳到行业列表。"},
+    {no:"3",nm:"个股/ETF",ct:SIG.length?SIG.length+" 只信号":"",href:"#sigRadar",
+     tip:"③ 个股/ETF 层：全市场**成分股**近端背驰信号（顶风险 / 底机会两组）。这里的计数是**只数**，与②的「板块自身」不是一个层次。点击跳到信号雷达。"},
+  ];
+  el.innerHTML=steps.map(function(s,i){
+    return (i?'<span class="sep">›</span>':'')
+      +'<a class="st" href="'+s.href+'" title="'+esc(s.tip)+'">'
+      +'<span class="no">'+s.no+'</span><span class="nm">'+s.nm+'</span>'
+      +(s.ct?'<span class="ct">'+s.ct+'</span>':'')+'</a>';
+  }).join("")+'<span class="note">按此顺序看：先定大盘环境 → 再找哪个板块自身出结构 → 最后落到具体标的</span>';
 }
 /* ===== R444: 信号实证效力条(R443 回测结论常驻看板) =====
    R443 对看板信号做了五年 point-in-time 回测 —— 直接重放**生产引擎本身**(analyze_one),
@@ -1370,7 +1547,8 @@ function renderSigRadar(){
         ?(nSelfNew
           ? '<span style="cursor:pointer" onclick="sortInds(\'bc\');var _e=document.getElementById(\'indList\');if(_e&&_e.scrollIntoView)_e.scrollIntoView({behavior:\'smooth\',block:\'start\'})" title="板块指数自身的段级背驰中, 信号锚点距末根不超过阈值的数量 —— 与右侧「🎯 近端集中」(成分股里信号最密集的行业)是两个层次。点击按此排序并跳到下方「行业 · ETF 板块」表。">⛓ 板块自身新背驰 <b>'+nSelfNew+'</b> ↓</span>'
           : '<span title="板块指数自身当前无「新」段级背驰(仍有 '+nSelfAny+' 个板块处在活跃段级背驰窗口内) —— 与右侧「🎯 近端集中」(成分股密集度)是两个层次。">⛓ 板块自身 <b>'+nSelfAny+'</b>(无新出)</span>')
-        : '<span style="color:#b0b9c6" title="本轮快照各板块 st 无 bc_state 键 ⇒ 尚未携带板块自身背驰数据(线上仍是 r30 之前的构建), 下一交易日重扫后生效。注意这不等于「所有板块都没有背驰」。">⛓ 板块自身数据未携带</span>')+
+        : '<span style="color:#b0b9c6" title="'+esc('本轮快照各板块 st 无 bc_state 键 ⇒ 尚未携带「板块自身背驰」数据(线上仍是 r30 之前的构建), 下一交易日重扫后生效。'
+            +'注意: 这不等于「所有板块都没有背驰」—— 二者结论相反, 不可互相推断。')+'">⛓ 未携带</span>')+
       (nRes?'<span>💰资金共振 <b style="color:#c92a2a">'+nRes+'</b></span>':'')+
       (nDiv?'<span>⚠️背离警示 <b style="color:#f59f00">'+nDiv+'</b></span>':'')+
       (nTopDn?'<span title="顶信号已从背驰高点回落超过3%的数量(横截面口径, 非时间序列回测)">顶信号已回落&gt;3% <b class="fd">'+nTopDn+'/'+top.length+'</b></span>':'')+
@@ -2110,9 +2288,15 @@ function indRuleHtml(){
   ks.forEach(function(k){var _bs=((INDS[k]||{}).st||{}).bc_state;
     if(_bs===undefined)return;_nBc++;if(_bs&&_bs.seg)_nSelf++;});
   var selfHtml=(_nBc===0)
-    ? '<br><span class="warn">⚠ <b>本轮快照未携带「板块自身背驰」数据</b>(各板块 st 无 bc_state 键) —— '
-      +'线上仍是 P3b-r28 及更早的构建; 下一交易日全市场重扫产出 r30 后自动生效, 此提示随之消失。'
-      +'⚠ 这<b>不等于</b>「所有板块都没有背驰」。</span>'
+    /* R499（拍板后执行）：无数据态**降级为一行**。裁决依据：
+       ① **不隐藏** —— 隐藏=静默，与 R497「消灭两处静默」的口径直接冲突；且用户会把"没数据"
+          读成"没有背驰"（这两件事结论相反，R498 已立此判据）。
+       ② 但也不该占两行 —— 版本号(r28/r30)、生效机制属**实现细节**，移入 title；
+          正文只留「结论 + 最关键的误读澄清」。
+       实测触发窗口：线上 r28 快照（`nBcKey=0`）⇒ 2026-09-21 首次真扫落盘 r30 前都会显示这一行。 */
+    ? '<br><span class="warn" title="'+esc('本轮快照各板块 st 无 bc_state 键 ⇒ 尚未携带「板块自身背驰」数据'
+        +'（线上仍是 P3b-r28 及更早的构建）。下一交易日全市场重扫产出 r30 后自动生效，此提示随之消失。')+'">'
+      +'⚠ 快照未携带「板块自身背驰」数据，<b>这不等于「所有板块都没有背驰」</b>；重扫后自动生效</span>'
     : '<br>⛓ <b>自身背驰</b> = 该板块指数<b>自己</b>的段级背驰(后端 st.bc_state.seg)。信号锚点 = 该背驰<b>笔</b>'
       +'的结束日(<b>不是最后一根 K 线</b> —— 引擎要求笔走完才确认, 故锚点天然滞后几根); 「新」= 锚点距末根不超过阈值交易日。'
       +'当前 <b>'+_nSelf+'/'+n+'</b> 个板块自身有活跃段级背驰。'
