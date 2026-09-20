@@ -1474,7 +1474,11 @@ function renderSigRadar(){
     var f=(_u.ff)||{};
     var fn=f.net,t=s.dir==="top";
     if(fn!=null){if((!t&&fn>0)||(t&&fn<0))nRes++;else if((!t&&fn<0)||(t&&fn>0))nDiv++;}
-    else{nNoFF++;if(nNoFFList.length<12)nNoFFList.push((s.name||"")+"("+s.sym+")");}   // R502: 缺资金流数据 ⇒ res/div 两模式都看不到, 需显式报账
+    /* ★ R502b: 清单上限 12 → 40, 且**超限时 title 必须显式报「仅列前 N 条」**。
+       病灶(自伤): R502 把原上限 12 写成硬截断却**不提示**—— 而实测 nNoFF=10, **余量只有 2 条**,
+       再新增 3 只缺资金数据的票(一只新 ETF/新股上市即可)就会**静默只列前 12 条**。
+       这正是本轮主题「消灭静默」的**同型残留**: 截断本身可以, 截断不报账不行。 */
+    else{nNoFF++;if(nNoFFList.length<40)nNoFFList.push((s.name||"")+"("+s.sym+")");}
     if((s.fresh!=null&&s.fresh<=5))nNear++;
     // R442: 底信号「盘中已破」计数(透明账) — 读 UNI 侧(口径 = universe 的最新扫描状态)。
     //   ★ R501 更正: 原文写「broken 只在 universe 侧有值(signals[].st 未同步 R439 补拉)」—— 实测**已不成立**:
@@ -1718,7 +1722,7 @@ function renderSigRadar(){
       /* ★ R502: **缺资金流数据**的显式账 —— 三模式恒显(横截面事实, 不随模式变)。
          没有它, 用户在 💰资金共振 / ⚠️背离警示 下会**静默少看到** nNoFF 条, 且 200+191 ≠ 401 无处解释。 */
       (nNoFF?'<span style="color:#b0b9c6" title="'+esc("这些信号**没有资金流数据**(ff.net 为 null) ⇒ 无法判定资金共振/背离, 故在 💰资金共振 / ⚠️背离警示 两个模式下**一条都不显示**(那两个模式的判据本身要求资金流)。它们仍可在 🔥最新 模式按结构查看。"
-          +"★ 实测 r28: "+nNoFF+" 条 —— "+nNoFFList.join("、")
+          +"★ 实测 r28: "+nNoFF+" 条 —— "+nNoFFList.join("、")+(nNoFF>nNoFFList.length?" …（此处仅列前 "+nNoFFList.length+" 条，共 "+nNoFF+" 条）":"")
           +"。北交所占多数: 全市场 333 只北交所的 ff 字段**整类为 null**(net 有值 0/333), 属数据源覆盖边界, 非偶发缺失。"
           +"⚠ 这不等于「它们没有信号」—— 二者结论相反, 不可互相推断。")+'">⛔ 无资金数据 <b class="fd">'+nNoFF+'</b></span>':'')+
       /* R455: 不复权源的结构可信度**收敛口径** —— 替代原页脚一句泛化警告("除权日K线可能有假跳空"),
