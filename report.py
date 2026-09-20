@@ -2514,7 +2514,15 @@ def compare_svg(data):
                 yy = py + 13 if yy <= py else py - 13
         placed.append(yy)
         name = data[sym]["name"]
-        p.append(f'<text x="{W - PAD_R + 4}" y="{yy + 4:.1f}" font-size="14" font-weight="600" fill="{IDX_COLORS[sym]}">{name} {val:.0f}</text>')
+        # ★ R506: 原先 x = W - PAD_R + 4 且**左对齐**、未预留文字宽度 —— 最长标签
+        #   「中证500 120」实测宽 81(viewBox 单位) ⇒ 文字右缘 1067 > W(1060)
+        #   ⇒ 被 svg 自身的 overflow:hidden 裁掉约 7 单位（屏幕 1280px 下实测 7.8px），
+        #     末位数字被切一半 ⇒ 用户可能读到**错误的段数**。
+        #   改为**右对齐 + 右缘内收 4 单位**：右缘恒为 1056 < 1060 ⇒ **无论标签多长都不再溢出**
+        #   （有界修法，不依赖"文字宽度 < 某阈值"的假设；PAD_R 保持不动，避免连锁改绘图区）。
+        #   ⚠ 有意变更：标签由左对齐改为右对齐（最长标签左端内移约 12 单位），
+        #     非"零视觉变更"；依据是"完整数字"优先于"左对齐观感"。
+        p.append(f'<text x="{W - 4}" y="{yy + 4:.1f}" text-anchor="end" font-size="14" font-weight="600" fill="{IDX_COLORS[sym]}">{name} {val:.0f}</text>')
     # 图例
     lx = PAD_L + 8
     for sym, d in data.items():
@@ -4624,6 +4632,23 @@ def main():
   .panel {{ background: #fff; border: 1px solid #e5e9f0; border-radius: 10px; padding: 16px 18px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(15,23,42,.04); }}
   .panel h2 {{ font-size: 18px; margin-bottom: 10px; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }}
   .badge {{ font-size: 12px; color: #fff; padding: 2px 10px; border-radius: 999px; font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums; vertical-align: middle; }}
+  /* ★ R506: `.tbl` 内的徽章改为**允许折行** —— 原先 nowrap + 表格 `table-layout:fixed`
+     下 td 列宽固定（实测 1280px: 115px / 375px: 61px），而最长徽章文字 142.9px
+     ⇒ 文字冲出单元格、被 table.tbl 自身的 overflow:hidden（为圆角而设）硬裁
+     （实测 1280px 裁 50.2px = 约 4 个字；375px 裁 103.8px = 文字只剩 27%）
+     ⇒ 用户读到的是「敏感·待确认·结构/统计偏」这类**残缺词**。
+     ⚠ 本文件 CSS 位于 f-string 内 ⇒ 注释里的花括号同样必须写成双写，
+       否则被当成表达式求值（实测 NameError: name 'overflow' is not defined）；
+       此处刻意改用文字描述、不写花括号。
+     `table` 自身的 overflow:hidden 是为了圆角，改它风险大；这里只让**徽章自己折行**：
+     文字完整可读（行高变大是有意代价）。限 `.tbl` 作用域，不影响标题区的状态徽章。 */
+  .tbl .badge {{ white-space: normal; line-height: 1.35; border-radius: 12px; }}
+  .tbl td .badge {{ display: inline-block; max-width: 100%; }}
+  /* ★ R506b（同判据扩到指数卡片）: 375px 实测「信号年轻·待确认 · 末笔7日」宽 160px
+     而 `.chips` 内容盒仅 134px ⇒ 冲出 16.4px 被 `.card` 自身的 overflow:hidden（为圆角）裁掉
+     ⇒ 末尾「日」字被切（`.chips` 虽是 flex-wrap，但**单个**徽章自身 nowrap ⇒ 无处可断）。
+     与 `.tbl` 同款手法：让徽章自己允许折行。 */
+  .chips .badge {{ white-space: normal; line-height: 1.35; border-radius: 12px; }}
   .verdict {{ background: #f0f6ff; border-left: 4px solid {BLUE}; padding: 10px 14px; margin-top: 12px; font-size: 14px; border-radius: 0 6px 6px 0; }}
   .verdict p {{ margin-top: 4px; color: #475569; line-height: 1.7; }}
   .tbl {{ width: 100%; border-collapse: collapse; font-size: 13px; background: #fff; table-layout: fixed; }}
@@ -5229,6 +5254,16 @@ def main():
   .tb-sum b {{ color:var(--up); }}
   .tb-sum--calm {{ background:linear-gradient(180deg,#fafbfc,#f2f6fa); border-color:#e2e8f0; border-left-color:#94a3b8; }}
   .tb-sum--calm b {{ color:#475569; }}
+  /* ★ R506: 横滚容器 —— 复用此前已在 `.tbl` 上验证过的 `.tablescroll` 同款模式。
+     病灶(375px 实测): `.tb-tbl` 内容宽 695.8px, 而 `.tb` 是 overflow:hidden(为圆角)
+     ⇒ 右侧 ~397px(半张表)**永久不可达**: 「距今」列表头被切成「距」、单元格只剩
+     「2 个交」「36 个交」、条形数值 0.648/0.488 整条被切掉、表头长句被切 372.8px。
+     本容器此前**只有窄屏 margin、从未设 overflow** ⇒ 溢出无处可去。
+     ⇒ 补 overflow-x:auto: 溢出部分变为**可横滑到达**(内容不再静默丢失)。
+     有界性: 宽屏下表格不溢出(实测 scrollW == clientW) ⇒ 不产生滚动条、桌面观感不变。 */
+  .tb-tblwrap {{ width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }}
+  .tb-tblwrap::-webkit-scrollbar {{ height: 6px; }}
+  .tb-tblwrap::-webkit-scrollbar-thumb {{ background: #cbd5e1; border-radius: 3px; }}
   /* 数据表：对齐 .tbl（表头渐变 + 悬停 + 等宽数字） */
   .tb-tbl {{ width:calc(100% - 44px); margin:14px 22px 0; border-collapse:separate; border-spacing:0; font-size:13px; }}
   .tb-tbl th {{
