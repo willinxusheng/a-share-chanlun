@@ -384,7 +384,7 @@ footer{color:var(--muted);font-size:11.5px;line-height:1.8;padding:2px 2px 0}
     </tr></thead>
     <tbody id="etfTb"></tbody>
   </table></div>
-  <div class="cnt"><span>沪市 <b id="etfN">–</b> 只合计 <b id="etfTot">–</b> 亿份（深市 3 只自 2026-09-09 起逐日累积、未计入合计）</span><span class="n">当日 Δ 与 5 日累计均为金额口径（Δ份额×当日收盘价）· 全体持有人合计、非国家队专属</span></div>
+  <div class="cnt"><span>沪市 <b id="etfN">–</b> 只合计 <b id="etfTot">–</b> 亿份（深市 <b id="etfSz">–</b> 只自 2026-09-09 起逐日累积、未计入合计）</span><span class="n">当日 Δ 与 5 日累计均为金额口径（Δ份额×当日收盘价）· 全体持有人合计、非国家队专属</span></div>
   <div class="chart" id="chE" style="height:270px;margin-top:12px"></div>
   <div class="fnote" id="etfHint"></div>
   <div class="bt" id="btBox">
@@ -398,7 +398,7 @@ footer{color:var(--muted);font-size:11.5px;line-height:1.8;padding:2px 2px 0}
       <li><b>共振只数修正后无区分度</b>：4 只以上同向净申购 vs 0~1 只，逐日组间差 1.19pp（p=0.013）看似有效，段级只剩 <b>+0.58pp（p=0.345）</b>、块自助 p=0.122 ⇒ <b>不构成信号</b>。「多只同向才像国家队」的说法证据不足。</li>
       <li><b>稳健性检验</b>：① 时滞检验<b>支持</b>主信号——延后 1 / 2 / 3 个交易日买入，段级 Q4-Q1 为 +2.97 / +3.09 / +2.53pp（p=0.033 / 0.012 / 0.029），<b>不衰减反略升</b> ⇒ 排除前视偏差。② 但五分位<b>严重不单调</b>：Q1 −3.14%（仅 6 段，p=0.000）/ Q2 −0.69% / Q3 −0.47% / Q4 −0.77% / Q5 +0.07%（仅 4 段，p=0.967）——<b>信息几乎全部来自「极端净赎回」的负端</b>，正端并无超额收益，故更应读作「极度净赎回后 20 日偏弱」而非「净申购后偏强」。</li>
     </ul>
-    <div class="bt-n">口径与边界：净流入 = Σ(Δ份额 × 当日收盘价)；沪市 7 只（上交所官方长史）参与，深市 3 只无免费长史源、自 2026-09-09 起逐日累积。<b>显著性一律以「事件段级」为准</b>（连续命中日聚成一段，一次事件算一票），并附平稳块自助交叉验证——日度重叠样本的裸 p 值仅作对照、不作判据。样本为单一市场周期（2024-03 起），独立事件段数量有限（主信号仅 7~8 段），<b>不构成投资建议</b>。</div>
+    <div class="bt-n">口径与边界：净流入 = Σ(Δ份额 × 当日收盘价)；沪市 <span id="etfShUse">–</span> 只（上交所官方长史）参与，深市 <span id="etfSzUse">–</span> 只无免费长史源、自 2026-09-09 起逐日累积。<b>显著性一律以「事件段级」为准</b>（连续命中日聚成一段，一次事件算一票），并附平稳块自助交叉验证——日度重叠样本的裸 p 值仅作对照、不作判据。样本为单一市场周期（2024-03 起），独立事件段数量有限（主信号仅 7~8 段），<b>不构成投资建议</b>。</div>
   </div>
 </div>
 
@@ -430,7 +430,7 @@ footer{color:var(--muted);font-size:11.5px;line-height:1.8;padding:2px 2px 0}
     <tbody id="tbody"></tbody>
   </table></div>
   <div class="hint">口径：本模块是<b>定期报告快照</b>——「占流通股本」为<b>百分数</b>（57.14 即 57.14%）；「较上季末」按<b>同主体</b>比对（若改用全池合计口径，会混入「主体进出」伪影——实测某票主体数 0→2 时合计口径虚增数千百分点，同主体口径为 0）。<b>季度环比变动无稳定预测力</b>：单季增持−减持 +1.08pp（p=0.48）；延长持有 2 季 +2.76pp，但 4 季归零、8 季 −4.22pp 反向（噪声形态）——<b>看结构可以，不构成择时信号</b>。</div>
-  <div class="cnt"><span>共 <b id="topNS">–</b> 只个股 · <b id="topN">–</b> 条主体持仓（最新报告期口径 · 最多展示 60 条）</span><span class="n">点击列头排序 · 动作按占流通比口径判定（送转免疫）</span></div>
+  <div class="cnt"><span>共 <b id="topNS">–</b> 只个股 · <b id="topN">–</b> 条主体持仓（最新报告期口径）<b id="topCut"></b></span><span class="n">点击列头排序 · 动作按占流通比口径判定（送转免疫）</span></div>
 </div>
 
 <div class="card" id="sec-trend">
@@ -666,13 +666,24 @@ function drawTop(top,stocks,f){
   }
   drawTopRows();
 }
+/* ★★ R503: 主表渲染上限（原为函数内硬编码 `rows.slice(0,60)`）。
+   病灶: 账(topN)报的是 `rows.length`(**全集**), 而表只渲染 60 行
+   ⇒ 实测 national.json top=**65** 条时: 表 60 行 / 账写「65 条」⇒ **用户数表格对不上账**,
+     且旧文案只写「最多展示 60 条」**不报被略去几条**(信息不可自证)。
+   ★ 与 R502 同族(视图截断 vs 账口径 不一致), 但形态相反:
+     R502 = 子段截断但账不报 ⇒ 本轮 N1 = **账报全集而视图截断**。
+   统一判据(R503): **凡「只显示前 N」处, 当可用总数 M>N 时必须让用户知道 M**。
+   处置(有界): ①上限 60 → 200 (覆盖当前 65, 留足余量; 表为 max-height 滚动区, 不撑破布局)
+              ②仍超限 ⇒ 在 topCut 插槽显式报「另 K 条未列出」 */
+var TOP_ROWS_MAX=200;
 function drawTopRows(){
   var top=TOPCTX.top,stocks=TOPCTX.stocks,f=TOPCTX.f,tb=document.getElementById('tbody');
   var rows=top.filter(function(r){return f==='all'||r.bucket===f;});
   if(!rows.length){
     tb.innerHTML='<tr class="empty"><td colspan="6">无命中（该主体本期未出现在池内前十大流通股东）</td></tr>';
     document.getElementById('topNS').textContent='0';
-    document.getElementById('topN').textContent='0';return;
+    document.getElementById('topN').textContent='0';
+    var _ce0=document.getElementById('topCut');if(_ce0)_ce0.textContent='';return;   /* R503 */
   }
   if(S1.k){var dir=S1.d;
     rows.sort(function(a,b){
@@ -681,7 +692,7 @@ function drawTopRows(){
       return (va-vb)*dir;
     });
   }
-  var vis=rows.slice(0,60),maxR=0;
+  var vis=rows.slice(0,TOP_ROWS_MAX),maxR=0;   /* R503: 原 slice(0,60) ⇒ 见 TOP_ROWS_MAX 注释 */
   vis.forEach(function(r){if(r.free_ratio&&r.free_ratio>maxR)maxR=r.free_ratio;});
   var rDen=maxR>0?maxR:1;   /* (R421) 除零守卫: 占比全缺/全为 0 时避免 width:NaN% */
   tb.innerHTML=vis.map(function(r,i){
@@ -696,8 +707,24 @@ function drawTopRows(){
       '<td class="num">'+chgCell(r,stocks)+'</td></tr>';
   }).join('');
   var ncodes={};rows.forEach(function(r){ncodes[r.code]=1;});
-  document.getElementById('topNS').textContent=Object.keys(ncodes).length;
+  var nNS=Object.keys(ncodes).length;
+  document.getElementById('topNS').textContent=nNS;
   document.getElementById('topN').textContent=rows.length;
+  /* ★ R503: 显式报账 —— 账(topN / topNS)是**全集事实**, 而表只渲染前 TOP_ROWS_MAX 行;
+     差额必须自证(否则用户数表格行数对不上账, 会误以为数据错)。
+     ★ 一并报「可见范围内的个股数」: 被略去的行若含**新代码**, 则 topNS 也会虚高
+       (用户按 topNS 去数可见个股同样对不上) ⇒ 两个数都要能对账。
+     ★ 不超限时**清空**, 不留「0 条」噪音(常态下这行应当完全不可见)。 */
+  var cutEl=document.getElementById('topCut');
+  if(cutEl){
+    if(rows.length>vis.length){
+      var vcodes={};vis.forEach(function(r){vcodes[r.code]=1;});
+      var vNS=Object.keys(vcodes).length;
+      cutEl.textContent='（此处按当前排序显示前 '+vis.length+' 条'
+        +(vNS<nNS?('，含 '+vNS+' 只个股'):'')
+        +'；另 '+(rows.length-vis.length)+' 条未列出）';
+    } else cutEl.textContent='';
+  }
 }
 
 var EV=[
@@ -812,7 +839,7 @@ function drawEtfRows(){
   var rows=pool.filter(function(p){return (S[p.code]||[]).length;});
   if(!rows.length){
     tb.innerHTML='<tr class="empty"><td colspan="7">暂无快照 · 每交易日 16:00 盘后自动打点累积</td></tr>';
-    document.getElementById('etfTot').textContent='–';document.getElementById('etfN').textContent='0';return;
+    document.getElementById('etfTot').textContent='–';document.getElementById('etfN').textContent='0';document.getElementById('etfSz').textContent='0';return;
   }
   if(S2.k){var dir=S2.d;
     rows.sort(function(a,b){
@@ -822,8 +849,11 @@ function drawEtfRows(){
     });
   }
   /* 合计/占比口径与图表一致: 仅沪市 (深市无长史、逐日累积, 计入会与曲线/回测打架) */
-  var tot=0,shN=0;
-  rows.forEach(function(p){if(p.market==='sz')return;var a=S[p.code]||[];if(a.length){tot+=a[a.length-1][1];shN++;}});
+  /* ★ R503: 深市只数**现算** —— 原卡片文案把「深市 3 只」写死, 而 meta.pool 本就自带
+     market 字段(实测 sh=7/sz=3)。上游增删 ETF 时硬编码文案会**静默失真**(用户看到 3 只、
+     表里其实 4 只), 属 R502「消灭静默」同型残留。沪市侧由 shN 动态填 #etfN, 此处补深市。 */
+  var tot=0,shN=0,szN=0;
+  rows.forEach(function(p){if(p.market==='sz'){szN++;return;}var a=S[p.code]||[];if(a.length){tot+=a[a.length-1][1];shN++;}});
   var maxPct=0;
   rows.forEach(function(p){if(p.market==='sz')return;var a=S[p.code],l=a[a.length-1],pct=tot?l[1]/tot*100:0;if(pct>maxPct)maxPct=pct;});
   tb.innerHTML=rows.map(function(p,idx){
@@ -858,6 +888,7 @@ function drawEtfRows(){
   }).join('');
   document.getElementById('etfTot').textContent=fmtE(tot/1e8);
   document.getElementById('etfN').textContent=shN;
+  document.getElementById('etfSz').textContent=szN;   /* R503: 现算深市只数 */
 }
 function drawEtfChart(e){
   var meta=e.meta||{},S=e.series||{},pool=meta.pool||[];
@@ -924,7 +955,20 @@ function drawEtfChart(e){
     ]};
   chE.setOption(oE);
   window.addEventListener('resize',function(){chE.resize();});
-  hint.innerHTML='数据日期 <b>'+esc(meta.data_date||meta.latest||'-')+'</b> · 已积累 '+dates.length+' 个交易日 · '+use.length+' 只沪市宽基参与合计（深市 3 只无免费长史源，自 2026-09-09 起逐日累积，未计入曲线）。'+
+  /* ★ R503: 深市只数**现算**(原写死「深市 3 只」)。口径与 drawEtfRows 的 szN 一致 =
+     meta.pool 中 market==='sz' 且**已有数据**的只数 —— 上游增删 ETF 时提示自动跟随。
+     (「自 2026-09-09 起逐日累积」是深市通道的**历史起点**, 固定不变, 故保留硬编码。) */
+  var szN2=pool.filter(function(p){return p.market==='sz'&&(S[p.code]||[]).length;}).length;
+  /* ★ R503(补漏): 「口径与边界」段落(.bt-n)里的沪/深只数**同属"描述当前口径"的可变计数** ——
+     上一轮只改了卡片与 hint, 漏了这里(漏因: 上次 Grep 把该行标为 [Omitted long matching line],
+     长行输出被工具省略 ⇒ 没读到内容, 误以为只有 3 处。教训: **工具的输出截断会伪装成已核查**)。
+     用 <span>(非 <b>)包裹 ⇒ 不触发 .bt-n 的强调样式, 零视觉变更; 初值写 '–' 而非 '7'/'3',
+     这样即使本函数未跑到(数据未加载)也不会回落到假值。 */
+  var _eShU=document.getElementById('etfShUse'),_eSzU=document.getElementById('etfSzUse');
+  if(_eShU)_eShU.textContent=use.length;
+  if(_eSzU)_eSzU.textContent=szN2;
+  hint.innerHTML='数据日期 <b>'+esc(meta.data_date||meta.latest||'-')+'</b> · 已积累 '+dates.length+' 个交易日 · '+use.length+' 只沪市宽基参与合计'+
+    (szN2?('（深市 '+szN2+' 只无免费长史源，自 2026-09-09 起逐日累积，未计入曲线）'):'（深市暂无标的参与曲线）')+'。'+
     '<div style="margin-top:5px;line-height:1.75"><b>怎么读</b>：'+
     '<b>净申赎</b>=当日申购金额−赎回金额（Δ份额×当日收盘价），是 ETF <b>全体持有人</b>的合计净额，<b style="color:#b45309">不是国家队专属持仓</b>——汇金只是其中最大的参与者之一。'+
     '红柱=净申购、绿柱=净赎回。<b style="color:#c026d3">品红线</b>=最近 20 个交易日累计（回测：20 日累计信号最强，单日无预测力）、<b>橙线</b>=最近 5 个交易日累计、<b style="color:#185FA5">蓝线</b>=全池份额（左轴，亿份）。拖拽底部滑条查看历史。</div>';

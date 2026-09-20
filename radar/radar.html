@@ -1667,6 +1667,13 @@ function renderSigRadar(){
     var indTop=[];
     Object.keys(indAgg).forEach(function(k){indTop.push({k:k,n:indAgg[k]});});
     indTop.sort(function(a,b){return b.n-a.n||(a.k<b.k?-1:1);});
+    /* ★ R503: Top-N 提示必须能回答「一共有多少」。
+       本行原只列最密集的 2 个行业且**不报总数** ⇒ 实测 r28 有 **12 个**行业带近5日信号
+       (计算机3 建筑材料2 机械设备2 食品饮料1 环保1 通信1 传媒1 国防军工1 有色金属1
+        商贸零售1 电子1 交通运输1), 用户看到「🎯 近端集中 计算机 3 · 建筑材料 2」会
+       读成「只有这两个行业有信号」—— 略去 10 个且无处解释(R502「消灭静默」同族)。
+       ⇒ 保留 Top2(简洁是刻意的), 但当总数 > 2 时在括号里报出总数。 */
+    var nIndAgg=indTop.length;
     indTop=indTop.slice(0,2);
     /* R498: 板块**自身**段级背驰计数 —— ⚠️ 与上面的 indAgg(成分股信号密集度) 是两个层次, 不可混。
        用途: 用户流程是「主看板看大盘 → 雷达看行业 → 看 ETF → 看个股」, 本条是"行业"那一环的入口指引 ——
@@ -1733,7 +1740,11 @@ function renderSigRadar(){
         +"⚠ 判据边界: 只识别「单日涨跌幅超板块涨跌停上限」的大比例除权(送转/大额分红/份额折算), 中小分红(约2~5%)检不出 —— "
         +"但其幅度与正常日波动(全市场振幅中位≈2.7%)同量级, 对笔/中枢无实质影响。")+'">不复权源 '
         +'<b>'+(nSina-nExR)+'/'+nSina+'</b> 近一年无除权'+(nExR?' · <b class="fd">'+nExR+' 只存疑</b>':'')+'</span>':'')+
-      ((indTop.length&&indTop[0].n>=2)?'<span title="近5日背驰信号最密集的行业(顶+底合计) — 板块效应/资金合力提示">🎯 近端集中 <b>'+indTop.map(function(o){return o.k+' '+o.n;}).join(' · ')+'</b></span>':'')+
+      ((indTop.length&&indTop[0].n>=2)?'<span title="'+esc("近5日背驰信号最密集的行业(顶+底合计) — 板块效应/资金合力提示。"
+        +"★ 此处只列**最密集的 "+indTop.length+" 个**; 括号内是**带近5日信号的全部行业数**(R503 补, 此前不报总数 ⇒ 会被读成"
+        +"「只有这两个行业有信号」)。完整分布见下方行业表按「📊 信号集中」排序。")+'">🎯 近端集中 <b>'
+        +indTop.map(function(o){return o.k+' '+o.n;}).join(' · ')+'</b>'
+        +(nIndAgg>indTop.length?'（共 '+nIndAgg+' 个行业）':'')+'</span>':'')+
       (inTop?'<span>主力净流入 <b class="fn">'+esc(inTop.k)+' '+ffTxt(inTop.nf)+'</b></span>':'')+
       (inBot?'<span>净流出 <b class="fd">'+esc(inBot.k)+' '+ffTxt(inBot.nf)+'</b></span>':'')+
       '</div>';
