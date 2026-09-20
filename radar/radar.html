@@ -423,17 +423,24 @@ h1{font-size:21px;font-weight:700;letter-spacing:.4px;line-height:1.3}   /* R323
 @media(max-width:980px){.sigrad .sbody{grid-template-columns:1fr}.sigrad .sgrp+.sgrp{border-left:0;border-top:1px dashed #e8edf4}}
 @media(max-width:980px){.sigrad .srow{grid-template-columns:minmax(94px,1.1fr) .7fr 52px minmax(168px,max-content);padding:7px 12px}.sigrad .gtt{padding:6px 12px}.sigrad .shead{padding:12px}}
 /* R500: ≤520px 信号行右裁 —— R499 只修了行业面板(.ind-panel), 漏了信号雷达(#sigRadar)。
-   同一类病、同一套方法论: 第 4 列是 minmax(...,max-content) 被内容撑到 182px, 四列需求合计 390px,
-   而 .sigrad{overflow:hidden} ⇒ 视口不足时右侧【被裁】而非可滚动。实测定罪(改前, 同一份 r28 真产物):
-     档位     面板可用宽  行宽   被裁量   被裁的是什么
-     412px      374      393    7px    「▼ 1.6%」偏差值右缘
-     375px      337      393   44px    偏差值 + 量线半截
-     360px      322      393   59px    偏差值 + 量线
-     320px      282      393   「99px」 .right 整列(218~400)只剩到 301 ⇒ 偏差值/量线/月线徽章【全不可见】
-   ★ 为什么这条要紧: 「现价较信号位偏离」正是判断"该不该低吸 / 是否已追高"的判据本体, 而旭总常年出差
-     无笔记本、手机为主(375~412px) ⇒ 关键数字在其主要设备上被裁。
+   同一类病: 第 4 列是 minmax(...,max-content) 被内容撑到 182px, 四列需求合计 390px,
+   而 .sigrad{overflow:hidden} ⇒ 视口不足时右侧【被裁】而非可滚动。
+   ★★ 实测定罪(改前, 同一份 r28 真产物)。口径 = **逐子项 box** 与**裁剪祖先内容盒**比 ——
+      ⚠ 不要只看 `.right` 盒! 见下方「口径陷阱」。
+        视口   可见限  行右缘越界  .right盒被裁  .dev(偏差值)  .spk(量线)      .mtag(月线档)
+        412px   394      18px        6px          完整         完整(100%)      完整
+        390px   372      40px       28px          完整         裁8px (92%)     完整
+        375px   357      55px       43px          完整         裁23px(79%)     完整
+        360px   342      70px       58px          完整         裁38px(67%)     完整
+        320px   302     110px       98px          完整         裁78px(30%)     完整
+   ⚠⚠ 口径陷阱(本轮自己先踩、后更正): `.right{justify-content:flex-end}` ⇒ 内容**向左溢出**,
+      所以「`.right` 盒被裁 98px」**不等于**「里面的字被裁」—— 只看盒会得出**方向相反**的结论。
+      初版据此写成「320px 偏差值/量线/月线徽章全不可见」, 实测**全错**: `.dev` 与 `.mtag` 全程完整,
+      真正被裁的**只有 `.spk`(量线)**。⇒ 判"哪一项被裁多少"必须**逐子项**量(并按 R500 规则 54 用 Range 复核文本)。
+   ★ 结论(更正后): 实质信息丢失 = **量线从 390px 起被裁、320px 只剩 27~30%**(辅助视觉);
+     判据本体「偏差值」与「月线档」在 320~412px 全档**始终可见**。越界量为行右缘 18→110px。
    ★ 可减项按「判据本体优先」排序(与 R499 决定减哪一列同一原则), 共减三处, 合计 ≈ 390 → 261:
-     · 量线 spark(72px) = 辅助视觉, 与 R499 藏 .rsi-bar 同一取舍 ⇒ 窄屏隐藏
+     · 量线 spark(72px) = 辅助视觉(且 ≤390px 本就被裁掉一截, 只留半张图更难看) ⇒ 窄屏**整体隐藏**
      · .dev 的 min-width:80px = R409 为对齐硬设的值, 而文本实测仅需 ~45px ⇒ 窄屏放开收缩
      · .tag-fresh.new(1~3 天的黄色「N天」徽章) 与左列「N天前」文字重复 ⇒ 隐藏
    ⚠ 只藏 .tag-fresh.new; .tag-fresh.hot(🔥 当日)【必须保留】—— 它是"当天新出"的唯一标识, 与"文字重复"是两回事。
