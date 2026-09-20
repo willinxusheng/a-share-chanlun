@@ -422,6 +422,29 @@ h1{font-size:21px;font-weight:700;letter-spacing:.4px;line-height:1.3}   /* R323
 .sigrad .srow .right .spk .mtag{flex:0 0 auto}
 @media(max-width:980px){.sigrad .sbody{grid-template-columns:1fr}.sigrad .sgrp+.sgrp{border-left:0;border-top:1px dashed #e8edf4}}
 @media(max-width:980px){.sigrad .srow{grid-template-columns:minmax(94px,1.1fr) .7fr 52px minmax(168px,max-content);padding:7px 12px}.sigrad .gtt{padding:6px 12px}.sigrad .shead{padding:12px}}
+/* R500: ≤520px 信号行右裁 —— R499 只修了行业面板(.ind-panel), 漏了信号雷达(#sigRadar)。
+   同一类病、同一套方法论: 第 4 列是 minmax(...,max-content) 被内容撑到 182px, 四列需求合计 390px,
+   而 .sigrad{overflow:hidden} ⇒ 视口不足时右侧【被裁】而非可滚动。实测定罪(改前, 同一份 r28 真产物):
+     档位     面板可用宽  行宽   被裁量   被裁的是什么
+     412px      374      393    7px    「▼ 1.6%」偏差值右缘
+     375px      337      393   44px    偏差值 + 量线半截
+     360px      322      393   59px    偏差值 + 量线
+     320px      282      393   「99px」 .right 整列(218~400)只剩到 301 ⇒ 偏差值/量线/月线徽章【全不可见】
+   ★ 为什么这条要紧: 「现价较信号位偏离」正是判断"该不该低吸 / 是否已追高"的判据本体, 而旭总常年出差
+     无笔记本、手机为主(375~412px) ⇒ 关键数字在其主要设备上被裁。
+   ★ 可减项按「判据本体优先」排序(与 R499 决定减哪一列同一原则), 共减三处, 合计 ≈ 390 → 261:
+     · 量线 spark(72px) = 辅助视觉, 与 R499 藏 .rsi-bar 同一取舍 ⇒ 窄屏隐藏
+     · .dev 的 min-width:80px = R409 为对齐硬设的值, 而文本实测仅需 ~45px ⇒ 窄屏放开收缩
+     · .tag-fresh.new(1~3 天的黄色「N天」徽章) 与左列「N天前」文字重复 ⇒ 隐藏
+   ⚠ 只藏 .tag-fresh.new; .tag-fresh.hot(🔥 当日)【必须保留】—— 它是"当天新出"的唯一标识, 与"文字重复"是两回事。
+   ⚠ 判据本级一律不动: 方向(顶/底背驰) / 背离强度(面X) / 偏差值(dev) / 新鲜度(左列文本) / 月线档(mtag)。 */
+@media(max-width:520px){
+  .sigrad .srow{grid-template-columns:minmax(0,1.2fr) auto auto minmax(0,max-content);padding:7px 10px}
+  .sigrad .srow .right{padding-right:0;gap:6px}
+  .sigrad .srow .right .spk svg{display:none}
+  .sigrad .srow .right .dev{min-width:0;flex:0 1 auto}
+  .sigrad .srow .tag-fresh.new{display:none}
+}
 /* ===== R305: 逆向观察池(首页中部, 超窗底背驰埋伏候选) ===== */
 .revpool{margin-top:16px;background:var(--card);border:1px solid #d9e2ef;border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden;border-left:3px solid #18a058}
 .revpool .phead{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid #eef2f7;flex-wrap:wrap}
@@ -1424,7 +1447,7 @@ function renderSigRadar(){
   var box=$("sigRadar");
   if(!box)return;
   var top=[],bot=[];
-  var nRes=0,nDiv=0,nNear=0,nTopDn=0,nBotCl=0,nBotLive=0,nBotBk=0;   // R442: nBotBk=底信号中「盘中已击穿背驰低点」(缠论一买已废)的数量
+  var nRes=0,nDiv=0,nNear=0,nTopDn=0,nBotCl=0,nBotLive=0,nBotBk=0,nTopInv=0;   // R442: nBotBk=底信号中「盘中已击穿背驰低点」(缠论一买已废)的数量 · R500: nTopInv=顶信号中「已上破背驰高点」(见顶判据已证伪)的数量
   var nSina=0,nExR=0;   // R455: nSina=信号票走新浪不复权价的数量 · nExR=其中近一年有除权记录(需点名)的数量
   SIG.forEach(function(s){
     if(!s||!s.sym)return;
@@ -1438,8 +1461,9 @@ function renderSigRadar(){
     if(!t){var _bbk=((UNI[s.sym]||{}).st||{}).bottom_bc;if(_bbk&&_bbk.broken)nBotBk++;}
     // R288b: 兑现速览(横截面口径, 现价相对信号位) — 顶信号已回落>3%=方向兑现; 底信号仍贴近低点(0~8%)=待启动
     // R289: 底 dv<0(已跌破背驰低点=结构失效)不计入"待启动"
+    // R500: 顶 dv>0(已上破背驰高点 = 见顶判据被证伪, 与 R454 严格 `>` 同源) 单列透明账 —— 与底侧 nBotBk 对称。
     var dv=sigDev(s,s.st||{});
-    if(dv!=null){if(t){if(dv<=-3)nTopDn++;}else{if(dv>=0)nBotLive++;if(dv>=0&&dv<=8)nBotCl++;}}
+    if(dv!=null){if(t){if(dv<=-3)nTopDn++;if(dv>0)nTopInv++;}else{if(dv>=0)nBotLive++;if(dv>=0&&dv<=8)nBotCl++;}}
     if(s.dir==="top")top.push(s);else if(s.dir==="bottom")bot.push(s);
   });
   var gRes=function(s){var fn=(UNI[s.sym]||{}).ff||{};fn=fn.net;if(fn==null)return false;return (s.dir==="bottom"&&fn>0)||(s.dir==="top"&&fn<0);};
@@ -1469,17 +1493,29 @@ function renderSigRadar(){
   //  P0: 破位不再混入"机会"主区(默认🔥最新 下沉灰显段, 防误买失效结构 — 东阿阿胶案例)
   //  P1: dev>8% 同沉非低吸区(追高) | res/div 模式保留全量(资金视角, 破位+流入=骗线警示仍有价值)
   //   ⚠️ 原文此处写「顶组无失效概念不受影响」—— **R454 后该前提已不成立**(顶侧已有"已上破=判据被证伪"
-  //     语义)。但**本轮只改标记与文案, 不动排序/分组**: `ptDz` 仍把 dv>=0 归 0 段(主区), 即"已失效"
-  //     的顶信号依旧留在主区、只是行内多了「顶失效」徽章。是否要像底组那样把"已失效"单独成段/剔除,
-  //     属**新决策**(需证据: 判据失效的后续走势是否与对照组不可区分? 参 R442「剔除=丢信息+抖动 ⇒
-  //     分组才是正解」) —— **未拍板前勿改**。见 `REF-r-conclusions.md` 待议项。
+  //     语义)。R454 当时**只改标记与文案, 不动排序/分组**（属新决策, 需证据）。★ **R500 已拍板并落地**
+  //     （旭总「待我拍板的事按照你的建议执行」+ 明确要求「针对买卖信号深度检查还有什么需要优化」）：
+  //     本轮照 **R442 通法**（「剔除 = 丢信息 + 抖动 ⇒ 分组才是正解」）把"已失效"**独立成段**（不剔除）。
+  //   ★★ 实测定罪（线上 r28 真产物 · asof 2026-09-18 · 401 条信号 · _dbg/r500/audit_buy_sell.py）：
+  //     · 顶信号 352 条按 dev 细分：已兑现(dv≤-3) 277 · **已失效(dv>0) 45** · 释放中(-3<dv<0) 29 ·
+  //       **真正"贴住高点未破"(dv==0) 仅 1 条**
+  //     · ⇒ `ptDz` 段 0（原称"风险未释放"）共 **46 条里 45 条(97.8%) 判据已失效** —— **段名与内容完全背离**
+  //     · ⇒ all 模式主区 75 条中 45 条(60%) 是失效结构；**默认折叠可见的前 5 条里 4 条是已失效**
+  //       （#1 三峡新材 +1.83% / #3 招商轮船 +3.04% / #4 建研院 +0.20% / #5 太力科技 +1.16%）
+  //     · 与 **R439 修底侧同型**：底侧当时的病灶正是"精选榜首 #1/#3 均为已破票 = 用户第一眼看到失效结构"
+  //   ★ 为什么顶侧用**独立子段**而不是照抄底侧的**剔除**(待议 #8 的第 ③ 条)：
+  //     底侧 dv<0 = **跌破买点低点** ⇒ 买点逻辑破坏, 照着买就是错的 ⇒ 剔除(防误买);
+  //     顶侧 dv>0 = **上破看跌位** ⇒ 看跌判断被否掉, 它不指示"该做什么", 但要知道"这里曾看跌、现已被否"
+  //     ⇒ **证伪信息有独立价值** ⇒ 移到独立子段展示(防误判), 不静默丢弃。
   var botDz=function(s){var d=sigDev(s,s.st||{});if(d==null||s.dir!=="bottom")return 0;return d<0?2:(d>8?1:0);};
   // R410: 顶组三段(与底组 botDz 对称的失效守卫) — 0=风险未释放(现价仍≥背驰高点 dv>=0) 1=释放中(已回落0~3%)
   //   2=已兑现(回落>3% = 方向已应验; 口径同 R288b 摘要 nTopDn)。深度回测实证: r11 283 只顶信号 172 只(61%)
   //   已从背驰高点回落>3% 却仍以"风险"姿态列前=马后炮(信号兑现后重复播报, r6→r11 交集 219/223 连续两天同批);
   //   底组早于 R380-R382 有破位失效守卫(破位沉灰显→all剔除), 顶组长缺对称物 — 本守卫合上。
-  var ptDz=function(s){var d=sigDev(s,s.st||{});if(d==null||s.dir!=="top")return 0;return d<=-3?2:(d<0?1:0);};
-  var pt=null,pb=null,pbSub=null;
+  // R500: 补第 4 段 3=已失效(dv>0)。判据**严格 >**（与 R454 完全同源: dv==0 是"贴住高点未破", 判据仍成立
+  //    ⇒ 归段 0; 只有 dv>0 = 真上破才是证伪）。段 3 只在 all 模式从主区**移出到子段**, 不剔除。
+  var ptDz=function(s){var d=sigDev(s,s.st||{});if(d==null||s.dir!=="top")return 0;return d<=-3?2:(d<0?1:(d>0?3:0));};
+  var pt=null,pb=null,pbSub=null,ptSub=null;
   if(curSigMode==="all"){
     var pbA=bot.filter(function(s){return botDz(s)===0;});
     pb=pick(pbA);
@@ -1488,13 +1524,16 @@ function renderSigRadar(){
     pbSub=null;
     // R410: 已兑现顶信号从 all 主区剔除(与 R382 底组同款决策 — 只保留未释放+释放中, 有操作价值的风险警示);
     //   摘要行"顶信号已回落>3% 172/283"保留透明账; res/div 资金视角全量保留(已兑现+资金背离=警示仍有价值)。
-    pt=pick(top.filter(function(s){return ptDz(s)!==2;}));
+    // R500: 主区改为**显式枚举段 0/1**（原 `!==2` 会把新增的段 3「已失效」一起收进主区 —— 这正是要修的病）;
+    //   段 3 移入独立子段 ptSub（**不剔除**，见上方 ptDz 注释第 ③ 条)。res/div 资金视角仍全量保留原序。
+    pt=pick(top.filter(function(s){return ptDz(s)===0||ptDz(s)===1;}));
+    ptSub=pick(top.filter(function(s){return ptDz(s)===3;}));
   }else{pt=pick(top);pb=pick(bot);}
   if(!pt.length&&!pb.length&&curSigMode==="all"){box.style.display="none";return;}
   box.style.display="";
   var emptyTxt=curSigMode==="all"?"当前全市场近端暂无该类信号 · 有信号时自动上榜":(curSigMode==="res"?"当前筛选下无「资金共振」信号(底信号+净流入/顶信号+净流出) · 切回🔥最新查看全部":"当前筛选下无「资金背离」信号(底+流出/顶+流入) · 切回🔥最新查看全部");
-  var sortTxt=curSigMode==="all"?"按最新触发排序 · 结构已破者沉底":(curSigMode==="res"?"按资金同向金额降序":"按背离资金量降序");
-  function grp(ic,title,rows,subRows){
+  var sortTxt=curSigMode==="all"?"按最新触发排序 · 结构失效者不进主区":(curSigMode==="res"?"按资金同向金额降序":"按背离资金量降序");
+  function grp(ic,title,rows,subRows,subMeta){
     /* R447: ETF 同指数折叠 —— 顶/底两组各自折叠(同指数只列一只, 保留组内当前排序最优者)。
        一个指数常有十几家公司各发一只 ETF 跟踪 ⇒ 信号天然重复计数(实测 11 只顶信号里
        6 只是「自由现金流」系列、3 只石油系 ⇒ 实际仅 3~4 个独立标的)。折叠数如实披露在标题。 */
@@ -1502,8 +1541,26 @@ function renderSigRadar(){
     var _nF=(_r2.folded||0)+((_s2&&_s2.folded)||0);
     rows=_r2;subRows=_s2;
     if(!rows.length&&(!subRows||!subRows.length))return '<div class="sgrp"><div class="gtt"><span class="ic">'+ic+'</span>'+title+' <span class="n">0</span></div><div style="padding:14px 16px;font-size:11px;color:#b0b9c6;line-height:1.7">'+esc(emptyTxt)+'</div></div>';
-    // R380: 非低吸区灰显段(破位/已走高) — 与"机会"主区视觉断开, 仅跟踪不作低吸参考
-    var subHtml=(subRows&&subRows.length)?'<div class="sdead-sep" title="已跌破背驰低点(破位·结构失效)或已较背驰低点走高超过8%(追高)—— 已沉出「机会」主区, 仅作失效/追高跟踪, 不属低吸参考">🔍 非低吸区 · 破位/已走高 '+subRows.length+' 只 · 跟踪不参与</div>'+subRows.map(function(s){return sigRow(s,{sub:true});}).join(''):'';
+    /* R380/R500: 子段 —— 与主区视觉断开。**两侧语义不同, 由调用方以 subMeta 声明**(禁"统一")：
+       · 底侧(R380, 默认值): 破位/已走高 = 结构失效/追高 ⇒ 非低吸区, "跟踪不参与";
+       · 顶侧(R500, 调用方传): 已上破 = 判据被证伪 ⇒ 独立成段, 但它是**信息**不是操作参考
+         (需保留展示, 故不能用底侧的"剔除"; 见 ptDz 注释第 ③ 条)。
+       R500: 子段同样受 SIG_MAIN 折叠(原先子段是**全量渲染** —— 顶侧首次启用时会有 45 行无条件铺开,
+         把整页撑长; 与主区共用 sigExpanded 开关, 点任一"展开全部"两者一起展开)。*/
+    subMeta=subMeta||{label:"🔍 非低吸区 · 破位/已走高",tail:"跟踪不参与",
+      tip:"已跌破背驰低点(破位·结构失效)或已较背驰低点走高超过8%(追高)—— 已沉出「机会」主区, 仅作失效/追高跟踪, 不属低吸参考"};
+    /* R500: 子段**折叠态渲染 0 行**（此前是全量渲染，顶侧首次启用会有 45 行无条件铺开）。
+       理由: ① 顶侧实测 45 行 ⇒ 折叠态页面凭空长 342px（几何指纹实测: 信号雷达之后全部元素 +342px），
+                而"已失效"是**存档信息**、不是"一眼要看的结论"（真正的风险在 30 条主区里）；
+             ② 但**不能静默** —— 透明账由两处承载: 分隔行本身（「🚫 … 45 只 …」恒可见）+ 摘要行「顶已失效 45/352」，
+                外加本行的"▼ 展开全部 45 只"按钮 ⇒ 用户既看得见"有多少条被移出"，也能一键展开看是谁。
+       ③ 与主区共用 sigExpanded：点任一"展开全部" ⇒ 主区与子段一起展开（都是"看更多"，符合直觉）。 */
+    var subOpen = !!sigExpanded;
+    var subHtml=(subRows&&subRows.length)
+      ? '<div class="sdead-sep" title="'+esc(subMeta.tip)+'">'+subMeta.label+' '+subRows.length+' 只 · '+subMeta.tail+'</div>'
+        + (subOpen?subRows:[]).map(function(s){return sigRow(s,{sub:true});}).join('')
+        + '<div class="sigmore"><a onclick="toggleSig()">'+(subOpen?'▲ 收起 · 隐藏 '+subRows.length+' 只':'▼ 展开全部 '+subRows.length+' 只')+'</a></div>'
+      : '';
     // R381: P4 折叠态只画前 SIG_MAIN 行, >5 出展开按钮; 标题 n=全量真实数(原 pick 截断导致 >5 时标题 n 虚低)
     var nAll=rows.length;
     var main=sigExpanded?rows:rows.slice(0,SIG_MAIN);
@@ -1552,6 +1609,11 @@ function renderSigRadar(){
       (nRes?'<span>💰资金共振 <b style="color:#c92a2a">'+nRes+'</b></span>':'')+
       (nDiv?'<span>⚠️背离警示 <b style="color:#f59f00">'+nDiv+'</b></span>':'')+
       (nTopDn?'<span title="顶信号已从背驰高点回落超过3%的数量(横截面口径, 非时间序列回测)">顶信号已回落&gt;3% <b class="fd">'+nTopDn+'/'+top.length+'</b></span>':'')+
+      /* R500: 与底侧「底已破」对称的顶侧透明账 —— 原来顶侧只有"已兑现"一个账, 缺"已失效"这个反方向的账,
+         使 45 条判据被证伪的信号在摘要里**完全不可见**(静默)。 */
+      (nTopInv?'<span title="'+esc("顶信号中「现价已上破背驰高点」的数量 —— 该**见顶判据已被证伪**(判据严格 >; 现价恰好贴住高点未破不计入)。"
+          +"这些信号在🔥最新模式已从「风险」主区移出, 单列「已失效」子段(独立成段、不剔除: 证伪信息有独立价值)。"
+          +"💰资金共振 / ⚠️背离警示 两个模式仍按资金视角保留原序。横截面口径, 非时间序列回测。")+'">顶已失效 <b class="fd">'+nTopInv+'/'+top.length+'</b></span>':'')+
       (nBotCl&&nBotLive?'<span title="底信号现价仍贴近背驰低点(+8%以内, 尚未走高=待启动; 分母=未破位底信号数, 横截面口径)">底待启动 <b class="bb">'+nBotCl+'/'+nBotLive+'</b></span>':'')+
       (nBotBk?'<span title="底信号中「盘中已击穿背驰低点」的数量 —— 缠论一类买点结构已失效(看板按收盘价剔票故仍在榜, 有意避开日内插针); all 模式已将其沉至底组末尾(非低吸参考), res/div 资金视角保留原序">底已破 <b class="fd">'+nBotBk+'</b></span>':'')+
       /* R455: 不复权源的结构可信度**收敛口径** —— 替代原页脚一句泛化警告("除权日K线可能有假跳空"),
@@ -1574,8 +1636,16 @@ function renderSigRadar(){
       '<span class="chip'+chipOn("res")+'" onclick="setSigMode(\'res\')">💰资金共振</span>'+
       '<span class="chip'+chipOn("div")+'" onclick="setSigMode(\'div\')">⚠️背离警示</span>'+
     '</div>'+smark+
-    '<span class="shint" style="width:100%">全市场最新背驰信号 · <b style="color:#c92a2a">顶=风险</b>(警惕/减仓) <b style="color:#087f5b">底=机会</b>(关注/分批低吸) · 「偏离」=现价较信号位涨跌(<8%贴近=低吸参考区, 大=已走远慎追) · 👑龙头/资金佐证 · <span style="color:#e54545">左边条=资金共振</span>/<span style="color:#f59f00">黄条=背离警示</span> · <b>顶组仅列未兑现</b>(已回落&gt;3%=方向应验, 从🔥最新剔除, 摘要可见已兑现数; 💰⚠️模式可查全量) · <span title="背离强度 = 本笔 MACD 面积 ÷ 前笔面积。**越小越可靠**(该方向动能衰竭越彻底): 绿&lt;0.5 强 / 橙0.5~0.8 中 / 红≥0.8 弱。「面积退化」=该笔无 MACD 柱, 判据构造上恒成立、不含力度证据(R387/R452)。⚠ 原「强度N/2」列已移除 —— 跨 6 个快照(09-04~09-11)共 1507 条信号中该值 100% 落在 2 档, 零区分度; 且 vol=false 时会渲染出悬空斜杠「强2/」。故改为把最有区分度的面积比上色(实测 area 分布 0.008~0.830, 中位 0.326)">「面X」=背离强度 <b style="color:#0e7d4a">越小越可靠</b>(绿强/橙中/红弱) · 原「强度N」列已移除(1507 条信号 100% = 2 档, 无区分度)</span></div>'+
-    '<div class="sbody">'+grp("⚠️","顶背驰 · 风险",pt)+grp("✅","底背驰 · 机会",pb,pbSub)+'</div>'+
+    '<span class="shint" style="width:100%">全市场最新背驰信号 · <b style="color:#c92a2a">顶=风险</b>(警惕/减仓) <b style="color:#087f5b">底=机会</b>(关注/分批低吸) · 「偏离」=现价较信号位涨跌(<8%贴近=低吸参考区, 大=已走远慎追) · 👑龙头/资金佐证 · <span style="color:#e54545">左边条=资金共振</span>/<span style="color:#f59f00">黄条=背离警示</span> · <b>顶组🔥最新只列「判据仍成立」者</b>(已回落&gt;3%=方向已应验 ⇒ 剔除; 已上破高点=判据被证伪 ⇒ 单列「已失效」子段, 保留不剔除; 两项计数见摘要, 💰⚠️模式可查全量) · <span title="背离强度 = 本笔 MACD 面积 ÷ 前笔面积。**越小越可靠**(该方向动能衰竭越彻底): 绿&lt;0.5 强 / 橙0.5~0.8 中 / 红≥0.8 弱。「面积退化」=该笔无 MACD 柱, 判据构造上恒成立、不含力度证据(R387/R452)。⚠ 原「强度N/2」列已移除 —— 跨 6 个快照(09-04~09-11)共 1507 条信号中该值 100% 落在 2 档, 零区分度; 且 vol=false 时会渲染出悬空斜杠「强2/」。故改为把最有区分度的面积比上色(实测 area 分布 0.008~0.830, 中位 0.326)">「面X」=背离强度 <b style="color:#0e7d4a">越小越可靠</b>(绿强/橙中/红弱) · 原「强度N」列已移除(1507 条信号 100% = 2 档, 无区分度)</span></div>'+
+    '<div class="sbody">'+grp("⚠️","顶背驰 · 风险",pt,ptSub,{
+        /* R500: 顶侧子段语义 —— 与底侧「非低吸区」**刻意不同, 禁"统一"**:
+           底侧破位 = 买点逻辑破坏(照买即错) ⇒ 剔除; 顶侧上破 = 看跌判断被否(是"信息"非"操作") ⇒ 独立成段保留。 */
+        label:"🚫 已失效 · 现价已上破背驰高点",tail:"判据已证伪 · 仅存档不参与排序",
+        tip:"现价已上破顶背驰高点 ⇒ 该**见顶判据已被证伪**(价格续创新高, 须按新顶背驰重新评估)。"
+           +"图上已撤下「顶确认·破位离场」与「反抽减仓参考」两条行动线, 仅留一条灰色「顶背驰高点·已失效」判据锚点"
+           +"(它既不是压力位、也不是做空位)。★ 与底侧「破位」刻意不同: 底侧破位=买点逻辑破坏(照着买就是错的, 故剔除); "
+           +"顶侧上破=看跌判断被否掉 —— 它不指示「该做什么」, 但「这里曾看跌、现已被否」本身是有价值的信息 ⇒ 独立成段、不剔除。"
+      })+grp("✅","底背驰 · 机会",pb,pbSub)+'</div>'+
     '<div class="foot">信号=自研缠论引擎背驰确认 · 数据截至 '+esc(M.asof||"-")+' · 仅供研究参考，不构成投资建议</div>';
 }
 /* ===== R305: 逆向观察池(首页中部) — 老结构埋伏候选 =====
