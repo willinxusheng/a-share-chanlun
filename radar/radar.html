@@ -870,6 +870,22 @@ var UP="#e54545", DN="#18a058", ACC="#2b6cb0";
 var M=null, UNI={}, SIG=[], INDS={};
 var curInd=null, curStk=null, curTab="ind", myChart=null;
 var IDX=null, detailOpen=false;   // IDX=上证基准(close/chg) · detailOpen=行业详情是否已展开
+/* ★ R505: 快照版本号的**唯一来源**。凡面向用户的文案里要出现"版本号", 必须走这个函数,
+   禁止在渲染串里写死 `rNN` —— 写死会随数据刷新变成**假陈述**(规则 60: 描述当前状态必现算)。
+   病灶实例(改前): 「⛔ 无资金数据」title 把**现算**的 nNoFF 标成"★ 实测 r28", r30 落盘后
+   会渲染成"实测 r28: 5 条", 而 r28 的实测值恰是 10 条(同文件注释 L1466 自己记着) ⇒ 自相矛盾。
+   同一处另有 `线上仍是 P3b-r28 及更早的构建` 属同类写死。 */
+function snapVer(){return ((typeof M!=="undefined"&&M&&M.version)||"?")+""}
+/* ★ R505: 「量缩确认」徽章的命中率也必须**现算**。改前 title 写死「近端 55/276 只命中」——
+   276 是**更早快照**的信号总数(r28 实测 401 条 / 命中 97 = 24.2%), 属「冻结样本冒充当前事实」:
+   用户无法判断这个比例是当下还是陈年数据。载入时算一次, 存成 `h/n` 串供行渲染直接拼。 */
+var VOLTXT="";
+function calcVolTxt(){
+  var n=(typeof SIG!=="undefined"&&SIG?SIG.length:0),h=0;
+  for(var i=0;i<n;i++){if(SIG[i]&&SIG[i].vol===true)h++;}
+  VOLTXT=h+"/"+n;
+  return VOLTXT;
+}
 function $(id){return document.getElementById(id)}
 function esc(s){return (s==null?"":String(s)).replace(/[&<>"']/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]})}
 function pct(v,d){if(v==null||isNaN(v))return "-";return (v>0?"+":"")+(v*100).toFixed(d==null?2:d)+"%"}
@@ -1077,6 +1093,7 @@ function getStkData(sym){
 }
 fxT("radar.json").then(function(r){if(!r.ok)throw new Error("HTTP "+r.status);return r.json()}).then(function(d){
   M=d.meta;UNI=d.universe||{};SIG=d.signals||[];INDS=d.industries||{};
+  calcVolTxt();                  // R505: 「缩」徽章命中率现算(改前写死 55/276)
   INDM={};_RS=null;_RS60=null;   // R445: 行业指标缓存随数据重载失效(防跨数据集串值)
   buildEtfGroups();              // R447: ETF 同指数分组索引(revpool/sigrad 折叠共用)随数据重载重建
   initSearch();   // R298: 数据就绪后激活全局搜索(UNI 已加载)
@@ -1440,10 +1457,10 @@ function sigRow(s,opt){   // R380: opt.sub=true = 非低吸区灰显行(破位/�
     '<div><div class="nm">'+(t?"⚠️ ":((opt.sub)?"🔍 ":"✅ "))+esc(nm)+lead+ffMini+etfTag+twTag+'</div><div class="sub">'+esc(s.sym)+" · "+esc(indName)+'</div></div>'+   // R447: +etfTag/twTag
     /* R455: 原第二列渲染 `强N/缩 面X` —— 其中 `强N` 是**死字段**(跨 6 快照 1507 条信号 100% = 2,
        `vol=false` 时还会留下悬空斜杠「强2/」), 而 `面X` 是本行区分度最高的判据却**无配色**。
-       今: 去掉死字段 → _areaTag() 带上 R387 三段配色; `缩` 保留(55/221 有区分度); 末尾挂除权标。
+       今: 去掉死字段 → _areaTag() 带上 R387 三段配色; `缩` 保留(有区分度: r28 实测命中 97/401 = 24.2%, R505 改为现算); 末尾挂除权标。
        ⚠ 量缩标**必须用 `<span>` 不能用 `<b>`** —— 第 292 行 `.sigrad .srow .st b{display:block}`,
        用 `<b>` 会变块级、整列多占一行(实测行高 53→67px, 3/10 行被撑开)。 */
-    '<div class="st">'+(t?'<b style="color:#c92a2a">顶背驰</b>':'<b style="color:#087f5b">底背驰</b>')+'<span>'+_areaTag(s.area)+(s.vol?' <span style="color:#087f5b;font-weight:700" title="量缩确认: 该背驰笔区间成交量较前笔萎缩, 佐证动能衰竭(近端 55/276 只命中)">缩</span>':"")+(divTag?' '+divTag:"")+(premTag?' '+premTag:"")+'</span></div>'+
+    '<div class="st">'+(t?'<b style="color:#c92a2a">顶背驰</b>':'<b style="color:#087f5b">底背驰</b>')+'<span>'+_areaTag(s.area)+(s.vol?' <span style="color:#087f5b;font-weight:700" title="量缩确认: 该背驰笔区间成交量较前笔萎缩, 佐证动能衰竭(本快照信号 '+VOLTXT+' 只命中)">缩</span>':"")+(divTag?' '+divTag:"")+(premTag?' '+premTag:"")+'</span></div>'+
     '<div class="st">'+(fr==null?"-":(fr===0?"当日":fr+"天前"))+frTag+'</div>'+
     '<div class="right">'+
       '<div class="dev '+devCls+'" title="'+esc(devTip||sigTip)+'">'+(dev!=null?devTxt:"-")+'<small>'+bkTag+topBkTag+devSub+'</small></div>'+
@@ -1459,7 +1476,7 @@ function renderSigRadar(){
   var box=$("sigRadar");
   if(!box)return;
   var top=[],bot=[];
-  var nRes=0,nDiv=0,nNear=0,nTopDn=0,nBotCl=0,nBotLive=0,nBotBk=0,nTopInv=0,nBotOut=0;   // R442: nBotBk=底信号中「盘中已击穿背驰低点」(缠论一买已废)的数量 · R500: nTopInv=顶信号中「已上破背驰高点」(见顶判据已证伪)的数量 · R501: nBotOut=底信号中「已走高>8% 或 收盘破位」的数量(= 与 all 模式剔除集合同口径的"非低吸区")
+  var nRes=0,nDiv=0,nNear=0,nTopDn=0,nBotCl=0,nBotLive=0,nBotBk=0,nTopInv=0,nBotOut=0,nBotUp=0,nBotDn=0,nBotBkCl=0;   // R442: nBotBk=底信号中「盘中已击穿背驰低点」(缠论一买已废)的数量 · R500: nTopInv=顶信号中「已上破背驰高点」(见顶判据已证伪)的数量 · R501: nBotOut=底信号中「已走高>8% 或 收盘破位」的数量(= 与 all 模式剔除集合同口径的"非低吸区") · R505: nBotUp/nBotDn=nBotOut 的**现算拆分**(已走高>8% / 收盘破位<0) · nBotBkCl=nBotBk 中**收盘未破**(dv>=0、仍在低吸区)的数 —— 后三者均为消灭「写死样本冒充当前事实」新增(改前 title 里写死"实测 r28: 已走高 15 · 收盘破位 3"与"盘中击穿(9 只), 其中 6 只收盘未破")
   /* ★ R502: nNoFF = 信号中**没有资金流数据**(ff.net 为 null)的条数。用途 = 消灭「静默丢弃」。
      病灶: 💰资金共振 / ⚠️背离警示 的过滤函数 gRes/gDiv 都要求 `fn!=null` ⇒ 这批票在这两个模式下
      **一条都看不到**; 而摘要原先只报 nRes/nDiv, 二者相加 ≠ 全集 ⇒ **无处解释差的那几条去哪了**。
@@ -1489,12 +1506,15 @@ function renderSigRadar(){
     //   ★ R501 更正: 原文写「broken 只在 universe 侧有值(signals[].st 未同步 R439 补拉)」—— 实测**已不成立**:
     //     r28 产物 401 条中 sig.st 侧含 broken 者 9 条、uni.st 侧也是 9 条(逐条一致); 且两侧的 close 与
     //     end_price 全量逐条相同(0 条不一致)。⇒ 两侧同源, 读 UNI 是**口径选择**而非"唯一有值处"。
-    if(!t){var _bbk=((UNI[s.sym]||{}).st||{}).bottom_bc;if(_bbk&&_bbk.broken)nBotBk++;}
+    //   ★ R505: **下移到 dv 之后**(原在 dv 之前, 故拿不到 dv ⇒ 拆不出"盘中破但收盘未破")。
     // R288b: 兑现速览(横截面口径, 现价相对信号位) — 顶信号已回落>3%=方向兑现; 底信号仍贴近低点(0~8%)=待启动
     // R289: 底 dv<0(已跌破背驰低点=结构失效)不计入"待启动"
     // R500: 顶 dv>0(已上破背驰高点 = 见顶判据被证伪, 与 R454 严格 `>` 同源) 单列透明账 —— 与底侧 nBotBk 对称。
     var dv=sigDev(s,s.st||{});
-    if(dv!=null){if(t){if(dv<=-3)nTopDn++;if(dv>0)nTopInv++;}else{if(dv>=0)nBotLive++;if(dv>=0&&dv<=8)nBotCl++;if(dv>8||dv<0)nBotOut++;}}
+    /* R505: nBotBk=盘中击穿数; nBotBkCl=其中**收盘未破**(dv>=0, 仍在低吸区)的数 —— 改前这对数字
+       (9 只 / 其中 6 只)是**写死的样本**, 却被放在「当下可低吸」的语境里 ⇒ 数据一刷新即成为假陈述。 */
+    if(!t){var _bbk=((UNI[s.sym]||{}).st||{}).bottom_bc;if(_bbk&&_bbk.broken){nBotBk++;if(dv!=null&&dv>=0)nBotBkCl++;}}
+    if(dv!=null){if(t){if(dv<=-3)nTopDn++;if(dv>0)nTopInv++;}else{if(dv>=0)nBotLive++;if(dv>=0&&dv<=8)nBotCl++;if(dv>8||dv<0)nBotOut++;if(dv>8)nBotUp++;if(dv<0)nBotDn++;}}   // R505: 末两计为 nBotOut 的现算拆分(已走高/收盘破位), 恒有 nBotUp+nBotDn===nBotOut
     if(s.dir==="top")top.push(s);else if(s.dir==="bottom")bot.push(s);
   });
   /* ★ R504: 缺资金数据的**构成**必须**现算**。R502 曾把「北交所 ff 整类为 null(0/333) ⇒ 数据源
@@ -1726,9 +1746,9 @@ function renderSigRadar(){
          用户得自己做两次减法；且与「底已破(盘中击穿)」口径不同、不可互推（实测: 盘中破的 9 只中 6 只收盘未破、
          仍在低吸区）⇒ 补一个**显式**合计账，与顶侧「顶已失效 45/352」形式对称。 */
       ((curSigMode==="all"&&nBotOut)?'<span title="'+esc("底信号中「已较背驰低点走高>8%(追高)」或「收盘已跌破背驰低点(结构失效)」的数量 —— "
-          +"两档都不是「当下可低吸」的参考(实测 r28: 已走高 15 · 收盘破位 3)。这些信号在 🔥最新 模式已被 R382 剔除出主区, "
+          +"两档都不是「当下可低吸」的参考(本快照 "+snapVer()+" 现算: 已走高 "+nBotUp+" · 收盘破位 "+nBotDn+" = "+nBotOut+")。这些信号在 🔥最新 模式已被 R382 剔除出主区, "
           +"在 💰资金共振 / ⚠️背离警示 模式沉出主区到「非低吸区」子段(不剔除, 资金视角仍可看)。"
-          +"⚠ 与「底已破」是两套口径: 后者是盘中击穿(9 只), 其中 6 只收盘未破、仍在低吸区 ⇒ 二者不可互推。")
+          +"⚠ 与「底已破」是两套口径: 后者是盘中击穿("+nBotBk+" 只), 其中 "+nBotBkCl+" 只收盘未破、仍在低吸区 ⇒ 二者不可互推。")
           +'">底非低吸区 <b class="fd">'+nBotOut+'/'+bot.length+'</b></span>':'')+
       (nBotBk?'<span title="底信号中「盘中已击穿背驰低点」的数量 —— 缠论一类买点结构已失效(看板按收盘价剔票故仍在榜, 有意避开日内插针); 🔥最新模式将其沉至底组末尾(非低吸参考); R501 起 💰⚠️ 两模式同样沉出主区到子段(不剔除)。⚠ 与「底非低吸区」是两套口径(盘中 vs 收盘), 不可互推">'+(curSigMode!=="all"?"全市场 ":"")+'底已破 <b class="fd">'+nBotBk+'</b></span>':'')+
       /* ★ R502: 非 all 模式 —— 报「**本模式子段构成**」，与用户展开后看到的行数**逐一对应**。
@@ -1743,7 +1763,7 @@ function renderSigRadar(){
       /* ★ R502: **缺资金流数据**的显式账 —— 三模式恒显(横截面事实, 不随模式变)。
          没有它, 用户在 💰资金共振 / ⚠️背离警示 下会**静默少看到** nNoFF 条, 且 200+191 ≠ 401 无处解释。 */
       (nNoFF?'<span style="color:#b0b9c6" title="'+esc("这些信号**没有资金流数据**(ff.net 为 null) ⇒ 无法判定资金共振/背离, 故在 💰资金共振 / ⚠️背离警示 两个模式下**一条都不显示**(那两个模式的判据本身要求资金流)。它们仍可在 🔥最新 模式按结构查看。"
-          +"★ 实测 r28: "+nNoFF+" 条 —— "+nNoFFList.join("、")+(nNoFF>nNoFFList.length?" …（此处仅列前 "+nNoFFList.length+" 条，共 "+nNoFF+" 条）":"")
+          +"★ 本快照("+snapVer()+")现算: "+nNoFF+" 条 —— "+nNoFFList.join("、")+(nNoFF>nNoFFList.length?" …（此处仅列前 "+nNoFFList.length+" 条，共 "+nNoFF+" 条）":"")
           +(nNoFFMix?("。构成(现算): "+nNoFFMix+"。"):"")
           +"（★ R504: 北交所资金流此前**整类缺席** —— 根因是本仓 secid 前缀假设未实证(非数据源边界), 已修; "
           +(nNoFFBy["北交"]?("本快照仍有北交 "+nNoFFBy["北交"]+" 条缺资金数据, 补齐自下次全量重扫生效。"):"本快照缺票中已无北交。")+"）"
@@ -2486,7 +2506,7 @@ function mpCell(m){
    仍是 R445 之前的构建(旧格式无 sig_*_lb 字段), 标签仍按旧"绝对数>=2"生成, 会与前端
    新口径(密度 Wilson 下界)冲突(实测 5 处: 交运/传媒/农林牧渔/建筑材料/石油石化)。
    新判据是旧判据的子集(多了密度门槛), 故冲突只可能是"标签说背驰区、新判据不达标"单向。
-   此处如实列出冲突名单而非静默 —— 下一次全市场重扫产出 P3b-r18 数据后自动归零。
+   此处如实列出冲突名单而非静默 —— 下一次全市场重扫产出带 sig_*_lb 字段的数据后自动归零。
    注: 这是**检测**而非重算, 前端不复刻后端 regime 的位置门控逻辑(避免双份实现漂移)。 */
 function regimeMismatch(){
   var bad=[];
@@ -2515,7 +2535,7 @@ function indRuleHtml(){
           正文只留「结论 + 最关键的误读澄清」。
        实测触发窗口：线上 r28 快照（`nBcKey=0`）⇒ 2026-09-21 首次真扫落盘 r30 前都会显示这一行。 */
     ? '<br><span class="warn" title="'+esc('本轮快照各板块 st 无 bc_state 键 ⇒ 尚未携带「板块自身背驰」数据'
-        +'（线上仍是 P3b-r28 及更早的构建）。下一交易日全市场重扫产出 r30 后自动生效，此提示随之消失。')+'">'
+        +'（当前线上构建 '+snapVer()+'）。下一交易日全市场重扫产出带该字段的数据后自动生效，此提示随之消失。')+'">'
       +'⚠ 快照未携带「板块自身背驰」数据，<b>这不等于「所有板块都没有背驰」</b>；重扫后自动生效</span>'
     : '<br>⛓ <b>自身背驰</b> = 该板块指数<b>自己</b>的段级背驰(后端 st.bc_state.seg)。信号锚点 = 该背驰<b>笔</b>'
       +'的结束日(<b>不是最后一根 K 线</b> —— 引擎要求笔走完才确认, 故锚点天然滞后几根); 「新」= 锚点距末根不超过阈值交易日。'
@@ -2527,7 +2547,7 @@ function indRuleHtml(){
   var mmHtml=mm.length?('<br><span class="warn">⚠ <b>口径待对齐</b>: 「走势状态」标签仍由后端按<b>旧判据(绝对数≥2)</b>生成, '
     +'其中 <b>'+mm.join("、")+'</b> 共 '+mm.length+' 个在新判据(密度下界≥'+DENS_LB_STRONG+'%)下不成立 —— '
     +'当前线上数据为 R445 之前的构建。密度/排序/色条已按新判据生效; '
-    +'下一交易日全市场重扫产出 P3b-r18 数据后本提示自动消失。</span>'):'';
+    +'下一交易日全市场重扫产出带 sig_*_lb 字段的数据后本提示自动消失。</span>'):'';   // R505: 原写死"产出 P3b-r18 数据"—— 版本号会随快照前进而变成假陈述, 改为按**字段**描述(不写死版本)
   return '📊 <b>信号集中度</b> = 顶/底背驰<b>只数 ÷ 该板块过门禁成分数</b>; '
     +'<b>排序、左侧色条、走势状态标签四处同一判据</b>: <b>95% Wilson 置信下界 ≥ '+DENS_LB_STRONG+'%</b> 且 <b>只数 ≥ '+SIG_ABS_MIN+'</b>。'
     +'用下界而非只数的原因: 成分数 16~386 差 24 倍, 绝对数排序被大板块恒定霸榜'
