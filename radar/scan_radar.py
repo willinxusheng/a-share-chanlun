@@ -658,12 +658,37 @@ def _fetch_tx(sym, max_pages=None, page0=None):
     return ks, "tx"
 
 
-_EM_MKT_PFX = {"sh": "1.", "sz": "0."}   # 东财 secid 市场前缀(沪=1 深=0); 北交段归属未实证, 跳过东财
+_EM_MKT_PFX = {"sh": "1.", "sz": "0."}   # 东财 **K线**(push2his) secid 前缀(沪=1 深=0); 北交 K线未实证故不加 bj —— **本表只管 K线**, 资金流侧的额外放开见下方 `_EM_FF_MKT_PFX`(R504)
 
 
 def _em_secid(sym):
     """sh600000 -> 1.600000; sz300274 -> 0.300274; bj* -> None(北交 K线 secid 归属未实证, 不盲试)。"""
     pre = _EM_MKT_PFX.get(sym[:2])
+    return (pre + sym[2:]) if pre else None
+
+
+# R504: **资金流链路专用**的 secid 额外放开 —— 北交段实测可用 `0.` 前缀(与深市同前缀,
+#   以代码段区分)。为什么不直接把 `bj` 加进 `_EM_MKT_PFX`:
+#     `_em_secid` 同时服务 **K线** `_fetch_em`(push2his)，而北交 K线经东财/腾讯**未实证**
+#     (R270/R348: 腾讯 bj920 段恒回 1 根假数据, kline 侧由新浪兜底) —— `_EM_MKT_PFX` 里
+#     没有 bj 是 **kline 侧的有意边界**。此表只作用于 `fetch_fflow_all`，K线边界原样不动
+#     (有界修改, 规则 52)；sh/sz 仍走 `_em_secid` 本体 ⇒ 两链路不会分叉出第二份映射(规则 20)。
+#   实测 2026-09-20（对 r28 产物里全部 333 只北交, 用生产函数本体）:
+#     · 正控(未打补丁) 前 60 只命中 **0**，请求根本不发(被 _em_secid 过滤成 None)
+#     · 打补丁后 全部 333 只命中 **330 = 99.1%**（920 段 330/330 = **100%**），耗时 4.5s
+#     · 未命中 3 只 = bj833994/bj833874/bj832317，均为 **83 老段**(北交 920 号段切换后
+#       该代码失效: 末根停在 2021-10/11、gate='停牌' 已被门禁剔除) ⇒ 非本链路缺口, 不特判。
+#   业务后果(修前): 333 只北交 **结构性缺席**「💰资金共振 / ⚠️背离警示」两个模式
+#     (两者判据都读 ff.net)，而页面只按"本轮无资金数据"逐票解释 —— 整类标的静默不可见。
+_EM_FF_MKT_PFX = {"bj": "0."}
+
+
+def _em_ff_secid(sym):
+    """资金流专用 secid = `_em_secid` 为基 + 本链路额外放开(bj)。"""
+    sec = _em_secid(sym)
+    if sec:
+        return sec
+    pre = _EM_FF_MKT_PFX.get(sym[:2])
     return (pre + sym[2:]) if pre else None
 
 
@@ -977,14 +1002,16 @@ def _ff_parse(diff, secmap):
 
 
 def fetch_fflow_all(syms):
-    """全市场当日主力资金流(东财批量): 输入 sym 列表(sh/sz 有效, bj 跳过),
+    """全市场当日主力资金流(东财批量): 输入 sym 列表(**sh/sz/bj 三市场均已覆盖**),
     返回 {sym: {"net": 元, "pct": %}}。东财不可达/停更时缺票直接不返回(前端显示'-')。
     与 _em_down 停用状态机解耦 —— 资金流是展示级增强, 失败不影响 K 线下行源健康判定。
     实测: 股与 ETF/LOF 均返回 f62(510300 等场内基金有主力净额), 全市场约 6500 票
-    =110 批 ×0.25s ≈ 30s。"""
+    =110 批 ×0.25s ≈ 30s。
+    R504: 北交(**此前整类跳过**)改走 `_em_ff_secid`(0. 前缀) ⇒ 实测 330/333=99.1%、
+    920 段 100%, 追加成本 ≈4.5s。旧注释"bj 跳过"已失效, 勿据此复现旧行为。"""
     secs = []
     for s in syms:
-        sec = _em_secid(s)
+        sec = _em_ff_secid(s)
         if sec:
             pre, code = sec.split(".")
             secs.append((s, (int(pre), code)))
@@ -2791,7 +2818,7 @@ def main():
         if _src == "tx":
             _record_tx_depth(_ks)
 
-    # --- R283: 当日主力资金流(全市场 sh/sz 批量; 与 K 线/源健康解耦, 失败只缺字段不崩产物) ---
+    # --- R283: 当日主力资金流(全市场 sh/sz/bj 批量; 与 K 线/源健康解耦, 失败只缺字段不崩产物) ---
     t_ff = time.time()
     ffmap = fetch_fflow_all(syms)
     print("  资金流 %d 票, %.0fs (东财主力净额口径)" % (len(ffmap), time.time() - t_ff))

@@ -1464,8 +1464,13 @@ function renderSigRadar(){
      病灶: 💰资金共振 / ⚠️背离警示 的过滤函数 gRes/gDiv 都要求 `fn!=null` ⇒ 这批票在这两个模式下
      **一条都看不到**; 而摘要原先只报 nRes/nDiv, 二者相加 ≠ 全集 ⇒ **无处解释差的那几条去哪了**。
      实测 r28: 10 条(北交所 5 + 创业板 5), 401 − 200 − 191 = 10 完全对上;
-     ★ 且全市场 **333 只北交所的 ff 字段整类为 null**(net 有值 0/333) ⇒ 这是**数据源覆盖边界**, 非偶发缺失。 */
-  var nNoFF=0,nNoFFList=[];
+     ★ 当时据此推断「全市场 333 只北交所的 ff 整类为 null(0/333) ⇒ 数据源覆盖边界」—— **R504 已证伪**:
+       真正原因是本仓 `fetch_fflow_all` 以"北交 secid 归属未实证, 不盲试"为由**主动跳过**了北交
+       (scan_radar `_EM_MKT_PFX` 无 bj)。实测东财 ulist.np 用 `0.` 前缀对北交**完全可用**
+       (生产函数本体实测 330/333 = 99.1%, 920 段 100%) ⇒ R504 已补齐, 本账面 nNoFF 随之下降。
+       **教训**: 把"本仓自己的假设未验证"写成"上游数据源边界", 会让一个**可修**的缺口被永久
+       合理化 —— 判"边界"之前必须先证明上游确实拿不到(规则 64)。 */
+  var nNoFF=0,nNoFFList=[],nNoFFBy={};   // R504: nNoFFBy = 按 type 现算的构成(禁写死类别)
   var nSina=0,nExR=0;   // R455: nSina=信号票走新浪不复权价的数量 · nExR=其中近一年有除权记录(需点名)的数量
   SIG.forEach(function(s){
     if(!s||!s.sym)return;
@@ -1478,7 +1483,7 @@ function renderSigRadar(){
        病灶(自伤): R502 把原上限 12 写成硬截断却**不提示**—— 而实测 nNoFF=10, **余量只有 2 条**,
        再新增 3 只缺资金数据的票(一只新 ETF/新股上市即可)就会**静默只列前 12 条**。
        这正是本轮主题「消灭静默」的**同型残留**: 截断本身可以, 截断不报账不行。 */
-    else{nNoFF++;if(nNoFFList.length<40)nNoFFList.push((s.name||"")+"("+s.sym+")");}
+    else{var _nty=_u.type||"?";nNoFF++;nNoFFBy[_nty]=(nNoFFBy[_nty]||0)+1;if(nNoFFList.length<40)nNoFFList.push((s.name||"")+"("+s.sym+")");}
     if((s.fresh!=null&&s.fresh<=5))nNear++;
     // R442: 底信号「盘中已破」计数(透明账) — 读 UNI 侧(口径 = universe 的最新扫描状态)。
     //   ★ R501 更正: 原文写「broken 只在 universe 侧有值(signals[].st 未同步 R439 补拉)」—— 实测**已不成立**:
@@ -1492,6 +1497,15 @@ function renderSigRadar(){
     if(dv!=null){if(t){if(dv<=-3)nTopDn++;if(dv>0)nTopInv++;}else{if(dv>=0)nBotLive++;if(dv>=0&&dv<=8)nBotCl++;if(dv>8||dv<0)nBotOut++;}}
     if(s.dir==="top")top.push(s);else if(s.dir==="bottom")bot.push(s);
   });
+  /* ★ R504: 缺资金数据的**构成**必须**现算**。R502 曾把「北交所 ff 整类为 null(0/333) ⇒ 数据源
+     覆盖边界」写成**静态文案**；R504 实测该"边界"不成立（东财 ulist.np 用 `0.` 前缀对北交完全
+     可用，生产函数实测 330/333 = 99.1%）并已补齐 ⇒ 那句静态文案变成**假陈述**。
+     按规则 60（描述**当前状态**⇒ 现算 / 描述**历史样本**⇒ 可保留）改为按 type 现算构成，
+     不写死任何一类；未在常用列表里的 type 也一并带出（防下轮新增标的类型被静默吞掉）。 */
+  var nNoFFMix=(function(){var _o=["股","北交","ETF"],_a=[];
+    _o.forEach(function(t){if(nNoFFBy[t])_a.push(t+" "+nNoFFBy[t]);});
+    Object.keys(nNoFFBy).forEach(function(t){if(_o.indexOf(t)<0)_a.push(t+" "+nNoFFBy[t]);});
+    return _a.join(" · ");})();
   var gRes=function(s){var fn=(UNI[s.sym]||{}).ff||{};fn=fn.net;if(fn==null)return false;return (s.dir==="bottom"&&fn>0)||(s.dir==="top"&&fn<0);};
   var gDiv=function(s){var fn=(UNI[s.sym]||{}).ff||{};fn=fn.net;if(fn==null)return false;return (s.dir==="bottom"&&fn<0)||(s.dir==="top"&&fn>0);};
   var gf=function(s){var fn=(UNI[s.sym]||{}).ff||{};return Math.abs(fn.net||0);};
@@ -1730,7 +1744,9 @@ function renderSigRadar(){
          没有它, 用户在 💰资金共振 / ⚠️背离警示 下会**静默少看到** nNoFF 条, 且 200+191 ≠ 401 无处解释。 */
       (nNoFF?'<span style="color:#b0b9c6" title="'+esc("这些信号**没有资金流数据**(ff.net 为 null) ⇒ 无法判定资金共振/背离, 故在 💰资金共振 / ⚠️背离警示 两个模式下**一条都不显示**(那两个模式的判据本身要求资金流)。它们仍可在 🔥最新 模式按结构查看。"
           +"★ 实测 r28: "+nNoFF+" 条 —— "+nNoFFList.join("、")+(nNoFF>nNoFFList.length?" …（此处仅列前 "+nNoFFList.length+" 条，共 "+nNoFF+" 条）":"")
-          +"。北交所占多数: 全市场 333 只北交所的 ff 字段**整类为 null**(net 有值 0/333), 属数据源覆盖边界, 非偶发缺失。"
+          +(nNoFFMix?("。构成(现算): "+nNoFFMix+"。"):"")
+          +"（★ R504: 北交所资金流此前**整类缺席** —— 根因是本仓 secid 前缀假设未实证(非数据源边界), 已修; "
+          +(nNoFFBy["北交"]?("本快照仍有北交 "+nNoFFBy["北交"]+" 条缺资金数据, 补齐自下次全量重扫生效。"):"本快照缺票中已无北交。")+"）"
           +"⚠ 这不等于「它们没有信号」—— 二者结论相反, 不可互相推断。")+'">⛔ 无资金数据 <b class="fd">'+nNoFF+'</b></span>':'')+
       /* R455: 不复权源的结构可信度**收敛口径** —— 替代原页脚一句泛化警告("除权日K线可能有假跳空"),
          把"247 只一律存疑"收敛为"nExR 只点名 + 其余洗清"。判据与边界见 exdivRisk()。 */
