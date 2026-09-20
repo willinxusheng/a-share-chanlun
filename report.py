@@ -4181,7 +4181,12 @@ def main():
         _tbl_html = ('<div class="tb-tblwrap"><table class="tb-tbl"><thead><tr>'
                      '<th>指数</th><th>结构信号</th><th>端点日期</th><th>距今</th>'
                      f'<th>段内 MACD 面积比（越小越衰竭 · 竖线 = 背驰成立阈值 {BC_AREA_RATIO_TH}）</th>'
-                     '</tr></thead><tbody>' + "".join(_t_rows) + '</tbody></table></div>')
+                     '</tr></thead><tbody>' + "".join(_t_rows) + '</tbody></table></div>'
+                     # ★ R506b: 溢出必须"报账"(R503 纪律) —— 只加 overflow-x:auto 仅让内容
+                     #   **可达**; 窄屏首屏看到的仍是「距」「2 个交」这类半截字, 而移动端
+                     #   默认不显示滚动条 ⇒ 用户不知道可以左滑 (实测截图复核才发现)。
+                     #   故补一行**仅窄屏可见**的滑动提示 (宽屏下表格不溢出 ⇒ 恒不显示)。
+                     '<div class="tb-swipe">← 左右滑动查看全部 5 列 →</div>')
     else:
         _tbl_html = ('<div class="tb-empty"><b>今日无待观察的结构信号</b><br>'
                      '5 个主要指数的段级背驰均已超出结构窗口（近 3 段），无需为此盯盘。</div>')
@@ -5264,6 +5269,12 @@ def main():
   .tb-tblwrap {{ width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }}
   .tb-tblwrap::-webkit-scrollbar {{ height: 6px; }}
   .tb-tblwrap::-webkit-scrollbar-thumb {{ background: #cbd5e1; border-radius: 3px; }}
+  /* ★ R506b: 滑动提示 —— 只在"会溢出"的窄屏显示（宽屏表格不溢出 ⇒ 恒 display:none）。
+     理由: 移动端默认不显示滚动条, 只说"可横滑"没用, 必须在**不随滚动移动**的层上给提示。 */
+  .tb-swipe {{ display: none; }}
+  @media (max-width: 820px) {{
+    .tb-swipe {{ display: block; margin: 7px 14px 0; font-size: 11.5px; color: var(--muted); text-align: right; }}
+  }}
   /* 数据表：对齐 .tbl（表头渐变 + 悬停 + 等宽数字） */
   .tb-tbl {{ width:calc(100% - 44px); margin:14px 22px 0; border-collapse:separate; border-spacing:0; font-size:13px; }}
   .tb-tbl th {{
