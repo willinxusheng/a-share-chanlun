@@ -1898,7 +1898,7 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
     legend_html = (
         f'<div class="fc-legend">'
         f'<span><i class="ln ln-dash" style="background:{RED}"></i>{_pstar}结构演绎主路径 ≈ {p_main * 100:.0f}%（目标 {main_p[-1][1]:.0f}，{((main_p[-1][1]/last-1)*100):+.1f}%）</span>'
-        f'<span><i class="ln" style="background:#d4a017"></i>统计期望路径（琥珀金·窗口均值 {_medf(1.0):.0f}，{((_medf(1.0)/last-1)*100):+.1f}%）</span>'
+        f'<span><i class="ln" style="background:#b21b7d"></i>统计期望路径（梅红·窗口均值 {_medf(1.0):.0f}，{((_medf(1.0)/last-1)*100):+.1f}%）</span>'
         f'<span><i class="ln ln-dash" style="background:#94a3b8"></i>{_astar}次路径：中枢内震荡 ≈ {p_alt * 100:.0f}%</span>'
         f'<span><i class="ln ln-dot" style="background:{GREEN}"></i>{_rstar}风险路径：跌破ZD转空 ≈ {p_risk * 100:.0f}%</span>'
         f'<span><i class="ln ln-band"></i>预测带 = 经验分位(P05–P95 / P25–P75) × 覆盖修正 κ={_kappa:.2f}（故带宽大于名义分位，实测覆盖≈90%）</span>'
@@ -2363,9 +2363,19 @@ def forecast_echart(sym, fc_data):
       // R492(Ⓐ): 统计期望路径由红改**琥珀金** —— 它与「结构演绎路径」此前**同为 #e54545**
       //   （一实线一虚线），而两者方向可以相反（上证 −3.2% vs +0.9%）⇒ 同一张图上两条红线
       //   反向张开，用户极易看成"同一条线的两条边"。改为琥珀金后一眼可分：红=缠论结构演绎，
-      //   金=统计基准。★ 选色已核对全图用色（历史蓝/次路径灰/风险绿/趋势青/MA 四色/情绪紫），
-      //   琥珀金仅用于 keyLevels 文字、未被任何折线占用。
-      {{ name: '统计期望路径', type: 'line', data: D.med, symbol: 'none', smooth: true, lineStyle: {{ color: '#d4a017', width: 1.6 }}, z: 5 }},
+      //   金=统计基准。
+      // ★★ R493 更正：R492 那次「选色已核对全图用色」**只核了折线(series)**，漏了**水平参考线**
+      //   —— 本图的 ZG/ZD 是 markLine 虚线、同为 GOLD(#d4a017) ⇒ **琥珀金与中枢线撞色**。
+      //   真渲染取证: 换色前该图内 #d4a017 命中 **5922 px**（= 期望路径 + ZG/ZD 两条虚线），
+      //   而「统计期望路径」只存在于**推演区**（实测 x=1701~2063 共 322 列）且几乎水平（CSS y≈223），
+      //   距 ZG 虚线（y≈237）**仅约 14px** ⇒ 用户看到的是「金色实线压着金色虚线」，无法区分。
+      //   语义定位: GOLD 在本页**只有**「中枢/结构参考」一个含义（L581 / L2200 / L2202 虚线 +
+      //   L922 中枢路径 + L1402 / L2418 文字）⇒ 该改的是**期望路径**，不是 ZG/ZD。
+      //   选色方法（不再靠肉眼）: 取渲染后 option 的**真实在用色**（14 色），在色相环上搜索
+      //   「到所有在用色的**最小 CIE-Lab ΔE 最大**」⇒ 最优点落在**梅红/洋红区间**（H≈318~324°）。
+      //   逐候选**真渲染 A/B**（回读 getOption 断言 + 截图哈希互异 + 像素级命中计数）后取
+      //   **#b21b7d**：最小 ΔE **52.9**（原琥珀金仅 16.6，且与 ZG/ZD 为 **0**），与金 ΔE 94.8。
+      {{ name: '统计期望路径', type: 'line', data: D.med, symbol: 'none', smooth: true, lineStyle: {{ color: '#b21b7d', width: 1.6 }}, z: 5 }},
       {{ name: '结构演绎路径', type: 'line', data: D.main, symbol: 'none', smooth: true, lineStyle: {{ color: '#e54545', width: 2.0, type: 'dashed', opacity: 0.85 }}, z: 6 }},
       {{ name: '次路径', type: 'line', data: D.alt, symbol: 'none', smooth: true, lineStyle: {{ color: '#94a3b8', width: 2.0, type: 'dashed' }}, z: 7 }},
       {{ name: '风险路径', type: 'line', data: D.risk, symbol: 'none', smooth: true, lineStyle: {{ color: '#18a058', width: 2.0, type: 'dashed' }}, z: 8 }},
