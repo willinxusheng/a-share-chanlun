@@ -163,8 +163,8 @@ tbody tr:last-child td{border-bottom:0}
 .sigp .mchip{background:#f4f7fb;border:1px solid #e6edf6;border-radius:10px;padding:8px 10px;
   transition:background .2s,border-color .2s,transform .2s}
 .sigp .mchip:hover{background:#eaf2fb;border-color:#c9dcf0;transform:translateY(-1px)}
-.sigp .mclab{display:block;font-size:11px;color:#8a97aa;line-height:1.45;white-space:nowrap}
-.sigp .mcval{display:block;font-size:16px;font-weight:700;line-height:1.4;font-variant-numeric:tabular-nums}
+.sigp .mclab{display:block;font-size:11px;color:#8a97aa;line-height:1.45;white-space:normal;overflow-wrap:anywhere}
+.sigp .mcval{display:block;font-size:16px;font-weight:700;line-height:1.4;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
 .sigp .mcval.up{color:#c53030}.sigp .mcval.dn{color:#0f7a52}.sigp .mcval.dim{color:#475569}
 .sigp .mcunit{font-size:11px;color:#8a97aa;font-weight:400;margin-left:2px}
 .sigp .sflow{margin-top:13px;flex-shrink:0}
@@ -231,6 +231,13 @@ tbody tr:last-child td{border-bottom:0}
   .sigp .sqrow{grid-template-columns:88px minmax(0,1fr);gap:4px 9px;padding:8px 10px 9px}
   .sigp .sqrow:hover{transform:translateX(2px)}
 }
+/* (R507) 断点死区 761~960px：>760px 恢复两列 minmax(0,1fr) minmax(0,1.45fr)，左列宽 = 容器/2.45
+   ⇒ 768px 时仅 276.7px；再减 .scur padding(17×2) 与 .mchips 内 gap 后每格内容盒只剩 53px，
+   而标签「沪深300ETF 5 日」实测宽 88.5px ⇒ 冲出 35.5px，被 .scur{overflow:hidden} 裁掉
+   24.6px(768px) / 6.6px(900px)。实测可见死区 = 761~970px（chip 溢出未超卡内 17px padding 时不可见）。
+   修法：该区间改单列（与 ≤760px 既有设计同向），左列由此变满宽 ⇒ 内容盒 192px(768)/236px(900)，
+   不裁字；右列「四象限」反而由 401→694px 更宽。960 的取值依据：两列不溢出的临界 ≈935px（留余量）。 */
+@media(min-width:761px) and (max-width:960px){.sigp .sgrid{grid-template-columns:1fr}}
 @media(prefers-reduced-motion:reduce){
   .sigp *{transition:none!important}
   .sigp .scur:hover,.sigp .sqrow:hover,.sigp .mchip:hover{transform:none}
