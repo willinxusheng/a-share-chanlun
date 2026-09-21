@@ -481,6 +481,18 @@ h1{font-size:21px;font-weight:700;letter-spacing:.4px;line-height:1.3}   /* R323
 .revpool .prow .confdot.c2{background:#cbd5e1}
 /* R383: 月线 MACD 状态小标(双周期键可视化) — 红柱=月线多头不标省位/绿缩/绿加长标字, 随 devv 换行 */
 .revpool .prow .mtag{font-size:9px;font-weight:700;border:1px solid;padding:0 4px;border-radius:3px;line-height:1.5;white-space:nowrap;letter-spacing:.2px;flex:0 0 auto}
+/* R508: 逆向观察池 7 列表的窄屏可达性 —— 实测 375px 下 7 列最小总宽 536+gaps48+padding20
+   = 604px ≫ 卡内容盒 339px ⇒ 尾部 243px 被 .revpool{overflow:hidden}(为圆角) 硬裁,
+   且**无滚动条无提示** ⇒ 后 3 列(60日均额/底背驰触发/距背低点+dtlbl)永久不可达。
+   与 R506 首页 .tb-tblwrap 完全同型(漏设 overflow)。修法:给既有包裹层(原无 class)补
+   横滚 + 补"可横滑"提示(提示放在**不随滚动移动**的兄弟层,同 R506b 教训)。 */
+.revpool .rpwrap{overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch}
+.revpool .rpwrap::-webkit-scrollbar{height:6px}
+.revpool .rpwrap::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:3px}
+.revpool .rp-swipe{display:none}
+/* R508b: .chips 未设 flex-wrap ⇒ 375/412px 下最后 1~2 个筛选 chip 被裁(.sigrad 同型, 一并修) */
+.revpool .chips,.sigrad .chips{flex-wrap:wrap;justify-content:flex-end;row-gap:4px}
+@media(max-width:980px){.revpool .rp-swipe{display:block;font-size:11px;color:#94a3b8;padding:2px 12px 0;text-align:right}}
 .revpool .prow .mtag.mw{color:#c92a2a;background:rgba(229,69,69,.08);border-color:rgba(229,69,69,.45)}
 .revpool .prow .mtag.ms{color:#b45309;background:rgba(232,160,16,.08);border-color:rgba(232,160,16,.45)}
 /* R437c: 逆向观察池补「月红」样式 — 与 .sigrad .srow .mtag.mr 同色(绿=最优档;
@@ -2318,9 +2330,20 @@ function renderRevPool(){
     '</div>'+
     (collapsed?'<span class="phint">🏆 高胜率精选 — 底部刚启(<b style="color:#18a058">距底≤3%</b>)+<b style="color:#18a058">60日均额≥1亿</b>+结构自洽(非低自洽/次新) · 共 <b style="color:#18a058">'+nEli+' 只</b>'+(nEliBk?'（其中 <b style="color:#c92a2a">'+nEliBk+' 只盘中已破</b>，已沉底并单独分组 — 一买已废，勿按埋伏位对待）':'')+' · 已滤除: 已起涨/追高/已错过档、薄流动(<1亿)、低自洽/次新结构 — <b style="color:#b45309">全量档案 '+nAll+' 只点下方按钮展开</b></span>':(revExpanded?'<span class="phint">📚 全量档案 <b style="color:#18a058">'+nAll+' 只</b> — 含全部五档(含已起涨/追高/已错过跟踪) · 🏆 高胜率精选仅 '+nEli+' 只(底部刚启≤3%+≥1亿+自洽样本足) · 标签五档：<b style="color:#18a058">绿=底部刚启(≤3%最佳埋伏)</b>/<b style="color:#b45309">橙=已起涨</b>/<b style="color:#c92a2a">红=追高风险</b>/<b style="color:#7b2cbf">紫=已错过</b> · 与顶部「实操信号雷达」(近端≤10天)互补</span>':'<span class="phint">已超实操窗的底背驰老结构 · 深跌(距历史高≥30%)+未破背驰低点 · 埋伏候选 <b style="color:#18a058">'+nAll+' 只</b> · 标签五档：<b style="color:#18a058">绿=底部刚启(≤3%最佳埋伏)</b>/<b style="color:#b45309">橙=已起涨</b>/<b style="color:#c92a2a">红=追高风险</b>/<b style="color:#7b2cbf">紫=已错过</b> · 与顶部「实操信号雷达」(近端≤10天)互补</span>'))+
     revRule()+'</div>'+
-    '<div style="padding:6px 0 8px">'+phdrHtml+rowsHtml+moreHtml+'</div>'+
+    '<div class="rpwrap" style="padding:6px 0 8px">'+phdrHtml+rowsHtml+moreHtml+'</div>'+
+    '<div class="rp-swipe">← 左右滑动查看全部 7 列 →</div>'+
     '<div class="foot">候选=底背驰(fresh&gt;10) + 距历史高≥30% + 现价&gt;背驰低点 · 止损参考=背驰低点(跌破失效) · 数据截至 '+esc(M.asof||"-")+' · 仅供研究参考，不构成投资建议</div>';
+  syncRpSwipe();   // R508: 溢出才提示(纯 CSS 媒体查询会误报/漏报) —— 与 R506b 同纪律「溢出必须报账, 且不虚报」
 }
+/* R508: 「可横滑」提示的显隐 —— 只在 .rpwrap 真溢出时显示(ro 实测 375px 需滑 285px / 640px 不需)。
+   提示放在 rpwrap 的**兄弟层**(不随滚动移动), 同 R506b 的教训。 */
+function syncRpSwipe(){
+  var rp=$("revPool");if(!rp)return;
+  var rw=rp.querySelector(".rpwrap"),sw=rp.querySelector(".rp-swipe");
+  if(!rw||!sw)return;
+  sw.style.display=(rw.scrollWidth-rw.clientWidth>1)?"block":"none";
+}
+window.addEventListener("resize",syncRpSwipe);
 var IND_TABS=["tabRsiL","tabRsi","tabSig","tabBc","tabTrend","tabRs","tabDip","tabFlow","tabCap","tabChg"];   // R498: +tabBc(板块自身背驰)
 function sortInds(mode){
   curSortMode=mode;
