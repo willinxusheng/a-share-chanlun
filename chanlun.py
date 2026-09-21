@@ -830,6 +830,79 @@ def pick_recent_bc(recent_bc):
     return ("top" if _top else "bottom"), False
 
 
+def recent_beichis(bis, beichis):
+    """R513：「近端背驰窗口」的**唯一来源**（原内联于 classify L849）。
+
+    窗口 = `bi_index >= len(bis) - 4`。★ 索引口径（R173/BUG4 注释）：`beichi["bi_index"]`
+    指向 `bis_done = bis[:-1]`，故 `len(bis) - 4 == len(bis_done) - 3`，恰好覆盖**最后 3 支
+    已完成笔**。若写成 `len(bis) - 3` 会漏判倒数第 3 支已完成笔的背驰。
+    """
+    return [b for b in beichis if b["bi_index"] >= len(bis) - 4]
+
+
+def pick_scenario_bc(recent_bc, direction):
+    """R513：从近端窗口里取**最新一条**指定方向（"top"/"bottom"）的背驰；无则 None。
+
+    ★ 这是「判定 detail 面积比 / 反向证伪位该用哪一条背驰」的**唯一来源**（原为 classify
+    内联的 `next((b["area_ratio"] for b in reversed(recent_bc) if b["type"] == d), 0.0)`）。
+    与 `pick_recent_bc` 的关系：后者回答「方向是顶还是底」（并存时取更新的那条），本函数
+    回答「该方向的具体那一条是谁」。二者自洽 —— 当 `pick_recent_bc` 返回 "top" 时，本函数
+    取到的 top 必是窗口内最新的一条（即驱动方向判定的那一条）。
+    """
+    return next((b for b in reversed(recent_bc) if b["type"] == direction), None)
+
+
+def bc_invalidation(bis, beichis):
+    """R513：背驰判据的**反向证伪位** —— 价格走到哪里，这个背驰判断就被推翻。
+
+    缠论语义（一类买卖点的证伪条件）：
+      · 顶背驰（一类卖点）：价格**上破**该笔终点（前高）⇒ 创新高且力度未衰竭 ⇒ 见顶判断失败；
+      · 底背驰（一类买点）：价格**跌破**该笔终点（前低）⇒ 再创新低且力度未衰竭 ⇒ 见底判断失败。
+
+    与 radar 侧同口径：`radar/radar.html` 的 `dv`（现价相对背驰端点的偏离）—— 顶侧
+    `dv > 0`（已上破背驰高点）= 见顶判据被证伪（R410/R454/R500 四段制的第 3 段「已失效」）。
+    实测（R501）352 条顶信号里 **45 条（12.8%）** 判据已被上破 ⇒ 该现象是常态而非理论顾虑。
+
+    ⚠ 顶/底**不对称**，不可统一（R489/R500）：
+      · 顶侧该位 = **风险情景的作废条件**，上破即推翻，语义明确；
+      · 底侧该位 = **机会情景的作废条件**，但 R489 已证「线段端点被跌破**不能当止损**
+        （端点破位后胜率 53%、p=0.598）」，故调用方必须显式注明「仅作判据证伪、不作止损」。
+
+    返回 {"top": entry|None, "bot": entry|None}，entry =
+        {"price": 端点价, "date": 端点日, "bi_index": 笔索引, "area_ratio": 面积比,
+         "bc_type": 背驰级别("趋势背驰"/"盘整背驰")}
+    """
+    recent = recent_beichis(bis, beichis)
+    out = {"top": None, "bot": None}
+    # ★ direction 的取值必须是 beichi["type"] 的**原值** "top"/"bottom"；输出键才用短名
+    #   "top"/"bot"。R513 初版把短名 "bot" 当 direction 传入 ⇒ **底侧永久取不到**
+    #   （顶侧因 "top" 恰好同名而正常）⇒ 若只看顶侧正控会全绿放行。已并入判据。
+    for key, direction in (("top", "top"), ("bot", "bottom")):
+        b = pick_scenario_bc(recent, direction)
+        if not b:
+            continue
+        i = b.get("bi_index")
+        # 边界守卫：bi_index 指向 bis_done(=bis[:-1])，越界（退化/短行情）时跳过该项，
+        # 不抛错——该值仅用于「补充提示」，缺失时应静默降级为"本轮无此项"，
+        # 绝不能让整份报告因它崩掉。
+        if not isinstance(i, int) or not (0 <= i < len(bis)):
+            continue
+        bi = bis[i]
+        # 端点 = 该笔的**终点**：`find_beichi` 的判据是「当前笔创新极值 但 MACD 面积萎缩」，
+        # 故带背驰的笔，其终点**恒**为该笔的极值端（向上笔=高点、向下笔=低点）。
+        # ★ 不可按 dir 分支取 start_price —— 那会把底背驰的"低点"错取成该笔**起点**
+        #   （=前一个高点），得到一个方向相反、且比现价还高的假证伪位。
+        out[key] = {
+            "price": bi["end_price"],
+            "date": bi["date_end"],
+            "bi_index": i,
+            "dir": bi["dir"],
+            "area_ratio": b.get("area_ratio"),
+            "bc_type": b.get("bc_type"),
+        }
+    return out
+
+
 def classify(bis, zss, beichis, close, wcls=None, segments=None, seg_beichi=None, mcls=None):
     if not bis:
         # R166: 早返回必须补齐正常路径(约L721-726)的全部键，否则下游
@@ -846,7 +919,9 @@ def classify(bis, zss, beichis, close, wcls=None, segments=None, seg_beichi=None
     last_zs = zss[-1] if zss else None
     # R173(BUG4): beichi["bi_index"] 指向 bis_done(=bis[:-1]); 用 len(bis)-3 会漏判倒数第3支已完成笔的背驰。
     # 阈值改用 len(bis)-4(=len(bis_done)-3), 使"近3笔背驰"覆盖最后3支已完成笔。
-    recent_bc = [b for b in beichis if b["bi_index"] >= len(bis) - 4]
+    # R513: 抽为 recent_beichis() —— 与 bc_invalidation() 共用**同一窗口口径**，
+    # 杜绝「detail 说 A 笔、失效位取 B 笔」式第二份映射。
+    recent_bc = recent_beichis(bis, beichis)
 
     pos = "无中枢"
     if last_zs:
@@ -937,7 +1012,9 @@ def classify(bis, zss, beichis, close, wcls=None, segments=None, seg_beichi=None
                 # 实证 5 指数中 4 个底背驰因此被忽略、看板失真。去掉约束让背驰优先显示。
         # R140 修复：detail 面积比须取「顶背驰」类型，而非 recent_bc[-1]——当 recent_bc 混合
         # top/bottom 且最后一支是 bottom 时，recent_bc[-1] 会张冠李戴显示底背驰面积比。
-        _ar = next((b["area_ratio"] for b in reversed(recent_bc) if b["type"] == "top"), 0.0)
+        # R513: 取法抽为 pick_scenario_bc()（唯一来源），与 bc_invalidation 的端点取法同源。
+        _bc_used = pick_scenario_bc(recent_bc, "top")
+        _ar = _bc_used["area_ratio"] if _bc_used else 0.0
         scenario = "背驰见顶风险"
         detail = "最近向上笔价格创新高但MACD红柱面积明显萎缩（面积比 %.2f）" % _ar
         if seg_top:
@@ -946,7 +1023,9 @@ def classify(bis, zss, beichis, close, wcls=None, segments=None, seg_beichi=None
                    % (_bc_qual, last_zs["zg"] if last_zs else close))
         detail += _tie_note
     elif _bc_main == "bottom":  # R155: 同上，背驰信号优先于 last 笔方向
-        _ar = next((b["area_ratio"] for b in reversed(recent_bc) if b["type"] == "bottom"), 0.0)
+        # R513: 同 pick_scenario_bc()（唯一来源）。
+        _bc_used = pick_scenario_bc(recent_bc, "bottom")
+        _ar = _bc_used["area_ratio"] if _bc_used else 0.0
         scenario = "背驰见底机会"
         detail = "最近向下笔价格创新低但MACD绿柱面积明显萎缩（面积比 %.2f）" % _ar
         if seg_bot:

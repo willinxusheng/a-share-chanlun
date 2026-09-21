@@ -7,7 +7,7 @@ import sys
 import math
 import ast
 from datetime import datetime, timedelta, timezone
-from chanlun import analyze, backtest_signals, MIN_BI_PCT_WEEK, health_score, forecast_confidence, forward_vol, adaptive_horizon, classify, realized_vol_annualized, KNOWN_PIVOTS, _date_diff, MIN_BI_PCT_MONTH, backtest_robustness, backtest_paths, _path_targets, market_breadth, regime_factor, classify_regime, SC_BULL, SC_BEAR, build_seg_zhongshu, SEG_BC_ACTIVE_GAP, BC_AREA_RATIO_TH, SEG_BC_FRESH_DAYS
+from chanlun import analyze, backtest_signals, MIN_BI_PCT_WEEK, health_score, forecast_confidence, forward_vol, adaptive_horizon, classify, realized_vol_annualized, KNOWN_PIVOTS, _date_diff, MIN_BI_PCT_MONTH, backtest_robustness, backtest_paths, _path_targets, market_breadth, regime_factor, classify_regime, SC_BULL, SC_BEAR, build_seg_zhongshu, SEG_BC_ACTIVE_GAP, BC_AREA_RATIO_TH, SEG_BC_FRESH_DAYS, bc_invalidation
 
 W, H_PRICE, H_VOL, H_MACD = 1060, 360, 64, 110
 PAD_L, PAD_R, PAD_T, PAD_B = 12, 78, 24, 26
@@ -1457,6 +1457,24 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
     _gap_refs = _gap_refs[:2]
     sc = r["classify"]["scenario"]
     cls_dir = r["classify"]["last_bi_dir"]
+    # ---- R513: 背驰判据的**反向证伪位** -------------------------------------------------
+    # 缺口（本轮实测）：本图原先只给「向下失效位（有效跌破 ZD）」，而情景由**顶背驰**驱动时
+    #   （"背驰见顶风险"，一类卖点的证伪条件是**价格上破背驰高点**）—— 向上那一侧**无任何提示**。
+    #   实证（2026-09-21 线上）：上证现价 3949.91 已在中枢上方 +1.7%，距 09-01 顶背驰高点
+    #   3995.18 仅 **+1.15%**（45 点）⇒ 一次 1.2% 的上涨即推翻整个"见顶"结论，而全页
+    #   「上破/突破/背驰高点」出现 **0 次**（实测 live index.html）。
+    #   同族不一致：radar 侧早有该判据（`dv > 0` = 已上破背驰高点 ⇒ 见顶判据被证伪，
+    #   R410/R454/R500 四段制 + deadOf 守卫）；主看板缺 ⇒ 同一事实两个出口不同口径（规则 78）。
+    # 取值口径：与 classify.detail 的面积比**同源**（chanlun.pick_scenario_bc），不另造映射。
+    # 有界：仅当情景确由背驰驱动时才产生内容（2/11 个情景），其余情景 `_bc_fail` 恒 None
+    #   ⇒ 两个出口均为空串、页面字节不变（本表 09-02~09-21 实测 13/70 出内容、57/70 不变）。
+    _bc_inv = bc_invalidation(r.get("bis") or [], r.get("beichi") or [])
+    _bc_fail = None          # 本情景对应的反向证伪条目（{price,date,bi_index,area_ratio,bc_type}）
+    _bc_fail_kind = None     # "up"=顶背驰（上破即证伪） / "down"=底背驰（跌破即证伪）
+    if sc == "背驰见顶风险":
+        _bc_fail, _bc_fail_kind = _bc_inv.get("top"), "up"
+    elif sc == "背驰见底机会":
+        _bc_fail, _bc_fail_kind = _bc_inv.get("bot"), "down"
     wdir = wcls["last_bi_dir"]
     aligned = (cls_dir == wdir)
     # 最近完成的笔幅度，作为"实测幅度投影"基准
@@ -1892,6 +1910,42 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
     #    1.26~2.42 倍（= κ 覆盖修正，故实测覆盖率才达名义 90%）⇒ 只写"经验分位/真实分布"失实，
     #    现明确写出「经验分位 × κ」及本指数 κ 值。
     #  ③ 概率最高者加「★概率最高」标记：因"主路径"是结构命名、不代表概率最大（3/5 指数如此）。
+    # ---- R513: 「反向证伪位」的两个出口（汇总行 + note），取值同源（chanlun.bc_invalidation） ----
+    # 只在情景确由背驰驱动、且**取到了端点**时才产生内容；否则为空串（页面完全不变）。
+    # 距离**现算**（规则 60：当前状态必须由当前数据算出，不得写死）。
+    _bc_fail_line = ""
+    _bc_fail_note = ""
+    if _bc_fail is not None and _bc_fail.get("price"):
+        _fp = _bc_fail["price"]
+        _fd = _bc_fail.get("date") or ""
+        _fdist = (_fp / last - 1) * 100
+        _ftag = "上破背驰高点" if _bc_fail_kind == "up" else "跌破背驰低点"
+        _bc_fail_line = (f'反向证伪位({_ftag}) ≈ <b>{_fp:.0f}</b> · ')
+        if _bc_fail_kind == "up":
+            _bc_fail_note = (
+                f"反向证伪位（顶背驰专用）：现价<b>上破 {_fp:.0f}</b>（{_fd} 顶背驰的高点，"
+                f"距现价 <b>{_fdist:+.2f}%</b>）⇒ 该顶背驰判据<b>被证伪</b>（创新高且力度未衰竭），"
+                f"「背驰见顶风险」情景作废、需按「多头延续」重判。\n"
+                f"⚠ 本假设的两侧条件方向相反、**勿混读**：上破 {_fp:.0f} 回答「何时推翻本判断」，"
+                f"而向下的失效位（有效跌破 ZD {zd:.0f}）回答「何时算跌势确认」——前者是<b>证伪</b>、"
+                f"后者是<b>确认</b>，现价距前者 {abs(_fdist):.2f}%、"
+                f"距后者 {abs((zd/last-1)*100):.2f}%。\n")
+        else:
+            _bc_fail_note = (
+                f"反向证伪位（底背驰专用）：现价<b>跌破 {_fp:.0f}</b>（{_fd} 底背驰的低点，"
+                f"距现价 <b>{_fdist:+.2f}%</b>）⇒ 该底背驰判据<b>被证伪</b>（再创新低且力度未衰竭），"
+                f"「背驰见底机会」情景作废、需按「空头延续」重判。\n"
+                f"⚠ 该位<b>仅作判据证伪用、不作止损</b>：R489 实测线段端点被跌破后 20 日胜率 "
+                f"53%（p=0.598，与随机无异），据此止损并无统计优势。\n")
+        # 逼近提醒：距证伪位不足 3% 时显式点出（这是用户最需要预先知道的状态）
+        if abs(_fdist) <= 3.0:
+            # ★ 不写成 f-string 内嵌引号（`f"{'上破' if ... else '跌破'}"`）—— 那是 PEP 701
+            #   语法，仅 Python ≥3.12 支持；CI 的 python-version 未必 ≥3.12，故显式预置变量。
+            _fv = "上破" if _bc_fail_kind == "up" else "跌破"
+            _bc_fail_note += (f"⚠ <b>已逼近该位（距 {abs(_fdist):.2f}%）</b>："
+                              f"该情景随时可能被推翻，读本图时请把「{_fv} {_fp:.0f}」"
+                              f"与主路径概率一并看，勿只看单向结论。\n")
+
     _pstar = "★概率最高 " if _p_top == "main" else ""
     _astar = "★概率最高 " if _p_top == "alt" else ""
     _rstar = "★概率最高 " if _p_top == "risk" else ""
@@ -1909,6 +1963,7 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
         f'风险止损位(风险路径终点·向下量度) ≈ <b>{risk_p[-1][1]:.0f}</b>（{((risk_p[-1][1]/last-1)*100):+.1f}%） · '
         f'趋势外推位 ≈ <b>{trend_end_price:.0f}</b> · '
         f'主路径失效位(有效跌破ZD) ≈ <b>{zd:.0f}</b> · '
+        f'{_bc_fail_line}'
         f'结构存续概率(锥) ≈ <b>{_p_hold*100:.0f}%</b></div>'
         + _src_note
     )
@@ -1916,7 +1971,8 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
     # 「60 日…~119%」——那是创业板的历史读数，写到所有指数身上既错指数、又错 horizon
     # （horizon 由 adaptive_horizon 决定，实测为 30 而非 60））。
     _bw = math.exp(_mean + _sp_up) - math.exp(_mean - _sp_dn)
-    note = (f"主路径失效位：现价有效跌破 ZD {zd:.0f}（收盘确认）→ 主路径失效、风险路径概率上升；风险路径确认需同时满足「跌破 ZD + 周线笔转向下」。\n"
+    note = (_bc_fail_note
+            + f"主路径失效位：现价有效跌破 ZD {zd:.0f}（收盘确认）→ 主路径失效、风险路径概率上升；风险路径确认需同时满足「跌破 ZD + 周线笔转向下」。\n"
              f"上方「风险止损位」即该风险路径的<b>向下量度终点</b>（由 ZD 派生的结构参考位）——需要「往下还有多少空间」时读这一栏；确认条件未满足前它只是条件应对的边界，不是对底部的预测。\n"
              f"红色阴影为基于<b>真实历史 {horizon} 日对数收益分布</b>推演的<b>经验分位扇形预测带</b>（P05–P95 外层 / P25–P75 内层）：与对称 ±σ 带不同，它直接由本指数历史兑现统计得出、天然包含 A 股肥尾与涨跌不对称，"
         f"故<b>上下带非对称</b>——按真实历史经验分位分别给上下沿定宽（替代对称 ±1.645σ 等宽假设）：本指数近 3 年 {horizon} 日对数收益呈右偏，上行离散（P95–P50）实测为下行（P50–P05）的 <b>{_base_up / _base_dn:.2f} 倍</b>，故<b>上行带更宽</b>，如实容纳单边急涨的肥尾。<b>⚠ 带宽口径（R491 补披露）</b>：图上带的上下沿<b>不是</b>名义经验分位本身，而是<b>经验分位 × 覆盖修正 κ</b>——本指数 κ=<b>{_kappa:.2f}</b>，故实际带宽（{horizon} 日 P05–P95 ≈ <b>{_bw*100:.0f}%</b>）显著大于名义分位区间（{horizon} 日 ≈ {(_q95 - _q05)*100:.0f}%）；κ 的作用是补偿有限样本估计误差与非平稳，使<b>实测覆盖率</b>回到名义 90%（否则名义 90% 的区间实际只覆盖约 85%）。κ>1 属设计而非缺陷，但读图时不应把带沿直接当作「历史 5%/95% 分位」。R57+R58 口径：① 校准窗口由全历史改为<b>近 3 年</b>，剔除 2015 股灾等早期崩溃收益导致的 era-shift 偏悲观；② 中心由中位改为<b>窗口均值（期望）</b>，A 股含正漂移、中位低估中枢，使方向判定正确率由约 36% 升至约 54%；③ 近窗口已含当前波动，<b>不再叠加 regime 因子</b>（此前双重放大使创业板带宽虚胖至 ±60%+）。覆盖修正系数 κ（R168 重标定 + R171 regime 细化）：walk-forward 实测(同回测引擎, 5指数 N=180/horizon)表明 κ=1.8 时牛/震荡实测覆盖达 96~98%(过宽、名义90%被高估、带几乎无信息量)，故 R168 将 κ 由 1.8 降至 1.4，聚合精确命中名义 90%(T+8 89.4%、T+30 91.1%)。但 R171 分 regime 重扫(动态 exec 真实 forecast_svg, 遍历 κ∈[1.4,2.3])发现：单一 bull κ 无法同时让 H8/H30 都≈90%——bull H8 在 κ=1.4 仅 79.2%(N=53, 牛市短期急涨急跌使 30日带对 T+8 偏窄)，而 bull H30 在 κ=1.4 已 90.6%、κ=1.6 即过宽到 96.2%(无信息量带)。故 R171 取折中 bull=1.5：bull H8 79.2%→86.8%(接近名义90%、健康)、bull H30 92.5%(未过宽)；range 维持 1.4(聚合 H8/H30 均 93.2%)、bear 维持 2.3(下行富尾安全垫)。早期「κ=1.4→86%/κ=1.8→90.2%」系 R57/R58 改窗口与改中心前的旧口径、已 stale。√t 缩放假设仍成立(覆盖率随 horizon 分桶均匀)。<b>κ 按市场环境自适应(R108)</b>：牛 <b>{_KAPPA_NEAR['bull']:.2f}/{_KAPPA['bull']:.2f}</b>(近端/远端) / 震荡 <b>{_KAPPA['range']:.2f}</b> / 熊市 <b>{_KAPPA['bear']:.2f}</b>(关15 实证熊市 T+30 原 κ=1.8 漏覆盖 33.3%、LRuc=7.1 拒绝 99%，放宽后给下行富尾补安全垫——A 股熊市下跌更急更肥尾，近 3 年经验分位低估了极端下行)。R223：仅牛市加「近端(f=0)加宽」斜坡(1.5→1.60)修 T+8 漏覆盖 86.8%→≈90+(walk-forward 实测复核见 backtest_diff)；震荡/熊市维持 R171 原值不动——过度收窄属安全侧过宽非缺陷，且盲目降 range κ 会把创业板 T+30 本已偏低覆盖(86.1%)进一步压低(假绿)，故仅精准修牛市近端这一真缺陷。中线路径为「实测漂移期望（均值）」而非手工情景路径，置信带中线统计诚实；带宽随时间按 √t 扩张（随机游走特性），近月不确定性即已显著，并非线性外推的针状。<b>代价</b>：高波动指数（如创业板）本指数 {horizon} 日 P05–P95 带宽可达 <b>{_bw*100:.0f}%</b>，这是其真实波动的诚实反映（含 κ 覆盖修正），而非缺陷。\n"
@@ -2035,6 +2091,12 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
                "p_hold": round(_p_hold, 3),
                "path_dev": round(_dev, 4),
                "path_dir_conflict": _dir_conflict,   # R490: 与主路径/期望「方向相反」判据同源，供卡片标签复用
+               # R513 记账：本轮**故意不**新增 fc_data 键。R513 初版曾加 bc_fail / bc_fail_kind /
+               #   bc_fail_date / bc_fail_from 四个键，但按 R491 的"死键判据"（带引号键名在
+               #   fc_data 定义块之外零出现）逐一核查后确认：**零消费者**——note 与 .fc-targets
+               #   汇总行是经 `_bc_fail` 局部变量取值渲染的，而 fc_data 只被 forecast_echart()
+               #   消费并转成 ECharts option（键名不序列化进 HTML，实测产物内 path_dir_conflict
+               #   / p_top_slot 均为 0 次）。既然无消费者，就不导出，避免重蹈 R491 的 9 个死键。
                "p_top_slot": _p_top,                 # R491: 概率最高的路径槽位(main/alt/risk)，供汇总表/卡片标签复用
                "zd": round(zd, 2), "zg": round(zg, 2), "last": round(last, 2),
                "trend": round(trend_end_price, 2),
