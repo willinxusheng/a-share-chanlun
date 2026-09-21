@@ -102,6 +102,11 @@ h1{font-size:21px;font-weight:700;letter-spacing:.4px;line-height:1.3}   /* R323
    （实测 ≥1100px 档与改前**逐像素相同**）。子项 `flex:0 0 auto` 防被压扁。 */
 .ind-panel .head .tabs{min-width:0;max-width:100%;overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch}
 .ind-panel .head .tabs a{flex:0 0 auto}
+/* R509c: 排序 tab 栏的「可横滑」提示 —— R499 只修了「可达可滚」, 但移动端不显示滚动条
+   ⇒ 用户不知道能滑。实测 375px 下 .tabs 内容 951px / 可视 305px, 10 个排序 tab 只有约 1/3
+   可见 ⇒ 「⛓ 自身背驰 / 💵 净流入 / ⚡ 涨跌极端」等**不可发现**(功能丢失, 非"只是不好看")。
+   显隐由 syncTabsTip() 按实测溢出决定, 不用媒体查询(与 R506b 同纪律: 溢出必须报账, 且不虚报)。 */
+.ind-panel .head .tabsTip{display:none;flex-basis:100%;font-size:11px;color:#94a3b8;text-align:right;padding:2px 0 0}
 .ind-panel .head .tabs a{font-size:12px;padding:4.5px 11px;border-radius:7px;cursor:pointer;color:var(--muted);text-decoration:none;line-height:1.5;transition:background .15s,color .15s;white-space:nowrap}
 .ind-panel .head .tabs a:hover{color:var(--ink)}
 .ind-panel .head .tabs a.on{background:#fff;color:var(--ink);font-weight:700;box-shadow:0 1px 3px rgba(0,0,0,.08)}
@@ -215,6 +220,16 @@ h1{font-size:21px;font-weight:700;letter-spacing:.4px;line-height:1.3}   /* R323
 .dstrip .rsi-cell{margin:0}
 .dstrip .dsep{color:#cbd5e1;margin:0 -6px}
 .dstrip .muted{color:#94a3b8;font-weight:400}
+/* R509: 「相对强度」项窄屏溢出 —— .dstrip>span 是 white-space:nowrap 的 flex item,
+   nowrap 下 min-content=全长 ⇒ **不收缩**; 该项内含长括号说明(20日分位/动量变化/强度释义),
+   实测 375px 宽 428px · 412px 391px, 而面板内容盒仅 305px ⇒ 溢出被 #indDetailPanel
+   {overflow:hidden}(**为圆角**)硬裁: 375 裁 90.7px / 412 裁 53.7px, 尾部「· 强, 但动能熄火)」
+   整段不可见 —— 而「强/弱 + 动能是否熄火」正是**结论词**。640px 起放得下(实测 0 处)。
+   修法(有界): 仅该单元允许折行; 其余单元实测不超宽 ⇒ 有证据地不放开(全放开会让
+   「主力净流入/行业龙头」等随机折行, 是更大面积的视觉变更)。
+   keep-all 让断点落在「 · 」而非词中(否则出现「动量变/化」), anywhere 兜底防整词超宽。 */
+.dstrip>span.rswrap{flex-wrap:wrap}
+.dstrip>span.rswrap .muted{white-space:normal;min-width:0;word-break:keep-all;overflow-wrap:anywhere}
 /* 涨跌单元格内 相对大盘 次级文案 */
 .vsub{font-size:10px;font-weight:400;text-align:right;margin-top:2px;line-height:1.3;white-space:nowrap;opacity:.92}
 /* 板块异动小徽章 / 成分股信号新鲜度 */
@@ -233,6 +248,11 @@ h1{font-size:21px;font-weight:700;letter-spacing:.4px;line-height:1.3}   /* R323
 .det-tabs .ind-tab{font-size:12.5px;padding:5px 13px;border-radius:7px;cursor:pointer;color:var(--muted);line-height:1.6;white-space:nowrap;transition:background .15s,color .15s;text-decoration:none}
 .det-tabs .ind-tab:hover{color:var(--ink)}
 .det-tabs .ind-tab.on{background:#fff;color:var(--ink);font-weight:700;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+/* R509b: .det-tabs 未设 flex-wrap ⇒ 「📈 个股 K 线 · <标的名称>」在长名标的下(实测 15 字
+   ETF 名「科创创业人工智能ETF中银证券」)整组宽 >305px ⇒ 溢出被 #indDetailPanel
+   {overflow:hidden}(**为圆角**)裁 55.5px —— **用户看不到自己在看哪只票**, 而"在看哪只票"
+   正是切到该 tab 的唯一意义。与 R508b 的 .chips 完全同型(未设 flex-wrap)。 */
+.det-tabs{flex-wrap:wrap}
 .stk-panel{margin-top:14px;padding:0}
 .chart-note{font-size:11.5px;color:var(--muted);padding:8px 16px 9px;line-height:1.8}
 .legend-tag{display:inline-flex;align-items:center;font-size:11.5px;margin-right:16px;color:var(--muted);line-height:1}
@@ -817,6 +837,7 @@ a{color:var(--primary);text-decoration:none}
           <a id="tabCap" onclick="sortInds('cap')">💰 市值优先</a>
           <a id="tabChg" onclick="sortInds('chg')">⚡ 涨跌极端</a>
         </span>
+        <span class="tabsTip">← 左右滑动查看全部排序 →</span>
         <span class="hint">申万一级 31 行业 + ETF 板块 · 龙头=市值最大 · 资金=主力净流入(亿, 红流入绿流出) · 点击展开</span>
       </div>
       <div class="ind-rule" id="indRule"></div>
@@ -2344,6 +2365,17 @@ function syncRpSwipe(){
   sw.style.display=(rw.scrollWidth-rw.clientWidth>1)?"block":"none";
 }
 window.addEventListener("resize",syncRpSwipe);
+/* R509c: 行业排序 tab 栏的「可横滑」提示 —— 见 CSS 处注释。
+   提示放在 .tabs 的**兄弟层**(.head 内、.tabs 之外): 放 .tabs 内部会随横滑一起移动而看不见(R506b 教训)。
+   .tabs 是静态 HTML ⇒ DOM 就绪即可算; 字体加载会改字宽 ⇒ 再挂 load 复算一次。 */
+function syncTabsTip(){
+  var t=document.querySelector(".ind-panel .head .tabs"),p=document.querySelector(".ind-panel .head .tabsTip");
+  if(!t||!p)return;
+  p.style.display=(t.scrollWidth-t.clientWidth>1)?"block":"none";
+}
+window.addEventListener("resize",syncTabsTip);
+window.addEventListener("load",syncTabsTip);
+syncTabsTip();
 var IND_TABS=["tabRsiL","tabRsi","tabSig","tabBc","tabTrend","tabRs","tabDip","tabFlow","tabCap","tabChg"];   // R498: +tabBc(板块自身背驰)
 function sortInds(mode){
   curSortMode=mode;
@@ -2757,7 +2789,7 @@ function detailStrip(ind,k){
   if(dm.rs20!=null){
     // R446: 详情页也内联含义 —— 不依赖悬停(手机/触屏无 native title)
     var _rd=ROT_DEF[dm.rot];
-    h+='<span title="'+esc(rotTip(dm))+'">相对强度 <b>'+esc(dm.rot||"-")+'</b>'
+    h+='<span class="rswrap" title="'+esc(rotTip(dm))+'">相对强度 <b>'+esc(dm.rot||"-")+'</b>'
       +'<span class="muted">(20日分位 '+dm.rs20+'%'+(dm.accel!=null?" · 动量变化 "+(dm.accel>0?"+":"")+dm.accel.toFixed(2)+"pp/日":"")
       +(_rd?" · "+_rd.r:"")+')</span></span>';
   }
