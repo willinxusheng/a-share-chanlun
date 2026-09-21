@@ -4654,6 +4654,23 @@ def main():
      ⇒ 末尾「日」字被切（`.chips` 虽是 flex-wrap，但**单个**徽章自身 nowrap ⇒ 无处可断）。
      与 `.tbl` 同款手法：让徽章自己允许折行。 */
   .chips .badge {{ white-space: normal; line-height: 1.35; border-radius: 12px; }}
+  /* ★ R509（同判据扩到标题区 h2）: R506/R506b 当时**有意**把作用域限在 .tbl/.chips，
+     明写「不影响标题区的状态徽章」，其隐含前提是「标题区徽章都是短静态文本」。
+     **该前提已被数据打破**：二、市场情绪 的 stale 徽章是**动态文案**
+     「情绪数据滞后 N 日（东财行情源在云端 CI 被限流，沿用 YYYY-MM-DD 成功快照）」
+     ≈500px，而 375px 下 h2#s2 内容盒仅 339px ⇒ 徽章溢出 196.7px；h2 自身
+     overflow:visible ⇒ 溢出传导到文档 ⇒ **整页横滚 154px**（412px 档 117px；
+     640px 起放得下）。整页横滚 = 手机上左右滑会整页错位（sticky 导航随之偏移），
+     比单纯裁字更伤。同族风险还有 tencent_proxy 分支的
+     「数据源: 腾讯回退(成交额/换手率为 OHLCV 派生代理)」≈356px > 339px ——
+     即**当前数据下只暴一个, 换 .sent_mode 就再暴一个**（真数据跑不出的那一类）。
+     修法同 R506/R506b（让徽章自己折行）。作用域取 **h2 内全部徽章**而非仅 .sec：
+     实测 h2 内共 34 个徽章、除该 stale 外 33 个内容都短（同批实测 overHost 全为 0）
+     ⇒ 折行开关对它们零视觉影响，系统性覆盖不引入额外变更。
+     刻意**不**加 border-radius:12px（R506/R506b 加过）：那会把 33 个短徽章从
+     胶囊改成圆角矩形，属大面积可见变更; 保持 999px 时两行盒的半径会自动夹到 h/2，
+     渲染为圆角矩形，可接受。 */
+  h2 .badge {{ white-space: normal; display: inline-block; max-width: 100%; line-height: 1.35; }}
   .verdict {{ background: #f0f6ff; border-left: 4px solid {BLUE}; padding: 10px 14px; margin-top: 12px; font-size: 14px; border-radius: 0 6px 6px 0; }}
   .verdict p {{ margin-top: 4px; color: #475569; line-height: 1.7; }}
   .tbl {{ width: 100%; border-collapse: collapse; font-size: 13px; background: #fff; table-layout: fixed; }}
