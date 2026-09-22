@@ -202,7 +202,17 @@ def find_beichi(bis, hist, merged):
             continue
         a_cur = bi_macd_area(cur, hist, merged)
         a_prev = bi_macd_area(prev, hist, merged)
-        if a_prev <= 0:
+        # R515: ★★ 零面积退化守卫 —— 旧实现只防 a_prev<=0，不防 a_cur==0。
+        #   bi_macd_area 只累加**与笔方向同号**的 MACD 柱 ⇒ 若该笔区间内柱子全为反号
+        #   （价格在涨但 DIF 全程低于 DEA，典型"底部反转初期"形态），面积恒为 0，
+        #   比值恒 0 ⇒ 无条件满足 a_cur < a_prev*0.85 ⇒ **假背驰**。
+        #   实证(2026-09-22 线上产物)：5 指数×日/周/月 共 142 条笔级背驰中 15 条(10.6%)
+        #   零面积；radar 87 个信号中 5 个(5.7%) area=0。这些笔的价格变动多为大涨
+        #   (+4.5%~+21.4%)、vol_ratio 多为 >1（量能放大）⇒ 与"力度衰竭"直接矛盾。
+        #   后果实例：上证周线 bi#37(3794.68→4258.86, +12.2%) 被判顶背驰 ⇒ 周线情景
+        #   「背驰见顶风险」，且页面 detail 显示"面积比 0.00"。
+        #   判据：**两段都须有非零面积**，比值才有意义。本守卫只删不增（有界）。
+        if a_cur <= 0 or a_prev <= 0:
             continue
         if cur["dir"] == 1 and cur["end_price"] > prev["end_price"] and a_cur < a_prev * BC_AREA_RATIO_TH:
             out.append({"bi_index": i, "type": "top", "area_ratio": a_cur / a_prev})
@@ -330,7 +340,9 @@ def find_beichi_segment(segs, hist, merged):
             continue
         a_cur = seg_macd_area(cur, hist, merged)
         a_prev = seg_macd_area(prev, hist, merged)
-        if a_prev <= 0:
+        # R515: 与 find_beichi 同一守卫（零面积退化 ⇒ 比值无意义 ⇒ 假背驰），
+        #   实证段级 67 条中 4 条(6.0%)零面积。与会话内 R515 笔级修复同批。
+        if a_cur <= 0 or a_prev <= 0:
             continue
         if cur["dir"] == 1 and cur["high"] > prev["high"] and a_cur < a_prev * BC_AREA_RATIO_TH:
             out.append({"seg_index": i, "type": "top", "area_ratio": a_cur / a_prev})
