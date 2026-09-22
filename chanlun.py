@@ -915,6 +915,71 @@ def bc_invalidation(bis, beichis):
     return out
 
 
+def cross_level_conflict(scenario, active_seg_bc):
+    """R516：**跨级别冲突**判据（唯一来源）—— 笔级情景方向与**活跃**段级背驰方向相反。
+
+    为什么需要它：`classify()` 的 `scenario` **只由笔级背驰 + 位置**决定（背驰优先于位置）；
+    段级背驰在旧实现里仅作 detail 的**半句修饰**，且**只在同向时输出**
+    （`seg_top` 配顶情景、`seg_bot` 配底情景）。于是「笔级看空 + 活跃段底背驰（段级看多）」
+    这类**跨级别冲突**在页面判据里**无任何条文** —— 引擎既不说明、也不改口述，读者无从知道
+    两个级别正在打架。R515 实测 2026-09-22 **5 指数中 4 个**（上证/深证/创业板/中证500）
+    日线同处此态。
+
+    ★ 判据只回答「**是否存在方向相反的活跃段级背驰**」，**不改变** `scenario`
+      —— 实证（R516，5 指数 2021 至今逐日重放，H=20，见 `_dbg/r516/`）
+      支持「披露」而**不支持**「让段级翻多」：看空情景内有无段底背驰的差异远小于
+      看多情景内有无段底背驰的差异。故本函数只产出**标注**，方向仍由笔级裁决
+      （与 R514「方向锁」、R515「有证据地不改 scenario」同一纪律）。
+
+    参数：
+      scenario      —— classify 已判定的情景字符串
+      active_seg_bc —— **活跃**段级背驰列表（调用方负责按 SEG_BC_ACTIVE_GAP 过滤）
+
+    返回 None（无冲突）或：
+      {"kind": "笔级看空×段级看多" / "笔级看多×段级看空",
+       "bi_dir": -1 / 1, "seg_type": "bottom" / "top",
+       "seg_index": int|None, "area_ratio": float|None,
+       "seg_internal_split": bool,      # 段级内部同时存在另一方向的活跃背驰
+       "label": "跨级别冲突", "note": "【跨级别冲突】…"}
+    """
+    bi_dir = 1 if scenario in SC_BULL else (-1 if scenario in SC_BEAR else 0)
+    if bi_dir == 0 or not active_seg_bc:
+        # 中性情景（既不在 SC_BULL 也不在 SC_BEAR）没有「方向」可言，谈不上冲突
+        return None
+    # 段级看多的证据 = 活跃的段级**底**背驰；段级看空 = 活跃的段级**顶**背驰
+    opp = "bottom" if bi_dir == -1 else "top"
+    same = "top" if bi_dir == -1 else "bottom"
+    cand = [b for b in active_seg_bc if b.get("type") == opp]
+    if not cand:
+        return None
+    # 取**最新**的一条（seg_index 最大）—— 与 pick_recent_bc「并存取更新者」同口径
+    b = max(cand, key=lambda z: z.get("seg_index", -1))
+    si = b.get("seg_index")
+    ar = b.get("area_ratio")
+    seg_internal_split = any(x.get("type") == same for x in active_seg_bc)
+
+    bi_cn = "看多" if bi_dir == 1 else "看空"
+    seg_cn = "看多" if opp == "bottom" else "看空"
+    seg_nm = "底" if opp == "bottom" else "顶"
+    kind = "笔级看空×段级看多" if bi_dir == -1 else "笔级看多×段级看空"
+
+    # ★ 文本里**不得**出现 markdown 记号（`**`）—— detail 直接进 HTML，星号会原样显示（规则 84）
+    _ev = "（走势段 #%s%s）" % (
+        "?" if si is None else si,
+        "" if ar is None else "，面积比 %.2f" % ar)
+    _ext = "；段级内部亦同时存在另一方向的活跃背驰，级别内部亦分歧" if seg_internal_split else ""
+    note = ("【跨级别冲突】笔级判为「%s」（%s），但走势段级别另有活跃的%s背驰%s（%s）"
+            "—— 两个级别的方向相反。引擎按既定规则「笔级定方向、段级定买卖点」"
+            "维持现判；此处只作披露，不改变情景。该冲突意为多空力度在不同级别上分歧，"
+            "宜降低仓位、并以下方失效位为准%s。"
+            % (scenario, bi_cn, seg_nm, _ev, seg_cn, _ext))
+
+    return {"kind": kind, "bi_dir": bi_dir, "seg_type": opp,
+            "seg_index": si, "area_ratio": ar,
+            "seg_internal_split": seg_internal_split,
+            "label": "跨级别冲突", "note": note}
+
+
 def classify(bis, zss, beichis, close, wcls=None, segments=None, seg_beichi=None, mcls=None):
     if not bis:
         # R166: 早返回必须补齐正常路径(约L721-726)的全部键，否则下游
@@ -922,7 +987,8 @@ def classify(bis, zss, beichis, close, wcls=None, segments=None, seg_beichi=None
         # (L1353 cls["last_bi_dir"]) 直接下标访问会 KeyError 崩溃(退化/空 bis 输入)。
         # 补中性默认值，保证键齐备、下游安全。
         return {"scenario": "数据不足", "detail": "",
-                "seg_bc_bottom": False, "seg_bc_top": False, "interval_nesting": "",
+                "seg_bc_bottom": False, "seg_bc_top": False, "cross_conflict": None,
+                "interval_nesting": "",
                 "position": "无中枢", "last_bi_dir": 0, "last_bi_pct": 0.0,
                 "month_context": "", "trend_type": "", "month_dir": 0, "week_dir": 0,
                 "week_scenario": "数据不足", "month_scenario": "数据不足",
@@ -1075,6 +1141,19 @@ def classify(bis, zss, beichis, close, wcls=None, segments=None, seg_beichi=None
         scenario = "震荡待方向"
         detail = "价格处于中间位置、方向待确认，暂按中性震荡处理，等待分型与笔的进一步确认。"
 
+    # R516: 跨级别冲突判据（唯一来源 = cross_level_conflict()）—— 笔级情景方向与**活跃**段级
+    #   背驰方向相反时，在 detail 里**显式披露**。此前该情形**无任何条文**：段级背驰只在同向时
+    #   输出半句修饰（seg_top 配顶情景、seg_bot 配底情景），方向相反则完全静默 ⇒ 读者无从知道
+    #   两个级别正在打架（R515 实测 2026-09-22 上证/深证/创业板/中证500 日线同处此态）。
+    #   ★ 只披露、**不改变** scenario。实证（R516，5 指数 2021 至今逐日重放 n=6540，H=20）：
+    #     两类冲突后果**不对称** —— 「笔级看多×段顶背驰」后 20 日 -0.34%（上涨 40.5%，n=635），
+    #     弱于看多情景无段背驰的 +0.33%（n=1737）⇒ 是真警示；「笔级看空×段底背驰」后 +0.06%
+    #     （n=1058），好于看空情景无段背驰的 -0.32%（n=1631），但仍低于全样本基准 +0.29%
+    #     ⇒ 只弱化看空、不足以翻多。且两组**逐指数正负分化**，故方向仍由笔级裁决。
+    cross_conflict = cross_level_conflict(scenario, _active_seg_bc)
+    if cross_conflict:
+        detail += "　" + cross_conflict["note"]
+
     if nest:
         detail += "　【区间套】" + nest + "。"
     # 注：mdesc 已并入 nest（区间套）并在上方统一输出，避免「月线背景」在 detail 中重复出现。
@@ -1142,7 +1221,8 @@ def classify(bis, zss, beichis, close, wcls=None, segments=None, seg_beichi=None
 
     return {"scenario": scenario, "detail": detail, "position": pos,
             "last_bi_dir": last["dir"], "last_bi_pct": (last["end_price"] / last["start_price"] - 1),
-            "seg_bc_bottom": seg_bot, "seg_bc_top": seg_top, "interval_nesting": nest,
+            "seg_bc_bottom": seg_bot, "seg_bc_top": seg_top, "cross_conflict": cross_conflict,
+            "interval_nesting": nest,
             "month_context": mdesc, "trend_type": trend_type, "month_dir": month_dir,
             "week_dir": week_dir, "week_scenario": week_scenario,
             "month_scenario": month_scenario, "resonance": resonance}
@@ -1953,7 +2033,8 @@ def analyze(klines, min_bi_pct=MIN_BI_PCT, with_stability=True):
         # 返回最小安全骨架(与 classify 空守卫同口径), 调用方应避免传入空序列。
         return {"classify": {"scenario": "数据不足", "detail": "", "position": "无中枢",
                              "last_bi_dir": 0, "last_bi_pct": 0.0, "seg_bc_bottom": False,
-                             "seg_bc_top": False, "interval_nesting": "", "month_context": "",
+                             "seg_bc_top": False, "cross_conflict": None,
+                             "interval_nesting": "", "month_context": "",
                              "trend_type": "", "month_dir": 0, "week_dir": 0,
                              "week_scenario": "数据不足", "month_scenario": "数据不足",
                              "resonance": "", "ma_alignment": None},

@@ -2641,9 +2641,16 @@ def sparkline(klines, color, w=150, h=34):
     return f'<svg viewBox="0 0 {w} {h}" width="{w}" height="{h}" xmlns="http://www.w3.org/2000/svg"><path d="{d}" fill="none" stroke="{color}" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round"/></svg>'
 
 
-def badge(text, color, icon=''):
-    """统一实心胶囊标签：白字 + 彩色背景"""
-    return f'<span class="badge" style="background:{color}">{icon}{text}</span>'
+def badge(text, color, icon='', title=''):
+    """统一实心胶囊标签：白字 + 彩色背景
+
+    R516: 新增可选 `title`（原生 hover 提示）—— 供「跨级别冲突」徽章承载详细口径，
+    避免把长文案塞进徽章本体（h2 徽章族曾因过长导致整页横滚，见 R510）。
+    title 里的引号/尖括号须转义，否则会截断属性、把文案泄进 HTML 结构。
+    """
+    _t = (' title="%s"' % title.replace('&', '&amp;').replace('"', '&quot;')
+          .replace('<', '&lt;').replace('>', '&gt;')) if title else ''
+    return f'<span class="badge" style="background:{color}"{_t}>{icon}{text}</span>'
 
 
 def _score_color(score):
@@ -2845,7 +2852,7 @@ def card_html(sym, name, klines, r, wcls, health, conf):
 
 
 # ================= 关键位表 =================
-def strategy_text(cls, zs):
+def _strategy_core(cls, zs):
     sc = cls["scenario"]
     if zs is None:
         # R363: 区分「真数据不足」(classify 空输入骨架 scenario=数据不足)与「有笔无中枢」
@@ -2878,6 +2885,61 @@ def strategy_text(cls, zs):
         return f"偏多结构（{sc}），回踩不破 ZG {zs['zg']:.0f} 持股；跌破 ZD {zs['zd']:.0f} 转弱"
     # 其余(震荡待方向等真中性情景)给中性观望建议, 不再误标「空头格局减仓」(R164)
     return f"结构中性（{sc}），观望为主；突破 ZG {zs['zg']:.0f} 转多，跌破 ZD {zs['zd']:.0f} 转空"
+
+
+def strategy_text(cls, zs):
+    """R516: 在 `_strategy_core` 之上追加**跨级别冲突**的谨慎提示。
+
+    为什么必须动这一列：`cls["detail"]` 会披露冲突（见 chanlun.cross_level_conflict），
+    若「应对策略」维持纯方向口径，会出现「策略说『持股为主、回踩不破可加』，而结构解读说
+    『两个级别方向相反、宜降低仓位』」的**自相矛盾呈现** —— 正是本项目反复禁止的「单向呈现」。
+
+    ★ 只**追加谨慎语**，**不翻转**方向建议 —— 与实证强度匹配：冲突 B（看多×段顶背驰）后 20 日
+      -0.34%（上涨 40.5%）、冲突 A（看空×段底背驰）+0.06%，均**逐指数正负分化**
+      ⇒ 属**方向性证据**，足以支持「提示降仓」，不足以支持「反手做多/做空」。
+    """
+    _base = _strategy_core(cls, zs)
+    _cf = cls.get("cross_conflict")
+    if not _cf:
+        return _base
+    if _cf.get("seg_type") == "bottom":
+        return _base + "；但段级底背驰活跃（力度已衰减），不宜追空、宜降低仓位"
+    return _base + "；但段级顶背驰活跃，不宜追高、宜降低仓位"
+
+
+# ================= 跨级别冲突（R516） =================
+CONFLICT_COLOR = "#d97706"   # 琥珀：与「日强周弱背离」徽章同色系，语义同为"存在分歧"
+
+
+def conflict_levels(cls, wcls, mcls):
+    """R516：返回**存在跨级别冲突**的级别短名列表（按 日/周/月 顺序）。
+
+    唯一来源 = classify 输出里的 `cross_conflict`（判据在 `chanlun.cross_level_conflict`）。
+    本函数只做「多级别汇总」，**不重新判据** —— 否则就是第二份映射（规则 20）。
+    """
+    out = []
+    for nm, c in (("日", cls), ("周", wcls), ("月", mcls)):
+        if isinstance(c, dict) and c.get("cross_conflict"):
+            out.append(nm)
+    return out
+
+
+def conflict_badge(cls, wcls, mcls):
+    """R516：跨级别冲突徽章。**无冲突时返回空串** ⇒ 不冲突的指数页面字节不变（零视觉影响）。
+
+    徽章本体只放级别短名（`跨级别冲突（日）`），详细口径（哪一级、哪个方向、哪条段级背驰）
+    走原生 `title` hover 提示 —— 避免长文案进 h2 徽章族（R510 曾因 h2 徽章过长致整页横滚）。
+    """
+    lv = conflict_levels(cls, wcls, mcls)
+    if not lv:
+        return ""
+    _c0 = None
+    for c in (cls, wcls, mcls):   # 详细口径优先取日线（交易主级别）
+        if isinstance(c, dict) and c.get("cross_conflict"):
+            _c0 = c["cross_conflict"]
+            break
+    return badge('跨级别冲突（%s）' % "/".join(lv), CONFLICT_COLOR, '⚠ ',
+                 title=(_c0 or {}).get("note", ""))
 
 
 def levels_table(data, results, results_week, results_month, scores):
@@ -2913,7 +2975,7 @@ def levels_table(data, results, results_week, results_month, scores):
             zg_txt = zd_txt = "—"
         rows.append(f"""<tr data-sym="{sym}" class="linkrow" data-jump>
           <td><b>{d["name"]}</b></td>
-          <td>{badge(cls["scenario"], sc_color)}</td>
+          <td>{badge(cls["scenario"] + ("⚠" if cls.get("cross_conflict") else ""), sc_color, '', (cls.get("cross_conflict") or {}).get("note", ""))}</td>
           <td>{badge(wcls["scenario"], w_color)}</td>
           <td>{badge(mcls["scenario"], m_color)}</td>
           <td class="tac">{syn}</td>
@@ -4434,7 +4496,7 @@ def main():
                              f'<span style="color:{_col};font-weight:600">{_sig}</span> —— {_txt}</p>')
             sections.append(f"""
     <section class="panel" id="sec-{sym}">
-      <h2>{d["name"]}（{sym}）{badge(f'日线：{cls["scenario"]}', sc_color)}{badge(f'周线：{wcls["scenario"]}', w_color)}{badge(f'月线：{mcls["scenario"]}', m_color)}{badge(f'健康 {health}', _score_color(health))}{badge(f'置信 {conf}', _score_color(conf))}{_sent_badge}</h2>
+      <h2>{d["name"]}（{sym}）{badge(f'日线：{cls["scenario"]}', sc_color)}{badge(f'周线：{wcls["scenario"]}', w_color)}{badge(f'月线：{mcls["scenario"]}', m_color)}{conflict_badge(cls, wcls, mcls)}{badge(f'健康 {health}', _score_color(health))}{badge(f'置信 {conf}', _score_color(conf))}{_sent_badge}</h2>
       <div class="chartbox">
         {echart_main(d["klines"], r, sym, r["captured"], sig_age)}
       </div>
@@ -4528,6 +4590,25 @@ def main():
         ② <b>三类族不动</b>：第 2 次起<b>两侧一致退化</b>（笔 73.1%→61.5%→56.4%，
         段 81.5%→66.7%→70.6%）⇒ 中枢的「首个回抽」才是离开确认，后续回抽退化为中枢震荡，
         补齐只会稀释读数 —— 这是<b>有证据的「不补」</b>，不是遗漏。</div>
+      <div style="margin-top:4px;font-size:12px;line-height:1.75;color:#b45309">
+        ⚠ <b>跨级别冲突</b>（R516 新增标注）：该级别<b>笔级</b>情景方向与<b>活跃段级背驰</b>方向相反 ——
+        例：日线判「背驰见顶风险」（看空），但走势段级别另有<b>活跃的底背驰</b>（看多）。
+        引擎按既定规则<b>「笔级定方向、段级定买卖点」</b>维持现判；本标注<b>只作披露、不改变情景</b>，
+        并在「应对策略」列追加降仓提示。判定依据 = <b>段级背驰在最近 {SEG_BC_ACTIVE_GAP} 段内仍活跃</b>。<br>
+        ★ <b>实测（5 指数 2021 至今逐日重放，n=6540，前视 20 日；同长度基准 +0.29% / 上涨 47.2%）</b>
+        —— 两类冲突的后果<b>并不对称</b>：<br>
+        ① <b>笔级看多 × 段顶背驰</b>后 20 日 <b>-0.34%</b>（上涨 <b>40.5%</b>，n=635），
+        <b>弱于</b>「看多情景无段背驰」的 +0.33%（n=1737）⇒ <b>是真警示，追高需谨慎</b>；<br>
+        ② <b>笔级看空 × 段底背驰</b>后 20 日 <b>+0.06%</b>（上涨 46.5%，n=1058），
+        <b>好于</b>「看空情景无段背驰」的 -0.32%（n=1631），但<b>仍低于</b>全样本基准 +0.29%
+        ⇒ <b>只弱化看空、不足以翻多</b>。<br>
+        ⚠ <b>反例边界（如实）</b>：两组<b>逐指数正负分化</b>（冲突 A 跨度 -1.81%~+2.49%、
+        冲突 B -2.46%~+2.47%；各指数样本 264/245/152/221/176 条）⇒ 全样本均值是各指数<b>互相抵消</b>
+        的结果，<b>不可外推到单一指数</b>；事件级聚类（同指数 H=20 去重）符号方向一致但样本小
+        （n=46~89）。故本标注定级为<b>方向性提示</b>，不作硬性方向开关。<br>
+        <b>滚动重算</b>：上述数值是<b>历史样本统计</b>（口径 = 逐日 point-in-time 重放，每 t 只用
+        <code>kl[:t+1]</code>），随样本增长与引擎版本变化会小幅变动，请勿当作不变量。
+      </div>
       <div class="verdict"><b>结构解读：</b><p>{cls["detail"]}</p>
       <p style="margin-top:4px"><b>周线级别：</b>{wcls["detail"]}</p>{_sent_row}</div>
       <h3 class="fc-title">未来走势推演</h3>
