@@ -328,7 +328,14 @@ jobs:
         # P1b: cron-job.org 16:00 起每半小时 dispatch 本站 → 每次跑完顺带 dispatch radar-scan。
         # radar-scan 内部有"当日已扫则跳过"守卫: 当日首扫(约40min)成功后, 后续各时点秒退;
         # 若首扫失败/漏跑, 下一时点自动补扫 —— 跟随 12 次节奏总有成功兜底。
-        # radar-scan push radar.json → 再次触发本站 deploy → 首页信号条刷新为当日数据。
+        # ★ R519 订正(原注释写"radar-scan push radar.json → 再次触发本站 deploy", **不成立**):
+        #   radar-scan 用默认 GITHUB_TOKEN push, 而 GitHub 规定「用 GITHUB_TOKEN 触发的
+        #   事件不会创建新的 workflow run」⇒ 那次 push **不会**拉起本站 deploy。
+        #   历史链路其实是: cron-job.org 每半小时 dispatch 本站 → 本次 deploy 发布整个仓库根
+        #   (`upload-pages-artifact path: .`), 把**上一次雷达扫描已入库**的 radar.json 顺带上线。
+        #   因此若雷达扫描晚于最后一个 deploy 时点(北京 21:30)完成, radar.json 虽已入库却
+        #   **无人发布** ⇒ 雷达界面停在昨日(R519 实测 2026-09-23)。
+        #   ⇒ 已由 radar-scan.yml 新增「显式触发 Pages 重新发布」步骤补齐(反面闭环)。
         # 失败不阻断本站发布(continue-on-error), 30 分钟后下一 cron-job 时点会再次尝试。
         continue-on-error: true
         run: |
