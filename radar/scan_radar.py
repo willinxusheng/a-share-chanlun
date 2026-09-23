@@ -446,6 +446,60 @@ def _typename(code, name):
     return "ETF"                                             # 15/16/18/51/56/58/50/90/11/12/20 场内基金
 
 
+# ★★ R519（2026-09-23）标底池**离线兜底** —— 应对东财 `clist` **路径级封禁**。
+#   实证（R519 探针，本机与 CI 同签名）：
+#     · 4 个镜像的 `/api/qt/clist/get` **全部秒断** HTTP=000（60~320ms 即断，TLS 握手已成功）；
+#     · **同 host 的其它接口全部 200**：`/api/qt/ulist/get`、`/api/qt/slist/get`、
+#       `datacenter-web.eastmoney.com/api/data/v1/get`；
+#     · **跨 host 同路径**（`push2his/api/qt/clist/get`）同样 000。
+#   ⇒ 排除了 出口IP / 网络 / UA / 协议(http/https) / 参数(fs·ut·pz) 五类原因，
+#     确证是**路径级**拒绝（`clist` 与 `stock/get` 两个路径，其余正常）。
+#   ⚠ 因此「加镜像」与「换 runner IP」**都不是解**（R517 的证伪在此得到更强解释：同路径一拒全拒）；
+#     正解 = **换接口** 或 **离线兜底**。本函数实现后者（有界、零网络、字段同构）。
+#
+#   兜底源 = **上一个成功产物** `radar.json`（`OUT`，**已入库**，CI checkout 即得）：
+#     · `universe[sym]` 字段域 {name,type,code,ind,mcap} 与 `fetch_universe()` 返回值**逐键同构**
+#       （`ind` 已完成 SW1 映射、ST/退门禁已在上一轮剔除）⇒ 下游零适配；
+#     · 代价：当日**新增**标的漏 1 天、当日**新变 ST** 的多留 1 天（可接受，且次日自愈）。
+#   ⚠ 两项守卫（缺一不可，防「用陈旧池静默产出错误数据」）：
+#     ① **新鲜度**：asof 距今 > `UNI_FALLBACK_MAX_DAYS` 自然日 ⇒ **拒绝兜底**，照旧 exit 2
+#        （宁无数据、不误导 —— 规则 83「条件态≠完成态」）；
+#     ② **自我披露**：第 3 项带 `fallback:` 前缀 ⇒ main 的 `源host=` 日志与 meta 的
+#        `uni_fallback` 键都写明本次用了兜底池（规则 78 同口径多出口）。
+UNI_FALLBACK_MAX_DAYS = 7
+
+
+def _uni_fallback_fresh(asof):
+    """兜底池 asof 是否仍在新鲜度窗口内（自然日）。无法解析 → **拒绝**（保守优先）。"""
+    try:
+        d0 = datetime.datetime.strptime(str(asof), "%Y-%m-%d").date()
+    except Exception:
+        return False
+    return (datetime.date.today() - d0).days <= UNI_FALLBACK_MAX_DAYS
+
+
+def _fallback_universe_from_output(excl):
+    """R519：从上一成功产物重建标的池。返回 (uni, excl, host_tag)；不可用则 ({}, excl, "")。"""
+    try:
+        d = json.load(open(OUT, encoding="utf-8"))
+    except Exception as e:
+        print("[scan_radar] 兜底不可用: 读不到 %s (%s)" % (OUT, e), file=sys.stderr)
+        return {}, excl, ""
+    asof = str((d.get("meta") or {}).get("asof") or "")
+    if not _uni_fallback_fresh(asof):
+        print("[scan_radar] 兜底拒绝: 产物 asof='%s' 无法解析或已超 %d 天, 不沿用陈旧池"
+              % (asof, UNI_FALLBACK_MAX_DAYS), file=sys.stderr)
+        return {}, excl, ""
+    uni = {}
+    for sym, r in (d.get("universe") or {}).items():
+        uni[sym] = {"code": r.get("code") or sym[-6:], "name": r.get("name") or sym,
+                    "type": r.get("type") or "ETF", "ind": r.get("ind") or "-",
+                    "mcap": r.get("mcap") or 0.0}
+    print("[scan_radar] ★ 兜底启用: clist 全路径不可用 → 沿用产物标的池 %d 只 (asof=%s)"
+          % (len(uni), asof))
+    return uni, excl, "fallback:%s@%s" % (os.path.basename(OUT), asof)
+
+
 def fetch_universe():
     """东财全市场标的池(多镜像轮询)。返回 {sym: {code,name,type,ind,mcap}}, 及排除计数。
     ind = 申万一级行业(industry_map 映射, ETF/未收录='-')"""
@@ -481,7 +535,9 @@ def fetch_universe():
             uni[sym] = {"code": code, "name": name, "type": typ,
                         "ind": ind, "mcap": mcap}
         return uni, excl, host
-    return uni, excl, ""
+    # R519: 所有镜像的 clist 都失败 ⇒ 尝试**离线兜底**（沿用上一产物标的池，不引入新数据源）。
+    #   兜底也不可用（产物缺失 / asof 过旧）时返回空 uni ⇒ 调用处照旧 exit 2（行为不变）。
+    return _fallback_universe_from_output(excl)
 
 
 # ================= 2. K线抓取(腾讯qfq 主 / 东财qfq 次 / 新浪裸价 备) =================
@@ -3302,6 +3358,10 @@ def main():
             src_cycle[_ck] = {"stops": _cs, "resumes": _cr}
     meta = {
         "title": "A股全市场缠论雷达",
+        # R519: **标底池兜底自我披露** —— 非空串表示本次**未**从东财 clist 拿到标的池，
+        #   而是沿用了该产物（形如 "fallback:radar.json@2026-09-22"）；空串 = 正常路径。
+        #   与 `degraded`（复权源占比口径）**互不相同**，故独立成键、不复用，避免口径混淆。
+        "uni_fallback": host if str(host).startswith("fallback:") else "",
         "asof": asof, "build_time": datetime.datetime.now(
             datetime.timezone(datetime.timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S"),
         "version": "P3b-r30",   # r30=R496: **详情页 K 线标注(mark)编码与口径重做**。对**信号/门禁

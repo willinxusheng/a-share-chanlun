@@ -2693,7 +2693,7 @@ def path_hit_html(scenario, pb, p_main, p_alt, p_risk, horizon=60):
         # R173: 样本不足(N<8)时回退 total 也可能为 0 → mr=0 → dev<-8 必判"偏乐观",
         # 这与 R172 消除伪告警的初衷相悖; 此时不对照方向, 直接告知样本不足。
         return ('<div class="pathcheck"><b>推演路径命中率自校验</b>'
-                '<span class="pc-sub">历史同类方向结构样本不足(N={n})，不做方向校准对照，'
+                '<span class="pc-sub">历史同类方向结构样本不足(有效样本 N≈{n:.0f})，不做方向校准对照，'
                 '本条不判定偏乐观/偏保守。</span></div>').format(n=n)
     # R172: 自校验改比「方向命中率」(dir_main/dir_n) 而非目标价命中率(main/n), 与 p_main 经验锚一致,
     # 否则方向技能高的环境(牛/熊)会被误报"偏乐观"。total 无方向命中率时回退目标价命中率。
@@ -2720,7 +2720,7 @@ def path_hit_html(scenario, pb, p_main, p_alt, p_risk, horizon=60):
     else:
         calib = '<span style="color:#0891b2;font-weight:700">基本一致</span>'
     return ('<div class="pathcheck"><b>推演路径命中率自校验</b>'
-            '<span class="pc-sub">历史同类方向结构（h={h}日，N={n}）：未来实际走势落入各路径的比例，与本报告概率对照</span>'
+            '<span class="pc-sub">历史同类方向结构（h={h}日，有效样本 N≈{n:.0f}）：未来实际走势落入各路径的比例，与本报告概率对照</span>'
             '{body}<div class="pc-calib">校准结论：{calib}</div></div>').format(h=horizon, n=n, body=body, calib=calib)
 
 
