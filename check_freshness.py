@@ -1,9 +1,13 @@
 # -*- coding: utf-8 -*-
 """R237 线上数据新鲜度看门狗。
 
-每个交易日盘后自动校验「线上已部署报告的数据截止日」是否与「源端最新交易日」一致：
-  - 一致    -> 退出 0（当日数据已上线）
-  - 落后    -> 先尝试自动触发一次重新部署自救，再以退出码 1 让 workflow 失败 -> GitHub 告警
+每个交易日盘后自动校验三项**线上已部署**数据是否都追平「源端最新交易日」：
+  ① 行情数据区间（首页报告）
+  ② 情绪 asof（R239 补：防"行情更新、情绪静默冻结"）
+  ③ ★雷达 asof（R519c 补：防"行情情绪都新、雷达却停更"—— 雷达是独立链路，
+     其产物发布依赖 deploy 重新发布整个仓库根，与 ①② 不同源，必须分开盯）
+  - 全部一致 -> 退出 0（当日数据已上线）
+  - 任一落后 -> 先尝试自动触发一次重新部署自救，再以退出码 1 让 workflow 失败 -> GitHub 告警
 
 为什么需要它：
     此前"云端没更新"完全靠旭总人工发现再来反馈，导致同一问题反复折腾多轮(R230~R236)。
@@ -47,6 +51,24 @@ SOURCE_URL = ("https://ifzq.gtimg.cn/appstock/app/fqkline/get"
 SRC_RETRIES = 5
 SRC_RETRY_SLEEP = 10
 SRC_TIMEOUT = 60   # 腾讯凌晨偶发慢响应, 30s 偏紧(09-09 04:31 误报实证)
+
+# R519c: 雷达数据（radar/radar.json）线上版本探针。
+# 为什么必须补这一路（原巡检的**结构性盲区**）：
+#   原巡检只看「行情数据区间 + 情绪 asof」，而雷达是**独立第二条链路**，
+#   且恰好是最容易"静默停更"的一条 —— 它依赖东财标底池 + 105 分钟全量扫描，
+#   且其产物 push 用 GITHUB_TOKEN（GitHub 规定 token 触发的事件不建新 run）
+#   ⇒ **push 不会拉起 deploy**，Pages 不会自动重新发布；历史靠外部每半小时
+#   dispatch deploy「顺带」上线。一旦当日扫描晚于**最后一个 deploy 时点**完成，
+#   radar.json 已入库却无人发布 ⇒ **雷达界面停在昨日，而行情/情绪一切正常**
+#   ⇒ 旧巡检判"✅ 已最新"，沉默失败。2026-09-23 实测正是此情形（旭总反馈
+#   「雷达界面还是没更新」，行情情绪却早已是当日）。
+# 取数成本控制：radar.json 全文约 8MB，但 `meta` 位于 JSON **头部**，
+#   服务端支持 Range（实测 HTTP 206）⇒ 只取前 RADAR_PROBE_BYTES 字节即可。
+RADAR_URL = os.environ.get(
+    "RADAR_URL", SITE_URL.rstrip("/") + "/radar/radar.json")
+RADAR_PROBE_BYTES = 2048
+RADAR_RETRIES = 3
+RADAR_RETRY_SLEEP = 10
 
 
 def _http_get(url, timeout=30):
@@ -101,6 +123,38 @@ def parse_sentiment_asof(html):
     # 报告里形如: "asof 2026-08-28" / "asof <b>2026-08-28</b>"
     m = re.search(r"asof[^0-9]{0,40}(\d{4}-\d{2}-\d{2})", html)
     return m.group(1) if m else None
+
+
+def fetch_radar_asof(retries=RADAR_RETRIES, retry_sleep=RADAR_RETRY_SLEEP):
+    """R519c: 取**线上已发布**的 radar/radar.json 的 meta.asof。
+
+    必须取线上（Pages）而不是读仓库里的文件 —— 要抓的恰恰是
+    「文件已入库、Pages 还没重新发布」这种状态，读仓库就永远测不出来。
+    只取前 RADAR_PROBE_BYTES 字节（meta 在 JSON 头部 + 服务端 Range 支持）。
+    取不到返回 None：调用方降级为 WARN、**不因此红叉** —— 雷达探针是"补盲",
+    若因网络抖动误报会毁掉告警可信度（本项目既有裁决：误报比漏报更伤）。
+    """
+    url = RADAR_URL + ("&" if "?" in RADAR_URL else "?") + "_=%d" % int(time.time())
+    last = None
+    for i in range(1, retries + 1):
+        try:
+            req = urllib.request.Request(url, headers={
+                "User-Agent": UA,
+                "Range": "bytes=0-%d" % (RADAR_PROBE_BYTES - 1),
+            })
+            raw = urllib.request.urlopen(req, timeout=60).read().decode("utf-8", "replace")
+            m = re.search(r'"asof"\s*:\s*"(\d{4}-\d{2}-\d{2})"', raw)
+            if m:
+                return m.group(1)
+            last = RuntimeError(
+                "已取到 %d 字节但未匹配到 \"asof\"（radar.json 结构可能变更）" % len(raw))
+        except Exception as e:   # noqa: BLE001
+            last = e
+        if i < retries:
+            print("   第 %d 次雷达探针失败, %d 秒后重试: %r" % (i, retry_sleep, last))
+            time.sleep(retry_sleep)
+    print("   WARN 雷达探针最终失败（本轮跳过雷达校验）: %r" % (last,))
+    return None
 
 
 def fetch_source_date():
@@ -179,15 +233,32 @@ def main(argv=None):
     else:
         print("WARN 未解析到情绪 asof（报告结构可能变更），本轮仅校验行情数据")
 
-    # 4) 比对：行情与情绪都必须 >= 源端最新交易日
+    # 3b) R519c: 雷达数据单独校验 —— 补上"行情/情绪都正常、雷达却静默停更"的盲区。
+    # 独立链路的产物(radar/radar.json)在另一个子目录, 且发布依赖 deploy 重新发布整个
+    # 仓库根 ⇒ 它落后时行情/情绪判定完全看不出来(2026-09-23 实证)。
+    radar_date = fetch_radar_asof()
+    if radar_date:
+        print("线上雷达 asof: %s" % radar_date)
+    else:
+        print("WARN 未取到线上雷达版本，本轮跳过雷达校验（不影响行情/情绪判定）")
+
+    # 4) 比对：行情 / 情绪 / 雷达 都必须 >= 源端最新交易日
     stale = []
     if dep_date < src_date:
         stale.append("行情数据 线上 %s < 源端 %s" % (dep_date, src_date))
     if sent_date and sent_date < src_date:
         stale.append("情绪数据 线上 %s < 源端 %s" % (sent_date, src_date))
+    if radar_date and radar_date < src_date:
+        stale.append("雷达数据 线上 %s < 源端 %s" % (radar_date, src_date))
 
     if not stale:
-        print("✅ 行情与情绪均已最新（均 >= 源端 %s），无需处理" % src_date)
+        # ★ 措辞必须区分「已校验且最新」与「探针失败导致未校验」——
+        #   否则当雷达探针取不到数时, 这里会打印"行情/情绪/雷达均已最新",
+        #   把上面那句 WARN 冲掉, 变成**同型沉默失败**(空集恒真=假绿)。
+        done = "行情/情绪" + ("/雷达" if radar_date else "")
+        tail = ("" if radar_date
+                else "；⚠ 本轮**未校验雷达**（探针失败），雷达状态未知")
+        print("✅ %s均已最新（均 >= 源端 %s），无需处理%s" % (done, src_date, tail))
         return 0
 
     print("❌ 数据落后：" + "；".join(stale))
