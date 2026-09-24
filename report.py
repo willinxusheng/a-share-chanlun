@@ -2697,13 +2697,23 @@ def path_hit_html(scenario, pb, p_main, p_alt, p_risk, horizon=60):
                 '本条不判定偏乐观/偏保守。</span></div>').format(n=n)
     # R172: 自校验改比「方向命中率」(dir_main/dir_n) 而非目标价命中率(main/n), 与 p_main 经验锚一致,
     # 否则方向技能高的环境(牛/熊)会被误报"偏乐观"。total 无方向命中率时回退目标价命中率。
-    if e.get("dir_n", 0.0) > 0.0:
-        mr = e["dir_main"] / e["dir_n"] * 100
-    else:
-        mr = e["main"] / n * 100 if n else 0
+    # R521: 表格「历史」三列**统一为「路径落点比例」**（三者互斥、合计恒 =100%）——
+    # 此前主路径列用「方向命中率」(dir_main/dir_n)、次/风险列用「路径落点比例」(alt/n、risk/n)，
+    # 三列分属**两种不同划分**：既不互斥、合计也不为 100%。实测(09-24, horizon=30) 5/5 指数
+    # 合计分别为 69% / 57% / 106% / 119% / 102%（两个 >100%），而文案写的是「落入各路径的比例」；
+    # 更严重的是把**真实的主路径落点率藏了起来**（沪深300 真实落点 87.5% 被显示成 44%，
+    # 差 -43.6pp）。现三列同口径后，表格与文案自洽、且主路径真实落点率可见。
+    # 方向命中率**不丢**（R172 的判据口径保持原样、单列参考行呈现，见下方 _dirref）。
+    mr_loc = (e["main"] / n * 100) if n else 0
     ar = e["alt"] / n * 100 if n else 0
     rr = e["risk"] / n * 100 if n else 0
-    rows = (("主路径", mr, p_main * 100, RED),
+    # R521: 显示层末项吸收舍入残差 —— 三行同口径后数学上必然合计 100%，但三者各自独立
+    # 四舍五入会出现 99%/101%（实测沪深300 88+1+12=101、中证500 60+30+9=99，用户会疑惑
+    # "比例为何不是 100%"）。令末项 = 100 - 前两项，屏幕上的三个数恒合计 100%，与口径自洽。
+    _pc = [round(mr_loc), round(ar)]
+    _pc.append(100 - _pc[0] - _pc[1])
+    mr_loc, ar, rr = _pc[0], _pc[1], _pc[2]
+    rows = (("主路径", mr_loc, p_main * 100, RED),
             ("次路径", ar, p_alt * 100, "#64748b"),
             ("风险路径", rr, p_risk * 100, GREEN))
     body = "".join(
@@ -2712,6 +2722,20 @@ def path_hit_html(scenario, pb, p_main, p_alt, p_risk, horizon=60):
         '<span class="pc-h">历史 {h:.0f}%</span>'
         '<span class="pc-p">本报告 {p:.0f}%</span></div>'.format(c=c, lab=lab, hw=max(h, 2), h=h, p=p)
         for lab, h, p, c in rows)
+    # R172 判据口径**不变**：结论 dev 仍比「方向命中率」(dir_main/dir_n)，与 p_main 的经验锚同源，
+    # 否则方向技能高的环境(牛/熊)会被误报"偏乐观"。total 无方向命中率时回退落点口径。
+    if e.get("dir_n", 0.0) > 0.0:
+        mr = e["dir_main"] / e["dir_n"] * 100
+    else:
+        mr = mr_loc
+    # R521: 方向口径单列参考行 —— 让两种口径的差异**显式可见**，同时提醒二者不可相加。
+    _dirref = (('<div class="pc-rows" style="margin-top:2px"><span class="pc-sub">'
+                '参考·方向口径（R172·与主路径概率同源）：历史上同类方向结构、'
+                '未来 {h} 日<b>真实方向</b>与主路径方向一致的比例 = <b>{m:.0f}%</b>'
+                '（本报告主路径概率 {p:.0f}% 按此口径校准）。'
+                '注意：此「方向命中率」与上表「落点比例」是<b>两个不同的量</b>，'
+                '既不可相加、也不宜直接相减比较。</span></div>').format(h=horizon, m=mr, p=p_main * 100)
+               if e.get("dir_n", 0.0) > 0.0 else "")
     dev = mr - p_main * 100
     if dev < -8:
         calib = '<span style="color:{RED};font-weight:700">偏乐观 — 历史主路径兑现更低，宜谨慎看待主路径</span>'.format(RED=RED)
@@ -2720,8 +2744,9 @@ def path_hit_html(scenario, pb, p_main, p_alt, p_risk, horizon=60):
     else:
         calib = '<span style="color:#0891b2;font-weight:700">基本一致</span>'
     return ('<div class="pathcheck"><b>推演路径命中率自校验</b>'
-            '<span class="pc-sub">历史同类方向结构（h={h}日，有效样本 N≈{n:.0f}）：未来实际走势落入各路径的比例，与本报告概率对照</span>'
-            '{body}<div class="pc-calib">校准结论：{calib}</div></div>').format(h=horizon, n=n, body=body, calib=calib)
+            '<span class="pc-sub">历史同类方向结构（h={h}日，有效样本 N≈{n:.0f}）：未来实际走势落入各路径的比例（三行互斥、合计 100%），与本报告概率对照</span>'
+            '{body}{dirref}<div class="pc-calib">校准结论（方向口径）：{calib}</div></div>').format(
+                h=horizon, n=n, body=body, dirref=_dirref, calib=calib)
 
 
 
