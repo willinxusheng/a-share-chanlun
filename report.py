@@ -2743,10 +2743,33 @@ def path_hit_html(scenario, pb, p_main, p_alt, p_risk, horizon=60):
         calib = '<span style="color:{GREEN};font-weight:700">偏保守 — 历史主路径兑现更高，可适度乐观</span>'.format(GREEN=GREEN)
     else:
         calib = '<span style="color:#0891b2;font-weight:700">基本一致</span>'
+    # R522: 「可检测区间」披露 —— 修 R521 遗留①（规则 103 阈值死代码）。
+    #   机制（已读码确认，非推测）：
+    #     · 上方的 mr 与 p_main 的经验锚 _anchor **同源**：二者都取
+    #       report.py `_dir = bt_paths["by_dir"][main_dir]` ⇒ mr = _dir["dir_main"]/_dir["dir_n"]*100
+    #       = _anchor*100（report.py:1627 附近 `_anchor = _dir_dir`）；
+    #     · R138 又把 p_main 对称夹逼在 [_anchor-0.06, _anchor+0.06]（1447 附近 `_cap/_floor`）。
+    #   ⇒ dev = mr - p_main*100 结构性落在 [-6, +6]（+四舍五入 0.5pp），
+    #     **恒 < 告警阈值 8** ⇒ 「偏乐观」「偏保守」两分支在 `dir_n>0` 时机制上不可达。
+    #   实证：R522(09-28) dev = +5.3/+5.9/+6.4/+5.8/+5.8pp ⇒ 5/5 判「基本一致」；
+    #     R521(09-24) 同为 5/5。即该自校验**只能确认"概率没被结构微调推离经验锚"，
+    #     不能检出校准偏差**——不披露会被读成"已通过灵敏度校验"。
+    #   本改动**纯披露**：不动 dev 定义、不动 ±8 阈值、不动 p_main/p_alt/p_risk，
+    #     仅在结论行后追加一段说明；`dir_n==0`（无方向锚，走落点口径回退）时不输出，
+    #     因那时 |dev| 不受 ±6 约束、告警分支可达。
+    _dev_bound = ""
+    if e.get("dir_n", 0.0) > 0.0 and abs(dev) <= 6.5:
+        _bind = "下限" if dev > 5.4 else ("上限" if dev < -5.4 else "区间内")
+        _dev_bound = (
+            '<div class="pc-sub">⚠ 可检测区间：本项 |偏差| <b>结构性 ≤ 6pp</b>'
+            '（主路径概率被夹逼在经验锚 ±6pp 内，且与上表「方向命中率」同源），'
+            '故「偏乐观 / 偏保守」提示在机制上<b>不会触发</b>；本项只能确认'
+            '<b>概率未被结构微调推离经验锚</b>，不能检出校准偏差。本次偏差 {d:+.1f}pp（夹逼{b}）。</div>'
+        ).format(d=dev, b=_bind)
     return ('<div class="pathcheck"><b>推演路径命中率自校验</b>'
             '<span class="pc-sub">历史同类方向结构（h={h}日，有效样本 N≈{n:.0f}）：未来实际走势落入各路径的比例（三行互斥、合计 100%），与本报告概率对照</span>'
-            '{body}{dirref}<div class="pc-calib">校准结论（方向口径）：{calib}</div></div>').format(
-                h=horizon, n=n, body=body, dirref=_dirref, calib=calib)
+            '{body}{dirref}<div class="pc-calib">校准结论（方向口径）：{calib}</div>{dev_bound}</div>').format(
+                h=horizon, n=n, body=body, dirref=_dirref, calib=calib, dev_bound=_dev_bound)
 
 
 
