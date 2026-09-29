@@ -2736,6 +2736,39 @@ def path_hit_html(scenario, pb, p_main, p_alt, p_risk, horizon=60):
                 '注意：此「方向命中率」与上表「落点比例」是<b>两个不同的量</b>，'
                 '既不可相加、也不宜直接相减比较。</span></div>').format(h=horizon, m=mr, p=p_main * 100)
                if e.get("dir_n", 0.0) > 0.0 else "")
+    # R523: 落点口径的**退化构成**披露（规则 106 纯披露 —— 不动判据、不动任何数值，
+    #   只增可见性）。R521 已把「历史」三行统一为落点口径并单列了方向口径参考行，
+    #   但**未披露落点口径自身的构成缺陷**：当主路径目标位落在现价「顺方向一侧」之外时
+    #   （空头 up_tgt=mid*0.99 ≥ last / 多头 突破位 ≤ last），主路径分支**无需兑现即成立**，
+    #   该子集内 main 与 risk 互斥二分、alt 不可达 ⇒「主路径」列实际度量的是
+    #   「风险路径未兑现」。引擎侧 chanlun.backtest_paths 的 degen_* 为**纯增量**统计。
+    #   实证（09-29, horizon=30, 正控 5/5 三方向逐键复现）：
+    #     退化权重占 35.1~50.0%，退化子集 main 比非退化子集高 **12.6~50.0pp**，alt ≡ 0.0%。
+    #   ★ 有界（规则 106）：degen_n == 0 时**不输出** —— 那时落点率就是真兑现率，
+    #     说"偏高"反而是新的失实。`n<8` 走 pb["total"] 回退（无 degen_* 键）时自然不输出。
+    _locdeg = ""
+    _dn = e.get("degen_n", 0.0)
+    _dmz = e.get("degen_main", 0.0)
+    if _dn > 0 and n > 0:
+        _da = e.get("degen_alt", 0.0) / _dn * 100
+        _nd_n = n - _dn
+        # R523 自查修订（规则 107）：① 首版把退化含义统写成「风险路径未兑现」——
+        #   只对**空头**成立（空头判据 `lo<=risk→risk` 优先，故 main 退化为「未跌破风险位」）；
+        #   **多头**判据 `hi>=up_tgt→main` 优先 ⇒ 退化时 main **无条件成立**，与 risk 无关。
+        #   现按方向分述，消除过度概括。② 非退化子集补样本量（规则 57 必报样本边界）——
+        #   沪深300 非退化权重仅 3.9，不给样本量会让 99% 被误读成稳健结论。
+        _nds = ("、非退化子集 <b>{m:.0f}%</b>（N≈{nn:.1f}）".format(
+                    m=(e["main"] - _dmz) / _nd_n * 100, nn=_nd_n) if _nd_n > 0 else "")
+        _locdeg = (
+            '<div class="pc-sub">⚠ 落点口径构成：「历史」主路径列中 <b>{dp:.0f}%</b> 的样本权重'
+            '处于<b>退化口径</b> —— 那时主路径目标位已落在现价<b>顺方向一侧</b>'
+            '（空头情景：目标位高于现价 ⇒ 判据退化为「未跌破风险位」；'
+            '多头情景：目标位低于现价 ⇒ 突破判据无条件成立），'
+            '该分支<b>无需兑现即成立</b>，且该子集内<b>次路径分支不可达</b>（实测 alt {da:.0f}%）。'
+            '退化子集主路径命中 <b>{dm:.0f}%</b>（N≈{dn:.1f}）{nds}'
+            '⇒ 上表「历史」主路径比例 <b>偏高</b>，不宜直接读作「主路径兑现率」。'
+            '（本项同为纯披露，判据与数值未变。）</div>'
+        ).format(dp=_dn / n * 100, da=_da, dm=_dmz / _dn * 100, dn=_dn, nds=_nds)
     dev = mr - p_main * 100
     if dev < -8:
         calib = '<span style="color:{RED};font-weight:700">偏乐观 — 历史主路径兑现更低，宜谨慎看待主路径</span>'.format(RED=RED)
@@ -2784,8 +2817,9 @@ def path_hit_html(scenario, pb, p_main, p_alt, p_risk, horizon=60):
         ).format(d=dev, b=_bind)
     return ('<div class="pathcheck"><b>推演路径命中率自校验</b>'
             '<span class="pc-sub">历史同类方向结构（h={h}日，有效样本 N≈{n:.0f}）：未来实际走势落入各路径的比例（三行互斥、合计 100%），与本报告概率对照</span>'
-            '{body}{dirref}<div class="pc-calib">校准结论（方向口径）：{calib}</div>{dev_bound}</div>').format(
-                h=horizon, n=n, body=body, dirref=_dirref, calib=calib, dev_bound=_dev_bound)
+            '{body}{dirref}{locdeg}<div class="pc-calib">校准结论（方向口径）：{calib}</div>{dev_bound}</div>').format(
+                h=horizon, n=n, body=body, dirref=_dirref, locdeg=_locdeg,
+                calib=calib, dev_bound=_dev_bound)
 
 
 

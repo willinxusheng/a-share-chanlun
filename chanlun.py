@@ -1604,9 +1604,12 @@ def backtest_paths(klines, min_bi_pct=MIN_BI_PCT, horizon=60, step=20, with_stab
          使校准更贴近当前市场状态、提升样本外稳健性；n/main/alt/risk 均为加权累计(浮点)。"""
     n = len(klines)
     by_sc = {}
-    by_dir = {1: {"n": 0.0, "main": 0.0, "alt": 0.0, "risk": 0.0, "dir_main": 0.0, "dir_n": 0.0},
-              -1: {"n": 0.0, "main": 0.0, "alt": 0.0, "risk": 0.0, "dir_main": 0.0, "dir_n": 0.0},
-              0: {"n": 0.0, "main": 0.0, "alt": 0.0, "risk": 0.0, "dir_main": 0.0, "dir_n": 0.0}}
+    # R523: degen_* 为**纯增量**披露字段（退化口径统计，见循环内注释），不参与任何计算；
+    #   加它们不改动 n/main/alt/risk/dir_main/dir_n 任一取值 ⇒ 对既有下游完全向后兼容。
+    _z = lambda: {"n": 0.0, "main": 0.0, "alt": 0.0, "risk": 0.0,   # noqa: E731
+                  "dir_main": 0.0, "dir_n": 0.0,
+                  "degen_n": 0.0, "degen_main": 0.0, "degen_alt": 0.0, "degen_risk": 0.0}
+    by_dir = {1: _z(), -1: _z(), 0: _z()}
     tot = {"n": 0.0, "main": 0.0, "alt": 0.0, "risk": 0.0}
     t = 260
     while t + horizon < n:
@@ -1659,6 +1662,26 @@ def backtest_paths(klines, min_bi_pct=MIN_BI_PCT, horizon=60, step=20, with_stab
         d = by_dir[main_dir]
         d["n"] += w
         d[hit] += w
+        # R523 退化口径统计（**纯增量披露字段**，绝不参与判据 / 概率计算）：
+        #   当主路径目标位已落在现价「顺方向一侧」之外时，主路径分支**无需兑现即成立**：
+        #     · 空头 main_dir=-1：up_tgt = mid*0.99 >= last（现价已跌破中枢中位）
+        #       ⇒ 判据 `lo <= up_tgt` 对任何「未跌破 risk_level」的区间恒真；
+        #     · 多头 main_dir=+1：up_tgt（突破位）<= last（现价已在突破位之上）
+        #       ⇒ 判据 `hi >= up_tgt` 恒真。
+        #   此时 main 与 risk 互斥二分、alt 分支**不可达**（R523 实证 09-29：5/5 指数
+        #   退化样本 alt ≡ 0.0%、main+risk ≡ 100%），故「主路径」列在该子集里实际度量的是
+        #   「风险路径未兑现」，与「主路径兑现」不是同一件事 ⇒ 落点率被结构性抬高
+        #   （R523 实证：退化子集 main 比非退化子集高 12.6~50.0pp，退化权重占 35~50%）。
+        #   仅用于渲染层披露落点率的构成，**不改变 hit 判定、不进入任何加权**。
+        if main_dir == -1:
+            _degen = up_tgt >= last
+        elif main_dir == 1:
+            _degen = up_tgt <= last
+        else:
+            _degen = False
+        if _degen:
+            d["degen_n"] += w
+            d["degen_" + hit] += w
         # 方向命中率(R172): 真实 net 方向与主路径方向一致的比例, 用于 p_main 上限诚实锚定。
         # 此前 p_main 上限锚的是「路径目标价命中率」(high/low 触及, 偏高), 而看板把 p_main 当
         # 方向概率展示; 实际方向命中更低, 导致高 p_main bin 系统性过自信。故单独累计方向命中率。
