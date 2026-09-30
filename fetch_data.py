@@ -689,9 +689,16 @@ _SENT_FILES = {
 # 顺序: 境内 http 主镜像 → 境内 http 备用镜像 → 境外 https 直连兜底。
 EM_KLINE_PATH = ("api/qt/stock/kline/get?secid=%s&fields1=f1,f2,f3,f4,f5,f6&"
                  "fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61&klt=101&fqt=1&beg=20210101&end=20500101")
+# R524: 增补东财编号镜像（23./48./11.）。依据：2026-09-30 07:41 CI 实测三主机全挂（四指数
+#   全部"东财不可达"→腾讯回退，页面情绪分 9.4→7.9 振荡）。本地实测四镜像均 200/1393 根
+#   （2026-09-30 盘中）。若云端限流为 per-host，多镜像提升存活率；若为 IP 级则无害
+#   （按序尝试，本地首主机命中即零额外开销）。编号镜像与主站同 API 同数据（EM 官方 CDN 分片）。
 EM_HOSTS = [
     "http://push2his.eastmoney.com/",
     "http://92.push2his.eastmoney.com/",
+    "http://23.push2his.eastmoney.com/",
+    "http://48.push2his.eastmoney.com/",
+    "https://11.push2his.eastmoney.com/",
     "https://push2his.eastmoney.com/",
 ]
 
@@ -859,12 +866,15 @@ def update_sentiment_txts():
                 raise ValueError("东财返回仅%d行" % len(rows))
         except Exception as e_em:
             # R232: 东财不可达 -> 腾讯 gtimg 回退(派生成交额/换手率代理), 情绪面板自动刷新
+            # R524: 回退日志带上东财失败原因(截断 120 字) —— 09-30 CI 三主机全挂时日志只有
+            #   "东财不可达"四字, 无法区分 超时/拒绝/空响应/解析错, 镜像是否有效无从判断。
             try:
                 rows, dirty = fetch_tx_sentiment(sym)
                 if len(rows) < 100:
                     raise ValueError("腾讯返回仅%d行" % len(rows))
                 mode = "tencent_proxy"
-                print("INFO 情绪 %s 东财不可达 -> 腾讯 gtimg 回退(派生成交额/换手率代理)" % sym)
+                print("INFO 情绪 %s 东财不可达(%s) -> 腾讯 gtimg 回退(派生成交额/换手率代理)"
+                      % (sym, str(e_em)[:120]))
             except Exception as e:
                 print("WARN 情绪 %s 东财与腾讯均失败, 保留旧txt: %s" % (sym, e))
                 continue

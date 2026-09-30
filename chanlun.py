@@ -1606,8 +1606,13 @@ def backtest_paths(klines, min_bi_pct=MIN_BI_PCT, horizon=60, step=20, with_stab
     by_sc = {}
     # R523: degen_* 为**纯增量**披露字段（退化口径统计，见循环内注释），不参与任何计算；
     #   加它们不改动 n/main/alt/risk/dir_main/dir_n 任一取值 ⇒ 对既有下游完全向后兼容。
+    # R524: dw_* 同为**纯增量**字段 —— 方向未兑现(真实方向 != 主方向)样本的联合统计：
+    #   dw_n = 方向未兑现的加权样本量; dw_risk = 其中「未来 horizon 内 lo<=risk_level」的加权量。
+    #   供 report 余量分割改「方向口径条件概率」P(触风险|方向错)使用(见 report.py R524 注释)，
+    #   亦不参与本函数任何既有统计。
     _z = lambda: {"n": 0.0, "main": 0.0, "alt": 0.0, "risk": 0.0,   # noqa: E731
                   "dir_main": 0.0, "dir_n": 0.0,
+                  "dw_n": 0.0, "dw_risk": 0.0,
                   "degen_n": 0.0, "degen_main": 0.0, "degen_alt": 0.0, "degen_risk": 0.0}
     by_dir = {1: _z(), -1: _z(), 0: _z()}
     tot = {"n": 0.0, "main": 0.0, "alt": 0.0, "risk": 0.0}
@@ -1691,6 +1696,13 @@ def backtest_paths(klines, min_bi_pct=MIN_BI_PCT, horizon=60, step=20, with_stab
             d["dir_n"] += w
             if _rdir == main_dir:
                 d["dir_main"] += w
+            else:
+                # R524 联合统计（纯增量）：方向未兑现样本中「触及风险位」的加权量。
+                # risk_touch 独立于 hit 分类（多头 hi>=up_tgt 优先 ⇒ 存在 hit=main 但已触风险
+                # 的样本，联合口径须按 lo<=risk_level 原始判定，不能复用 hit=="risk"）。
+                d["dw_n"] += w
+                if lo <= risk_level:
+                    d["dw_risk"] += w
         tot["n"] += w
         tot[hit] += w
         t += step
