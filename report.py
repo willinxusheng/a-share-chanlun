@@ -7,7 +7,9 @@ import sys
 import math
 import ast
 from datetime import datetime, timedelta, timezone
-from chanlun import analyze, backtest_signals, MIN_BI_PCT_WEEK, health_score, forecast_confidence, forward_vol, adaptive_horizon, classify, realized_vol_annualized, KNOWN_PIVOTS, _date_diff, MIN_BI_PCT_MONTH, backtest_robustness, backtest_paths, _path_targets, market_breadth, regime_factor, classify_regime, SC_BULL, SC_BEAR, build_seg_zhongshu, SEG_BC_ACTIVE_GAP, BC_AREA_RATIO_TH, SEG_BC_FRESH_DAYS, bc_invalidation
+from chanlun import analyze, backtest_signals, MIN_BI_PCT_WEEK, health_score, forecast_confidence, forward_vol, adaptive_horizon, classify, realized_vol_annualized, KNOWN_PIVOTS, _date_diff, MIN_BI_PCT_MONTH, backtest_robustness, backtest_paths, _path_targets, market_breadth, regime_factor, classify_regime, SC_BULL, SC_BEAR, build_seg_zhongshu, SEG_BC_ACTIVE_GAP, BC_AREA_RATIO_TH, SEG_BC_FRESH_DAYS, bc_invalidation, bi_macd_area
+# R525: `bi_macd_area` 新增 import —— 仅用于「末笔（未完成笔）衰竭度」前瞻披露，
+#   与引擎 find_beichi 的判据**同源**（规则 20：不另写一份面积口径）。
 
 W, H_PRICE, H_VOL, H_MACD = 1060, 360, 64, 110
 PAD_L, PAD_R, PAD_T, PAD_B = 12, 78, 24, 26
@@ -1916,12 +1918,17 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
         f'置信锥与主/次/风险概率同样来自统计与启发式校准，亦非缠论推导。'
         f'</div>'
     )
-    # R524: 今日结构自身的「退化几何」披露 —— 主路径终点已落现价顺方向一侧
-    #   （空头情景终点高于现价 ⇒ 回落目标位已被现价向下穿越；多头情景终点低于现价 ⇒
-    #    突破目标位已被现价触及），此时「触及主路径终点」无需等待兑现即成立，
-    #   主路径概率只能按方向口径解读（未来 horizon 日收盘方向），几何触及不再是有效区分。
-    #   与自校验表的「退化口径」披露（R523，历史样本层面）同族；本条是**当前结构**层面。
-    #   有界：非退化情景输出空串，页面完全不变。
+    # R524: 今日结构自身的「退化几何」披露 —— 主路径终点已落在现价**反方向**一侧
+    #   （空头情景终点高于现价 / 多头情景终点低于现价），此时判据「触及主路径终点」
+    #   无需等待兑现即恒成立，主路径概率只能按方向口径解读（未来 horizon 日收盘方向），
+    #   几何触及不再是有效区分。与自校验表的「退化口径」披露（R523，历史样本层面）同族；
+    #   本条是**当前结构**层面。有界：非退化情景输出空串，页面完全不变。
+    # ★ R525 更正：R524 首版文案把机制写成了「回落目标位已被现价向下穿越」——
+    #   几何上不成立（现价 4357.62 在目标 4572 **下方**，目标位在现价上方，谈不上
+    #   "被向下穿越"）。真实机制：**目标位落在现价的反方向**（空头情景的"回落至中枢中位"
+    #   目标，在现价已跌穿中枢中位后反而位于现价上方）⇒ 判据 `未来最低价 <= 目标位`
+    #   恒真。措辞错误归因见规则 107（披露文案本身是被审计对象：机制性断言必须与几何事实
+    #   一致，不得用"已穿越"这类方向词替代"位于反方向"）。数值与判据一字未改。
     if _main_dir == -1:
         _degen_today = main_p[-1][1] >= last
     elif _main_dir == 1:
@@ -1932,10 +1939,14 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
         _tgt_pct = (main_p[-1][1] / last - 1) * 100
         _degen_note = (
             f'<div style="margin-top:4px;font-size:12px;line-height:1.75;color:#b45309">'
-            f'⚠ <b>当前情景处于退化几何</b>：主路径终点 {main_p[-1][1]:.0f} 已在现价'
-            f'{"上方" if _main_dir == -1 else "下方"}（{_tgt_pct:+.1f}%）——'
-            f'{"空头情景的回落目标位已被现价向下穿越" if _main_dir == -1 else "多头情景的突破目标位已被现价上穿"}，'
-            f'该目标位<b>无需等待兑现即已成立</b>；主路径概率应按<b>方向口径</b>解读'
+            f'⚠ <b>当前情景处于退化几何</b>：主路径终点 {main_p[-1][1]:.0f} 落在现价'
+            f'{"上方" if _main_dir == -1 else "下方"}（{_tgt_pct:+.1f}%），'
+            f'与{"空头" if _main_dir == -1 else "多头"}方向<b>相反</b> —— '
+            f'{"空头情景的回落目标位（中枢中位×0.99）在现价已跌穿中枢中位后反落于现价上方"
+              if _main_dir == -1 else "多头情景的突破目标位在现价已上破该位后反落于现价下方"}，'
+            f'它<b>尚未被触及、也不构成可兑现的落点</b>；但判据「未来价格触及目标位」在此几何下'
+            f'<b>恒成立</b>（现价已在目标位的顺判据一侧）⇒ '
+            f'主路径概率应按<b>方向口径</b>解读'
             f'（未来 {horizon} 日收盘方向与主路径方向一致的概率），'
             f'「价格触及目标位」在此几何下不构成有效区分。历史统计含义见自校验表的退化口径披露。</div>'
         )
@@ -4401,6 +4412,9 @@ def main():
     #   实跑直接 `UnboundLocalError`。这与 R491 的 `_p_top` 是**同一个错误**（"判据块放在消费点
     #   之后"），第二次踩。⇒ 新增任何变量时，先把它放到**最早**的消费点之前，再回来写消费代码。
     today_signals = []
+    # R525: 末笔（未完成笔）衰竭度收集桶 —— 与 today_signals 同处初始化（同一条纪律：
+    #   任何被下游消费的桶都必须定义在**最早**的消费点之前）。口径见下方收集循环。
+    _open_bi_rows = []
     breadth_banner = (f'<div class="panel" style="border-left:4px solid {_bcolor};margin:4px 0 16px">'
                       f'<h4 style="font-size:15px;color:{BLUE};margin-bottom:10px">跨指数市场广度综合研判 '
                       f'<span style="font-size:12px;color:#64748b;font-weight:400">日 / 周 / 月三级区间套（数据截至 {last_date}）</span></h4>'
@@ -4433,7 +4447,26 @@ def main():
                 _gi = _nseg_t - 1 - _b["seg_index"]
                 if _gi < 0 or _gi > SEG_BC_ACTIVE_GAP:
                     continue
-                _ei = _mg_t[_segs_t[_b["seg_index"]]["end"]]["idx_end"]
+                # ★ R525: 端点索引改「段内极值 K 线」口径 —— 与图上 label（report 主图
+                #   `seg_pts` 的 argmax/argmin）和雷达（scan_radar `_seg_extrema`）**同口径**。
+                #   旧实现取 merged 端点的 `idx_end`（合并 K 线的最后一根原始 K 线），段端点
+                #   跨多根原始 bar 时会比极值日晚 1~N 天 ⇒ 同一事实两个日期（规则 78 违反）。
+                #   实测（2026-09-30，本条修复的动因）：沪深300 #36 / 深证 #54 / 创业板 #76
+                #   三条「新」段背驰**全部**出现「横幅 09-29 vs 图上 09-28」的分歧，
+                #   价格相同、日期与"距今天数"各差 1（横幅 1 日 / 图上 2 日）。
+                #   ★ 同时使「日期」与页面既有「端点价 = 该段极值」自洽（旧口径下 09-29 并非
+                #   最低点），避免用户在图上按日期找不到标签。
+                #   崩溃边界：极值扫描范围取该段首个 merged bar 的 idx_start 到末个的 idx_end，
+                #   与主图 seg_pts 完全同式（同一份 klines 索引空间，不会越界）。
+                _sg_t = _segs_t[_b["seg_index"]]
+                _s0_t = _mg_t[_sg_t["start"]]["idx_start"]
+                _e0_t = _mg_t[_sg_t["end"]]["idx_end"]
+                if _e0_t < _s0_t:
+                    _s0_t, _e0_t = _e0_t, _s0_t
+                if _sg_t["dir"] == 1:
+                    _ei = max(range(_s0_t, _e0_t + 1), key=lambda i: _kl_t[i]["high"])
+                else:
+                    _ei = min(range(_s0_t, _e0_t + 1), key=lambda i: _kl_t[i]["low"])
                 _days = len(_kl_t) - 1 - _ei
                 today_signals.append({
                     "sym": _sym_t, "name": _d_t.get("name", _sym_t), "type": _b["type"],
@@ -4444,6 +4477,35 @@ def main():
         except Exception as _es:
             print(f"[warn] {_sym_t} 今日段级背驰收集失败（{type(_es).__name__}: {_es}）"
                   f"，该指数不参与顶部横幅", file=sys.stderr)
+        # ---- R525: 末笔（未完成笔）衰竭度 ------------------------------------------------
+        # 回答「今天这根 K 线有没有背驰迹象」时**段级之外**的那一半：引擎按设计
+        # （analyze 的 `bis_done = bis[:-1]`，防未来函数）**不**从未完成笔产出任何信号，
+        # 于是「末笔 + MACD 面积萎缩」（缠论里背驰的最早形态）在页面**完全不可见**。
+        # 实测动因（2026-09-30）：5 个指数末笔**全部**满足「创新极值 + 面积比 < 阈值」
+        # （比值 0.56~0.74），却无任何提示。
+        # ★ 有界 & 不越界：只披露面积比与"未确认"标注，**不产生买卖点、不改变任何信号、
+        #   不进入概率**；判据与 find_beichi 同源（bi_macd_area + BC_AREA_RATIO_TH），
+        #   连"必须创新极值"这一条也照抄 —— 否则会把"未创新极值但缩量"误报成背驰雏形。
+        _bo = _r_t.get("bis") if isinstance(_r_t, dict) else None
+        if _bo and len(_bo) >= 3 and _r_t.get("hist"):
+            try:
+                _cur_b, _pv_b = _bo[-1], _bo[-3]
+                if _pv_b["dir"] == _cur_b["dir"]:
+                    _a_c = bi_macd_area(_cur_b, _r_t["hist"], _r_t["merged"])
+                    _a_p = bi_macd_area(_pv_b, _r_t["hist"], _r_t["merged"])
+                    if _a_p > 0 and _a_c > 0:
+                        _rb = _a_c / _a_p
+                        _ne = (_cur_b["end_price"] > _pv_b["end_price"]) if _cur_b["dir"] == 1 \
+                            else (_cur_b["end_price"] < _pv_b["end_price"])
+                        _open_bi_rows.append({
+                            "name": _d_t.get("name", _sym_t), "dir": _cur_b["dir"],
+                            "d0": _cur_b["date_start"], "d1": _cur_b["date_end"],
+                            "ratio": round(_rb, 3), "new_ext": bool(_ne),
+                            "fade": bool(_rb < BC_AREA_RATIO_TH),
+                        })
+            except Exception as _eb:
+                print(f"[warn] {_sym_t} 末笔衰竭度计算失败（{type(_eb).__name__}: {_eb}）",
+                      file=sys.stderr)
     _t_fresh = sorted([s for s in today_signals if s["fresh"]], key=lambda s: s["days"])
     _t_rest = sorted([s for s in today_signals if not s["fresh"]], key=lambda s: s["days"])
     # R494 深度美化：每行做成「方向 + 新鲜度」两维分层的表格行。
@@ -4506,6 +4568,28 @@ def main():
         _t_head = '今日 5 个指数均无活跃的段级背驰 —— 这是<b>常态</b>，不必每天等到信号才动手。'
         _state_cls, _state_txt = "tb-state--calm", "今日无活跃信号"
         _sum_cls = " tb-sum--calm"
+    # ★ R525: 「末笔前瞻（未确认）」块 —— 补齐段级背驰之外的那一半答案。
+    #   有界：没有任何指数同时满足「创新极值 + 面积比 < 阈值」时输出空串，页面完全不变。
+    #   与下方既有说明「为什么只提醒段级背驰」互补：那条解释「买卖点为何不出现」，
+    #   本条如实报出「末笔（未完成笔）当前已处于什么状态」——否则用户看到"今日无信号"
+    #   会误以为末笔毫无衰竭迹象，而实测 2026-09-30 是 5/5 全部满足雏形判据。
+    _ob_hit = [x for x in _open_bi_rows if x["new_ext"] and x["fade"]]
+    if _ob_hit:
+        _ob_items = "、".join(
+            f'<b>{x["name"]}</b>（{"向下" if x["dir"] == -1 else "向上"}笔 '
+            f'{x["d0"][5:]}→{x["d1"][5:]}，面积比 <b>{x["ratio"]}</b>）' for x in _ob_hit)
+        _openbi_html = (
+            '<div class="tb-note tb-note--info">'
+            '<h5><i class="tb-k"></i>末笔前瞻（未确认 · 非信号）</h5>'
+            f'除上表外，另有 <b>{len(_ob_hit)} 个指数</b>的<b>末笔（尚未走完的那一笔）</b>'
+            f'已同时满足「价格创新极值 + MACD 面积比 &lt; {BC_AREA_RATIO_TH}」'
+            f'—— 即<b>笔级背驰的雏形</b>：{_ob_items}。'
+            f'<b>按设计此处不作为信号</b>（引擎只用「已完成笔」判背驰，防未来函数），'
+            f'待后续反向笔走完、该笔被确认成"已完成笔"后，才会成为正式的笔级背驰提示。'
+            f'★ 该比值<b>随 K 线延伸会变动、也可能消失</b>（笔未走完，端点极值与 MACD 面积'
+            f'都还会变），请勿当作已确认信号使用。</div>')
+    else:
+        _openbi_html = ""
     # 头部图标：简洁的脉冲波形（纯内联 SVG，不用 emoji，避免与正文符号混淆）
     _tb_ico = ('<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#fff" '
                'stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">'
@@ -4544,7 +4628,7 @@ def main():
         f'<span class="tb-state {_state_cls}"><span class="tb-dot"></span>{_state_txt}</span>'
         '</div>'
         f'<div class="tb-sum{_sum_cls}">{_t_head}</div>'
-        + _tbl_html + _warn_html +
+        + _tbl_html + _openbi_html + _warn_html +
         '<details class="tb-fold"><summary><span class="tb-caret">▶</span>口径与统计说明'
         '<span style="font-weight:400;color:#64748b">（3 条 · 点击展开）</span></summary>'
         '<div class="tb-notes">' + _notes_html + '</div></details>'
