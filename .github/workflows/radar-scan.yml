@@ -81,11 +81,29 @@ jobs:
             if [ "$BD" = "$TODAY" ] && [ "$FORCE" = "true" ]; then
               echo "★ force=true: 本地产物虽是今日($BD), 仍强制全量重扫"
             elif [ "$BD" = "$TODAY" ]; then
-              echo "今日(北京 $TODAY)已完成扫描并入库, 本次 dispatch 跳过(数据已当日)"
-              echo "skip=true" >> "$GITHUB_OUTPUT"
-              exit 0
+              # ★ R526 修⑤: 「产物性 skip」前必须先复核**将要被沿用的那份产物**是否健康 ——
+              #   否则坏产物当天会被永久静默沿用: skip 会让「产物自检」步骤一并被跳过，
+              #   门禁整条失效而 job 仍报 success（实证 run 37776091490：head=594411f、
+              #   无 force ⇒ 步骤 4~8 **全部 skipped** ⇒ success；而当天产物 n_signal=17
+              #   按新门禁 >=50 本应失败，且 meta.fresh_max 缺失）。
+              #   不健康 ⇒ **放弃跳过**、放行全量重扫自愈（规则 98: 兜底/自愈须落云端）。
+              if python3 radar/check_artifact.py; then
+                echo "今日(北京 $TODAY)已完成扫描并入库, 本次 dispatch 跳过(数据已当日)"
+                echo "skip=true" >> "$GITHUB_OUTPUT"
+                exit 0
+              else
+                echo "★★ 本地产物健康自检**不通过** ⇒ 放弃跳过, 放行全量重扫以自愈(断言消息见上)"
+                _HEAL=1
+              fi
             fi
-            echo "radar 数据为 $BD(非今日), 执行全量扫描以补当日数据"
+            # ★ R526 修⑤: 上面不健康时会 **fall through 到这里**放行扫描 —— 此时 BD 恰恰
+            #   是**今日**，原措辞恒写"非今日"会与实际不符（规则 84/107: 披露文案本身也是
+            #   被审计对象，必须与事实一致）。
+            if [ "${_HEAL:-0}" = "1" ]; then
+              echo "radar 数据为 $BD(今日)但健康自检不通过 ⇒ 执行全量扫描以覆盖退化产物"
+            else
+              echo "radar 数据为 $BD(非今日), 执行全量扫描以补当日数据"
+            fi
           else
             echo "radar/radar.json 不存在, 执行全量扫描"
           fi
@@ -97,9 +115,22 @@ jobs:
           RBD=$(git show FETCH_HEAD:radar/radar.json 2>/dev/null | python3 -c "import json,sys;print(json.load(sys.stdin)['meta'].get('build_time','')[:10])" 2>/dev/null || echo "")
           echo "远端 main radar build_date=$RBD"
           if [ "$RBD" = "$TODAY" ] && [ "$FORCE" != "true" ]; then
-            echo "远端 main 已有今日产物(首发已提交), 本次 dispatch 跳过(防竞态双扫)"
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            exit 0
+            # ★ R526 修⑤: 同上，这里要核的是**远端那份**产物。取到临时目录后用
+            #   **同一个** check_artifact.py 复核（该脚本读 cwd 相对路径 radar/radar.json，
+            #   故无需参数化 = 断言体零改动，规则 20 单一来源）。
+            rm -rf .radar_health && mkdir -p .radar_health/radar
+            _RH_OK=0
+            if git show FETCH_HEAD:radar/radar.json > .radar_health/radar/radar.json 2>/dev/null \
+               && ( cd .radar_health && python3 "$GITHUB_WORKSPACE/radar/check_artifact.py" ); then
+              _RH_OK=1
+            fi
+            rm -rf .radar_health
+            if [ "$_RH_OK" = "1" ]; then
+              echo "远端 main 已有今日产物(首发已提交), 本次 dispatch 跳过(防竞态双扫)"
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "★★ 远端 main 今日产物健康自检**不通过** ⇒ 放弃跳过, 放行全量重扫以自愈"
           fi
 
       - name: 配置 Python
@@ -119,74 +150,10 @@ jobs:
 
       - name: 产物自检(不达标即失败, 保留上一版 radar.json)
         if: steps.guard.outputs.skip != 'true'
-        run: |
-          python3 - <<'PY'
-          import json, datetime
-          d = json.load(open("radar/radar.json", encoding="utf-8"))
-          m = d["meta"]
-          assert m["n_ok"] > 4000, "有效分析过少: %s" % m["n_ok"]
-          # ★ R526: 原为 `assert m["n_signal"] >= 0` —— **恒真断言**（规则 43「空集恒真=假绿」）：
-          #   信号族**整体清空**时它照样通过，而这正是线上真实发生过的退化态 ——
-          #   旧「近端窗口」用**自然日**（阈值 10），休市日也算老化 ⇒ 中秋休市后官方 signals
-          #   由 270（09-24）骤降为 **22**（09-28），CI 全绿、无人发现（探针 `_dbg/r526/r526_radar_fresh.py`）。
-          #   今口径改「交易日根数」后实测预期区间：8 个历史产物重算的信号数 245~478
-          #   （扣掉 ST/次新等门禁剔除后按同比例折算 ≈ 160~320）⇒ 取 **50** 作灾难态下界，
-          #   与 R495/R496「只拦灾难态、上线后按线上实测收紧」同风格。
-          assert m["n_signal"] >= 50, "近端信号族疑似整体清空(口径退化/门槛失配): %s" % m["n_signal"]
-          # 前端 revpool 的「超窗」阈值来自 meta.fresh_max（规则 20 禁第二份副本）；
-          # 缺失时前端会退回硬编码，二者一旦漂移就不再严格互补 ⇒ 这里做**契约存在性**校验
-          # （不钉死数值，留出后续标定空间）。
-          assert m.get("fresh_max", 0) > 0, "meta.fresh_max 未下发(前端 revpool 将退回硬编码): %r" % m.get("fresh_max")
-          # R495: 段级标注 / 背驰状态产出率 —— 防「整族静默为空」。
-          #   为什么必须硬断言: mark 里的新键是**整块写入**、不经白名单，若 chanlun 的
-          #   seg_signals/segments 接口变动或返回空，前端只会"图上少了段级点"——不报错，
-          #   也不进任何既有门禁。阈值取得宽松（样本实测个股 6/6、行业 5/5 均有），
-          #   只拦灾难态；首次上线后按线上实测值收紧。
-          # R496: 断言口径改读 `_eng` 后缀（**引擎侧全量**）—— 因为 mark 六类已从"按条数
-          #   截断"改为"只受 draw_n（前端画得出的 K 线根数）约束"；**mark 里只含前端画得出的**，
-          #   若断言仍读 mark 计数，就成了**用守卫去迁就前端契约**（前端根数一变断言跟着变，
-          #   跨轮不可比）。引擎侧计数回答的正是本断言的原本意图："引擎有没有产出这一族"。
-          #   另加一组**落盘覆盖度**断言（引擎有产出 ≠ mark 有落盘，两者互补）。
-          sm = m.get("seg_mark") or {}
-          assert sm.get("n_uni_segsig_eng", 0) > 100, "引擎段级买卖点为空: %s" % sm
-          assert sm.get("n_uni_segzs_eng", 0) > 100, "引擎段级中枢为空: %s" % sm
-          assert sm.get("n_ind_segsig_eng", 0) > 0, "行业引擎段级标注为空: %s" % sm
-          _nu = sm.get("n_uni", 0) or 1
-          assert sm.get("n_uni_mark_sig", 0) > 0.5 * _nu, "笔级买卖点落盘覆盖过少: %s" % sm
-          assert sm.get("n_uni_mark_line", 0) > 0.5 * _nu, "笔折线落盘覆盖过少: %s" % sm
-          # R496b: 落盘**总条数**下界 —— 用实测均值×0.5 兜（样本实测 sig 均值 24.75/只、
-          #   line 端点均值 179/只）× 6900 只 ⇒ sig ≈ 17 万、line 端点 ≈ 124 万。
-          #   这里只拦"退回按条数截断"这类灾难态（旧代码 sig 恒 ≤14/只 ⇒ 总数 ≤ 9.7 万）。
-          assert sm.get("n_uni_sig_total", 0) > 80000, "笔级买卖点总条数异常(疑似退回按条数截断): %s" % sm
-          assert sm.get("n_uni_line_pts_total", 0) > 500000, "笔折线总点数异常(疑似退回按条数截断): %s" % sm
-          # R496b: 「后端产出 ⊆ 前端可绘制」不变量 —— 这是**静默损耗**的唯一防线。
-          #   个股/ETF 后端缠论跑全历史(~1380 根) 而前端 getStkData 只取 660 根；
-          #   行业后端跑合成全历史(~1386 根) 而前端行业K线就是入库的 320 根。
-          #   ⇒ off 超过该端上界的标注会被前端 xi() 返回 null **静默剔除**（图上只是"少几条"，
-          #     不报任何错）。R496b 前实测：行业 sig 23 条丢 5 条；上证最近 3 笔中枢里有
-          #     off=1083 的（前端 320 根画不出）；笔折线首端点越界到 322~339。
-          #   故此处按**各端 K 线根数**硬断言偏移上界（与前端 radar.html 的取数根数联动）。
-          assert sm.get("fe_kline_n") == 660, "前端个股K线根数契约与 CI 预期不符(改 radar.html getStkData 须同步): %s" % sm.get("fe_kline_n")
-          assert sm.get("ind_kline_n") == 320, "行业K线根数契约与 CI 预期不符: %s" % sm.get("ind_kline_n")
-          _uo = sm.get("uni_off_max", -1)
-          assert 0 <= _uo <= sm.get("fe_kline_n", 0) - 1, \
-            "个股标注偏移越界(前端会静默剔除): uni_off_max=%s, 前端K线=%s" % (_uo, sm.get("fe_kline_n"))
-          _io = sm.get("ind_off_max", -1)
-          assert 0 <= _io <= sm.get("ind_kline_n", 0) - 1, \
-            "行业标注偏移越界(前端会静默剔除): ind_off_max=%s, 行业K线=%s" % (_io, sm.get("ind_kline_n"))
-          print("段级标注(引擎侧): 个股 segsig %d/%d · 段级中枢 %d · 行业 segsig %d/%d · 活跃段级背驰 %d 只"
-                % (sm.get("n_uni_segsig_eng", 0), sm.get("n_uni", 0), sm.get("n_uni_segzs_eng", 0),
-                   sm.get("n_ind_segsig_eng", 0), sm.get("n_ind", 0),
-                   sm.get("n_bc_state_seg", 0)))
-          print("落盘覆盖(只受 draw_n 约束): 笔级点 %d/%d 只(共 %d 条) · 笔折线 %d 只(共 %d 点) · 背驰 %d 只"
-                % (sm.get("n_uni_mark_sig", 0), sm.get("n_uni", 0),
-                   sm.get("n_uni_sig_total", 0), sm.get("n_uni_mark_line", 0),
-                   sm.get("n_uni_line_pts_total", 0), sm.get("n_uni_mark_bc", 0)))
-          print("窗口一致性: 个股 off_max=%s/%s · 行业 off_max=%s/%s(不变量: 后端产出 ⊆ 前端可绘制)"
-                % (sm.get("uni_off_max"), sm.get("fe_kline_n", 0) - 1,
-                   sm.get("ind_off_max"), sm.get("ind_kline_n", 0) - 1))
-          print("自检通过: 有效%d 信号%d asof=%s" % (m["n_ok"], m["n_signal"], m["asof"]))
-          PY
+        # ★ R526: 断言体已抽为 radar/check_artifact.py（**唯一来源**，规则 20）——
+        #   因为守卫的「产物性 skip」出口也要复核**将要被沿用的那份产物**。
+        #   抽取经 diff 自证与内联版本**逐字节一致**，本步骤行为不变。
+        run: python3 radar/check_artifact.py
 
       - name: 提交雷达数据(触发 deploy 发布)
         id: commit
