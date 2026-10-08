@@ -816,7 +816,7 @@ a{color:var(--primary);text-decoration:none}
     <div class="efbar" id="efBar" style="display:none"></div>
     <!-- R285: 实操信号雷达 — 近端全市场背驰信号, 直连个股实操 (顶风险/底机会左右分栏) -->
     <div class="sigrad" id="sigRadar" style="display:none"></div>
-    <!-- R305: 逆向观察池 — 超窗(fresh>10)底背驰 + 深跌(距高≥30%) + 未破背驰低点 的老结构埋伏候选 -->
+    <!-- R305: 逆向观察池 — 超窗(fresh>meta.fresh_max 交易日)底背驰 + 深跌(距高≥30%) + 未破背驰低点 的老结构埋伏候选 -->
     <div class="revpool" id="revPool" style="display:none"></div>
     <!-- 行业指数列表: 平铺到顶部 + 专业信息 -->
     <div class="ind-panel">
@@ -1434,7 +1434,7 @@ function sigRow(s,opt){   // R380: opt.sub=true = 非低吸区灰显行(破位/�
   var spk=(s.spark&&s.spark.data)?s.spark.data:s.spark;
   var nm=(u.name||s.name||s.sym);
   var sigTip=(t?"顶背驰·风险":"底背驰·机会")+" | "+nm+" "+(s.sym||"")+
-    "\n"+(s.bc_date||"")+"触发 · 距今"+(fr==null?"?":(fr===0?"当日":fr+"天"))+"\n类型 "+(s.bc_type||"-")+(s.vol?" · 量缩确认":"")+(s.area==null?" · 面积比 -":" · "+(s.area>0?"面积比 "+s.area:"面积 0(退化: 该笔区间内此方向无 MACD 柱 ⇒ 判据「本笔面积<前笔×0.85」构造上恒成立, 不含力度证据)"))+   // R320: fresh=0 →"距今当日"(原"距今0天"误导) · R452: area=0 显式标退化(原静默) 
+    "\n"+(s.bc_date||"")+"触发 · 距今"+(fr==null?"?":(fr===0?"当日":fr+"个交易日"))+"\n类型 "+(s.bc_type||"-")+(s.vol?" · 量缩确认":"")+(s.area==null?" · 面积比 -":" · "+(s.area>0?"面积比 "+s.area:"面积 0(退化: 该笔区间内此方向无 MACD 柱 ⇒ 判据「本笔面积<前笔×0.85」构造上恒成立, 不含力度证据)"))+   // R320: fresh=0 →"距今当日"(原"距今0天"误导) · R452: area=0 显式标退化(原静默) 
     "\n所属 "+(indName||"-")+(u.lead?" · 行业龙头":"")+
     momRsTip(st,u)+   // R447: 多周期动量 + 行业内相对强度(纯描述)
     (dev!=null?"\n现价较信号位: "+devTxt+(devTip?" ("+devTip+")":""):"")+
@@ -1494,7 +1494,10 @@ function sigRow(s,opt){   // R380: opt.sub=true = 非低吸区灰显行(破位/�
        ⚠ 量缩标**必须用 `<span>` 不能用 `<b>`** —— 第 292 行 `.sigrad .srow .st b{display:block}`,
        用 `<b>` 会变块级、整列多占一行(实测行高 53→67px, 3/10 行被撑开)。 */
     '<div class="st">'+(t?'<b style="color:#c92a2a">顶背驰</b>':'<b style="color:#087f5b">底背驰</b>')+'<span>'+_areaTag(s.area)+(s.vol?' <span style="color:#087f5b;font-weight:700" title="量缩确认: 该背驰笔区间成交量较前笔萎缩, 佐证动能衰竭(本快照信号 '+VOLTXT+' 只命中)">缩</span>':"")+(divTag?' '+divTag:"")+(premTag?' '+premTag:"")+'</span></div>'+
-    '<div class="st">'+(fr==null?"-":(fr===0?"当日":fr+"天前"))+frTag+'</div>'+
+    /* R526: 口径已由自然日改为**交易日根数**（休市日不计）。此处**故意保留紧凑字形**「N天前」
+       —— 完整口径放在本 cell 的 title 与行 tooltip、meta.note 里；不改字形是为了不触发
+       窄屏列宽溢出（规则 54/75：改渲染文案必须跑全档位裁字/横滚体检）。 */
+    '<div class="st" title="距背驰端点 '+(fr==null?"-":(fr===0?"当日":fr+" 个交易日"))+'（交易日口径，休市日不计）">'+(fr==null?"-":(fr===0?"当日":fr+"天前"))+frTag+'</div>'+
     '<div class="right">'+
       '<div class="dev '+devCls+'" title="'+esc(devTip||sigTip)+'">'+(dev!=null?devTxt:"-")+'<small>'+bkTag+topBkTag+devSub+'</small></div>'+
       '<div class="spk">'+(mTag?mTag+" ":"")+(spk&&spk.length>1?sparkSVG(spk.length>90?spk.slice(-90):spk,72,24):'<span style="color:#cbd5e1">-</span>')+'</div>'+
@@ -1852,12 +1855,12 @@ function renderSigRadar(){
     '<div class="foot">信号=自研缠论引擎背驰确认 · 数据截至 '+esc(M.asof||"-")+' · 仅供研究参考，不构成投资建议</div>';
 }
 /* ===== R305: 逆向观察池(首页中部) — 老结构埋伏候选 =====
-   选样: 全量 UNI 中 scenario=背驰见底机会 + 有 bottom_bc + fresh>10(已超实操窗, 归老结构)
+   选样: 全量 UNI 中 scenario=背驰见底机会 + 有 bottom_bc + fresh>fresh_max(已超实操窗, 归老结构)
          + 距历史高回撤≥30%(深跌) + 现价>背驰低点 end_price(未破位, 结构仍有效)
    R447: **放开 ETF**(原 R305 剔除, 理由「dd 失真/埋伏对象=个股」; 实测 ETF 候选 dd 分布正常
          -0.31~-0.74 与个股同量级, 「失真」未复现; 且旭总主买 ETF, 低吸埋伏恰在 ETF 上更适用)。
          同指数多产品刷屏由 revFoldTwins() 折叠解决 —— 15 只候选里 10 只是同一指数。
-   语义: 与顶部"实操信号雷达"(近端 fresh≤10)互补 — 近端管"当下", 观察池管"提前埋伏/跟踪"
+   语义: 与顶部"实操信号雷达"(近端 fresh≤meta.fresh_max 交易日)互补 — 近端管"当下", 观察池管"提前埋伏/跟踪"
    操作参考: 止损参考=end_price(跌破结构失效) · 埋伏区=现价贴近 end_price 时(dev 小) · 勿追 dev>8% */
 var REV_SHOW=12;            // 折叠态默认展示行数
 var revExpanded=false;
@@ -1877,7 +1880,12 @@ function revCand(sym,v){
   var bb=st.bottom_bc||{};
   if(!bb.end_price)return null;
   var fd=bb.fresh_days;
-  if(fd==null||fd<=10)return null;               // 超窗(fresh>10)才进观察池
+  /* R526: 阈值随数据下发（规则 20 禁第二份副本）—— 必须与后端 scan_radar.signal_of 的
+     FRESH_MAX_DAYS 同值，否则「实操信号窗」与「逆向观察池超窗」不再是严格互补：
+     可能出现同一只票既是近端信号、又落在观察池（或两边都不在）。
+     ★口径已由自然日改为**交易日根数**（休市日不计），故 7 = 一周+一周末。 */
+  var _fm=(M&&M.fresh_max!=null)?M.fresh_max:7;
+  if(fd==null||fd<=_fm)return null;              // 超窗(fd>fresh_max 交易日)才进观察池
   var dd=st.dd;
   if(dd==null||dd>-0.30)return null;             // 距历史高回撤≥30%
   var close=st.close;
@@ -2302,7 +2310,7 @@ function revRule(){   // R376: 排序标准常驻标注(随 chip 联动, 旭总�
   if(curRevMode==="pick")t='<b class="k">🌟实操优选(默认)</b> <b>⓪结构有效性</b>: <b style="color:#c92a2a">盘中已破</b>(击穿背驰低点=一买已废) 全局沉底并单独分组(不剔除 — 本池按收盘价剔票) · <b>①结构档</b>: <b style="color:#18a058">底部刚启(距底≤3%)</b> 最前 → <b style="color:#b45309">已起涨(3~8%)</b> → <b style="color:#c92a2a">追高(8~15%)</b> → <b style="color:#7b2cbf">已错过(&gt;15%)</b> 垫底(收盘破位剔除 — R442: 判据是收盘价, 盘中破另见 ⓪) · <b>②月线MACD(名次键·双周期, 大方向先于细节)</b>: 月红柱=多头背景 / <span style="color:#b45309">月缩</span>=下跌动能衰减 在前, <span style="color:#c92a2a">月弱</span>(绿柱加长=月线下跌中继, 反弹易夭折)沉同档尾 · <b>③确认度(名次键·非门槛)</b>: <b style="color:#18a058">双确认●</b>(放量+末笔向上) &gt; <b style="color:#2f9e44">单确认●</b> &gt; <b style="color:#94a3b8">灰●</b>(未确认沉后, 不踢出) · <b>④档内流动性</b>: 60日均额 <b>&gt;=1亿</b> &gt; <b>&gt;=5000万</b> &gt; 薄 · <b>⑤同档同额</b>: 距历史高跌得最透者前 · 行首 <b>🎯</b> = 三条件齐(≤3%+≥1亿+距高≥50%) · 行内 <b style="color:#0e7d4a">右侧·涨势</b>/<b style="color:#b45309">左侧·盘整</b>=走势状态(仅标签) · <b style="color:#0e7d4a">背离&lt;0.5</b>=背驰力度强(仅标签, 越小越可靠)';
   else if(curRevMode==="dd")t='<b class="k">📉最深回撤</b>: 按 <b>距历史高点回撤幅度(dd)</b> 降序 — 负得越多(跌得最透)越靠前';
   else if(curRevMode==="dev")t='<b class="k">🎯最贴低点</b>: 按 <b>现价距背驰低点(dev%)</b> 升序 — 越贴近买点(≤3%底部区)越靠前';
-  else if(curRevMode==="fr")t='<b class="k">🕐最新触发</b>: 按 <b>距触发天数(fd)</b> 升序 — 刚超实操窗(10天)的新鲜结构在前';
+  else if(curRevMode==="fr")t='<b class="k">🕐最新触发</b>: 按 <b>距触发交易日数(fd)</b> 升序 — 刚超实操窗('+((M&&M.fresh_max!=null)?M.fresh_max:7)+' 交易日)的新鲜结构在前';
   else t='<b class="k">⏳底久未破</b>: 按 <b>距触发天数(fd)</b> 降序 — 触发后企稳最久未破位者在前';
   return '<div class="revrule">'+t+'</div>';
 }
@@ -2353,7 +2361,7 @@ function renderRevPool(){
     revRule()+'</div>'+
     '<div class="rpwrap" style="padding:6px 0 8px">'+phdrHtml+rowsHtml+moreHtml+'</div>'+
     '<div class="rp-swipe">← 左右滑动查看全部 7 列 →</div>'+
-    '<div class="foot">候选=底背驰(fresh&gt;10) + 距历史高≥30% + 现价&gt;背驰低点 · 止损参考=背驰低点(跌破失效) · 数据截至 '+esc(M.asof||"-")+' · 仅供研究参考，不构成投资建议</div>';
+    '<div class="foot">候选=底背驰(fresh&gt;'+((M&&M.fresh_max!=null)?M.fresh_max:7)+' 个交易日) + 距历史高≥30% + 现价&gt;背驰低点 · 止损参考=背驰低点(跌破失效) · 数据截至 '+esc(M.asof||"-")+' · 仅供研究参考，不构成投资建议</div>';
   syncRpSwipe();   // R508: 溢出才提示(纯 CSS 媒体查询会误报/漏报) —— 与 R506b 同纪律「溢出必须报账, 且不虚报」
 }
 /* R508: 「可横滑」提示的显隐 —— 只在 .rpwrap 真溢出时显示(ro 实测 375px 需滑 285px / 640px 不需)。
@@ -3068,7 +3076,7 @@ function renderIndStkList(k){
       else if(s.scenario&&s.scenario.indexOf("见")>=0)tag='<span class="badge2 '+(s.scenario.indexOf("见底")>=0?"g":"r")+'">'+esc(s.scenario)+'</span>';
       else if(s.scenario)tag='<span class="badge2 z">'+esc(s.scenario)+'</span>';
       else tag='<span class="badge2 o">震荡</span>';
-      var tip=esc((u.name||"")+" | "+(x.sg?(x.sg.dir==="top"?"顶背驰":"底背驰")+" "+x.sg.bc_date+" "+x.sg.bc_type+(x.sg.vol?" 量缩确认":"")+" 距今"+(x.sg.fresh!=null?(x.sg.fresh===0?"当日":x.sg.fresh+"天"):" ?") :(s.scenario||"震荡"))+(s.trend?" | 趋势"+s.trend:"")+(s.agree!=null?" | 自洽"+(s.agree*100).toFixed(0)+"%":""))+trkTip(x);   // R321: fresh=0 → "距今当日"(同 R320 口径, 原"距今0天"误导) · R448: 附 ETF 领域/费率/同指数选优
+      var tip=esc((u.name||"")+" | "+(x.sg?(x.sg.dir==="top"?"顶背驰":"底背驰")+" "+x.sg.bc_date+" "+x.sg.bc_type+(x.sg.vol?" 量缩确认":"")+" 距今"+(x.sg.fresh!=null?(x.sg.fresh===0?"当日":x.sg.fresh+"个交易日"):" ?") :(s.scenario||"震荡"))+(s.trend?" | 趋势"+s.trend:"")+(s.agree!=null?" | 自洽"+(s.agree*100).toFixed(0)+"%":""))+trkTip(x);   // R321: fresh=0 → "距今当日"(同 R320 口径, 原"距今0天"误导) · R448: 附 ETF 领域/费率/同指数选优
       /* R448: ETF 徽章 —— **表内只承载「同指数只数」这一个判据**, 领域名交给①基金名本身
          (「云计算ETF华夏」已含主题) ②行的 title(含官方跟踪标的全名)。原因(实测, 非审美):
          名称格仅 184px, 「名称 + 👑规模最大标(60px) + 领域徽章(96px)」三者并存会把名称压到

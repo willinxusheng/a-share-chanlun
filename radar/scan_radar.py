@@ -62,7 +62,25 @@ ONE_WORD_MAX = 10              # 一字板天数 >= -> 结构失真, 不进信�
 ONE_WORD_WIN = 120
 AGREE_TOTAL_MIN = 8
 AGREE_RATE_MIN = 0.6
-FRESH_MAX_DAYS = 10            # 最近背驰距今天数 <= -> 才算"近端信号"
+# ★★★ R526（2026-10-08）口径缺陷修复：**「近端信号」窗口由「自然日」改为「交易日根数」**。
+#   · 事实链：旧口径 `_days_ago()` 数的是**自然日**、阈值 10 —— 休市日不产生新 K 线，
+#     却照样让存量信号"变老"。实测（`_dbg/r526/r526_radar_fresh.py`，8 个历史产物逐日重算）：
+#       asof 09-24（中秋休市前最后一日）官方 signals = 270 → 09-28（仅新增 1 个交易日、
+#       中间夹 3 个休市自然日）骤降到 **22**；同一批结构在交易日口径下是 **608** ⇒
+#       **信号消失纯粹由日历造成，市场什么都没发生**（规则 85/109：先扫同表反例）。
+#       官方计数 8 日内在 **22~401** 间摆动 18 倍；交易日口径稳定在 **545~830**。
+#   · 正解：改用**交易日根数** —— 与引擎既有的时间新鲜度口径**同源**（`bc_state.seg.days` /
+#     `bc_state.bi.days` 早已是"端点距末根的交易日根数"，`cl.SEG_BC_FRESH_DAYS` 同口径）。
+#     修前同一页面同一条背驰会出现**两个"天数"**（信号行 fresh=6 自然日 vs
+#     bc_state.bi.days=3 交易日）⇒ 违反规则 102 / 111（同表禁多口径混排）。
+#   · 阈值同步标定：10 自然日的**真等价是 6~9 交易日（视 asof 是周几而定）**，不存在唯一
+#     等价值，故按「保持有效窗口不变」取 **7**（一周 + 一个周末）。实测 8 日 signals
+#     均值 231 → 297，幅度温和；★如实披露：窗口语义由「10 自然日」变为「7 交易日」，
+#     属**口径变更**（不是纯披露），前后逐日对照见 commit message 与 `_dbg/r526/r526_report.html`。
+#   · 同一事实的其他出口**同步**（规则 78）：`meta.note` 文案、`meta.fresh_max`（新增下发，
+#     供前端 revpool 读 —— 规则 20 禁第二份副本）、`radar.html` 的 revpool 超窗判据。
+#     注：`_apply_exdiv_immune` 的 `fd+2` 本就是 **K 线根数**窗口且默认取本常量 ⇒ 口径一致 ✔。
+FRESH_MAX_DAYS = 7             # 最近背驰距**末根**的**交易日根数** <= -> 才算"近端信号"
 # R445: 行业信号计数改「规模可比」口径 —— n_sig_top/bot 是**绝对数**, 但 32 个板块的成分数
 # 从 16(综合) 到 386(机械设备) 差 **24 倍** ⇒ 绝对数排序被大板块恒定霸榜。实测(09-11):
 #   煤炭 29 只成分 / 6 个顶信号 → 绝对数仅第 15, 密度却是全市场第一 20.7%;
@@ -1499,13 +1517,23 @@ def _bc_tail(bc, bis, btype, n_last=10, ks=None):
     bi = bis[pos]
     if len(bis) - 1 - pos >= n_last:      # 超过最近 n_last 笔 -> 不算近端
         return None
-    fresh = _days_ago(bi["date_end"])
+    # ★ R526: fresh = **交易日根数**（端点那根之后还有多少根 K 线），与 bc_state 同口径
+    #   （`n - 1 - _i`）。旧实现直接 `_days_ago`（自然日）⇒ 休市日被算作"老化"，
+    #   长假后近端信号被整体清空（见上方 FRESH_MAX_DAYS 注释的事实链）。
+    #   ks 缺失 / 端点不在 ks 里（数据缺口、停牌、K 线窗被截断）时**回退自然日**，
+    #   并以 `fresh_td=false` 显式标注该条是回退值 —— 不静默（规则 106/107）。
+    _td = None
+    if ks:
+        _i0 = next((i for i, k in enumerate(ks) if k.get("date") == bi["date_end"]), None)
+        if _i0 is not None:
+            _td = len(ks) - 1 - _i0
+    fresh = _td if _td is not None else _days_ago(bi["date_end"])
     if fresh > FRESH_MAX_DAYS * 4:         # 背驰发生在很久前(非当下信号)
         return None
     out = {"bi_date_end": bi["date_end"], "end_price": round(bi["end_price"], 3),
            "area_ratio": round(x.get("area_ratio", -1), 3),
            "bc_type": x.get("bc_type", ""), "vol_confirm": bool(x.get("vol_confirm")),
-           "fresh_days": fresh}
+           "fresh_days": fresh, "fresh_td": bool(_td is not None)}
     if ks:
         d = bi["date_end"]
         after = [k for k in ks if k["date"] > d]
@@ -1565,8 +1593,11 @@ def _bc_state_of(ks, bis, bc, segs, seg_bc, merged):
     并存这一事实本身如实报出（both），不静默丢弃另一方向。
 
     ⚠️ 段级与笔级的 days **统一为交易日根数** —— 下方笔级刻意不复用 `_bc_tail` 的
-    `fresh_days`（那是**自然日**口径，既有的 st["bottom_bc"] 字段沿用不改），否则同一
-    提示条里两个天数含义相反。笔级仍用 `_bc_tail` 判定"是否近端背驰"（保留既有门槛）。
+    `fresh_days`（两者取值来源不同：本处锚在段端点极值 K 线、`_bc_tail` 锚在笔端点），
+    否则同一提示条里两个天数含义相反。笔级仍用 `_bc_tail` 判定"是否近端背驰"。
+    ✔ R526：`_bc_tail` 的 `fresh_days` 已由**自然日**改为**交易日根数** ⇒ 与本处 days、
+      与 `signal_of` 的 `FRESH_MAX_DAYS` 门槛、与前端信号行的 `fresh` 展示**全部同口径**
+      （修前同一页面同一条背驰会出现 6 自然日 vs 3 交易日两个"天数"，违反规则 102/111）。
     """
     out = {"seg": None, "bi": None,
            # ★ 阈值随数据下发，前端**不写第二份副本**（规则 20：别名/阈值表禁第二份副本，
@@ -2028,25 +2059,33 @@ def gate_of(st):
     return "", ""
 
 
+_EXDIV_NEAR_BARS = 12   # 近端除权免疫窗口 —— 单位是 **K 线根数**，与"近端信号"的时间口径无关。
+                        # ★ R526 解耦：旧实现以 `FRESH_MAX_DAYS` 作为默认值、再在函数内 +2
+                        #   ⇒ 有效值 10+2 = 12 根。若不显式解耦，本轮把 FRESH_MAX_DAYS 由 10
+                        #   改 7 会**无声**把除权免疫窗从 12 根缩到 9 根（我不想要的连带副作用，
+                        #   规则 52「修法有界」）。此处把原有效值 12 固定下来，行为保持不变。
+
+
 def _apply_exdiv_immune(st, ks, sym, fresh_days=None):
     """R273: 裸价源(新浪)除权假跳空免疫(在 analyze_one 后、信号生成前调用)。
     除权日单日|chg|超板块涨跌停上限是复权源不会出现的假跳空(真实涨跌被制度锁死),
     会伪造笔/背驰与当日涨跌幅:
       1) 末根为除权日 -> chg1d 不可信置 null(前端显示"-", 免误读为真实暴跌)
-      2) 近端(末根前 <= fresh_days+2 交易日)有除权 -> 结构/背驰可能被假跳空污染,
-         scenario 免疫(灰标"疑似除权·结构失真"), 清近端背驰字段(防详情页误导)。
+      2) 近端(末根前 <= _EXDIV_NEAR_BARS 根 K 线, 默认 12)有除权 -> 结构/背驰可能被
+         假跳空污染, scenario 免疫(灰标"疑似除权·结构失真"), 清近端背驰字段(防详情页误导)。
     返回是否命中近端免疫。"""
     ex = _exdiv_dates(ks, sym)
     if not ex:
         return False
-    fd = FRESH_MAX_DAYS if fresh_days is None else fresh_days
+    # ★ R526: 单位是 K 线根数。显式传 fresh_days 时保留旧语义(fresh_days + 2 根)。
+    fd = _EXDIV_NEAR_BARS if fresh_days is None else (fresh_days + 2)
     st["exdiv_d"] = ex[-1]                       # 最近疑似除权日(诊断/展示)
     if ks and ks[-1]["date"] == ex[-1]:
         st["chg1d"] = None                       # 末根除权: 当日涨跌幅不可信
     near = False
     for j in range(len(ks) - 1, -1, -1):     # 含末根本身(除权日可为末根)
         if ks[j]["date"] == ex[-1]:
-            near = (len(ks) - 1 - j) <= fd + 2
+            near = (len(ks) - 1 - j) <= fd
             break
     if near:
         st["exdiv"] = 1
@@ -3757,7 +3796,13 @@ def main():
         "etf_prem": etf_prem_meta,
         "ind_cnt": ind_cnt,
         "excl_st": excl.get("st", 0),
-        "note": ("信号=近端背驰场景(背驰见底/见顶) 距背驰日<=%d天; 门禁剔除项仅展示不进信号; "
+        # R526: 「近端信号」窗口阈值**随数据下发**（规则 20：前端不写第二份副本）。
+        #   语义 = 端点距**末根**的**交易日根数**（休市日不计）。前端 revpool 的超窗
+        #   判据 `fd <= fresh_max` 与本处的 `signal_of` 门槛**必须同值**才是严格互补，
+        #   故两处共读此键（旧版前端硬编码字面量 10，改口径后即成静默不一致的唯一来源）。
+        "fresh_max": FRESH_MAX_DAYS,
+        "note": ("信号=近端背驰场景(背驰见底/见顶) 距背驰端点<=%d个交易日(休市日不计); "
+                 "门禁剔除项仅展示不进信号; "
                  "K线源 腾讯qfq优先/东财qfq次之/新浪兜底; 行业=申万一级31个, K线=成分股总市值加权合成; "
                  "龙头=行业内总市值最大成分(ETF板块=规模最大场内基金); "
                  "资金流=东财当日主力净额(超大+大单, 元), 正=净流入红 负=净流出绿"
