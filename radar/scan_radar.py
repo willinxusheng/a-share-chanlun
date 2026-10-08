@@ -462,20 +462,48 @@ def _typename(code, name):
 #       （`ind` 已完成 SW1 映射、ST/退门禁已在上一轮剔除）⇒ 下游零适配；
 #     · 代价：当日**新增**标的漏 1 天、当日**新变 ST** 的多留 1 天（可接受，且次日自愈）。
 #   ⚠ 两项守卫（缺一不可，防「用陈旧池静默产出错误数据」）：
-#     ① **新鲜度**：asof 距今 > `UNI_FALLBACK_MAX_DAYS` 自然日 ⇒ **拒绝兜底**，照旧 exit 2
+#     ① **新鲜度**：asof 距今 > `UNI_FALLBACK_MAX_DAYS` ⇒ **拒绝兜底**，照旧 exit 2
 #        （宁无数据、不误导 —— 规则 83「条件态≠完成态」）；
+#        ★ R526 修正：计数口径由**自然日**改为**工作日(Mon–Fri)** —— 见下方 UNI_FALLBACK_MAX_DAYS。
 #     ② **自我披露**：第 3 项带 `fallback:` 前缀 ⇒ main 的 `源host=` 日志与 meta 的
 #        `uni_fallback` 键都写明本次用了兜底池（规则 78 同口径多出口）。
-UNI_FALLBACK_MAX_DAYS = 7
+#
+#   ★★★ R526（2026-10-08）**长假锁死**缺陷 —— 旧口径用自然日 ⇒ 雷达被永久 brick：
+#     · 事实链：CI 侧东财 `clist` 不可用（线上产物 `meta.uni_fallback=fallback:radar.json@2026-09-29`
+#       自证 —— 每次真扫都靠兜底），因此兜底是**唯一**构建标的池的通道；
+#     · 国庆假期后 radar.json 的 asof 停在 09-30，距 10-08 已 **8 自然日 > 7** ⇒ 兜底被拒 ⇒ exit 2；
+#       而产物 asof 不会前进、窗口只会越拉越大 ⇒ **永远无法自愈**（实测 10-08 08:08Z 起连续 5 次 failure；
+#       04:00Z 那次 "success" 实为「盘后窗口外跳过」，不是真扫）。
+#     · 正解：用**工作日**度量陈旧度 —— 休市日不产生新标的，不构成"陈旧"；
+#       实证：09-30(周三) → 10-08(周四) 工作日间隔 = 5 ≤ 7 ⇒ 放行（该池仅 1 个交易日陈旧，
+#       落在上方已披露的代价内：当日新增标的漏 1 天）；而真正的陈旧池（≥8 工作日 ≈ 11+ 自然日）
+#       仍被拒绝，守卫强度不减。
+#     · 残留边界（如实登记）：若连续 **>7 个工作日**构建失败，仍会拒绝且不能自愈 ——
+#       该情形由 `freshness-watchdog.yml`（check_freshness.py 已含 radar asof 探针，R519c）告警，
+#       需人工介入（不在本函数能力内）。
+UNI_FALLBACK_MAX_DAYS = 7      # 语义＝**工作日(Mon–Fri)计数**（R526 由自然日改）
 
 
 def _uni_fallback_fresh(asof):
-    """兜底池 asof 是否仍在新鲜度窗口内（自然日）。无法解析 → **拒绝**（保守优先）。"""
+    """兜底池 asof 是否仍在新鲜度窗口内（**工作日** Mon–Fri 计数）。
+
+    R526：旧版按自然日 ⇒ 长假后（如国庆）/ 长周末后必然误拒，且因产物 asof 不前进而
+    **永久锁死雷达**（2026-10-08 实测）。休市日不产生新标的，故用工作日度量才对齐语义。
+    无法解析 / 未来日期 → **拒绝**（保守优先）。
+    """
     try:
         d0 = datetime.datetime.strptime(str(asof), "%Y-%m-%d").date()
     except Exception:
         return False
-    return (datetime.date.today() - d0).days <= UNI_FALLBACK_MAX_DAYS
+    today = datetime.date.today()
+    if d0 > today:
+        return False
+    n, d = 0, d0
+    while d < today:
+        d += datetime.timedelta(days=1)
+        if d.weekday() < 5:            # 0=周一 … 4=周五
+            n += 1
+    return n <= UNI_FALLBACK_MAX_DAYS
 
 
 def _fallback_universe_from_output(excl):
@@ -487,7 +515,7 @@ def _fallback_universe_from_output(excl):
         return {}, excl, ""
     asof = str((d.get("meta") or {}).get("asof") or "")
     if not _uni_fallback_fresh(asof):
-        print("[scan_radar] 兜底拒绝: 产物 asof='%s' 无法解析或已超 %d 天, 不沿用陈旧池"
+        print("[scan_radar] 兜底拒绝: 产物 asof='%s' 无法解析/为未来日期/已超 %d 个工作日, 不沿用陈旧池"
               % (asof, UNI_FALLBACK_MAX_DAYS), file=sys.stderr)
         return {}, excl, ""
     uni = {}
