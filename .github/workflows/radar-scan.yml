@@ -110,6 +110,11 @@ jobs:
 
       - name: 全市场缠论扫描(腾讯qfq主源/新浪兜底, 自动限速与WAF退避)
         if: steps.guard.outputs.skip != 'true'
+        # ★ R526: scan_radar 内部还有第二层当日短路（「数据已覆盖市场末交易日 ⇒ 跳过
+        #   全量重扫」）—— 只在 workflow 层放行是不够的（实测 force 派发仍 6 秒短路退出）。
+        #   故把 force 透传给它；定时跑(无 inputs)时为空串 ⇒ 行为不变。
+        env:
+          RADAR_FORCE: ${{ github.event.inputs.force }}
         run: python3 radar/scan_radar.py
 
       - name: 产物自检(不达标即失败, 保留上一版 radar.json)

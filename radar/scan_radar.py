@@ -2768,8 +2768,16 @@ def main():
     # 先探测市场最新交易日(新浪, 轻量), 现有数据(asof)已覆盖锚 → 周末/长假/当日行情
     # 未出的首轮 dispatch 一律直接跳过, 不再空跑烧源; 探测失败回落周末+窗口表判定。
     # 人工调试(--only/--limit/--src)不受限, 照常可跑。
+    # ★ R526: `RADAR_FORCE=1` 旁路 —— 修了扫描逻辑/口径后必须能**当天**重扫验证，
+    #   否则唯一通道是"等次日 18:35 定时跑"（实证：本轮 10-08 产物是修复前口径
+    #   n_signal=17，派发 force 也只在 worklow 层放行，此处仍 6 秒短路退出）。
+    #   同时也给"内部退化产物"提供当天自愈通道（对照：workflow 层另有 force 入参，
+    #   两者配合才完整 —— workflow 挡"重复跑"，此处挡"数据已够新"）。
+    _force = (os.environ.get("RADAR_FORCE", "").strip().lower() in ("1", "true", "yes"))
     _old = {}
-    if not only and not limit and SRC_ONLY == "auto":
+    if _force:
+        print("[scan_radar] ★ RADAR_FORCE 已置位: 越过「数据已覆盖市场末交易日」短路, 强制执行全量重扫")
+    if (not only and not limit and SRC_ONLY == "auto") and not _force:
         try:
             _old = json.load(open(OUT, encoding="utf-8")).get("meta") or {}
         except Exception:
