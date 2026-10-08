@@ -4477,29 +4477,46 @@ def main():
         except Exception as _es:
             print(f"[warn] {_sym_t} 今日段级背驰收集失败（{type(_es).__name__}: {_es}）"
                   f"，该指数不参与顶部横幅", file=sys.stderr)
-        # ---- R525: 末笔（未完成笔）衰竭度 ------------------------------------------------
+        # ---- R525: 末笔（未完成笔）衰竭度；R526: 度量区间延伸至最新 K 线 ---------------
         # 回答「今天这根 K 线有没有背驰迹象」时**段级之外**的那一半：引擎按设计
         # （analyze 的 `bis_done = bis[:-1]`，防未来函数）**不**从未完成笔产出任何信号，
         # 于是「末笔 + MACD 面积萎缩」（缠论里背驰的最早形态）在页面**完全不可见**。
-        # 实测动因（2026-09-30）：5 个指数末笔**全部**满足「创新极值 + 面积比 < 阈值」
-        # （比值 0.56~0.74），却无任何提示。
+        # ★ R526 修正（本块自身的滞后缺陷，规则 107 三踩）：R525 版直接取
+        #   `bi_macd_area(bis[-1])` —— 该函数的区间 = 末笔**已确认分型**所在的合并 K 线，
+        #   而分型必须右侧有一根 K 线才能成立 ⇒ 区间**恒不包含最后一根(raw)**，
+        #   末两次 K 线结构性落在区间外。实证（2026-10-08）：比值在 09-29 / 09-30 /
+        #   10-08 三日**逐值完全相同**（区间恒为 raw1387..1391），对最新两根 K 线完全无感；
+        #   而按同一 bi_macd_area 语义把区间延伸到最新 K 线后，5/5 指数由「成立」
+        #   （0.558/0.563/0.562/0.742/0.593）翻为「不成立」（1.33/1.36/1.62/3.11/1.83）
+        #   —— 即当日放量下跌**扩大**了末笔 MACD 面积，雏形已被破坏，页面却仍报"5/5 成立"。
+        #   历史可达性（逐日重放 5 指数 × 末 260 日 = 935 日·指数）：块口径命中 182(19.5%)、
+        #   延伸口径命中 167(17.9%)、分歧 15 例 —— 非死代码，但分歧日含义完全相反。
+        # ★ 延伸口径 = 缠论标准做法：进行中的笔从起点累计到当前 K 线，与前一同向笔比较。
         # ★ 有界 & 不越界：只披露面积比与"未确认"标注，**不产生买卖点、不改变任何信号、
-        #   不进入概率**；判据与 find_beichi 同源（bi_macd_area + BC_AREA_RATIO_TH），
-        #   连"必须创新极值"这一条也照抄 —— 否则会把"未创新极值但缩量"误报成背驰雏形。
+        #   不进入概率**；判据（创新极值 + 面积比 < BC_AREA_RATIO_TH）与 find_beichi 同源，
+        #   只把**度量区间**改为「末笔起点 → 最新一根 K 线」（引擎口径只到已确认端点）。
         _bo = _r_t.get("bis") if isinstance(_r_t, dict) else None
         if _bo and len(_bo) >= 3 and _r_t.get("hist"):
             try:
                 _cur_b, _pv_b = _bo[-1], _bo[-3]
                 if _pv_b["dir"] == _cur_b["dir"]:
-                    _a_c = bi_macd_area(_cur_b, _r_t["hist"], _r_t["merged"])
                     _a_p = bi_macd_area(_pv_b, _r_t["hist"], _r_t["merged"])
+                    # R526: 当前（进行中）笔区间 = 末笔起点所在 raw idx → 最新一根 raw bar
+                    _s_ext = _mg_t[_cur_b["start"]]["idx_start"]
+                    _seg_ext = _r_t["hist"][_s_ext:]
+                    if _cur_b["dir"] == 1:
+                        _a_c = sum(v for v in _seg_ext if v > 0)
+                        _run_ext = max(_kl_t[i]["high"] for i in range(_s_ext, len(_kl_t)))
+                        _ne = _run_ext > _pv_b["end_price"]
+                    else:
+                        _a_c = abs(sum(v for v in _seg_ext if v < 0))
+                        _run_ext = min(_kl_t[i]["low"] for i in range(_s_ext, len(_kl_t)))
+                        _ne = _run_ext < _pv_b["end_price"]
                     if _a_p > 0 and _a_c > 0:
                         _rb = _a_c / _a_p
-                        _ne = (_cur_b["end_price"] > _pv_b["end_price"]) if _cur_b["dir"] == 1 \
-                            else (_cur_b["end_price"] < _pv_b["end_price"])
                         _open_bi_rows.append({
                             "name": _d_t.get("name", _sym_t), "dir": _cur_b["dir"],
-                            "d0": _cur_b["date_start"], "d1": _cur_b["date_end"],
+                            "d0": _cur_b["date_start"], "d1": _kl_t[-1]["date"],
                             "ratio": round(_rb, 3), "new_ext": bool(_ne),
                             "fade": bool(_rb < BC_AREA_RATIO_TH),
                         })
@@ -4586,6 +4603,9 @@ def main():
             f'—— 即<b>笔级背驰的雏形</b>：{_ob_items}。'
             f'<b>按设计此处不作为信号</b>（引擎只用「已完成笔」判背驰，防未来函数），'
             f'待后续反向笔走完、该笔被确认成"已完成笔"后，才会成为正式的笔级背驰提示。'
+            f'★ 度量区间 = <b>末笔起点 → 最新一根 K 线</b>（含当日尚未确认的 bar；'
+            f'引擎自身的口径只到「末笔已确认分型」为止，故本块读数会比引擎的笔级背驰'
+            f'更早变动）。'
             f'★ 该比值<b>随 K 线延伸会变动、也可能消失</b>（笔未走完，端点极值与 MACD 面积'
             f'都还会变），请勿当作已确认信号使用。</div>')
     else:
