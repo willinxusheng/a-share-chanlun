@@ -2,6 +2,16 @@ name: 全市场雷达每日扫描 (P1)
 
 "on":
   workflow_dispatch:        # 手动触发（首次全量 / 补扫）
+    inputs:
+      # ★ R526: 「当日已扫描」守卫会把同一天的所有 dispatch 全部跳过 —— 这在正常情况下
+      #   是对的（防双扫/堆积），但**修复了扫描逻辑之后就无法当天验证**（必须等到次日）。
+      #   本轮实证需要它：10-08 的产物是**修复前**口径（n_signal=17，全部 fresh=10），
+      #   不补扫就看不到新口径的效果。故加显式 force 开关，只越过"当日已扫过"判定，
+      #   **周末守卫与盘后时间窗守卫仍然生效**（它们防的是"扫出来的数据本身不对"）。
+      force:
+        description: '强制全量重扫(忽略"当日已扫过"守卫; 用于修复后补扫/产物损坏复核)'
+        type: boolean
+        default: false
   schedule:
     # 交易日 北京 18:35 (UTC 10:35)：当日收盘 K 线此时已由源端完整发布(收盘后1~2小时)，
     # 全量扫描约 20~60 分钟, 完成后 push 触发 deploy.yml 发布(radar.html/radar.json + 首页信号条)。
@@ -40,6 +50,7 @@ jobs:
         # 必须用 GITHUB_OUTPUT 写 skip 标记 + 后续步骤 if: steps.guard.outputs.skip != 'true' 才能真正跳过扫描。
         run: |
           set -euo pipefail
+          FORCE="${{ github.event.inputs.force }}"
           TODAY=$(TZ=Asia/Shanghai date +%F)
           DOW=$(TZ=Asia/Shanghai date +%u)     # 1=周一..7=周日
           HH=$(TZ=Asia/Shanghai date +%H)
@@ -67,7 +78,9 @@ jobs:
             # 双扫/堆积同型后果)。radar.json 恒为 UTF-8, 显式声明即可免疫 locale。
             BD=$(python3 -c "import json;print(json.load(open('radar/radar.json',encoding='utf-8'))['meta'].get('build_time','')[:10])" 2>/dev/null || echo "")
             echo "radar build_date=$BD  北京今天=$TODAY"
-            if [ "$BD" = "$TODAY" ]; then
+            if [ "$BD" = "$TODAY" ] && [ "$FORCE" = "true" ]; then
+              echo "★ force=true: 本地产物虽是今日($BD), 仍强制全量重扫"
+            elif [ "$BD" = "$TODAY" ]; then
               echo "今日(北京 $TODAY)已完成扫描并入库, 本次 dispatch 跳过(数据已当日)"
               echo "skip=true" >> "$GITHUB_OUTPUT"
               exit 0
@@ -83,7 +96,7 @@ jobs:
           git fetch origin main -q 2>/dev/null || true
           RBD=$(git show FETCH_HEAD:radar/radar.json 2>/dev/null | python3 -c "import json,sys;print(json.load(sys.stdin)['meta'].get('build_time','')[:10])" 2>/dev/null || echo "")
           echo "远端 main radar build_date=$RBD"
-          if [ "$RBD" = "$TODAY" ]; then
+          if [ "$RBD" = "$TODAY" ] && [ "$FORCE" != "true" ]; then
             echo "远端 main 已有今日产物(首发已提交), 本次 dispatch 跳过(防竞态双扫)"
             echo "skip=true" >> "$GITHUB_OUTPUT"
             exit 0
