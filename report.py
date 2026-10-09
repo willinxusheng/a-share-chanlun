@@ -3903,31 +3903,49 @@ def load_other_fib_nodes(base=None):
     if not src:
         return None
     try:
-        start = src.find('"subForecast"')
-        if start < 0:
-            return None
-        seg = src[start:start + 8000]
-        k = seg.find('"points"')
-        if k < 0:
-            return None
-        sub = seg[k:]
-        i = sub.find('[')
-        if i < 0:
-            return None
-        depth = 0
-        end = -1
-        for j in range(i, len(sub)):
-            c = sub[j]
-            if c == '[':
-                depth += 1
-            elif c == ']':
-                depth -= 1
-                if depth == 0:
-                    end = j
-                    break
-        if end < 0:
-            return None
-        arr = ast.literal_eval(sub[i:end + 1])
+        # ★ R527 同族修复（与 sentiment/sync_other_fib.py 同一事实链，规则 20/52）：
+        #   上游 A-share-Fibonacci/data/data.js 已由「JS 字面量」改为**标准 JSON**
+        #   （`window.FIB_DATA = {...}`，双引号键 + 小写 true/false）。本处旧实现同样用
+        #   `ast.literal_eval` 解析 **Python 字面量** ⇒ 撞 JSON 的 true/false 必抛
+        #   `ValueError: malformed node or string ... <ast.Name object>`。
+        #   本路径是「同机 data.js 实时兜底」（内置快照存在时不走），但**同族同修**：
+        #   先 json.loads（取首 `{` 到末 `}`，不依赖 8000 字符窗口），失败再回退旧路径。
+        arr = None
+        _i, _j = src.find("{"), src.rfind("}")
+        if _i >= 0 and _j > _i:
+            try:
+                _d = json.loads(src[_i:_j + 1])
+                _pts = ((_d.get("subForecast") or {}).get("points")) or []
+                if _pts:
+                    arr = _pts
+            except Exception:
+                arr = None
+        if arr is None:
+            start = src.find('"subForecast"')
+            if start < 0:
+                return None
+            seg = src[start:start + 8000]
+            k = seg.find('"points"')
+            if k < 0:
+                return None
+            sub = seg[k:]
+            i = sub.find('[')
+            if i < 0:
+                return None
+            depth = 0
+            end = -1
+            for j in range(i, len(sub)):
+                c = sub[j]
+                if c == '[':
+                    depth += 1
+                elif c == ']':
+                    depth -= 1
+                    if depth == 0:
+                        end = j
+                        break
+            if end < 0:
+                return None
+            arr = ast.literal_eval(sub[i:end + 1])
         nodes = []
         for p in arr:
             if not isinstance(p, dict):
@@ -4803,7 +4821,9 @@ def main():
         事后转为正式信号的比例有限，故不单独出标签）。<br>
         ★★ <b>那到底「什么时候该看什么」？</b>实测（5 指数 2021 至今，口径 =「标注出现后<b>次日开盘</b>
         买入、持有 H 个交易日」）：<b>段级背驰标注是当日可操作的结构判据</b> —— 它由线段序列<b>实时</b>算出，
-        实测出现日只需比段端点晚 <b>1 个交易日</b>，且 <b>100% 锚在「最后一段」</b>上（不必等该段之后的笔走完）。
+        实测出现日比段端点晚 <b>1 个交易日</b>（R526 实测 250 根 × 5 指数、27 次出现中
+        <b>85.2% 为 1 日 / 14.8% 为 2 日</b>、最大 2 日），且 <b>出现时 100% 锚在「最后一段」</b>上
+        （27/27，不必等该段之后的笔走完）。
         看到「段底·背驰」后买入：<b>H=20 胜率 70.0%</b>（随机基准 49.1%，<b>二项单侧 p≈0.017</b>）、
         <b>H=60 均值 +5.34%</b>（基准 +2.05%）；而若改等<b>引擎买卖点标签</b>（它是<b>确认</b>口径、天然滞后），
         H=20 胜率只有 <b>45.9%</b>、均值 +0.41%，<b>反而低于随机基准</b> —— 因为标签的坐标日期平均比诞生日

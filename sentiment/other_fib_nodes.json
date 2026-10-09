@@ -1,53 +1,54 @@
 {
   "source": "A-share-Fibonacci/data/data.js",
   "synced_from": "https://raw.githubusercontent.com/willinxusheng/A-share-Fibonacci/main/data/data.js",
+  "synced_at": "2026-10-09T10:34:22+00:00",
   "note": "另一斐波那契项目(艾略特波浪+斐波那契比率)波浪节点静态快照, R204 锚点对照用; 由 sentiment/sync_other_fib.py 每次部署前从公开仓库同步; 该项目为人工维护买/卖点, 非每日变动, 此处内置快照作为 CI 兜底",
   "nodes": [
     {
       "date": "2026-07-20",
       "price": 3741.11,
-      "lo": 3612.92,
-      "hi": 3869.3,
+      "lo": 3668.37,
+      "hi": 3813.85,
       "label": "浪⑤起",
       "side": "buy"
     },
     {
-      "date": "2026-09-02",
-      "price": 4043.82,
-      "lo": 3905.26,
-      "hi": 4182.38,
+      "date": "2026-10-26",
+      "price": 4011.82,
+      "lo": 3926.38,
+      "hi": 4097.26,
       "label": "子浪ⅰ",
       "side": "hold"
     },
     {
-      "date": "2026-09-18",
-      "price": 3867.7,
-      "lo": 3680.28,
-      "hi": 4055.12,
+      "date": "2026-11-10",
+      "price": 3895.25,
+      "lo": 3776.88,
+      "hi": 4013.62,
       "label": "子浪ⅱ",
       "side": "buy"
     },
     {
-      "date": "2026-10-13",
-      "price": 4357.48,
-      "lo": 4045.98,
-      "hi": 4668.98,
+      "date": "2026-12-10",
+      "price": 4333.26,
+      "lo": 4109.0,
+      "hi": 4557.52,
       "label": "子浪ⅲ",
       "side": "sell"
     },
     {
-      "date": "2026-10-26",
-      "price": 4191.23,
-      "lo": 3843.36,
-      "hi": 4539.1,
+      "date": "2026-12-25",
+      "price": 4223.23,
+      "lo": 3957.62,
+      "hi": 4488.84,
       "label": "子浪ⅳ",
       "side": "buy"
     },
     {
-      "date": "2026-11-10",
+      "date": "2027-01-11",
       "price": 4493.94,
-      "lo": 4058.61,
-      "hi": 4929.27,
+      "lo": 4176.88,
+      "hi": 4811.0,
       "label": "子浪ⅴ",
       "side": "sell"
     }

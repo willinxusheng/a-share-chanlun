@@ -40,31 +40,52 @@ def fetch_src(url):
 
 def parse_nodes(src):
     """从 data.js 文本解析 subForecast.points 波浪节点(括号平衡提取)。"""
-    start = src.find('"subForecast"')
-    if start < 0:
-        raise ValueError("subForecast not found in source")
-    seg = src[start:start + 8000]
-    k = seg.find('"points"')
-    if k < 0:
-        raise ValueError("points not found")
-    sub = seg[k:]
-    i = sub.find('[')
-    if i < 0:
-        raise ValueError("points array not found")
-    depth = 0
-    end = -1
-    for j in range(i, len(sub)):
-        c = sub[j]
-        if c == '[':
-            depth += 1
-        elif c == ']':
-            depth -= 1
-            if depth == 0:
-                end = j
-                break
-    if end < 0:
-        raise ValueError("unbalanced points array")
-    arr = ast.literal_eval(sub[i:end + 1])
+    # ★ R527 修复（根因实测，规则 61/77）：
+    #   上游 A-share-Fibonacci/data/data.js 已由「JS 字面量」改为**标准 JSON**
+    #   （`window.FIB_DATA = {...}`，双引号键 + 小写 true/false）。旧实现用
+    #   `ast.literal_eval` 解析 **Python 字面量** ⇒ 撞上 JSON 的 true/false 抛
+    #   `ValueError: malformed node or string ... <ast.Name object>`；CI stderr 原文即
+    #   `PARSE_FAIL: malformed node or string on line 1: <ast.Name object at ...>`。
+    #   后果：**跨项目锚点同步长期静默失效**（本地快照停在 2026-09-24，且因从未成功
+    #   而缺 `synced_at`；6 节点里 5 个已被上游改写 ⇒ report 的锚点对照在用旧数据）。
+    #   修法（有界，规则 52）：主体改 **json.loads**（取第一个 `{` 到最后一个 `}`，
+    #   不再依赖固定 8000 字符窗口 —— 上游节点变多会被截断），旧路径保留作兼容回退。
+    arr = None
+    _i, _j = src.find("{"), src.rfind("}")
+    if _i >= 0 and _j > _i:
+        try:
+            _d = json.loads(src[_i:_j + 1])
+            _pts = ((_d.get("subForecast") or {}).get("points")) or []
+            if _pts:
+                arr = _pts
+        except Exception:
+            arr = None
+    if arr is None:
+        start = src.find('"subForecast"')
+        if start < 0:
+            raise ValueError("subForecast not found in source")
+        seg = src[start:start + 8000]
+        k = seg.find('"points"')
+        if k < 0:
+            raise ValueError("points not found")
+        sub = seg[k:]
+        i = sub.find('[')
+        if i < 0:
+            raise ValueError("points array not found")
+        depth = 0
+        end = -1
+        for j in range(i, len(sub)):
+            c = sub[j]
+            if c == '[':
+                depth += 1
+            elif c == ']':
+                depth -= 1
+                if depth == 0:
+                    end = j
+                    break
+        if end < 0:
+            raise ValueError("unbalanced points array")
+        arr = ast.literal_eval(sub[i:end + 1])
     nodes = []
     for p in arr:
         if not isinstance(p, dict):
