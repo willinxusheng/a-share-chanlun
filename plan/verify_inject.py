@@ -97,11 +97,31 @@ def main():
     # --- 判据 5：数据日与关键数字确实来自 plan.json（非手写） ---
     must = [str(p["close"]), str(p["asof"])] + ["{:,.2f}".format(x["price"])
                                                 for x in (p.get("up") or []) + (p.get("dn") or [])]
+    sg = p.get("signals") or {}
+    for _l in sg.get("levels") or []:
+        for _x in _l["rows"]:
+            must.append("{:,.2f}".format(_x["price"]))
+            must.append("{:,.2f}".format(_x["inval"]))
+            if _x.get("target") is not None:
+                must.append("{:,.2f}".format(_x["target"]))
+    must += ["{:,.2f}".format(_x["price"]) for _x in (sg.get("next") or [])
+             if _x.get("price") is not None]
     absent = [t for t in must if t not in new]
     if not absent:
         print("  [PASS] 判据5 区块内 %d 个数字/日期全部可溯源到 plan.json" % len(must))
     else:
         fails.append("判据5 未在产物中找到：%s" % absent)
+
+    # --- 判据 6：信号表行数与 plan.json 对账（防注入漏行/多行） ---
+    # 计数锚的选择有讲究：信号行的 plan-k 带方向类（plan-dir--up/dn）⇒ 精确串只匹配「下一信号」行。
+    n_sig = sum(len(l["rows"]) for l in sg.get("levels") or [])
+    n_next = len(sg.get("next") or [])
+    got_sig = new.count('<td class="plan-lv">')
+    got_next = new.count('<td class="plan-k">')
+    if got_sig == n_sig and got_next == n_next:
+        print("  [PASS] 判据6 信号表行数与 plan.json 一致（信号 %d 行 + 下一信号 %d 行）" % (n_sig, n_next))
+    else:
+        fails.append("判据6 行数不符：信号 %d/%d、下一信号 %d/%d" % (got_sig, n_sig, got_next, n_next))
 
     print("")
     if fails:

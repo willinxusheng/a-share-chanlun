@@ -50,6 +50,13 @@ PLAN_CSS = """<style>
 .plan-foot b { color: #1f2937; font-variant-numeric: tabular-nums; }
 .plan-note { margin-top: 8px; font-size: 12px; color: #64748b; line-height: 1.7;
   background: #f8fafc; border-radius: 6px; padding: 8px 12px; }
+/* ===== plan: 买卖点信号（与上方「条件预案」同区块）===== */
+.plan-sec { font-size: 13px; font-weight: 600; color: #1f2937; margin: 16px 0 6px; }
+.plan-sec span { font-weight: 400; color: #64748b; font-size: 12px; }
+.plan-na { color: #94a3b8; font-size: 12px; }
+.plan-st--on { color: #64748b; }
+.plan-st--off { color: #b0b7c3; }
+.plan-tip { margin-top: 6px; font-size: 12px; color: #64748b; line-height: 1.7; }
 @media (max-width: 720px) {
   /* 窄屏改为**纵向卡片**：表格横滚会把「收盘到该位的含义」推到视口外，
      而那正是本区块最该被读到的列 ⇒ 放弃横滚，改为每行一卡、全部信息纵向可见。 */
@@ -62,7 +69,12 @@ PLAN_CSS = """<style>
   .plan-tbl td.plan-p { display: inline-block; }
   .plan-tbl td.plan-d { display: inline-block; margin-left: 8px; }
   .plan-tbl td.plan-sem { margin-top: 4px; }
+  .plan-tbl td.plan-lv { display: inline-block; margin-right: 6px; font-weight: 600; }
+  .plan-tbl td.plan-k { display: inline-block; }
+  .plan-tbl td.plan-date { display: block; font-size: 12px; color: #64748b; }
+  .plan-tbl td.plan-rr, .plan-tbl td.plan-inv { display: block; font-size: 12px; margin-top: 2px; }
   .plan-meta { font-size: 12px; }
+  .plan-sec { margin-top: 14px; }
 }
 </style>
 """
@@ -105,6 +117,88 @@ def _row(x, arrow, dir_cls):
     )
 
 
+# ===== 买卖点信号两小节 =====
+# 设计原则：① 全部数字来自 plan.json（规则 149）；② 复用既有 .plan-* 类，只加 4 个小类；
+# ③ 「判据成立/已破」只答「判据还成立吗」，**不得**被读成买卖指令（措辞与脚注双重约束）。
+_SIG_COLS = ("级别", "类型", "日期", "价位", "距现价", "止损 → 目标（R:R）", "失效位 / 判据")
+_NEXT_COLS = ("目标类型", "需要先看到什么", "关键位")
+
+
+def _sig_row(x, level):
+    """一条买卖点信号。方向色沿用全站惯例：买=红、卖=绿（与图上三角/倒三角一致）。"""
+    d_cls = "plan-dir--up" if x["dir"] > 0 else "plan-dir--dn"
+    rr = "—"
+    if x.get("target") is not None:
+        rr = "%s → %s" % (_money(x.get("stop") or 0), _money(x["target"]))
+        if x.get("rr") is not None:
+            rr += "（R:R %.2f）" % x["rr"]
+    broken = x["status"] == "判据已破"
+    return (
+        '<tr>'
+        '<td class="plan-lv">%s</td>'
+        '<td class="plan-k %s">%s</td>'
+        '<td class="plan-date">%s</td>'
+        '<td class="plan-p">%s</td>'
+        '<td class="plan-d">%s</td>'
+        '<td class="plan-rr">%s</td>'
+        '<td class="plan-inv">%s <span class="%s">%s</span>'
+        '<div class="plan-src">%s</div></td>'
+        '</tr>' % (esc(level), d_cls, esc(x["kind"]), esc(x["date"]),
+                   _money(x["price"]), _sign(x["dist_pct"]), rr,
+                   _money(x["inval"]),
+                   "plan-st--off" if broken else "plan-st--on", esc(x["status"]),
+                   esc(x["inval_src"]))
+    )
+
+
+def _next_row(x):
+    """一行「下一信号触发条件」。给不出价位的（需一类先出 / 需新中枢）如实标出原因，不留空。"""
+    if x.get("price") is not None:
+        cell = '%s<div class="plan-src">%s</div>' % (_money(x["price"]), esc(x["price_label"]))
+    else:
+        cell = '<span class="plan-na">%s</span>' % esc(x["price_label"])
+    return ('<tr><td class="plan-k">%s</td><td>%s</td><td class="plan-inv">%s</td></tr>'
+            % (esc(x["kind"]), esc(x["cond"]), cell))
+
+
+def build_signals(sg):
+    if not sg or not (sg.get("levels") or sg.get("next")):
+        return ""
+    lv_txt = " ｜ ".join(
+        "%s级近 %d 条：买 %d · 卖 %d" % (l["level"], len(l["rows"]),
+                                       (l.get("counts") or {}).get("买", 0),
+                                       (l.get("counts") or {}).get("卖", 0))
+        for l in sg.get("levels") or [])
+    tot = sg.get("total") or {}
+    sig_rows = "".join(_sig_row(x, l["level"])
+                       for l in sg.get("levels") or [] for x in l["rows"])
+    next_rows = "".join(_next_row(x) for x in sg.get("next") or [])
+    thead_sig = "".join("<th>%s</th>" % c for c in _SIG_COLS)
+    thead_next = "".join("<th>%s</th>" % c for c in _NEXT_COLS)
+    return """
+  <div class="plan-sec">买卖点信号 <span>（引擎 chanlun.find_signals 产出 · 引擎共 %s 笔 / %s 段 · %s）</span></div>
+  <div class="tablescroll">
+  <table class="plan-tbl">
+    <thead><tr>%s</tr></thead>
+    <tbody>%s</tbody>
+  </table>
+  </div>
+  <div class="plan-tip">失效位口径：<b>%s</b><br>
+    止损 / 目标 / R:R 直接沿用引擎 <b>attach_rr()</b> 的既有口径（目标 = 该笔之前最近完成中枢的边界），
+    可能距现价很远（如某行目标 3,040.69 低于现价约 20%%）⇒ <b>R:R 数值大不等于可交易</b>；
+    本表的看点是「失效位」与「判据是否成立」。</div>
+  <div class="plan-sec">下一信号 · 触发条件 <span>（「需先看到什么」是引擎判据的前置条件，不是价位预测）</span></div>
+  <div class="tablescroll">
+  <table class="plan-tbl">
+    <thead><tr>%s</tr></thead>
+    <tbody>%s</tbody>
+  </table>
+  </div>
+""" % (tot.get("笔", 0), tot.get("段", 0), esc(lv_txt),
+       thead_sig, sig_rows, esc(sg.get("rule") or ""),
+       thead_next, next_rows)
+
+
 def build(p):
     zs = p.get("zhongshu") or {}
     ztxt = ("%.2f ~ %.2f（%s 笔 · %s）" % (zs.get("zd", 0), zs.get("zg", 0),
@@ -143,14 +237,14 @@ def build(p):
   <div class="plan-foot">
     <div>今日动作：%s</div>
     <div>判据失效条件：%s</div>
-  </div>
+  </div>%s
   <div class="plan-note"><b>怎么用</b>：本表只是把<b>已有的结构位</b>摆成一排，标出每个位对应什么状态变化。
     幅度请自行决定（不提供仓位比例）。<ul>%s</ul></div>
 </section>
 """ % (MARK, esc(p.get("name") or ""), esc(p.get("asof") or ""),
        _money(p.get("close") or 0), _sign(p.get("chg_pct") or 0),
        esc(p.get("scenario") or "—"), esc(p.get("position") or "—"), ztxt,
-       rows, act_txt, inv_txt, notes)
+       rows, act_txt, inv_txt, build_signals(p.get("signals")), notes)
 
 
 def main():
