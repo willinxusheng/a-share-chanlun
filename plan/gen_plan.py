@@ -30,7 +30,11 @@ from chanlun import analyze, bc_invalidation   # noqa: E402
 SYM = "sh000001"
 NEAR_PCT = 0.30      # 「接近」阈值(%)：现价距该位 < 此值 ⇒ 预警态
 DEDUP_PCT = 0.15     # 合并阈值(%)：两位距离 < 此值 ⇒ 视为同一个位（合并语义，不丢弃）
-MAX_PER_SIDE = 3     # 上方 / 下方各最多列几个位（证伪位不占额、强制保留）
+MAX_PER_SIDE = 5     # 上方 / 下方各最多列几个位（证伪位不占额、强制保留）
+# R540: 3 → 5。候选池新增「均线 MA20/60/120/250」与「斐波那契回调位」两个维度后，
+# 名额 3 会被最近的结构位占满 ⇒ 均线/Fib 永远进不了表（实测：均线 4 档全在现价上方
+# +2.1%~+4.7%，距现价远于 3884/3995 这些结构位）。放宽到 5 后，多维度的位都有机会入表；
+# 因 _dedup 会合并 <0.15% 的近位，实际每侧多为 4~5 条。
 SIG_TOP_N = {"笔": 6, "段": 4}   # 买卖点信号：各级别各取最近 N 条（全列会淹掉重点）
 SIG_TTL = "卖点：收盘上破失效位 ⇒ 失效；买点：收盘跌破失效位 ⇒ 失效。"
 
@@ -58,6 +62,11 @@ def _semantic(kind):
         "inv_bot": "★ 收盘跌破 ⇒ 底背驰判据被证伪（⚠ 仅作判据参考，不可当止损 —— R489 已证）",
         "gap_top": "收盘站上 ⇒ 向下缺口开始被回补",
         "gap_bot": "回落至缺口中，缺口被逐渐回补",
+        "ma20": "均线位（MA20）：收盘站上 ⇒ 短线转强（20 日动量修复）",
+        "ma60": "均线位（MA60）：中期成本线，站稳才谈得上趋势修复",
+        "ma120": "均线位（MA120 · 半年线）",
+        "ma250": "均线位（MA250 · 年线）：牛熊分界，收盘站上 ⇒ 中长期转强",
+        "fib": "斐波那契回调位（基于前一笔摆动）：常见反抽/回踩目标区",
     }.get(kind, "")
 
 
@@ -94,13 +103,44 @@ def collect(r):
                             e.get("date", "?"), e.get("bc_type") or "?", e.get("area_ratio") or 0.0),
                         "inv_" + key))
 
+    # R540: 未补缺口由「只取最近 1 个」放宽为**最近 2 个** —— 跳空缺口是缠论结构之外的
+    # 独立价位锚（A 股「逢缺必补」），且同一轮调整常留下**多个**相邻缺口（实测 2026-09-24
+    # 与 2026-09-28 中秋假期前后各一个，w=0.101% / 0.257%）⇒ 只取最新一个会静默丢掉
+    # 更上方的那个压力位。
     unfilled = [g for g in (r.get("gaps") or []) if not g.get("filled")]
-    if unfilled:
-        g = unfilled[-1]
+    for g in unfilled[-2:]:
         gtag = "未补缺口 %s（%s）" % (g.get("date", "?"),
                                     "向下跳空" if g.get("type") == "down" else "向上跳空")
-        out.append((g["top"], "缺口上沿", gtag, "gap_top"))
-        out.append((g["bottom"], "缺口下沿", gtag, "gap_bot"))
+        _gd = (g.get("date") or "?")[5:]     # 同轮可能留下多个未补缺口 ⇒ label 必须带日期区分
+        out.append((g["top"], "缺口上沿 %s" % _gd, gtag, "gap_top"))
+        out.append((g["bottom"], "缺口下沿 %s" % _gd, gtag, "gap_bot"))
+
+    # R540 新增维度①：均线（MA20/60/120/250）。直接取引擎 classify.ma_alignment，
+    # **本侧不重算**（规则 111/156：同一事实单一来源 ⇒ 与主报告同口径）。
+    # 此前 plan 只有缠论结构位，均线这一最广泛使用的动态支撑/压力完全缺失。
+    ma = (r.get("classify") or {}).get("ma_alignment") or {}
+    if ma:
+        _ma_tag = "均线（%s）" % (ma.get("alignment") or "?")
+        for _k, _nm in (("ma20", "MA20"), ("ma60", "MA60"),
+                        ("ma120", "MA120 半年线"), ("ma250", "MA250 年线")):
+            if ma.get(_k):
+                out.append((float(ma[_k]), _nm, _ma_tag, _k))
+
+    # R540 新增维度②：斐波那契回调位 —— 与主报告 report.py 同公式同参数
+    # （同一摆动 leg = bis[-2]，同一组 0 / 0.382 / 0.5 / 0.618）。主报告画在图上，
+    # 本侧作为候选关键位参与「到哪个价会怎样」的编排。
+    _bis = r.get("bis") or []
+    if len(_bis) >= 2:
+        _leg = _bis[-2]
+        _hi, _lo = ((_leg["end_price"], _leg["start_price"]) if _leg.get("dir") == 1
+                    else (_leg["start_price"], _leg["end_price"]))
+        _swing = _hi - _lo
+        if _swing > 0:
+            _ftag = "斐波那契回调（前一笔摆动 %.2f~%.2f）" % (_lo, _hi)
+            for _f, _lab in ((0.0, "Fib F0"), (0.382, "Fib 38.2%"),
+                             (0.5, "Fib 50%"), (0.618, "Fib 61.8%")):
+                _pv = _hi - _swing * _f if _leg.get("dir") == 1 else _lo + _swing * _f
+                out.append((_pv, _lab, _ftag, "fib"))
     return out
 
 
@@ -293,6 +333,14 @@ def main():
         "total": {"笔": len(r.get("signals") or []), "段": len(r.get("seg_signals") or [])},
     }
 
+    # R540: 导出均线与乖离率（与主报告同源），供前端「均线状态」行使用。
+    _ma = (r.get("classify") or {}).get("ma_alignment")
+    ma_out = None
+    if _ma:
+        ma_out = {"ma20": _ma.get("ma20"), "ma60": _ma.get("ma60"),
+                  "ma120": _ma.get("ma120"), "ma250": _ma.get("ma250"),
+                  "alignment": _ma.get("alignment")}
+
     plan = {
         "asof": k[-1]["date"],
         "sym": SYM,
@@ -310,6 +358,8 @@ def main():
         "actions": acts,
         "invalidations": invalid,
         "signals": sigs,
+        "ma": ma_out,
+        "bias": r.get("bias"),
         "near_pct": NEAR_PCT,
         "notes": [
             "本表是当日快照：中枢随新笔生成会漂移，请以 asof 为准。",

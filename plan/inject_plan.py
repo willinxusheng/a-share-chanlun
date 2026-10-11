@@ -212,14 +212,36 @@ def _clip(s, limit):
     return out + "\u2026"
 
 
+# R540: 图内名称的**前缀缩写表**。图宽 300、标签区仅 x=186~300（≈114px），而维度扩展后
+# 一个价位常并列两个语义（如「中枢上沿 ZG / 缺口上沿 09-28」）。缩写「中枢X 」前缀每次
+# 省下约 3 个 CJK 宽，使**第二段（往往正是共振来源）也能挤进图内**，而不是被省略号吞掉。
+# ★ 只作用于图内显示：悬停 title 与折叠表一律使用完整 label，信息不因排版而丢失。
+_SEG_ABBR = (("中枢上沿 ", ""), ("中枢下沿 ", ""), ("中枢最高 ", ""), ("中枢最低 ", ""),
+             ("缺口上沿 ", "缺口上"), ("缺口下沿 ", "缺口下"), ("顶背驰证伪位", "顶背驰证伪"))
+
+
+def _abbr(seg):
+    for _a, _b in _SEG_ABBR:
+        if seg.startswith(_a):
+            return _b + seg[len(_a):]
+    return seg
+
+
 def _lv_name(x, limit=11.6):
-    """关键位名称：只取 label 的第一段（` / ` 分隔），余下加省略号；
+    """关键位名称：图上显示**前两段**（` / ` 分隔，段名经 _abbr 缩写），余下加省略号；
     全文在 SVG 悬停 title 与折叠表里，不丢信息。
-    limit 可调：该档若还要挂「买卖点触发」小标，需让出宽度。"""
-    parts = [p.strip() for p in str(x.get("label") or "").split(" / ") if p.strip()]
+    limit 可调：该档若还要挂「买卖点触发」小标，需让出宽度。
+
+    R540：由「只取第一段」改为**并列前两段**。维度扩展后同一价位常承载多个语义，
+    典型如 3,884.44 =「中枢上沿 ZG / 缺口上沿 09-28」—— 只取第一段会让**共振信息**
+    （同一价位被两个独立体系同时确认）被省略号吞掉，而共振恰恰是实战上最该看见的。
+    """
+    parts = [_abbr(p.strip()) for p in str(x.get("label") or "").split(" / ") if p.strip()]
     txt = parts[0] if parts else ""
     if len(parts) > 1:
-        txt += "\u2026"
+        txt = txt + " \u00b7 " + parts[1]
+        if len(parts) > 2:
+            txt += "\u2026"
     st = x.get("state")
     if st in ("near", "up_cross", "dn_cross"):
         txt += "（%s）" % _STATE[st]
@@ -309,6 +331,13 @@ def _chart(p, band):
          'aria-label="价格水位图：当前中枢区间、明日九成区间与上下方关键位">'
          % (_CH_W, _CH_H)]
 
+    # R540: 图内标注**数据日**。旭总需求：「给图标一个日期，这样我才能判断当日是否更新」——
+    # 此前日期只出现在区块副标题里，本图被单独截图 / 转发出去后无从判断新鲜度。
+    # 放右上角（顶部 y<30 区在价格轴刻度之上，不与任何图元争位）。
+    o.append('<text class="plan-date" x="%g" y="13" font-size="9.5" fill="#94a3b8" '
+             'text-anchor="end">数据 %s 收盘</text>'
+             % (_CH_W - 4, esc(str(p.get("asof") or "?"))))
+
     # ① 价格网格 + 轴
     step = 50.0
     t = (int(lo // step) + 1) * step
@@ -363,9 +392,33 @@ def _chart(p, band):
     # ⑤ 关键位（红 = 上方 / 绿 = 下方，沿用全站惯例）
     #    R539：凡「引擎给了明确价位」的买卖点，在同一档名称行右侧挂紫色触发标
     #    （形状 △买/▽卖 承载买卖语义；用紫而非红绿，避免与「红=上方/绿=下方」抢色）。
-    for i, x in enumerate(ups + dns):
-        col = _C_UP if i < len(ups) else _C_DN
-        y = py(x["price"])
+    #    R540：**标签避让**。维度扩展（均线 / Fib / 缺口）后，同一价格带会挤进多个位 ——
+    #    实测 3,878~3,905 一段内就有 4 个（缺口下沿 / ZG+缺口上沿 / MA20+MA60+F61.8 / F50），
+    #    按真实价位投影后的理想间距只有 16.1 / 10.8 / 7.8 px，而标签块高约 15px ⇒ 必然互压。
+    #    做法：短线 + 圆点仍画在**真实价位** y 上；标签块用避让后的 ym（贪心下推 + 越界回夹）；
+    #    偏移 > 3px 时在标签左缘补一条同色竖直虚线指回真实价位 —— 价位不因排版而失真。
+    #    ★ 间距取值：每档实际占「价格行（ym−14 … ym+3）+ 名称行（ym+4 … ym+16）」≈ 30px，
+    #      故 MK_GAP 取 34（净空隙 4px）；R540 首版误取 22 ⇒ 3,884.44 的名称行被
+    #      3,878.41 的价格行压住（已由截图核出）。
+    MK_GAP = 34.0
+    items = [(py(x["price"]), _C_UP if i < len(ups) else _C_DN, x)
+             for i, x in enumerate(ups + dns)]
+    ymv = [it[0] for it in items]
+    if items:
+        _ord = sorted(range(len(items)), key=lambda i: ymv[i])
+        for _k in range(1, len(_ord)):
+            _i, _ip = _ord[_k], _ord[_k - 1]
+            if ymv[_i] - ymv[_ip] < MK_GAP:
+                ymv[_i] = ymv[_ip] + MK_GAP
+        _ov = ymv[_ord[-1]] - (_CH_PB + 4)          # 底部越界 ⇒ 整组上移
+        if _ov > 0:
+            ymv = [v - _ov for v in ymv]
+        _dd = 14.0 - ymv[_ord[0]]                   # 上移过头 ⇒ 整组下夹
+        if _dd > 0:
+            ymv = [v + _dd for v in ymv]
+
+    for i, (y, col, x) in enumerate(items):
+        ym = ymv[i]
         t = trg.get(round(float(x["price"]), 2))
         nm = _lv_name(x, 6.6 if t else 11.6)
         o.append('<g class="plan-mk">')
@@ -376,12 +429,16 @@ def _chart(p, band):
         o.append('<line x1="%g" y1="%.1f" x2="%g" y2="%.1f" stroke="%s" stroke-width="2"/>'
                  % (_CH_BX1, y, _CH_MK, y, col))
         o.append('<circle cx="%g" cy="%.1f" r="3" fill="%s"/>' % (_CH_MK, y, col))
+        if abs(ym - y) > 3:                 # 标签被避让开 ⇒ 补虚线指回真实价位
+            o.append('<line x1="%g" y1="%.1f" x2="%g" y2="%.1f" stroke="%s" '
+                     'stroke-width="0.8" stroke-dasharray="2 2" opacity="0.65"/>'
+                     % (_CH_LB - 2, y, _CH_LB - 2, ym + 8, col))
         o.append('<text x="%g" y="%.1f" font-size="11.5" font-weight="700" fill="%s">%s</text>'
-                 % (_CH_LB, y - 3, col, _money(x["price"])))
+                 % (_CH_LB, ym - 3, col, _money(x["price"])))
         o.append('<text x="%g" y="%.1f" font-size="9.5" fill="#94a3b8">%s</text>'
-                 % (_CH_LB + 53, y - 3, esc(_sign(x.get("dist_pct") or 0))))
+                 % (_CH_LB + 53, ym - 3, esc(_sign(x.get("dist_pct") or 0))))
         o.append('<text x="%g" y="%.1f" font-size="9.5" fill="#94a3b8">%s</text>'
-                 % (_CH_LB, y + 12, esc(nm)))
+                 % (_CH_LB, ym + 12, esc(nm)))
         if t:
             lab = _trig_short(t)
             tx = _CH_LB + _dw(nm) * 9.5 + 6
@@ -389,11 +446,11 @@ def _chart(p, band):
             if tx + w <= _CH_W - 2:          # 放不下则不画（宁可少标，也不裁字/出框）
                 o.append('<rect class="plan-trg" x="%.1f" y="%.1f" width="%.1f" height="12" rx="6" '
                          'fill="%s" stroke="%s"><title>%s</title></rect>'
-                         % (tx, y + 3, w, _C_TRGB, _C_TRGS,
+                         % (tx, ym + 3, w, _C_TRGB, _C_TRGS,
                             esc("%s · 触发位 %s\n%s" % (t["kind"], _money(x["price"]),
                                                         t.get("cond") or ""))))
                 o.append('<text x="%.1f" y="%.1f" font-size="8.5" fill="%s">%s</text>'
-                         % (tx + 5, y + 12, _C_TRG, esc(lab)))
+                         % (tx + 5, ym + 12, _C_TRG, esc(lab)))
         o.append('</g>')
 
     # ⑥ 图例
