@@ -4,6 +4,7 @@ report.html
 index.html
 version.json
 quality_cert.json
+plan/plan.json
 sentiment/.em_fresh
 sentiment/.sent_mode
 

@@ -216,6 +216,16 @@ jobs:
           # P1: 注入「国家队持仓入口按钮」到同一 header 右上角 (与雷达按钮并排, 冷蓝脉冲区分)
           # 输入为上一步已含雷达按钮的 index.html, 输出就地追加国家队按钮+CSS (后写覆盖让位布局)
           python national/inject_banner.py index.html
+          # R535: 生成并注入「明日关键价位 · 条件预案」区块（纯新增，不碰 report.py 主链）。
+          # 数据源：plan/gen_plan.py 直接调 chanlun.analyze()，与主报告 ZG/ZD **同函数同口径**
+          # （已实跑对账 report.html 的 "ZG 3884 / ZD 3768"）。只讲「到哪个价会进入什么状态」，
+          # 不做方向预测（R533/R534/R529 已证日频方向无可用信息）。
+          # 注入后立刻做**零回归自证**：精确移除新增两段必须逐字节等于注入前 ⇒ 阻断式门禁，
+          # 确保「改看板顺手改了别处」这类回归无法静默上线。
+          cp index.html /tmp/_idx_pre_plan.html
+          python plan/gen_plan.py
+          python plan/inject_plan.py index.html
+          python plan/verify_inject.py /tmp/_idx_pre_plan.html index.html
           # R330: 接线 audit_report_runtime(R169, 自述「阻断 CI」却从未被任何 workflow 调用)
           # —— 扫描最终 report.html 是否混入 NaN/Infinity/undefined 数据字面量(ECharts 解析
           # 失败或渲染 "NaN" 文本); 产物已含 inject_banner 注入态, report.html 存在故不触发
