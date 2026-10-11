@@ -12,6 +12,11 @@
   7. **同源自证**：明日九成区间在「基线」与「注入后」两处**提取结果相同**，且区块内可检出该区间两端
      ⇒ 证明带子来自 index.html 内联推演数据本身，未重算（规则 111）。
   8. 价格水位图的关键位档位数 == plan.json 的 up + dn 行数。
+  9. （R539）图上买卖点触发标数 == signals.next 中**给了价位**的条数
+     ⇒ 防「漏标」或「把引擎没给价位的类别硬编上去」。
+ 10. （R539）两张表确实折进 <details>，且表体 + 失效位口径 + R:R 口径文字一字未丢（规则 107）。
+ 11. （R539）标题层级与全站 panel 对齐（h2），旧 h3.plan-h 已清除。
+ 12. （R539）meta 徽章数 == 4（收盘 / 情景 / 位置 / 中枢）。
 
 用法：
   python3 plan/verify_inject.py <基线html> <注入后html>
@@ -20,6 +25,7 @@
 """
 import json
 import os
+import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -155,6 +161,50 @@ def main():
         print("  [PASS] 判据8 水位图关键位档位数与 plan.json 一致（%d 档）" % n_lv)
     else:
         fails.append("判据8 水位图档位数不符：%d/%d" % (got_mk, n_lv))
+
+    # --- 判据 9：图上买卖点触发标数 == signals.next 中**给了价位**的条数（R539） ---
+    # 语义：只标引擎给了明确价位的类别；二/三类买卖点无价 ⇒ 不得凭空多标（规则 111/114）。
+    n_trg = len([x for x in (sg.get("next") or []) if x.get("price") is not None])
+    got_trg = new.count('<rect class="plan-trg"')
+    if got_trg == n_trg:
+        print("  [PASS] 判据9 图上买卖点触发标数与 plan.json 一致（%d 个）" % n_trg)
+    else:
+        fails.append("判据9 触发标数不符：%d/%d ⇒ 图上漏标，或把引擎没给价位的类别硬编上去了"
+                     % (got_trg, n_trg))
+
+    # --- 判据 10：两表已折叠，但表体与披露一字未丢（R539 · 规则 107） ---
+    n_det = new.count('<details class="plan-det">')
+    segs = new.split('<details class="plan-det">')
+    sig_seg = segs[2].split("</details>")[0] if len(segs) > 2 else ""
+    has_all = all(k in sig_seg for k in ("买卖点信号", "下一信号", "失效位口径", "attach_rr()"))
+    if n_det == 2 and has_all:
+        print("  [PASS] 判据10 两表折进 details（共 %d 个折叠块），表体 + 失效位口径 + R:R 口径均在"
+              % n_det)
+    else:
+        fails.append("判据10 折叠结构异常：details=%d, 表体/口径齐全=%s" % (n_det, has_all))
+
+    # --- 判据 11：标题层级与全站 panel 对齐（h2，旧 h3.plan-h 必须清除） ---
+    if "<h2>明日关键价位" in new and 'class="plan-h"' not in new:
+        print("  [PASS] 判据11 标题沿用全站 .panel h2 层级（旧 h3/plan-h 已清除）")
+    else:
+        fails.append("判据11 标题层级未与全站对齐（h2 缺失或旧 plan-h 残留）")
+
+    # --- 判据 12：meta 徽章数 == 4（收盘 / 情景 / 位置 / 中枢） ---
+    # 锚点必须带**词边界**：单纯 class="plan-chip 会前缀匹配到 plan-chip--x 之类（正控实测抓到两次）。
+    # 故：先框定 meta 容器，再要求 plan-chip 后紧跟空格或引号。
+    m_meta = re.search(r'<div class="plan-meta">(.*?)</div>', new, re.S)
+    got_chip = len(re.findall(r'<span class="plan-chip(?=[ "])', m_meta.group(1))) if m_meta else -1
+    if got_chip == 4:
+        print("  [PASS] 判据12 meta 徽章数与维度一致（4 个）")
+    else:
+        fails.append("判据12 meta 徽章数不符：%d/4" % got_chip)
+
+    # --- 判据 13：图旁「买卖点触发位」速查条目数 == 有价位的条数（R539） ---
+    got_tl = new.count('<li><b class="plan-tk">')
+    if got_tl == n_trg:
+        print("  [PASS] 判据13 触发位速查条目数与引擎给价条数一致（%d 条）" % n_trg)
+    else:
+        fails.append("判据13 触发位速查条目数不符：%d/%d" % (got_tl, n_trg))
 
     print("")
     if fails:

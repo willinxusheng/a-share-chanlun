@@ -34,10 +34,25 @@ _BAND_ANCHOR = "echart-forecast-sh000001"
 PLAN_CSS = """<style>
 /* ===== plan: 明日关键价位（条件预案 · 不预测方向）===== */
 #plan-board { border-left: 4px solid #d4a017; }
-.plan-h { font-size: 16px; margin-bottom: 2px; }
+/* 标题：直接沿用全站 .panel h2（18px + 底部细分隔线），副标题降为次要文字
+   ⇒ R539 之前用 h3，与其余 panel 相比少了分隔线、字号小一号（风格割裂）。 */
 .plan-sub { font-size: 12px; color: #64748b; font-weight: 400; }
-.plan-meta { display: flex; flex-wrap: wrap; gap: 4px 18px; font-size: 13px; color: #475569; margin: 10px 0 6px; }
-.plan-meta b { color: #1f2937; font-variant-numeric: tabular-nums; }
+/* meta → 徽章 chip（与全站 panel 标题旁的状态徽章同风格，替代原纯文本行） */
+.plan-meta { display: flex; flex-wrap: wrap; gap: 6px 8px; font-size: 12px; margin: 0 0 12px; }
+.plan-chip { display: inline-flex; align-items: baseline; gap: 5px; padding: 2px 10px;
+  border-radius: 999px; border: 1px solid #e5e9f0; background: #f8fafc; color: #475569;
+  white-space: nowrap; font-variant-numeric: tabular-nums; }
+.plan-chip b { color: #1f2937; font-weight: 700; }
+.plan-chip--up { border-color: #f4c6c6; background: #fdf3f3; }
+.plan-chip--up b { color: #c22f2f; }
+.plan-chip--dn { border-color: #bfe6cd; background: #f1faf4; }
+.plan-chip--dn b { color: #12874b; }
+.plan-chip--warn { border-color: #f0cf98; background: #fdf8ee; }
+.plan-chip--warn b { color: #a16207; }
+.plan-chip--info { border-color: #c7d7ee; background: #f2f6fc; }
+.plan-chip--info b { color: #1d4ed8; }
+/* 图容器：与全站 .chartbox 同款浅底 + 描边 + 圆角（原来 SVG 裸露在面板底色上） */
+.plan-box { background: #fbfdff; border: 1px solid #eef2f7; border-radius: 10px; padding: 6px; }
 .plan-tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
 .plan-tbl th { text-align: left; font-weight: 600; color: #64748b; font-size: 12px;
   padding: 6px 8px; border-bottom: 1px solid #e5e9f0; white-space: nowrap; }
@@ -67,11 +82,18 @@ PLAN_CSS = """<style>
 .plan-st--on { color: #64748b; }
 .plan-st--off { color: #b0b7c3; }
 .plan-tip { margin-top: 6px; font-size: 12px; color: #64748b; line-height: 1.7; }
+/* 买卖点触发位速查（R539）：图旁文字版，与图上紫标一一对应 */
+.plan-tl { margin: 4px 0 0; padding: 0; list-style: none; font-size: 12.5px; }
+.plan-tl li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px;
+  padding: 4px 0; border-bottom: 1px dashed #f1f5f9; }
+.plan-tl li > span { color: #64748b; flex: 1 1 170px; line-height: 1.6; }
+.plan-tk { color: #7c3aed; font-weight: 700; white-space: nowrap; }
+.plan-tv { font-variant-numeric: tabular-nums; color: #1f2937; white-space: nowrap; }
 /* ===== plan: 价格水位图（纯 SVG · 无 JS · 无外部请求）===== */
-.plan-chart { display: block; width: 100%; max-width: 460px; height: auto; margin: 2px 0 0; }
+.plan-chart { display: block; width: 100%; max-width: 460px; height: auto; margin: 0; }
 /* 宽屏：图在左、读法与依据在右（纵向价格尺不宜拉宽，右侧留给文字，避免大片留白） */
-.plan-viz { display: flex; flex-wrap: wrap; gap: 2px 26px; align-items: flex-start; }
-.plan-viz > .plan-chart { flex: 0 0 420px; width: 420px; max-width: 100%; }
+.plan-viz { display: flex; flex-wrap: wrap; gap: 8px 26px; align-items: flex-start; }
+.plan-viz > .plan-box { flex: 0 0 432px; max-width: 100%; }
 .plan-side { flex: 1 1 320px; min-width: 250px; }
 .plan-side > .plan-tip { margin-top: 8px; }
 .plan-side > .plan-det { margin-top: 10px; }
@@ -157,18 +179,20 @@ def extract_band(html):
 
 
 # ===== 价格水位图（纯 SVG · 字号按用户单位给足，窄屏靠 viewBox 等比缩放即够读）=====
-_CH_W, _CH_H = 300, 486
+_CH_W, _CH_H = 300, 500         # R539: 486→500（图例多一行「买卖点触发位」说明）
 _CH_PT, _CH_PB = 30, 396        # 绘图区上下沿
 _CH_AX = 54                     # 价格轴竖线 x
 _CH_BX1 = 176                   # 带区右沿（左沿 = 价格轴）
 _CH_MK = 182                    # 关键位刻度线终点
 _CH_LB = 186                    # 关键位标签起始 x
 _CH_TICK = 46                   # 价格刻度文字右对齐 x
-_CH_LEG = (418, 434, 450, 466)  # 图例各行基线 y
+_CH_LEG = (418, 434, 450, 466, 482)  # 图例各行基线 y
 _C_UP, _C_DN, _C_CLOSE = "#e54545", "#18a058", "#334155"
 _C_GRID, _C_AXIS = "#eef2f7", "#cbd5e1"
 _C_B95, _C_B95S = "#fbead0", "#dfb571"
 _C_ZS, _C_ZSS = "#e9eef7", "#c3cfe0"
+# 买卖点触发标记：**刻意用红绿之外的第二色系**（红=上方/绿=下方 的价位语义不能被买卖点语义污染）
+_C_TRG, _C_TRGB, _C_TRGS = "#7c3aed", "#f3e8ff", "#d8b4fe"
 
 
 def _dw(s):
@@ -188,9 +212,10 @@ def _clip(s, limit):
     return out + "\u2026"
 
 
-def _lv_name(x):
+def _lv_name(x, limit=11.6):
     """关键位名称：只取 label 的第一段（` / ` 分隔），余下加省略号；
-    全文在 SVG 悬停 title 与折叠表里，不丢信息。"""
+    全文在 SVG 悬停 title 与折叠表里，不丢信息。
+    limit 可调：该档若还要挂「买卖点触发」小标，需让出宽度。"""
     parts = [p.strip() for p in str(x.get("label") or "").split(" / ") if p.strip()]
     txt = parts[0] if parts else ""
     if len(parts) > 1:
@@ -198,7 +223,59 @@ def _lv_name(x):
     st = x.get("state")
     if st in ("near", "up_cross", "dn_cross"):
         txt += "（%s）" % _STATE[st]
-    return _clip(txt, 11.6)
+    return _clip(txt, limit)
+
+
+# ===== 买卖点触发位（R539）：图上直接标「到什么点位形成哪一类买卖点」=====
+
+def _triggers(p):
+    """返回 {价位: next 条目}，**只收引擎给了明确价位的**。
+
+    plan.json 的 signals.next 共 6 类，其中只有「一类买 / 一类卖」带 price；
+    「二类买/卖」判据是「需对应一类点先出现」、「三类买/卖」是「需新中枢形成」
+    ⇒ 引擎**没有**给出固定价位，本函数不硬编、不用 ZG/ZD 顶替（规则 111/114：
+    同一事实单一来源，测量总体须与语义同口径）。
+    """
+    out = {}
+    for x in ((p.get("signals") or {}).get("next") or []):
+        if x.get("price") is None:
+            continue
+        out[round(float(x["price"]), 2)] = x
+    return out
+
+
+def _trig_short(x):
+    """触发标短名：△ 买 / ▽ 卖（形状承载买卖语义，避免与「红=上方/绿=下方」抢色）。"""
+    k = str(x.get("kind") or "")
+    mark = "\u25b3" if "\u4e70" in k else "\u25bd"     # △ 买 / ▽ 卖
+    return mark + _clip(k, 4.4)
+
+
+def _trg_list(p):
+    """图旁「买卖点触发位」速查（R539）。
+
+    有价位的逐条列出（含判定条件）；**无价位的如实标出为什么没有**——
+    原因文字直接取 plan.json 的 price_label（「需一类买先出现」/「需新中枢形成」），
+    不由本脚本编写（规则 149：区块内不写任何统计值）。
+    """
+    nx = (p.get("signals") or {}).get("next") or []
+    if not nx:
+        return ""
+    with_p = [x for x in nx if x.get("price") is not None]
+    no_p = [x for x in nx if x.get("price") is None]
+    li = "".join(
+        '<li><b class="plan-tk">%s</b><b class="plan-tv">%s</b><span>%s</span></li>'
+        % (esc(_trig_short(x)), _money(x["price"]), esc(x.get("cond") or ""))
+        for x in with_p)
+    tail = ""
+    if no_p:
+        tail = ('<div class="plan-tip">其余 %d 类无固定价位：%s。'
+                '前置条件决定其无法用单点位预判（完整条件见下方折叠块）。</div>'
+                % (len(no_p), "；".join("%s（%s）" % (esc(x["kind"]), esc(x.get("price_label") or ""))
+                                       for x in no_p)))
+    return ("""
+  <div class="plan-sec">买卖点触发位 <span>（图上紫标 · 引擎本次给出 %d 个价位）</span></div>
+  <ul class="plan-tl">%s</ul>%s""" % (len(with_p), li, tail))
 
 
 def _chart(p, band):
@@ -207,6 +284,7 @@ def _chart(p, band):
     close = float(p.get("close") or 0.0)
     ups = list(p.get("up") or [])
     dns = list(p.get("dn") or [])
+    trg = _triggers(p)
 
     vals = [close] + [float(x["price"]) for x in ups + dns]
     for k in ("zg", "zd", "gg", "dd"):
@@ -283,9 +361,13 @@ def _chart(p, band):
              % (_CH_AX + 31, yc + 4, _money(close)))
 
     # ⑤ 关键位（红 = 上方 / 绿 = 下方，沿用全站惯例）
+    #    R539：凡「引擎给了明确价位」的买卖点，在同一档名称行右侧挂紫色触发标
+    #    （形状 △买/▽卖 承载买卖语义；用紫而非红绿，避免与「红=上方/绿=下方」抢色）。
     for i, x in enumerate(ups + dns):
         col = _C_UP if i < len(ups) else _C_DN
         y = py(x["price"])
+        t = trg.get(round(float(x["price"]), 2))
+        nm = _lv_name(x, 6.6 if t else 11.6)
         o.append('<g class="plan-mk">')
         o.append('<title>%s</title>' % esc(
             "%.2f  %s\n距现价 %s\n来源：%s\n收盘到该位：%s"
@@ -299,7 +381,19 @@ def _chart(p, band):
         o.append('<text x="%g" y="%.1f" font-size="9.5" fill="#94a3b8">%s</text>'
                  % (_CH_LB + 53, y - 3, esc(_sign(x.get("dist_pct") or 0))))
         o.append('<text x="%g" y="%.1f" font-size="9.5" fill="#94a3b8">%s</text>'
-                 % (_CH_LB, y + 12, esc(_lv_name(x))))
+                 % (_CH_LB, y + 12, esc(nm)))
+        if t:
+            lab = _trig_short(t)
+            tx = _CH_LB + _dw(nm) * 9.5 + 6
+            w = _dw(lab) * 8.5 + 10
+            if tx + w <= _CH_W - 2:          # 放不下则不画（宁可少标，也不裁字/出框）
+                o.append('<rect class="plan-trg" x="%.1f" y="%.1f" width="%.1f" height="12" rx="6" '
+                         'fill="%s" stroke="%s"><title>%s</title></rect>'
+                         % (tx, y + 3, w, _C_TRGB, _C_TRGS,
+                            esc("%s · 触发位 %s\n%s" % (t["kind"], _money(x["price"]),
+                                                        t.get("cond") or ""))))
+                o.append('<text x="%.1f" y="%.1f" font-size="8.5" fill="%s">%s</text>'
+                         % (tx + 5, y + 12, _C_TRG, esc(lab)))
         o.append('</g>')
 
     # ⑥ 图例
@@ -312,6 +406,7 @@ def _chart(p, band):
         ("rect", _C_ZS, _C_ZSS, "中枢 ZD~ZG  %s ~ %s" % (_money(zd), _money(zg))
          if zg is not None else "中枢区间（本次未取到）"),
         ("line", None, None, "现价 %s  ·  红=上方 / 绿=下方" % _money(close)),
+        ("trg", None, None, "紫 = 买卖点触发位（%d 个 · 悬停看条件）" % len(trg)),
     ]
     for i, (kind, fill, stroke, text) in enumerate(legs):
         yy = ly[i]
@@ -322,6 +417,9 @@ def _chart(p, band):
             o.append('<line x1="%g" y1="%.1f" x2="%g" y2="%.1f" stroke="%s" '
                      'stroke-width="1.4" stroke-dasharray="5 3"/>'
                      % (_CH_AX, yy - 3.5, _CH_AX + 9, yy - 3.5, _C_CLOSE))
+        elif kind == "trg":
+            o.append('<rect x="%g" y="%.1f" width="9" height="9" rx="4.5" fill="%s" stroke="%s"/>'
+                     % (_CH_AX, yy - 8, _C_TRGB, _C_TRGS))
         o.append('<text x="%.1f" y="%.1f" font-size="9.5" fill="#64748b">%s</text>'
                  % (_CH_AX + 14, yy, esc(_clip(text, 23.5))))
 
@@ -415,6 +513,13 @@ def _next_row(x):
 
 
 def build_signals(sg):
+    """R539：两张表**移入默认收起的 <details>**（原来是常显的两个大表）。
+
+    理由：水位图已把主要价位画成图，其中 6 档关键位有 5 档与信号表价位重合
+    （3,995.18 / 3,967.68 / 3,884.44 / 3,767.50 / 3,741.11）⇒ 常显即与图重复。
+    但「失效位口径」与「R:R 口径说明」属**披露**（规则 107）⇒ 随表一起折叠保留，
+    一字不删、只是默认不占版面。
+    """
     if not sg or not (sg.get("levels") or sg.get("next")):
         return ""
     lv_txt = " ｜ ".join(
@@ -428,28 +533,32 @@ def build_signals(sg):
     next_rows = "".join(_next_row(x) for x in sg.get("next") or [])
     thead_sig = "".join("<th>%s</th>" % c for c in _SIG_COLS)
     thead_next = "".join("<th>%s</th>" % c for c in _NEXT_COLS)
+    n_sig = sum(len(l["rows"]) for l in sg.get("levels") or [])
+    n_next = len(sg.get("next") or [])
     return """
-  <div class="plan-sec">买卖点信号 <span>（引擎 chanlun.find_signals 产出 · 引擎共 %s 笔 / %s 段 · %s）</span></div>
-  <div class="tablescroll">
-  <table class="plan-tbl">
-    <thead><tr>%s</tr></thead>
-    <tbody>%s</tbody>
-  </table>
-  </div>
-  <div class="plan-tip">失效位口径：<b>%s</b><br>
-    止损 / 目标 / R:R 直接沿用引擎 <b>attach_rr()</b> 的既有口径（目标 = 该笔之前最近完成中枢的边界），
-    可能距现价很远（如某行目标 3,040.69 低于现价约 20%%）⇒ <b>R:R 数值大不等于可交易</b>；
-    本表的看点是「失效位」与「判据是否成立」。</div>
-  <div class="plan-sec">下一信号 · 触发条件 <span>（「需先看到什么」是引擎判据的前置条件，不是价位预测）</span></div>
-  <div class="tablescroll">
-  <table class="plan-tbl">
-    <thead><tr>%s</tr></thead>
-    <tbody>%s</tbody>
-  </table>
-  </div>
-""" % (tot.get("笔", 0), tot.get("段", 0), esc(lv_txt),
-       thead_sig, sig_rows, esc(sg.get("rule") or ""),
-       thead_next, next_rows)
+  <details class="plan-det">
+    <summary>历史买卖点信号 %d 条 · 下一信号触发条件 %d 类 · 失效位口径（点击展开）</summary>
+    <div class="plan-sec">买卖点信号 <span>（引擎 chanlun.find_signals 产出 · 引擎共 %s 笔 / %s 段 · %s）</span></div>
+    <div class="tablescroll">
+    <table class="plan-tbl">
+      <thead><tr>%s</tr></thead>
+      <tbody>%s</tbody>
+    </table>
+    </div>
+    <div class="plan-tip">失效位口径：<b>%s</b><br>
+      止损 / 目标 / R:R 直接沿用引擎 <b>attach_rr()</b> 的既有口径（目标 = 该笔之前最近完成中枢的边界），
+      可能距现价很远（如某行目标 3,040.69 低于现价约 20%%）⇒ <b>R:R 数值大不等于可交易</b>；
+      本表的看点是「失效位」与「判据是否成立」。</div>
+    <div class="plan-sec">下一信号 · 触发条件 <span>（「需先看到什么」是引擎判据的前置条件，不是价位预测）</span></div>
+    <div class="tablescroll">
+    <table class="plan-tbl">
+      <thead><tr>%s</tr></thead>
+      <tbody>%s</tbody>
+    </table>
+    </div>
+  </details>""" % (n_sig, n_next, tot.get("笔", 0), tot.get("段", 0), esc(lv_txt),
+                    thead_sig, sig_rows, esc(sg.get("rule") or ""),
+                    thead_next, next_rows)
 
 
 def build(p, band=None):
@@ -475,36 +584,42 @@ def build(p, band=None):
                 if band else
                 "<b>未取到</b>（页面内联推演数据缺失 ⇒ 本图不画该带）")
 
+    # R539：meta 由纯文本行改为**状态徽章**（与全站 panel 标题旁的 chip 同风格）
+    chg = float(p.get("chg_pct") or 0.0)
+    chg_cls = "plan-chip--up" if chg > 0 else ("plan-chip--dn" if chg < 0 else "")
+
     return """
 <section class="panel" %s>
-  <h3 class="plan-h">明日关键价位 · 条件预案 <span class="plan-sub">%s · 数据截至 %s 收盘 · 只讲「到哪个价会怎样」，不预测涨跌</span></h3>
+  <h2>明日关键价位 · 条件预案 <span class="plan-sub">%s · 数据截至 %s 收盘 · 只讲「到哪个价会怎样」，不预测涨跌</span></h2>
   <div class="plan-meta">
-    <span>收盘 <b>%s</b>（<b>%s</b>）</span>
-    <span>情景 <b>%s</b></span>
-    <span>位置 <b>%s</b></span>
-    <span>中枢 <b>%s</b></span>
+    <span class="plan-chip %s">收盘 <b>%s</b>（%s）</span>
+    <span class="plan-chip plan-chip--warn">情景 <b>%s</b></span>
+    <span class="plan-chip plan-chip--info">位置 <b>%s</b></span>
+    <span class="plan-chip">中枢 <b>%s</b></span>
   </div>
   <div class="plan-viz">
-  %s
+  <div class="plan-box">%s</div>
   <div class="plan-side">
-  <div class="plan-tip">读法（<b>价格水位图</b>）：竖轴是价格。灰蓝色块 = 当前中枢 ZD~ZG；琥珀色块 = 明日九成区间；深色虚线 = 现价；右侧红 / 绿刻度 = 上方 / 下方关键位（价位 + 距现价 + 名称，鼠标悬停看来源与含义）。<br>
+  <div class="plan-tip">读法（<b>价格水位图</b>）：竖轴是价格。灰蓝色块 = 当前中枢 ZD~ZG；琥珀色块 = 明日九成区间；深色虚线 = 现价；右侧红 / 绿刻度 = 上方 / 下方关键位（价位 + 距现价 + 名称）；<b>紫色小标 = 买卖点触发位</b>。鼠标悬停任一元素看来源与含义。<br>
     明日九成区间 %s。<br>
     <b>本图不画 P25–P75</b>：它在单日尺度实测只覆盖约 72.5%%（名义 50%%），口径标不住 ⇒ 不画。</div>
+  %s
+  %s
   %s
   <div class="plan-foot">
     <div>今日动作：%s</div>
     <div>判据失效条件：%s</div>
   </div>
   </div>
-  </div>%s
+  </div>
   <div class="plan-note"><b>怎么用</b>：本区块只把<b>已有的结构位</b>摆成一排，标出每个位对应什么状态变化。
     幅度请自行决定（不提供仓位比例）。<ul>%s</ul></div>
 </section>
 """ % (MARK, esc(p.get("name") or ""), esc(p.get("asof") or ""),
-       _money(p.get("close") or 0), _sign(p.get("chg_pct") or 0),
+       chg_cls, _money(p.get("close") or 0), _sign(chg),
        esc(p.get("scenario") or "—"), esc(p.get("position") or "—"), ztxt,
-       _chart(p, band), band_txt, build_details(p), act_txt, inv_txt,
-       build_signals(p.get("signals")), notes)
+       _chart(p, band), band_txt, _trg_list(p), build_details(p), build_signals(p.get("signals")),
+       act_txt, inv_txt, notes)
 
 
 def main():
