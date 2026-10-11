@@ -7,6 +7,11 @@
   2. 新增标记恰好出现 1 次（幂等）；既有章节锚点 s1..s6 各仍恰好 1 次。
   3. 插入位置正确：CSS 在 </head> 之前、区块在 s1 标题之前。
   4. **正控**：人为改动既有字符后，判据 1 必须失败（证明判据真的在工作，规则 119）。
+  5. 数据日与全部关键数字可溯源到 plan.json（非手写，规则 149）。
+  6. 信号表行数与 plan.json 对账（防注入漏行/多行）。
+  7. **同源自证**：明日九成区间在「基线」与「注入后」两处**提取结果相同**，且区块内可检出该区间两端
+     ⇒ 证明带子来自 index.html 内联推演数据本身，未重算（规则 111）。
+  8. 价格水位图的关键位档位数 == plan.json 的 up + dn 行数。
 
 用法：
   python3 plan/verify_inject.py <基线html> <注入后html>
@@ -58,7 +63,11 @@ def main():
         p = json.load(f)
 
     css = inject_plan.PLAN_CSS
-    block = inject_plan.build(p)
+    # 区块内容依赖「明日九成区间」——它从 index.html 内联推演数据提取（不重算）。
+    # 基线里同样含该内联块（注入是纯插入），故两边提取结果必须一致（判据 7 单独核验）。
+    band_b = inject_plan.extract_band(base)
+    band_n = inject_plan.extract_band(new)
+    block = inject_plan.build(p, band_b)
     fails = []
 
     # --- 判据 1+4：移除新增后等于基线；正控必须让同一判据失败 ---
@@ -106,6 +115,8 @@ def main():
                 must.append("{:,.2f}".format(_x["target"]))
     must += ["{:,.2f}".format(_x["price"]) for _x in (sg.get("next") or [])
              if _x.get("price") is not None]
+    if band_b:
+        must += ["{:,.2f}".format(band_b["low"]), "{:,.2f}".format(band_b["high"])]
     absent = [t for t in must if t not in new]
     if not absent:
         print("  [PASS] 判据5 区块内 %d 个数字/日期全部可溯源到 plan.json" % len(must))
@@ -116,12 +127,34 @@ def main():
     # 计数锚的选择有讲究：信号行的 plan-k 带方向类（plan-dir--up/dn）⇒ 精确串只匹配「下一信号」行。
     n_sig = sum(len(l["rows"]) for l in sg.get("levels") or [])
     n_next = len(sg.get("next") or [])
+    n_lv = len(p.get("up") or []) + len(p.get("dn") or [])
     got_sig = new.count('<td class="plan-lv">')
     got_next = new.count('<td class="plan-k">')
     if got_sig == n_sig and got_next == n_next:
         print("  [PASS] 判据6 信号表行数与 plan.json 一致（信号 %d 行 + 下一信号 %d 行）" % (n_sig, n_next))
     else:
         fails.append("判据6 行数不符：信号 %d/%d、下一信号 %d/%d" % (got_sig, n_sig, got_next, n_next))
+
+    # --- 判据 7：明日九成区间「同源自证」（规则 111：同一事实单一来源，不重算） ---
+    if band_b is None and band_n is None:
+        print("  [PASS] 判据7 九成区间：两边均未取到 ⇒ 图上不画该带（一致，无重算）")
+    elif band_b != band_n:
+        fails.append("判据7 九成区间两侧提取不一致：base=%r new=%r ⇒ 疑被重算或有第二来源"
+                     % (band_b, band_n))
+    else:
+        lo_s, hi_s = "{:,.2f}".format(band_b["low"]), "{:,.2f}".format(band_b["high"])
+        if lo_s in new and hi_s in new:
+            print("  [PASS] 判据7 九成区间同源自证：%s ~ %s（取自页面内联推演数据，两侧一致）"
+                  % (lo_s, hi_s))
+        else:
+            fails.append("判据7 九成区间数值未在产物中检出：%s / %s" % (lo_s, hi_s))
+
+    # --- 判据 8：水位图关键位档位数 == plan.json（防图少画/多画） ---
+    got_mk = new.count('<g class="plan-mk">')
+    if got_mk == n_lv:
+        print("  [PASS] 判据8 水位图关键位档位数与 plan.json 一致（%d 档）" % n_lv)
+    else:
+        fails.append("判据8 水位图档位数不符：%d/%d" % (got_mk, n_lv))
 
     print("")
     if fails:
