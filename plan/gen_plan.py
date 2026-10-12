@@ -48,7 +48,15 @@ def _pct(a, b):
 
 
 def _semantic(kind):
-    """结构位的客观语义（状态描述，非买卖指令）。"""
+    """结构位的客观语义（状态描述，非买卖指令）。
+
+    R541：Fib 位支持 `fib@38.2%` 形式 —— 此前三段 Fib 的含义文字**一字不差**，
+    读者分不清哪档是哪档（实测 38.2% / 50% / 61.8% 三档 semantic 完全相同 ⇒ 等于没说）。
+    带上百分比后至少能对上号。★ 至于「38.2% 是浅回调、61.8% 是黄金分割」这类经验判断
+    **刻意不加**：无实证支撑，且 R535 已拍板本区块不预测方向、只答「到该位进入什么状态」。
+    """
+    if kind.startswith("fib@"):
+        return "斐波那契回调位（前一笔摆动的 %s）：常见反抽/回踩目标区" % kind[4:]
     return {
         "zg": "收盘站上 ⇒ 回到中枢上半区（中枢内偏强）",
         "zd": "收盘跌破 ⇒ 中枢下沿失守，进入中枢下方（结构转弱）",
@@ -60,14 +68,43 @@ def _semantic(kind):
         "bi_prev_up": "收盘站上 ⇒ 前一笔高点被收复（前高被破）",
         "inv_top": "★ 收盘上破 ⇒ 顶背驰判据被证伪（见顶判断作废，需重判）",
         "inv_bot": "★ 收盘跌破 ⇒ 底背驰判据被证伪（⚠ 仅作判据参考，不可当止损 —— R489 已证）",
-        "gap_top": "收盘站上 ⇒ 向下缺口开始被回补",
-        "gap_bot": "回落至缺口中，缺口被逐渐回补",
         "ma20": "均线位（MA20）：收盘站上 ⇒ 短线转强（20 日动量修复）",
         "ma60": "均线位（MA60）：中期成本线，站稳才谈得上趋势修复",
         "ma120": "均线位（MA120 · 半年线）",
         "ma250": "均线位（MA250 · 年线）：牛熊分界，收盘站上 ⇒ 中长期转强",
         "fib": "斐波那契回调位（基于前一笔摆动）：常见反抽/回踩目标区",
     }.get(kind, "")
+
+
+def _gap_sem(edge, gtype):
+    """缺口带上下沿的含义 —— **必须按缺口方向区分**，不能一套通用文案套到底（R541）。
+
+    向下缺口（跳空下跌，通常位于现价上方 ⇒ 压力）：价格自下而上回补
+      · 站上**下沿** ⇒ 进入缺口区，开始回补（第一个压力触点）
+      · 站上**上沿** ⇒ 缺口被完全回补，该压力解除
+    向上缺口（跳空上涨，通常位于现价下方 ⇒ 支撑）：价格自上而下跌破
+      · 跌破**上沿** ⇒ 进入缺口区，开始回补（第一个支撑触点）
+      · 跌破**下沿** ⇒ 缺口被完全回补，该支撑失效
+    """
+    down = (gtype or "down") == "down"
+    if edge == "top":
+        return ("收盘站上 ⇒ 缺口被完全回补，该压力解除" if down
+                else "收盘跌破 ⇒ 进入缺口区，开始回补（首个支撑触点）")
+    return ("收盘站上 ⇒ 进入缺口区，开始回补（首个压力触点）" if down
+            else "收盘跌破 ⇒ 缺口被完全回补，该支撑失效")
+
+
+def _unfilled_gaps(r, top_n=2):
+    """未补的跳空缺口（取最近 top_n 个，保持引擎给出的原始顺序）。
+
+    top_n=2（R540）：跳空缺口是缠论结构之外的独立价位锚（A 股「逢缺必补」），且同一轮
+    调整常留下**多个**相邻缺口（实测 2026-09-24 与 2026-09-28 中秋假期前后各一个，
+    w=0.101% / 0.257%）⇒ 只取最新一个会静默丢掉更上方的那个压力位。
+
+    R541 抽成函数：供 collect()（缺口入关键位表）与 main()（上下沿配对成「缺口带」）
+    **共用同一份筛选** —— 两处各写一份必然漂移（规则 111：同一事实单一来源）。
+    """
+    return [g for g in (r.get("gaps") or []) if not g.get("filled")][-top_n:]
 
 
 def collect(r):
@@ -103,17 +140,16 @@ def collect(r):
                             e.get("date", "?"), e.get("bc_type") or "?", e.get("area_ratio") or 0.0),
                         "inv_" + key))
 
-    # R540: 未补缺口由「只取最近 1 个」放宽为**最近 2 个** —— 跳空缺口是缠论结构之外的
-    # 独立价位锚（A 股「逢缺必补」），且同一轮调整常留下**多个**相邻缺口（实测 2026-09-24
-    # 与 2026-09-28 中秋假期前后各一个，w=0.101% / 0.257%）⇒ 只取最新一个会静默丢掉
-    # 更上方的那个压力位。
-    unfilled = [g for g in (r.get("gaps") or []) if not g.get("filled")]
-    for g in unfilled[-2:]:
-        gtag = "未补缺口 %s（%s）" % (g.get("date", "?"),
-                                    "向下跳空" if g.get("type") == "down" else "向上跳空")
-        _gd = (g.get("date") or "?")[5:]     # 同轮可能留下多个未补缺口 ⇒ label 必须带日期区分
-        out.append((g["top"], "缺口上沿 %s" % _gd, gtag, "gap_top"))
-        out.append((g["bottom"], "缺口下沿 %s" % _gd, gtag, "gap_bot"))
+    # R541：**未补缺口不再作为「关键位候选」参与去重** —— 缺口是**区间**（上沿~下沿），
+    # 当成两条点型刻度会踩两个坑：
+    #   ① 与近价合并后**数字失真**：实测 9/28 缺口真实为 [3878.41, 3888.37]，而上沿 3888.37
+    #      与末中枢 ZG = 3884.44 相差 0.10%，落在 DEDUP_PCT(0.15%) 容差内被合并 ⇒ 标签写成
+    #      「3,884.44 = 缺口上沿 09-28」，而 3888.37 这个真实价位在图/表里彻底消失。
+    #      对以点位判触发的场景，0.1% ≈ 3.9 点足以给出**不同结论**（收盘站上 3884.44 与站上
+    #      3888.37 不是同一件事）⇒ 属静默改判据值。
+    #   ② 区间被拆成两个"无关的点"：读者看不出它们围出的是同一段真空区。
+    # ⇒ 改为在图上画「缺口带」（gap_bands 字段，取引擎 top/bottom 原值），右侧逐带写含义。
+    # （R540 引入缺口维度这件事本身是对的，错的只是"当点处理"这个形态。）
 
     # R540 新增维度①：均线（MA20/60/120/250）。直接取引擎 classify.ma_alignment，
     # **本侧不重算**（规则 111/156：同一事实单一来源 ⇒ 与主报告同口径）。
@@ -137,10 +173,12 @@ def collect(r):
         _swing = _hi - _lo
         if _swing > 0:
             _ftag = "斐波那契回调（前一笔摆动 %.2f~%.2f）" % (_lo, _hi)
-            for _f, _lab in ((0.0, "Fib F0"), (0.382, "Fib 38.2%"),
-                             (0.5, "Fib 50%"), (0.618, "Fib 61.8%")):
+            # kind 带上百分比（fib@50% 等）⇒ 三档的「含义」各不相同，读者能对上号（见 _semantic）。
+            # F0（= 前一笔终点本身）不加百分比：写「回调 0%」没有意义。
+            for _f, _lab, _pct in ((0.0, "Fib F0", None), (0.382, "Fib 38.2%", "38.2%"),
+                                   (0.5, "Fib 50%", "50%"), (0.618, "Fib 61.8%", "61.8%")):
                 _pv = _hi - _swing * _f if _leg.get("dir") == 1 else _lo + _swing * _f
-                out.append((_pv, _lab, _ftag, "fib"))
+                out.append((_pv, _lab, _ftag, ("fib@" + _pct) if _pct else "fib"))
     return out
 
 
@@ -296,6 +334,16 @@ def main():
     assert up and dn, "上方 / 下方价位至少各需 1 个（收集中断或合并过严）"
 
     def pack(u):
+        # R541 自证契约：渲染层要把 `label` 段与 `semantic` 段**按序配对**（图右侧逐段写含义，
+        # 「这个位是什么」对「到它会怎样」）。配对成立的前提是两字段**段数相等、顺序同源** ——
+        # labels 与 kinds 由 _dedup 同步 append，semantic 由同一 kinds 逐项映射。
+        # 一旦将来新增 kind 却忘了补 _semantic 文案，段数就会错位 ⇒ 让断言在这里炸，
+        # 而不是让前端静默把含义配到错误的段上。
+        assert len(u["labels"]) == len(u["kinds"]), \
+            "label 段数与 kinds 不符（%d vs %d）：%s" % (len(u["labels"]), len(u["kinds"]), u["labels"])
+        _no_sem = [k for k in u["kinds"] if not _semantic(k)]
+        assert not _no_sem, \
+            "kind 无 _semantic 文案 ⇒ 前端按段配对时含义会串位：%s" % _no_sem
         return {"price": round(u["price"], 2), "label": _label_of(u),
                 "src": " ｜ ".join(u["srcs"]),
                 "dist_pct": round(_pct(u["price"], close), 2),
@@ -341,6 +389,35 @@ def main():
                   "ma120": _ma.get("ma120"), "ma250": _ma.get("ma250"),
                   "alignment": _ma.get("alignment")}
 
+    # R541 新增①中枢内位置分位：close 在 [ZD, ZG] 中的相对位置（0% = ZD，100% = ZG）。
+    # 原来只写「中枢内部」——看不出偏强还是偏弱，而这恰恰是实战上第一个该问的问题。
+    # 分位是 (close−zd)/(zg−zd) 的直接算术，输入全部来自引擎的末中枢与收盘价 ⇒ 在**生成侧**
+    # 算好落盘（规则 149：区块内所有数字必须可溯源到 plan.json，渲染层不得自造统计值）。
+    pos_pct = None
+    if zs and zs["zg"] > zs["zd"]:
+        pos_pct = round((close - zs["zd"]) / (zs["zg"] - zs["zd"]) * 100.0, 1)
+
+    up_packed, dn_packed = [pack(u) for u in up], [pack(u) for u in dn]
+
+    # R541 新增②未补缺口带：缺口是**区间**，独立于 up/dn 表输出（理由见 collect() 里的注释：
+    # 当点型候选参与去重会把真实上沿 3888.37 折进 ZG 3884.44）。这里直接取引擎 gaps 的
+    # top/bottom **原值**，配 direction / 带宽 / 距现价 / 上下沿含义 ⇒ 图上画矩形带、
+    # 右侧逐带写含义。不设「上下沿是否在表内」的前置条件：带与表是两种呈现，互不隶属
+    # （R540 的缺口「入选关键位」做法在本轮被这条替代，原因已记录）。
+    gap_bands = []
+    for _g in _unfilled_gaps(r):
+        _t, _b = round(float(_g["top"]), 2), round(float(_g["bottom"]), 2)
+        _ty = _g.get("type") or "down"
+        gap_bands.append({
+            "date": _g.get("date"), "top": _t, "bottom": _b, "type": _ty,
+            # 带宽（%）：跳空幅度，越大越难一次回补（供右侧列表如实标出）
+            "width_pct": round((_t / _b - 1.0) * 100.0, 3),
+            # 带中点相对现价的距离：正值 = 在现价上方（压力），负值 = 下方（支撑）
+            "dist_pct": round(_pct((_t + _b) / 2.0, close), 2),
+            "sem_top": _gap_sem("top", _ty),
+            "sem_bot": _gap_sem("bot", _ty),
+        })
+
     plan = {
         "asof": k[-1]["date"],
         "sym": SYM,
@@ -353,30 +430,35 @@ def main():
                       "gg": round(zs["gg"], 2), "dd": round(zs["dd"], 2),
                       "date_start": zs.get("date_start"), "date_end": zs.get("date_end"),
                       "count": zs.get("count")} if zs else None),
-        "up": [pack(u) for u in up],
-        "dn": [pack(u) for u in dn],
+        "up": up_packed,
+        "dn": dn_packed,
         "actions": acts,
         "invalidations": invalid,
         "signals": sigs,
         "ma": ma_out,
         "bias": r.get("bias"),
+        "pos_pct": pos_pct,
+        "gap_bands": gap_bands,
         "near_pct": NEAR_PCT,
-        "notes": [
-            "本表是当日快照：中枢随新笔生成会漂移，请以 asof 为准。",
-            "所有位取自 chanlun.analyze() 同一函数，与主报告 ZG/ZD 同口径。",
-            "买卖点信号取自 chanlun.find_signals()，与主报告图上的三角标记同源同判据，本侧不重算。",
-            "三类买/卖点需等**新中枢**形成（且一个中枢只出一个三类点）；一类买/卖点需 MACD 面积收缩确认 —— 两者都不是单点位可预判，故「下一信号」一栏如实标出「需先看到什么」。",
-            "二类买/卖点必须等对应的一类点先出现，无法凭空产生。",
-            "引擎给出的历史胜率是被 beta 污染过的指标（R528/R533 已证同类信号无可检测超额）；本表不构成买卖建议，动作幅度由使用者自定。",
-        ],
+        # R541：原 `notes`（6 条「怎么用」说明）字段**已删除** —— 旭总 2026-10-12 要求删掉
+        # 页面底部那段冗长说明。删除前逐条核过承载方（规则 107：披露不得静默丢失）：
+        #   ① 快照漂移/以 asof 为准 → 区块副标题「数据截至 X 收盘」+ 图内「数据 X 收盘」
+        #   ② 所有位取自 analyze() 同口径 → 页面 .plan-ref 一行保留（同源声明无他处载体）
+        #   ③ 买卖点取自 find_signals() → 同上 + 折叠块「引擎 chanlun.find_signals 产出」
+        #   ④ 三类需新中枢 / 一类需 MACD 确认 → 折叠块「下一信号 · 触发条件」逐条列出
+        #   ⑤ 二类需一类先出现 → 同上（每类各一行 price_label/cond）
+        #   ⑥ 不构成买卖建议 → 全站「六、免责说明」覆盖
+        # 全部有更细载体 ⇒ 字段一并删除，不留无消费者的死数据。
     }
     with open(OUT, "w", encoding="utf-8") as f:
         json.dump(plan, f, ensure_ascii=False, indent=1)
     _sig_rows = sum(len(l["rows"]) for l in sigs["levels"])
     _sig_live = sum(1 for l in sigs["levels"] for x in l["rows"] if x["status"] == "判据成立")
-    print("plan.json OK  asof=%s  close=%s  上%d 下%d  动作%d  失效%d  信号%d(判据成立%d)" % (
-        plan["asof"], plan["close"], len(plan["up"]), len(plan["dn"]),
-        len(plan["actions"]), len(plan["invalidations"]), _sig_rows, _sig_live))
+    print("plan.json OK  asof=%s  close=%s  上%d 下%d  动作%d  失效%d  信号%d(判据成立%d)"
+          "  中枢分位=%s  缺口带%d" % (
+              plan["asof"], plan["close"], len(plan["up"]), len(plan["dn"]),
+              len(plan["actions"]), len(plan["invalidations"]), _sig_rows, _sig_live,
+              ("%.1f%%" % pos_pct) if pos_pct is not None else "—", len(gap_bands)))
 
 
 if __name__ == "__main__":

@@ -11,6 +11,17 @@
   · 区块内**所有数字来自 plan.json 或 index.html 的内联推演数据**，本脚本不写任何统计值（规则 149）。
   · 不新增章节编号（保持 s1..s6 既有编号体系不被扰动）。
 
+R541（旭总 2026-10-12 三条要求）：
+  ① 删掉区块底部那段「怎么用」说明（plan-note）：原 6 条各有更细的载体，只有「同源同口径」
+     一条没有他处显式声明 ⇒ 压成一行 .plan-ref 保留（规则 107 披露不得静默丢失）。
+  ② 右侧新增「图上点位含义」：图上标签区仅 114px，只能显示缩写（「GG · 顶背…」），
+     而这些术语对非专业读者等于黑话，且**手机没有 hover**（title 里的全文结构上读不到）
+     ⇒ 逐档写全「这个位是什么 + 到它会怎样」，并与图上新增的带圈序号 ①②③… 一一对应。
+  ③ 顺带补齐 R540 导出却**零渲染**的维度（ma.alignment / bias）、新增中枢内分位（pos_pct），
+     并把未补缺口由「两条点型刻度」改为「区间带」—— 后者是**修 R540 的一处数字失真**：
+     9/28 缺口真实为 [3878.41, 3888.37]，上沿 3888.37 与 ZG 3884.44 相差 0.10%，
+     落在 DEDUP_PCT(0.15%) 内被合并 ⇒ 标签曾写成「3,884.44 = 缺口上沿 09-28」。
+
 R538：把「关键价位表」改为**价格水位图**（纯 SVG，无 JS、无外部请求）
   → 图为准，原表折叠进 <details>（保留「结构来源」依据，规则 107 披露纪律：不静默丢信息）。
   → 「明日九成区间」从**已生成的 index.html 内联推演数据**同源提取（规则 111：同一事实单一来源，
@@ -73,8 +84,32 @@ PLAN_CSS = """<style>
 .plan-foot { margin-top: 10px; padding-top: 8px; border-top: 1px dashed #e5e9f0;
   font-size: 13px; color: #475569; line-height: 1.85; }
 .plan-foot b { color: #1f2937; font-variant-numeric: tabular-nums; }
-.plan-note { margin-top: 8px; font-size: 12px; color: #64748b; line-height: 1.7;
-  background: #f8fafc; border-radius: 6px; padding: 8px 12px; }
+/* R541：原 `.plan-note`（「怎么用」+ 6 条说明）**已删除** —— 旭总 2026-10-12 反馈冗长。
+   删除前逐条核过承载方（规则 107：披露不得静默丢失，见 gen_plan.py 同处注释）：
+   asof 快照 → 副标题 + 图内日期；同源同口径 → 下面这行 .plan-ref；前置条件（三类需新中枢 /
+   二类需一类先出）→ 折叠块「下一信号 · 触发条件」逐条列出；不构成买卖建议 → 全站「六、免责说明」。
+   ⇒ 无信息丢失，只是不再用一段说明文字占版面。 */
+.plan-ref { margin-top: 6px; font-size: 12px; color: #94a3b8; line-height: 1.7; }
+/* 图上点位含义（R541）：与图上带圈序号 ①②③… 一一对应 —— 图上只能放缩写（标签区仅 114px），
+   含义放在模块右侧逐段写全，解决「看图看不懂 GG / ZG / MA20 是什么」。 */
+.plan-lvl { margin: 4px 0 0; padding: 0; list-style: none; }
+.plan-lvl > li { padding: 7px 0; border-bottom: 1px dashed #f1f5f9; }
+.plan-lvl-h { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; }
+.plan-lvl-i { font-size: 13px; color: #94a3b8; }
+.plan-lvl-n { font-weight: 700; font-size: 14px; font-variant-numeric: tabular-nums; }
+.plan-lvl--up .plan-lvl-n { color: #e54545; }
+.plan-lvl--dn .plan-lvl-n { color: #18a058; }
+.plan-lvl-d { font-size: 12px; color: #64748b; font-variant-numeric: tabular-nums; }
+.plan-lvl-t { font-size: 11px; padding: 1px 7px; border-radius: 999px;
+  background: #f3e8ff; border: 1px solid #d8b4fe; color: #7c3aed; font-weight: 600; }
+.plan-lvl-dl { margin: 5px 0 0; font-size: 12.5px; line-height: 1.65; }
+.plan-lvl-dl dt { color: #475569; font-weight: 600; margin-top: 4px; }
+.plan-lvl-dl dt:first-child { margin-top: 0; }
+.plan-lvl-dl dd { margin: 0; color: #64748b; padding-left: 12px; }
+/* 未补缺口带（R541）：区间型对象，不与点位序号共用 —— 用 ▨ 与「压力/支撑」标签区分 */
+.plan-gap-i { font-size: 12px; color: #94a3b8; }
+.plan-gap--res .plan-lvl-t { background: #fdecec; border-color: #eab8b8; color: #c22f2f; }
+.plan-gap--sup .plan-lvl-t { background: #eefaf1; border-color: #a9dcbb; color: #12874b; }
 /* ===== plan: 买卖点信号（与上方「条件预案」同区块）===== */
 .plan-sec { font-size: 13px; font-weight: 600; color: #1f2937; margin: 16px 0 6px; }
 .plan-sec span { font-weight: 400; color: #64748b; font-size: 12px; }
@@ -103,6 +138,14 @@ PLAN_CSS = """<style>
   list-style-position: outside; }
 .plan-det > summary:hover { color: #1f2937; }
 .plan-det[open] > summary { margin-bottom: 4px; }
+/* 宽屏：右侧「点位含义 8 档 + 缺口带 2 条」竖排会到 ~1740px，而左图只有 ~730px
+   ⇒ 左图下方一大片留白。≥1200px 时这两个列表改**双列**，侧栏高度近乎减半。
+   ★ 列数由探针判据 17 自证：grid 计算列数必须 == min(2, 档数) —— 防「基础规则改了、
+     覆盖规则没跟」把子元素挤进隐式列/行（跨项目通用坑）。 */
+@media (min-width: 1200px) {
+  .plan-side > .plan-lvl { display: grid; grid-template-columns: 1fr 1fr;
+    gap: 0 22px; align-content: start; }
+}
 @media (max-width: 720px) {
   /* 窄屏改为**纵向卡片**：表格横滚会把「收盘到该位的含义」推到视口外，
      而那正是本区块最该被读到的列 ⇒ 放弃横滚，改为每行一卡、全部信息纵向可见。 */
@@ -179,20 +222,24 @@ def extract_band(html):
 
 
 # ===== 价格水位图（纯 SVG · 字号按用户单位给足，窄屏靠 viewBox 等比缩放即够读）=====
-_CH_W, _CH_H = 300, 500         # R539: 486→500（图例多一行「买卖点触发位」说明）
+_CH_W, _CH_H = 300, 514         # R540: 486→500（图例加「买卖点触发位」）· R541: →514（加「缺口带」）
 _CH_PT, _CH_PB = 30, 396        # 绘图区上下沿
 _CH_AX = 54                     # 价格轴竖线 x
 _CH_BX1 = 176                   # 带区右沿（左沿 = 价格轴）
 _CH_MK = 182                    # 关键位刻度线终点
 _CH_LB = 186                    # 关键位标签起始 x
 _CH_TICK = 46                   # 价格刻度文字右对齐 x
-_CH_LEG = (418, 434, 450, 466, 482)  # 图例各行基线 y
+_CH_LEG = (418, 434, 450, 466, 482, 500)  # 图例各行基线 y（R541 加「缺口带」一行）
 _C_UP, _C_DN, _C_CLOSE = "#e54545", "#18a058", "#334155"
 _C_GRID, _C_AXIS = "#eef2f7", "#cbd5e1"
 _C_B95, _C_B95S = "#fbead0", "#dfb571"
 _C_ZS, _C_ZSS = "#e9eef7", "#c3cfe0"
 # 买卖点触发标记：**刻意用红绿之外的第二色系**（红=上方/绿=下方 的价位语义不能被买卖点语义污染）
 _C_TRG, _C_TRGB, _C_TRGS = "#7c3aed", "#f3e8ff", "#d8b4fe"
+# 未补缺口带（R541）：缺口是**区间**不是点。带色沿用「红=上方 / 绿=下方」的既有语义，
+# 但取极淡填充 + 虚线描边，与「九成区间（琥珀实底）」「中枢（灰蓝实底）」区分开。
+_C_GAP_F, _C_GAP_S = "#fdecec", "#eab8b8"      # 上方 ⇒ 压力带
+_C_SUP_F, _C_SUP_S = "#eefaf1", "#a9dcbb"      # 下方 ⇒ 支撑带
 
 
 def _dw(s):
@@ -227,10 +274,22 @@ def _abbr(seg):
     return seg
 
 
+# R541: 带圈序号 ①..⑩ —— 图上名称行前缀，与模块右侧「图上点位含义」逐条对应。
+# ★ 为什么需要序号：图上标签区只有 x=186~300（114px），只能放缩写（「GG · 顶背…」），
+#   而 8 档里 3,884.44 与 3,878.41 只差 6 元 —— 肉眼极易看串行。显式序号把「图上这个标」
+#   与「右侧这条含义」钉死，而不是要求读者自行比对价位（可读性必须自证，规则 166 同族）。
+_NUM = "\u2460\u2461\u2462\u2463\u2464\u2465\u2466\u2467\u2468\u2469"   # ①..⑩
+
+
 def _lv_name(x, limit=11.6):
     """关键位名称：图上显示**前两段**（` / ` 分隔，段名经 _abbr 缩写），余下加省略号；
-    全文在 SVG 悬停 title 与折叠表里，不丢信息。
+    全文在 SVG 悬停 title、折叠表、以及右侧「图上点位含义」里，不丢信息。
     limit 可调：该档若还要挂「买卖点触发」小标，需让出宽度。
+
+    ★ R541 自纠：带圈序号**不放这一行**。首版把序号加在名称行前缀（limit 11.6→10.4），
+      实测 3,995.18 那档因为还挂着触发标（limit 再降到 5.4），可用宽度只剩 4.4 个单位，
+      名称退化成「GG · …」——比加序号**之前**（「GG · 顶背…」）信息更少。改为把序号放到
+      价格行前（`① 3,995.18 +4.76%`，那行本来就有 ~15px 余量）⇒ 名称行预算不受影响。
 
     R540：由「只取第一段」改为**并列前两段**。维度扩展后同一价位常承载多个语义，
     典型如 3,884.44 =「中枢上沿 ZG / 缺口上沿 09-28」—— 只取第一段会让**共振信息**
@@ -298,6 +357,123 @@ def _trg_list(p):
     return ("""
   <div class="plan-sec">买卖点触发位 <span>（图上紫标 · 引擎本次给出 %d 个价位）</span></div>
   <ul class="plan-tl">%s</ul>%s""" % (len(with_p), li, tail))
+
+
+def _lv_items(p):
+    """图上点位的**绘制顺序**：上方（价格降序）在前、下方在后 = `_chart` 里 items 的顺序。
+
+    序号（图上名称行的 ①②③… 与右侧含义列表）依赖这个顺序 ⇒ 两处必须同源，
+    故抽成单一函数（规则 111：同一事实单一来源；顺序若各写一份，加一个维度就会错位）。
+    """
+    return list(p.get("up") or []) + list(p.get("dn") or [])
+
+
+def _seg_pairs(x):
+    """把 label 与 semantic 按**段**配对 => [(段名, 含义), ...]。
+
+    gen_plan 里 `labels` 与 `kinds` 由 _dedup 同步 append，`semantic` 由同一 `kinds` 逐项映射
+    ⇒ 正常情况下两列段数相等、顺序一致（gen_plan.pack 内有断言锁住该契约）。
+    仍做防御：段数不等时多出的段**单列**，既不丢文字也不硬凑。
+    """
+    labs = [s.strip() for s in str(x.get("label") or "").split(" / ") if s.strip()]
+    sems = [s.strip() for s in str(x.get("semantic") or "").split(" ｜ ") if s.strip()]
+    out = [(lb, sems[i] if i < len(sems) else "") for i, lb in enumerate(labs)]
+    out += [("", s) for s in sems[len(labs):]]
+    return out
+
+
+_MA_PREFIX = "均线位（"
+
+
+def _sem_clean(seg):
+    """含义段的**机械去重**：段名已经写了「MA120 半年线」，含义段再写一遍「均线位（MA120 ·
+    半年线）」纯属重复。只做「剥掉『均线位（…）』前缀」这一种可解释操作 —— 不改写、不编造，
+    剥完为空就不显示这一行（信息在段名里已经完整）。
+    """
+    s = str(seg or "").strip()
+    if s.startswith(_MA_PREFIX):
+        k = s.find("\uff09")                       # 全角右括号
+        if k >= 0:
+            s = s[k + 1:].strip()
+            s = s[1:].strip() if s[:1] in ("\uff1a", "\uff0c") else s   # 去掉孤零零的「：」
+    return s
+
+
+def _lv_meaning(p):
+    """右侧「图上点位含义」（R541 · 旭总：「图片上每一个点位的含义在这个模块右侧写上含义，
+    不然我看不懂」）。
+
+    为什么必须有：图上标签区仅 114px 宽，只能显示缩写（「GG · 顶背…」「Fib 50%」）；
+    而这些术语（GG/ZG/MA/Fib）对非专业读者等于黑话；悬停 title 里虽有全文，但**手机上
+    没有 hover** ⇒ 结构上不可读。故把「这个位是什么（段名）+ 到它会怎样（含义）」常显在
+    模块右侧，逐档一条、序号与图上带圈数字对应。
+
+    ★ 全部文字取自 plan.json 的 label / semantic / dist_pct（规则 149：区块内不写统计值、
+      不编文案）；本函数只做**排版拆分**与一处机械去重（_sem_clean）。
+    """
+    items = _lv_items(p)
+    if not items:
+        return ""
+    trg = _triggers(p)
+    n_up = len(p.get("up") or [])
+    lis = []
+    for i, x in enumerate(items):
+        t = trg.get(round(float(x["price"]), 2))
+        tag = ('<span class="plan-lvl-t">%s</span>' % esc(_trig_short(t))) if t else ""
+        body = ""
+        for lb, sm in _seg_pairs(x):
+            sm = _sem_clean(sm)
+            if lb:
+                body += "<dt>%s</dt>" % esc(lb)
+            if sm:
+                body += "<dd>%s</dd>" % esc(sm)
+        lis.append(
+            '<li class="plan-lvl--%s">'
+            '<div class="plan-lvl-h"><span class="plan-lvl-i">%s</span>'
+            '<b class="plan-lvl-n">%s</b><span class="plan-lvl-d">%s</span>%s</div>'
+            '<dl class="plan-lvl-dl">%s</dl></li>'
+            % ("up" if i < n_up else "dn", _NUM[i] if i < len(_NUM) else "",
+               _money(x["price"]), esc(_sign(x.get("dist_pct") or 0)), tag, body))
+    return ("""
+  <div class="plan-sec">图上点位含义 <span>（序号与图上标注一一对应 · %d 个：上方 %d / 下方 %d）</span></div>
+  <ul class="plan-lvl">%s</ul>""" % (len(items), n_up, len(items) - n_up, "".join(lis)))
+
+
+def _gap_list(p):
+    """右侧「未补缺口带」（R541）。
+
+    缺口是**区间**不是点（见 gen_plan.collect 注释：当点处理会把真实上沿 3888.37 折进
+    ZG 3884.44）。所以它不占关键位序号，单独成节：区间 + 方向 + 跳空幅度 + 上下沿含义。
+    全部字段取自 plan.json 的 gap_bands（含语义文案，不在渲染层编写）。
+    """
+    gb = p.get("gap_bands") or []
+    if not gb:
+        return ""
+    lis = []
+    for g in gb:
+        _is_res = (g.get("dist_pct") or 0) > 0        # 在现价上方 ⇒ 压力；下方 ⇒ 支撑
+        _head = ('<div class="plan-lvl-h">'
+                 '<span class="plan-gap-i">%s</span>'
+                 '<b class="plan-lvl-n">%s ~ %s</b>'
+                 '<span class="plan-lvl-d">%s</span>'
+                 '<span class="plan-lvl-t">%s</span></div>')
+        body = (
+            "<dt>缺口上沿 %s</dt><dd>%s</dd>"
+            "<dt>缺口下沿 %s</dt><dd>%s</dd>"
+            "<dt>跳空幅度</dt><dd>%s%%（当日上沿~下沿之间没有成交）</dd>"
+            % (_money(g["top"]), esc(g.get("sem_top") or ""),
+               _money(g["bottom"]), esc(g.get("sem_bot") or ""),
+               ("%.3f" % g["width_pct"]) if g.get("width_pct") is not None else "—"))
+        tag = "%s · %s" % ("向下跳空" if g.get("type") == "down" else "向上跳空",
+                           "压力" if _is_res else "支撑")
+        lis.append('<li class="plan-gap--%s">%s<dl class="plan-lvl-dl">%s</dl></li>'
+                   % ("res" if _is_res else "sup",
+                      _head % ("\u25a8", _money(g["bottom"]), _money(g["top"]),
+                               _sign(g.get("dist_pct") or 0), esc(tag)),
+                      body))
+    return ("""
+  <div class="plan-sec">未补缺口带 <span>（图上淡色矩形带 · 区间不是点位 · %d 处）</span></div>
+  <ul class="plan-lvl">%s</ul>""" % (len(gb), "".join(lis)))
 
 
 def _chart(p, band):
@@ -376,8 +552,11 @@ def _chart(p, band):
                     esc("当前中枢 ZD~ZG：%s ~ %s（%s~%s · %s 笔）"
                         % (_money(zd), _money(zg), zs.get("date_start", "?"),
                            zs.get("date_end", "?"), zs.get("count", "?")))))
+        # R541 自纠：标签由 y1+13 下移到 y1+19 —— 未补缺口带上沿（3888.37）高于 ZG（3884.44），
+        # 缺口带的下沿正好压在「中枢 ZD~ZG」的顶部（实测带下沿 198.0 vs 文字顶边 196.0，
+        # 重叠 2px，虚线边框划过字顶）。下移 6px 后两者净间隙 ≈ 2.4px。
         o.append('<text x="%g" y="%.1f" font-size="9.5" fill="#64748b">中枢 ZD~ZG</text>'
-                 % (_CH_AX + 6, y1 + 13))
+                 % (_CH_AX + 6, y1 + 19))
 
     # ④ 现价（深色虚线 + 轴侧标签）；虚线只画到带区右沿，避免横穿右侧关键位标签
     yc = py(close)
@@ -388,6 +567,37 @@ def _chart(p, band):
     o.append('<text x="%.1f" y="%.1f" font-size="11" font-weight="700" fill="#ffffff" '
              'text-anchor="middle">%s</text>'
              % (_CH_AX + 31, yc + 4, _money(close)))
+
+    # ④b 未补缺口**带**（R541）：缺口是一个**区间**（上沿~下沿），不是一个点。此前图上只画
+    #     两条独立刻度 ⇒ 会被读成「两个互不相关的位」，而它其实是同一根 K 线跳空留下的
+    #     一段真空区。上下沿都在表内时配对成带（gen_plan 的 gap_bands 字段，不解析文案）：
+    #       整条带在现价上方 ⇒ 压力带（淡红）；在下方 ⇒ 支撑带（淡绿）；横跨现价 ⇒ 中性灰。
+    #     上下沿的刻度线与标签照旧画 —— 它们是独立价位锚，带只补上「这是一个区域」这层含义。
+    for _g in (p.get("gap_bands") or []):
+        try:
+            _gt, _gb = float(_g["top"]), float(_g["bottom"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        _y1, _y2 = py(_gt), py(_gb)
+        if _gb > close:
+            _fill, _strk, _side = _C_GAP_F, _C_GAP_S, "上方压力带"
+        elif _gt < close:
+            _fill, _strk, _side = _C_SUP_F, _C_SUP_S, "下方支撑带"
+        else:
+            _fill, _strk, _side = "#f1f5f9", "#cbd5e1", "跨现价缺口区"
+        _gd = (_g.get("date") or "?")[5:]
+        o.append('<rect x="%g" y="%.1f" width="%g" height="%.1f" fill="%s" stroke="%s" '
+                 'stroke-dasharray="3 2"><title>%s</title></rect>'
+                 % (_CH_AX, _y1, _CH_BX1 - _CH_AX, max(_y2 - _y1, 1.5), _fill, _strk,
+                    esc("未补缺口 %s（%s跳空）：%s ~ %s ⇒ %s"
+                        % (_g.get("date"), "向下" if _g.get("type") == "down" else "向上",
+                           _money(_gb), _money(_gt), _side))))
+        # 带高实测仅 ~8px（缺口本身就是窄区间）⇒ 字号取 8 并给文字描白边，压在色带上仍清晰。
+        o.append('<text x="%g" y="%.1f" font-size="8" fill="#64748b" paint-order="stroke" '
+                 'stroke="#ffffff" stroke-width="2.2">%s %s</text>'
+                 % (_CH_AX + 6, (_y1 + _y2) / 2 + 3,
+                    esc("压力带" if _gb > close else ("支撑带" if _gt < close else "缺口带")),
+                    esc(_gd)))
 
     # ⑤ 关键位（红 = 上方 / 绿 = 下方，沿用全站惯例）
     #    R539：凡「引擎给了明确价位」的买卖点，在同一档名称行右侧挂紫色触发标
@@ -401,8 +611,9 @@ def _chart(p, band):
     #      故 MK_GAP 取 34（净空隙 4px）；R540 首版误取 22 ⇒ 3,884.44 的名称行被
     #      3,878.41 的价格行压住（已由截图核出）。
     MK_GAP = 34.0
+    # 顺序必须与右侧「图上点位含义」的序号一致 ⇒ 统一走 _lv_items（规则 111）。
     items = [(py(x["price"]), _C_UP if i < len(ups) else _C_DN, x)
-             for i, x in enumerate(ups + dns)]
+             for i, x in enumerate(_lv_items(p))]
     ymv = [it[0] for it in items]
     if items:
         _ord = sorted(range(len(items)), key=lambda i: ymv[i])
@@ -433,10 +644,15 @@ def _chart(p, band):
             o.append('<line x1="%g" y1="%.1f" x2="%g" y2="%.1f" stroke="%s" '
                      'stroke-width="0.8" stroke-dasharray="2 2" opacity="0.65"/>'
                      % (_CH_LB - 2, y, _CH_LB - 2, ym + 8, col))
+        # 带圈序号（R541）：放在**价格行**前 —— 这行原本 3,995.18 + 距现价之后还有 ~15px 余量，
+        # 而名称行是稀缺资源（见 _lv_name 的自纠说明）。序号贴着价位，对照最直观。
+        if i < len(_NUM):
+            o.append('<text x="%g" y="%.1f" font-size="10" fill="#94a3b8">%s</text>'
+                     % (_CH_LB, ym - 3, _NUM[i]))
         o.append('<text x="%g" y="%.1f" font-size="11.5" font-weight="700" fill="%s">%s</text>'
-                 % (_CH_LB, ym - 3, col, _money(x["price"])))
+                 % (_CH_LB + 11, ym - 3, col, _money(x["price"])))
         o.append('<text x="%g" y="%.1f" font-size="9.5" fill="#94a3b8">%s</text>'
-                 % (_CH_LB + 53, ym - 3, esc(_sign(x.get("dist_pct") or 0))))
+                 % (_CH_LB + 64, ym - 3, esc(_sign(x.get("dist_pct") or 0))))
         o.append('<text x="%g" y="%.1f" font-size="9.5" fill="#94a3b8">%s</text>'
                  % (_CH_LB, ym + 12, esc(nm)))
         if t:
@@ -464,6 +680,8 @@ def _chart(p, band):
          if zg is not None else "中枢区间（本次未取到）"),
         ("line", None, None, "现价 %s  ·  红=上方 / 绿=下方" % _money(close)),
         ("trg", None, None, "紫 = 买卖点触发位（%d 个 · 悬停看条件）" % len(trg)),
+        ("gap", _C_GAP_F, _C_GAP_S, "缺口带 %d 处 = 未补跳空区（压力 / 支撑）"
+         % len(p.get("gap_bands") or [])),
     ]
     for i, (kind, fill, stroke, text) in enumerate(legs):
         yy = ly[i]
@@ -477,6 +695,9 @@ def _chart(p, band):
         elif kind == "trg":
             o.append('<rect x="%g" y="%.1f" width="9" height="9" rx="4.5" fill="%s" stroke="%s"/>'
                      % (_CH_AX, yy - 8, _C_TRGB, _C_TRGS))
+        elif kind == "gap":
+            o.append('<rect x="%g" y="%.1f" width="9" height="9" rx="2" fill="%s" stroke="%s" '
+                     'stroke-dasharray="3 2"/>' % (_CH_AX, yy - 8, fill, stroke))
         o.append('<text x="%.1f" y="%.1f" font-size="9.5" fill="#64748b">%s</text>'
                  % (_CH_AX + 14, yy, esc(_clip(text, 23.5))))
 
@@ -634,7 +855,39 @@ def build(p, band=None):
     inv = p.get("invalidations") or []
     inv_txt = "；".join("<b>%s</b>：%s" % (_money(i["price"]), i["text"]) for i in inv) or "无"
 
-    notes = "".join("<li>%s</li>" % esc(n) for n in p.get("notes") or [])
+    # R541：把 R540 已导出、却一直**零渲染**的两个维度真正显示出来（半成品补齐）：
+    #   · `ma.alignment`（均线排列）—— 上面 8 档里已有 4 条均线位，但「多头/空头/纠缠」这个
+    #     一眼可判的状态没露脸；
+    #   · `bias`（乖离率）—— 距均线多远是判断「超买/超卖」的最常用尺子，且它的一手数据
+    #     早已落在 plan.json 里（bias20 / bias60 / state）。
+    # 两者都是**透传**（规则 149：区块内不写统计值，渲染层不自造数字）。
+    _ma = p.get("ma") or {}
+    ma_txt = ('<span class="plan-chip plan-chip--info" title="均线排列（引擎 classify.ma_alignment）：'
+              '多头 / 空头 / 纠缠">均线 <b>%s</b></span>' % esc(_ma.get("alignment") or "—")
+              ) if _ma.get("alignment") else ""
+    _bias = p.get("bias") or {}
+    bias_txt = ""
+    if _bias.get("bias20") is not None:
+        bias_txt = ('<span class="plan-chip" title="BIAS20 = 收盘价相对 MA20 的乖离率；'
+                    '引擎判定：%s">BIAS20 <b>%s</b>%s</span>'
+                    % (esc(_bias.get("state") or "—"), _sign(_bias["bias20"]),
+                       ("（%s）" % esc(_bias["state"])) if _bias.get("state") else ""))
+
+    # 位置徽章：R541 加「中枢内分位」——「中枢内部」看不出偏强还是偏弱，分位一眼可判。
+    # 只在 position 确为「中枢内部」时显示（其它位置态下该分位无意义）。
+    _pos = p.get("position") or "—"
+    _pp = p.get("pos_pct")
+    pos_txt = esc(_pos)
+    if _pos == "中枢内部" and _pp is not None:
+        pos_txt += "（%.1f%%）" % _pp
+
+    # R541：原「怎么用」说明块（plan-note · 6 条）已删除（旭总 2026-10-12）。其中 5 条都有
+    # 更细的载体（见 gen_plan.py notes 处逐条对照），唯独「所有位与买卖点取自引擎同一函数、
+    # 与主报告同口径」这条**没有他处显式声明** ⇒ 压成下面这一行 12px 灰字保留（规则 107：
+    # 披露不得静默丢失）。它不再是「使用说明」，只是依据声明。
+    ref = ('<div class="plan-ref">依据：关键位与买卖点信号均取自 chanlun.analyze() / '
+           'find_signals()，与主报告同口径、本侧不重算；本区块为当日快照（asof），'
+           '免责见文末「六、免责说明」。</div>')
 
     band_txt = ("<b>%s ~ %s</b>（T+1 %s · 单日 point-in-time 实测覆盖 <b>93.2%%</b>，名义 90%%）"
                 % (_money(band["low"]), _money(band["high"]), band.get("date") or "?")
@@ -651,15 +904,17 @@ def build(p, band=None):
   <div class="plan-meta">
     <span class="plan-chip %s">收盘 <b>%s</b>（%s）</span>
     <span class="plan-chip plan-chip--warn">情景 <b>%s</b></span>
-    <span class="plan-chip plan-chip--info">位置 <b>%s</b></span>
-    <span class="plan-chip">中枢 <b>%s</b></span>
+    <span class="plan-chip plan-chip--info" title="中枢内位置分位：0%% = ZD，100%% = ZG">位置 <b>%s</b></span>
+    <span class="plan-chip">中枢 <b>%s</b></span>%s%s
   </div>
   <div class="plan-viz">
   <div class="plan-box">%s</div>
   <div class="plan-side">
-  <div class="plan-tip">读法（<b>价格水位图</b>）：竖轴是价格。灰蓝色块 = 当前中枢 ZD~ZG；琥珀色块 = 明日九成区间；深色虚线 = 现价；右侧红 / 绿刻度 = 上方 / 下方关键位（价位 + 距现价 + 名称）；<b>紫色小标 = 买卖点触发位</b>。鼠标悬停任一元素看来源与含义。<br>
+  <div class="plan-tip">读法（<b>价格水位图</b>）：竖轴是价格。灰蓝色块 = 当前中枢 ZD~ZG；琥珀色块 = 明日九成区间；深色虚线 = 现价；右侧红 / 绿刻度 = 上方 / 下方关键位（价位 + 距现价 + 名称）；<b>紫色小标 = 买卖点触发位</b>；淡色带 = 未补缺口区（压力 / 支撑）。鼠标悬停任一元素看来源与含义 —— <b>但手机看不到悬停，请以下方「图上点位含义」为准</b>，那里把图上每个标（序号对应）逐个写全。<br>
     明日九成区间 %s。<br>
     <b>本图不画 P25–P75</b>：它在单日尺度实测只覆盖约 72.5%%（名义 50%%），口径标不住 ⇒ 不画。</div>
+  %s
+  %s
   %s
   %s
   %s
@@ -667,16 +922,15 @@ def build(p, band=None):
     <div>今日动作：%s</div>
     <div>判据失效条件：%s</div>
   </div>
+  %s
   </div>
   </div>
-  <div class="plan-note"><b>怎么用</b>：本区块只把<b>已有的结构位</b>摆成一排，标出每个位对应什么状态变化。
-    幅度请自行决定（不提供仓位比例）。<ul>%s</ul></div>
 </section>
 """ % (MARK, esc(p.get("name") or ""), esc(p.get("asof") or ""),
        chg_cls, _money(p.get("close") or 0), _sign(chg),
-       esc(p.get("scenario") or "—"), esc(p.get("position") or "—"), ztxt,
-       _chart(p, band), band_txt, _trg_list(p), build_details(p), build_signals(p.get("signals")),
-       act_txt, inv_txt, notes)
+       esc(p.get("scenario") or "—"), pos_txt, ztxt, ma_txt, bias_txt,
+       _chart(p, band), band_txt, _lv_meaning(p), _gap_list(p), _trg_list(p),
+       build_details(p), build_signals(p.get("signals")), act_txt, inv_txt, ref)
 
 
 def main():

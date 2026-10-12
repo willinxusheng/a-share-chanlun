@@ -16,7 +16,13 @@
      ⇒ 防「漏标」或「把引擎没给价位的类别硬编上去」。
  10. （R539）两张表确实折进 <details>，且表体 + 失效位口径 + R:R 口径文字一字未丢（规则 107）。
  11. （R539）标题层级与全站 panel 对齐（h2），旧 h3.plan-h 已清除。
- 12. （R539）meta 徽章数 == 4（收盘 / 情景 / 位置 / 中枢）。
+ 12. （R539）meta 徽章数 == 6（收盘 / 情景 / 位置 / 中枢 / 均线 / BIAS20 —— R541 补齐两项）。
+ 14. （R541）右侧「图上点位含义」档数 == 关键位档数，且**每个 label 段**都被写出
+     （图上只显缩写 ⇒ 逐段核，避免「列了档但漏了语义段」）。
+ 15. （R541）图上带圈序号数与右侧列表一一对应（各 == 档数）。
+ 16. （R541）未补缺口带：图上矩形带数 == 右侧条目数 == plan.json gap_bands 条数
+     ＋ 判据 5 的 must 中加入缺口上下沿原值（证明真实上沿如 3,888.37 确实落在产物里 ——
+     R540 它曾被 ZG 的去重吞掉，这正是本轮修的失真）。
 
 用法：
   python3 plan/verify_inject.py <基线html> <注入后html>
@@ -123,6 +129,16 @@ def main():
              if _x.get("price") is not None]
     if band_b:
         must += ["{:,.2f}".format(band_b["low"]), "{:,.2f}".format(band_b["high"])]
+    # R541：缺口上下沿取引擎**原值**（gap_bands）—— 这条最要紧：R540 时 9/28 缺口上沿
+    # 3,888.37 与 ZG 3,884.44 相差 0.10%，落在去重容差内被合并 ⇒ 真实价位在产物里消失。
+    # 把它列进 must，等于给「区间不再被点型去重吞掉」上了一道锁。
+    for _g in (p.get("gap_bands") or []):
+        must += ["{:,.2f}".format(_g["top"]), "{:,.2f}".format(_g["bottom"])]
+    if p.get("pos_pct") is not None:                      # R541 中枢内分位
+        must.append("%.1f%%" % p["pos_pct"])
+    _b20 = (p.get("bias") or {}).get("bias20")
+    if _b20 is not None:                                  # R541 BIAS 徽章
+        must.append(inject_plan._sign(_b20))
     absent = [t for t in must if t not in new]
     if not absent:
         print("  [PASS] 判据5 区块内 %d 个数字/日期全部可溯源到 plan.json" % len(must))
@@ -194,10 +210,10 @@ def main():
     # 故：先框定 meta 容器，再要求 plan-chip 后紧跟空格或引号。
     m_meta = re.search(r'<div class="plan-meta">(.*?)</div>', new, re.S)
     got_chip = len(re.findall(r'<span class="plan-chip(?=[ "])', m_meta.group(1))) if m_meta else -1
-    if got_chip == 4:
-        print("  [PASS] 判据12 meta 徽章数与维度一致（4 个）")
+    if got_chip == 6:
+        print("  [PASS] 判据12 meta 徽章数与维度一致（6 个：收盘/情景/位置(含中枢分位)/中枢/均线/BIAS20）")
     else:
-        fails.append("判据12 meta 徽章数不符：%d/4" % got_chip)
+        fails.append("判据12 meta 徽章数不符：%d/6" % got_chip)
 
     # --- 判据 13：图旁「买卖点触发位」速查条目数 == 有价位的条数（R539） ---
     got_tl = new.count('<li><b class="plan-tk">')
@@ -205,6 +221,46 @@ def main():
         print("  [PASS] 判据13 触发位速查条目数与引擎给价条数一致（%d 条）" % n_trg)
     else:
         fails.append("判据13 触发位速查条目数不符：%d/%d" % (got_tl, n_trg))
+
+    # --- 判据 14：右侧「图上点位含义」档数 + label **逐段**写出（R541）---
+    # 为什么逐段而不是只核档数：图上是缩写（「① GG · 顶背…」），右侧的价值就在于把
+    # **每一段**语义写全；只核档数会漏掉「列了 8 档但每档只写第一段」这种半成品。
+    # 严谨性：先在 inject_plan 重算该片段并确认它**确实被注入**（防止判据自己核自己）。
+    lv_seg = inject_plan._lv_meaning(p)
+    segs_all = []
+    for _x in (p.get("up") or []) + (p.get("dn") or []):
+        segs_all += [s.strip() for s in str(_x.get("label") or "").split(" / ") if s.strip()]
+    miss_seg = [s for s in segs_all if inject_plan.esc(s) not in lv_seg]
+    got_lvl = new.count('<li class="plan-lvl--')
+    if lv_seg and lv_seg in new and got_lvl == n_lv and not miss_seg:
+        print("  [PASS] 判据14 右侧点位含义：%d 档齐全，%d 个 label 段（含共振段）全部写出"
+              % (got_lvl, len(segs_all)))
+    else:
+        fails.append("判据14 点位含义不全：片段已注入=%s 档数 %d/%d 缺段 %s"
+                     % (bool(lv_seg) and lv_seg in new, got_lvl, n_lv, miss_seg))
+
+    # --- 判据 15：图上带圈序号 ⇄ 右侧列表 一一对应（R541）---
+    # 两侧各出现 n_lv 次才算「钉死」：图上少一个 ⇒ 有档没编号；右侧少一个 ⇒ 序号断档。
+    NUM = inject_plan._NUM
+    n_num = sum(new.count('<span class="plan-lvl-i">%s</span>' % NUM[i]) for i in range(n_lv))
+    # 图上锚：序号是**独立 text 节点**（R541 自纠：它从名称行前缀挪到了价格行前，
+    # 故锚由 `>① ` 改为 `>①</text>` —— 改锚必须跟着产品改，否则判据会恒真/恒假）。
+    ch_num = sum(new.count('>%s</text>' % NUM[i]) for i in range(n_lv))
+    if n_num == n_lv and ch_num == n_lv:
+        print("  [PASS] 判据15 图上带圈序号与右侧列表一一对应（各 %d 个）" % n_lv)
+    else:
+        fails.append("判据15 序号数不符：右侧 %d/%d、图上 %d/%d" % (n_num, n_lv, ch_num, n_lv))
+
+    # --- 判据 16：未补缺口带「图上矩形 = 右侧条目 = plan.json」（R541）---
+    n_gap = len(p.get("gap_bands") or [])
+    got_gap_r = new.count('stroke-dasharray="3 2"><title>未补缺口')
+    got_gap_l = new.count('<li class="plan-gap--')
+    if got_gap_r == n_gap and got_gap_l == n_gap:
+        print("  [PASS] 判据16 未补缺口带：图上 %d 处 = 右侧 %d 条 = plan.json %d 条（区间原值）"
+              % (got_gap_r, got_gap_l, n_gap))
+    else:
+        fails.append("判据16 缺口带数不符：图上 %d / 右侧 %d / plan.json %d"
+                     % (got_gap_r, got_gap_l, n_gap))
 
     print("")
     if fails:
