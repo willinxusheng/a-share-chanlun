@@ -11,6 +11,21 @@
   · 区块内**所有数字来自 plan.json 或 index.html 的内联推演数据**，本脚本不写任何统计值（规则 149）。
   · 不新增章节编号（保持 s1..s6 既有编号体系不被扰动）。
 
+R542（深挖 bug 修复 · 全部由故障注入实测触发）：
+  ① **缺口带不进量程**（R541 连带回归）：R541 把缺口从点型候选移出 up/dn 后，`_chart` 的
+     `vals` 忘了纳入 `gap_bands` ⇒ 当缺口落在所有关键位之外时（暴跌后留一串跳空，完全可达）
+     py() 给出绘图区外 y，整条带与标签画到图外（实测 y=-738 / y=1338）。修：量程改为
+     「所有会被绘制的值」的集合，并新增 `_selfcheck_geometry()` 对**产物本体**做永久护栏。
+  ② **压力/支撑分类两套判据**（规则 111）：图上按几何、右侧列表按 `dist_pct` 中点符号 ⇒
+     带横跨现价时同一条缺口给出相反结论（引擎可达：未补的成立条件只看 high/low）。修：
+     生成侧判一次落盘（`side`/`dir_label`/`side_label`），渲染侧唯一入口 `_gap_side()`。
+  ③ **缺口带标签与现价徽章重叠**（跨现价时 48.4×8.2 px）：标签改右对齐到带区右沿内侧。
+  ④ **合并组内成员价位被静默改写**：代表价只取首个候选 ⇒ 实测 MA60 真实 3,897.68 被展示成
+     3,892.75（差 4.93 点）、MA120/MA250 差 2.18/4.40 点，与 R541 修的缺口失真同源。修：
+     生成侧落盘 `seg_prices`，右侧逐段标出各体系自身价位。
+  ⑤ **避让算法容量**：档数×间距超可用高度时贪心避让必然重新重叠（图会静默压字）⇒ 加容量
+     WARN + verify 判据 18。
+
 R541（旭总 2026-10-12 三条要求）：
   ① 删掉区块底部那段「怎么用」说明（plan-note）：原 6 条各有更细的载体，只有「同源同口径」
      一条没有他处显式声明 ⇒ 压成一行 .plan-ref 保留（规则 107 披露不得静默丢失）。
@@ -31,6 +46,7 @@ R538：把「关键价位表」改为**价格水位图**（纯 SVG，无 JS、�
 """
 import json
 import os
+import re
 import sys
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -106,10 +122,16 @@ PLAN_CSS = """<style>
 .plan-lvl-dl dt { color: #475569; font-weight: 600; margin-top: 4px; }
 .plan-lvl-dl dt:first-child { margin-top: 0; }
 .plan-lvl-dl dd { margin: 0; color: #64748b; padding-left: 12px; }
+/* R542：段（成员）**自身**价位。同一档常由多个体系共同确认，展示价只取首选来源 ⇒
+   其余成员的价位与它相差 0.05%~0.13%（≈2~5 点），必须逐段标出，否则「站上哪个数」会判错。 */
+.plan-lvl-mp { margin-left: 5px; font-variant-numeric: tabular-nums; color: #334155;
+  font-weight: 700; font-size: 12px; }
 /* 未补缺口带（R541）：区间型对象，不与点位序号共用 —— 用 ▨ 与「压力/支撑」标签区分 */
 .plan-gap-i { font-size: 12px; color: #94a3b8; }
 .plan-gap--res .plan-lvl-t { background: #fdecec; border-color: #eab8b8; color: #c22f2f; }
 .plan-gap--sup .plan-lvl-t { background: #eefaf1; border-color: #a9dcbb; color: #12874b; }
+/* R542：横跨现价的缺口带 —— 既非纯压力亦非纯支撑，用中性色，避免读者按「压力」去用 */
+.plan-gap--cross .plan-lvl-t { background: #f1f5f9; border-color: #cbd5e1; color: #475569; }
 /* ===== plan: 买卖点信号（与上方「条件预案」同区块）===== */
 .plan-sec { font-size: 13px; font-weight: 600; color: #1f2937; margin: 16px 0 6px; }
 .plan-sec span { font-weight: 400; color: #64748b; font-size: 12px; }
@@ -241,6 +263,82 @@ _C_TRG, _C_TRGB, _C_TRGS = "#7c3aed", "#f3e8ff", "#d8b4fe"
 _C_GAP_F, _C_GAP_S = "#fdecec", "#eab8b8"      # 上方 ⇒ 压力带
 _C_SUP_F, _C_SUP_S = "#eefaf1", "#a9dcbb"      # 下方 ⇒ 支撑带
 
+# R542：关键位**标签块**的垂直占位与避让可用区间 —— 抽成常量 + 单一函数，
+# 供 `_chart`（实际下夹/上夹）与 `verify_inject` 判据 18（容量）**共用**。
+# ★ 为什么必须收紧：R540/R541 的下夹边界取 `_CH_PB + 4 = 400`，只考虑了「绘图区底」，
+#   没算**图例块**（首行基线 418、字号 9.5 ⇒ 文字顶 410.2）。标签块名称行基线 = ym+12、
+#   下缘 ≈ ym+14.2 ⇒ ym=400 时底到 414.2，压进图例首行 3.9px（故障注入实测抓出）。
+#   上夹边界同样只用了 14，未算**图内日期行**（基线 13、下缘 15.1、且它与标签同处 x≥186
+#   横向重叠）⇒ 标签被推到顶部时会与「数据 YYYY-MM-DD 收盘」叠字。
+_LBL_TOP = 12.4                                 # 标签块上缘相对 ym 的偏移（价格行基线 ym−3 − 上缘）
+_LBL_BOT = 14.2                                 # 标签块下缘相对 ym 的偏移（名称行基线 ym+12 + 下缘）
+_MIN_MK_GAP = _LBL_TOP + _LBL_BOT + 1.0         # 两档标签块**最小**可辨间距（硬容量用，27.6px）
+_DATE_Y = 13.0                                  # 图内日期行基线
+_FS_DESC = 0.22                                 # 下缘系数（≈ descent/em）；_FS_ASC 为上缘
+_FS_ASC = 0.82
+
+
+def _label_limits():
+    """标签避让的 [上界, 下界]（ym 允许范围，px）。单一来源：图上夹/下夹与 verify 容量同用。"""
+    top = _DATE_Y + 9.5 * _FS_DESC + 1.0 + _LBL_TOP          # 日期行下缘 + 净间隙 1px + 块高
+    bot = (_CH_LEG[0] - 9.5 * _FS_ASC) - 1.0 - _LBL_BOT      # 图例首行文字顶 − 净间隙 1px − 块高
+    return top, bot
+
+
+def _anno_limits(fs=9.5):
+    """**单行标注文字**的基线可用范围（px）：上方避开图内日期行，下方避开图例块。
+    与 `_label_limits()`（多行「关键位块」口径）刻意分开 —— 两者占高不同（块 ≈ 26.6px、
+    单行 ≈ fs），混用一个界会把单行标签压得过紧（跨块净间隙以各自真实占高算，规则 166）。"""
+    return (_DATE_Y + 9.5 * _FS_DESC + 1.0 + fs * _FS_ASC,
+            (_CH_LEG[0] - 9.5 * _FS_ASC) - 1.0 - fs * _FS_DESC)
+
+
+def _place_col(items, obstacles, lo, hi):
+    """把**同一列**的单行文字按候选基线的优先级逐个落位，保证互不重叠（含与固定障碍）。
+
+    items: [{"cands": [候选基线（按偏好排序）], "fs": 字号}, ...]（顺序 = 优先级）
+    obstacles: [(top, bottom)] 固定障碍（现价徽章 —— 它的位置有语义，不能挪）
+    返回与 items 等长的基线列表。纯字典序遍历 ⇒ 同一输入必得同一张图（可复现）。
+
+    ★ 为什么需要它（R542 第 6 个 bug）：图上三处标注（九成区间 / 中枢 ZD~ZG / 缺口带）
+      各自只按「自己矩形的顶边 + 13/19px」定位，而它们与现价徽章在 **x 方向重叠**
+      （徽章 x 59~111、左列标注 x 60~108）⇒ 只要两个矩形靠得近，文字就叠在一起。
+      实测可达性很高：收盘落在「ZG 下方 1.8~31.8 点」区间时，中枢标注与现价徽章必然重叠
+      —— 而「中枢内部偏强」正是最常见的形态之一（按均匀分布算约每 4 个交易日出现一次）。
+      随机 fuzz 300 例中 298 例能复现本族重叠（含「两个缺口带日期标签互压」）。
+    """
+    placed = list(obstacles)
+    out = []
+    for it in items:
+        fs = it["fs"]
+        up, dn = fs * _FS_ASC, fs * _FS_DESC
+        best, best_ov = None, None
+        for y in it["cands"]:
+            if y - up < lo - 0.4 or y + dn > hi + 0.4:
+                continue                                  # 越出该列可用范围 ⇒ 跳过
+            ov = sum(max(0.0, min(y + dn, b) - max(y - up, t)) for t, b in placed)
+            if ov <= 0.0:
+                best, best_ov = y, 0.0
+                break                                     # 首个不重叠的候选即采纳（保偏好序）
+            if best_ov is None or ov < best_ov:
+                best, best_ov = y, ov                     # 全部有冲突 ⇒ 取冲突最小者
+        if best is None:                                  # 所有候选都越界 ⇒ 夹进范围
+            best = min(max(it["cands"][0], lo + up), hi - dn)
+        out.append(best)
+        placed.append((best - up, best + dn))
+    return out
+
+
+def _cands(t, b, base_off, fs, n=3):
+    """标注文字的候选基线序列：默认位 → 同侧逐步下移/上移 → 矩形底边内侧。
+    偏好序 = 「离自己的矩形顶边最近」优先，使默认形态与历史一致（不无谓挪动）。"""
+    step = fs + 3.0
+    ys = [t + base_off]
+    for k in range(1, n + 1):
+        ys += [t + base_off + k * step, t + base_off - k * step]
+    ys += [b - fs * _FS_DESC - 2.0, b - fs * _FS_DESC - 2.0 - step]
+    return ys
+
 
 def _dw(s):
     """显示宽度（CJK 记 1、其余记 0.55），用于判标签是否放得下。"""
@@ -368,17 +466,45 @@ def _lv_items(p):
     return list(p.get("up") or []) + list(p.get("dn") or [])
 
 
-def _seg_pairs(x):
-    """把 label 与 semantic 按**段**配对 => [(段名, 含义), ...]。
+# R542：缺口带相对现价分类的**唯一入口**（图上矩形、图上文字、右侧列表条目类名、右侧标签
+# 全部经此函数取值）。此前两套判据并存且结论可相反 —— 图上按几何、列表按 dist_pct 中点符号；
+# 带横跨现价时必然打架（见 gen_plan.gap_bands 处注释：该状态引擎**可达**）。
+# 优先读生成侧写入的 `side`（单一来源），缺失时按**同一几何规则**兜底（边界闭区间，
+# 与生成侧逐字同源）；两处都不看 `dist_pct`，因为它是带**中点**的口径，与「带相对现价的位置」
+# 不是同一个量 —— 用中点代表整条带正是最初那处 bug 的根因。
+_GAP_SIDE_LABEL = {"res": "压力", "sup": "支撑", "cross": "跨现价"}
 
-    gen_plan 里 `labels` 与 `kinds` 由 _dedup 同步 append，`semantic` 由同一 `kinds` 逐项映射
-    ⇒ 正常情况下两列段数相等、顺序一致（gen_plan.pack 内有断言锁住该契约）。
+
+def _gap_side(g, close):
+    s = g.get("side")
+    if s in _GAP_SIDE_LABEL:
+        return s
+    try:
+        t, b = float(g["top"]), float(g["bottom"])
+    except (KeyError, TypeError, ValueError):
+        return "cross"
+    if b >= close:
+        return "res"
+    return "sup" if t <= close else "cross"
+
+
+def _seg_pairs(x):
+    """把 label / semantic / **各段自身价位** 按段配对 => [(段名, 含义, 段自身价), ...]。
+
+    gen_plan 里 `labels` 与 `kinds`、`prices` 由 _dedup **同步 append**，`semantic` 由同一
+    `kinds` 逐项映射 ⇒ 正常情况下三列段数相等、顺序一致（gen_plan.pack 内有断言锁住该契约）。
     仍做防御：段数不等时多出的段**单列**，既不丢文字也不硬凑。
     """
     labs = [s.strip() for s in str(x.get("label") or "").split(" / ") if s.strip()]
     sems = [s.strip() for s in str(x.get("semantic") or "").split(" ｜ ") if s.strip()]
-    out = [(lb, sems[i] if i < len(sems) else "") for i, lb in enumerate(labs)]
-    out += [("", s) for s in sems[len(labs):]]
+    prs = list(x.get("seg_prices") or [])
+    def _p(i):
+        try:
+            return float(prs[i])
+        except (IndexError, TypeError, ValueError):
+            return None
+    out = [(lb, sems[i] if i < len(sems) else "", _p(i)) for i, lb in enumerate(labs)]
+    out += [("", s, None) for s in sems[len(labs):]]
     return out
 
 
@@ -421,10 +547,16 @@ def _lv_meaning(p):
         t = trg.get(round(float(x["price"]), 2))
         tag = ('<span class="plan-lvl-t">%s</span>' % esc(_trig_short(t))) if t else ""
         body = ""
-        for lb, sm in _seg_pairs(x):
+        for lb, sm, pv in _seg_pairs(x):
             sm = _sem_clean(sm)
             if lb:
-                body += "<dt>%s</dt>" % esc(lb)
+                # R542：段的**自身价位**与组代表价不同时逐段标出（差 0.05%~0.13% ≈ 2~5 点，
+                # 对「收盘站上 X」判触发足以给出不同结论 —— 见 gen_plan._dedup 注释）。
+                # 判据用「四舍五入到分是否相等」而非拍一个百分比阈值：无魔数、且与展示精度一致。
+                ext = ""
+                if pv is not None and round(pv, 2) != round(float(x["price"]), 2):
+                    ext = '<span class="plan-lvl-mp">%s</span>' % _money(pv)
+                body += "<dt>%s%s</dt>" % (esc(lb), ext)
             if sm:
                 body += "<dd>%s</dd>" % esc(sm)
         lis.append(
@@ -434,9 +566,23 @@ def _lv_meaning(p):
             '<dl class="plan-lvl-dl">%s</dl></li>'
             % ("up" if i < n_up else "dn", _NUM[i] if i < len(_NUM) else "",
                _money(x["price"]), esc(_sign(x.get("dist_pct") or 0)), tag, body))
+    # R542：把「有多少段与组代表价不同、差多少点」**从数据算出来**再写文案 ——
+    # 不手写「2~5 点」这类描述（规则 149：渲染层不编写统计值；也避免数据变了文案不变）。
+    _n_seg = sum(len(_seg_pairs(x)) for x in items)
+    _offs = [abs(_pv - float(x["price"])) for x in items
+             for _lb, _sm, _pv in _seg_pairs(x)
+             if _lb and _pv is not None and round(_pv, 2) != round(float(x["price"]), 2)]
+    tip = ""
+    if _offs:
+        tip = ('<div class="plan-tip">同一价位由多个体系共同确认时已并列（图上只放得下前两段缩写，'
+               '此处逐段写全）。<b>段名后标出的数字 = 该体系自己的价位</b>：%d 段中有 %d 段与组代表价'
+               '不同，各差 <b>%.2f ~ %.2f 点</b>（代表价取该档首选来源）⇒ 判「站上哪个数」时请用段'
+               '自己的价位。</div>'
+               % (_n_seg, len(_offs), min(_offs), max(_offs)))
     return ("""
   <div class="plan-sec">图上点位含义 <span>（序号与图上标注一一对应 · %d 个：上方 %d / 下方 %d）</span></div>
-  <ul class="plan-lvl">%s</ul>""" % (len(items), n_up, len(items) - n_up, "".join(lis)))
+  <ul class="plan-lvl">%s</ul>%s"""
+            % (len(items), n_up, len(items) - n_up, "".join(lis), tip))
 
 
 def _gap_list(p):
@@ -445,17 +591,23 @@ def _gap_list(p):
     缺口是**区间**不是点（见 gen_plan.collect 注释：当点处理会把真实上沿 3888.37 折进
     ZG 3884.44）。所以它不占关键位序号，单独成节：区间 + 方向 + 跳空幅度 + 上下沿含义。
     全部字段取自 plan.json 的 gap_bands（含语义文案，不在渲染层编写）。
+
+    R542：压力/支撑/跨现价的分类与方向文案**不再在本层现算** —— 一律经 `_gap_side()` 取
+    （图上矩形、图上文字、这里条目类名与标签共用同一判据，规则 111）。此前本层按 `dist_pct`
+    中点符号判，与图上的几何判据**在带横跨现价时结论相反**（实测可复现）。
     """
     gb = p.get("gap_bands") or []
     if not gb:
         return ""
+    close = float(p.get("close") or 0.0)
     lis = []
     for g in gb:
-        _is_res = (g.get("dist_pct") or 0) > 0        # 在现价上方 ⇒ 压力；下方 ⇒ 支撑
+        _side = _gap_side(g, close)
+        _is_res = (_side == "res")
         _head = ('<div class="plan-lvl-h">'
                  '<span class="plan-gap-i">%s</span>'
                  '<b class="plan-lvl-n">%s ~ %s</b>'
-                 '<span class="plan-lvl-d">%s</span>'
+                 '<span class="plan-lvl-d" title="＝缺口带中点距现价">%s</span>'
                  '<span class="plan-lvl-t">%s</span></div>')
         body = (
             "<dt>缺口上沿 %s</dt><dd>%s</dd>"
@@ -464,12 +616,15 @@ def _gap_list(p):
             % (_money(g["top"]), esc(g.get("sem_top") or ""),
                _money(g["bottom"]), esc(g.get("sem_bot") or ""),
                ("%.3f" % g["width_pct"]) if g.get("width_pct") is not None else "—"))
-        tag = "%s · %s" % ("向下跳空" if g.get("type") == "down" else "向上跳空",
-                           "压力" if _is_res else "支撑")
+        # 方向与位置来自**生成侧**（`dir_label` / `side_label`）；仅为老产物兜底才在本层回退，
+        # 且回退规则与生成侧逐字同源（type 缺省 = down、side 走 _gap_side）。
+        _dl = g.get("dir_label") or ("向上跳空" if g.get("type") == "up" else "向下跳空")
+        _sl = g.get("side_label") or _GAP_SIDE_LABEL[_side]
+        tag = "%s · %s" % (esc(_dl), esc(_sl))
         lis.append('<li class="plan-gap--%s">%s<dl class="plan-lvl-dl">%s</dl></li>'
-                   % ("res" if _is_res else "sup",
+                   % (_side,
                       _head % ("\u25a8", _money(g["bottom"]), _money(g["top"]),
-                               _sign(g.get("dist_pct") or 0), esc(tag)),
+                               _sign(g.get("dist_pct") or 0), tag),
                       body))
     return ("""
   <div class="plan-sec">未补缺口带 <span>（图上淡色矩形带 · 区间不是点位 · %d 处）</span></div>
@@ -477,12 +632,28 @@ def _gap_list(p):
 
 
 def _chart(p, band):
-    """价格水位图。竖轴 = 价格；所有数字来自 plan.json / index.html 内联数据。"""
+    """价格水位图。竖轴 = 价格；所有数字来自 plan.json / index.html 内联数据。
+
+    R542：量程（`vals`）必须**覆盖每一个会被绘制的值**。此前漏了 `gap_bands` 的上下沿 ——
+    R541 把缺口从「点型候选」移出 up/dn 之后，缺口就不再进入 vals，于是**当缺口落在所有
+    关键位之外时**（未补缺口完全可以远高于最高的关键位：暴跌后留下的一串跳空），
+    py() 会给出绘图区外的 y，把整条带与它的标签画到图外（故障注入实测：y=-738 / y=1338）。
+    这是 R541 引入的连带回归 —— 修法不是「再补一行」，而是把量程改为
+    「**所有会被绘制的值**的集合」并由下面的断言自证，使同类漏项无法再悄悄发生。
+    """
     zs = p.get("zhongshu") or {}
     close = float(p.get("close") or 0.0)
     ups = list(p.get("up") or [])
     dns = list(p.get("dn") or [])
     trg = _triggers(p)
+
+    # 缺口带先解析一次，供量程 / 绘制 / 图例三处共用（避免各解析一遍而口径漂移）
+    gbs = []
+    for _g in (p.get("gap_bands") or []):
+        try:
+            gbs.append((float(_g["top"]), float(_g["bottom"]), _g))
+        except (KeyError, TypeError, ValueError):
+            continue
 
     vals = [close] + [float(x["price"]) for x in ups + dns]
     for k in ("zg", "zd", "gg", "dd"):
@@ -492,6 +663,8 @@ def _chart(p, band):
             pass
     if band:
         vals += [float(band["low"]), float(band["high"])]
+    for _t, _b, _ in gbs:                     # R542：缺口带上下沿必须进量程
+        vals += [_t, _b]
     if not vals:
         return ""
     lo, hi = min(vals), max(vals)
@@ -502,6 +675,12 @@ def _chart(p, band):
 
     def py(v):
         return _CH_PT + (hi - float(v)) / rg * (_CH_PB - _CH_PT)
+
+    # 自证：量程内的值映射后必然落在绘图区内（由构造保证）。把它写成断言，是为了让
+    # 「以后再加一种图元却忘了进 vals」当场炸，而不是又画到图外。
+    for _v in (lo, hi):
+        assert _CH_PT - 0.6 <= py(_v) <= _CH_PB + 0.6, \
+            "量程自证失败：v=%.2f ⇒ y=%.1f 越出绘图区 [%d, %d]" % (_v, py(_v), _CH_PT, _CH_PB)
 
     o = ['<svg class="plan-chart" viewBox="0 0 %d %d" role="img" '
          'aria-label="价格水位图：当前中枢区间、明日九成区间与上下方关键位">'
@@ -515,7 +694,17 @@ def _chart(p, band):
              % (_CH_W - 4, esc(str(p.get("asof") or "?"))))
 
     # ① 价格网格 + 轴
-    step = 50.0
+    # R542：步长随量程**自适应**。固定 50 在窄量程下正常（实测 8 档 + 缺口带 ⇒ 区间约 380 点
+    # ⇒ 7~8 行），但量程纳入缺口带后区间可能显著变宽（远方的未补缺口，见上方注释）——
+    # 366px 的绘图区塞几十行刻度会立刻文字重叠。取「行数 ≤ 9」的最小白名单步长：
+    # 9 行 ⇒ 相邻基线间距 ≥ 366/9 ≈ 40px ≫ 9.5px 字号所需的 ~13px ⇒ 结构性不重叠
+    # （不是「看起来还行」，而是由行数上限保证的）。
+    span = hi - lo
+    step = 5000.0
+    for _s in (10.0, 20.0, 25.0, 50.0, 100.0, 200.0, 250.0, 500.0, 1000.0, 2000.0, 5000.0):
+        if span / _s <= 9:
+            step = _s
+            break
     t = (int(lo // step) + 1) * step
     while t < hi:
         y = py(t)
@@ -527,6 +716,12 @@ def _chart(p, band):
     o.append('<line x1="%g" y1="%g" x2="%g" y2="%g" stroke="%s"/>'
              % (_CH_AX, _CH_PT, _CH_AX, _CH_PB, _C_AXIS))
 
+    # R542：三处固定位置标注（九成区间 / 中枢 / 缺口带）**先收集候选、最后统一落位**
+    # （见 ④c 与 `_place_col`）—— 它们各自只看自己矩形顶边定位，而彼此/与现价徽章在
+    # x 方向重叠 ⇒ 矩形靠近时必然叠字。分两列：左列 x≈60（与徽章 x 59~111 重叠）、
+    # 右列右对齐 x≈172（与徽章水平分离，只彼此避让）。
+    anno_l, anno_r = [], []
+
     # ② 明日九成区间（先画，位于中枢之下层）
     if band:
         y1, y2 = py(band["high"]), py(band["low"])
@@ -536,8 +731,8 @@ def _chart(p, band):
                     esc("明日九成区间 P05-P95（T+1 %s）：%s ~ %s｜单日 point-in-time 实测覆盖 93.2%%"
                         "（名义 90%%）" % (band.get("date") or "?", _money(band["low"]),
                                           _money(band["high"])))))
-        o.append('<text x="%g" y="%.1f" font-size="9.5" fill="#a16207">九成区间</text>'
-                 % (_CH_AX + 6, y1 + 13))
+        anno_l.append({"cands": _cands(y1, y2, 13, 9.5), "fs": 9.5,
+                       "txt": "九成区间", "fill": "#a16207", "halo": False})
 
     # ③ 当前中枢（ZD~ZG）
     try:
@@ -552,11 +747,11 @@ def _chart(p, band):
                     esc("当前中枢 ZD~ZG：%s ~ %s（%s~%s · %s 笔）"
                         % (_money(zd), _money(zg), zs.get("date_start", "?"),
                            zs.get("date_end", "?"), zs.get("count", "?")))))
-        # R541 自纠：标签由 y1+13 下移到 y1+19 —— 未补缺口带上沿（3888.37）高于 ZG（3884.44），
-        # 缺口带的下沿正好压在「中枢 ZD~ZG」的顶部（实测带下沿 198.0 vs 文字顶边 196.0，
-        # 重叠 2px，虚线边框划过字顶）。下移 6px 后两者净间隙 ≈ 2.4px。
-        o.append('<text x="%g" y="%.1f" font-size="9.5" fill="#64748b">中枢 ZD~ZG</text>'
-                 % (_CH_AX + 6, y1 + 19))
+        # R541 自纠（保留）：标签默认位由 y1+13 下移到 y1+19 —— 缺口带上沿高于 ZG 时，
+        # 缺口带的下沿正好压在「中枢 ZD~ZG」顶部（实测重叠 2px）。
+        # R542：该默认位只是**首选候选**，实际落位由 `_place_col` 与现价徽章统一避让。
+        anno_l.append({"cands": _cands(y1, y2, 19, 9.5), "fs": 9.5,
+                       "txt": "中枢 ZD~ZG", "fill": "#64748b", "halo": False})
 
     # ④ 现价（深色虚线 + 轴侧标签）；虚线只画到带区右沿，避免横穿右侧关键位标签
     yc = py(close)
@@ -570,34 +765,43 @@ def _chart(p, band):
 
     # ④b 未补缺口**带**（R541）：缺口是一个**区间**（上沿~下沿），不是一个点。此前图上只画
     #     两条独立刻度 ⇒ 会被读成「两个互不相关的位」，而它其实是同一根 K 线跳空留下的
-    #     一段真空区。上下沿都在表内时配对成带（gen_plan 的 gap_bands 字段，不解析文案）：
+    #     一段真空区。带色按**相对现价的位置**取（生成侧 `side`，见 `_gap_side` 注释）：
     #       整条带在现价上方 ⇒ 压力带（淡红）；在下方 ⇒ 支撑带（淡绿）；横跨现价 ⇒ 中性灰。
     #     上下沿的刻度线与标签照旧画 —— 它们是独立价位锚，带只补上「这是一个区域」这层含义。
-    for _g in (p.get("gap_bands") or []):
-        try:
-            _gt, _gb = float(_g["top"]), float(_g["bottom"])
-        except (KeyError, TypeError, ValueError):
-            continue
-        _y1, _y2 = py(_gt), py(_gb)
-        if _gb > close:
-            _fill, _strk, _side = _C_GAP_F, _C_GAP_S, "上方压力带"
-        elif _gt < close:
-            _fill, _strk, _side = _C_SUP_F, _C_SUP_S, "下方支撑带"
-        else:
-            _fill, _strk, _side = "#f1f5f9", "#cbd5e1", "跨现价缺口区"
+    #     R542 自纠：标签由 x=_CH_AX+6（左对齐）改为**右对齐到带区右沿内侧** —— 跨现价的带
+    #     其标签 y 恰好落在现价徽章那一行，左对齐时与徽章文字重叠 48.4×8.2 px（故障注入实测）；
+    #     右对齐后与徽章（x 59~111）在水平方向彻底分离，且白描边仍压在色带上清晰可读。
+    for _t, _b, _g in gbs:
+        _y1, _y2 = py(_t), py(_b)
+        _side = _gap_side(_g, close)
+        _fill, _strk = {"res": (_C_GAP_F, _C_GAP_S), "sup": (_C_SUP_F, _C_SUP_S),
+                        "cross": ("#f1f5f9", "#cbd5e1")}[_side]
+        _ro = "压力带" if _side == "res" else ("支撑带" if _side == "sup" else "缺口带")
         _gd = (_g.get("date") or "?")[5:]
         o.append('<rect x="%g" y="%.1f" width="%g" height="%.1f" fill="%s" stroke="%s" '
                  'stroke-dasharray="3 2"><title>%s</title></rect>'
                  % (_CH_AX, _y1, _CH_BX1 - _CH_AX, max(_y2 - _y1, 1.5), _fill, _strk,
-                    esc("未补缺口 %s（%s跳空）：%s ~ %s ⇒ %s"
-                        % (_g.get("date"), "向下" if _g.get("type") == "down" else "向上",
-                           _money(_gb), _money(_gt), _side))))
+                    esc("未补缺口 %s（%s · %s跳空）：%s ~ %s ⇒ %s"
+                        % (_g.get("date"), _ro,
+                           "向上" if _g.get("type") == "up" else "向下",
+                           _money(_b), _money(_t),
+                           {"res": "现价上方压力带", "sup": "现价下方支撑带",
+                            "cross": "横跨现价，上下沿含义见右侧逐条"}[_side]))))
         # 带高实测仅 ~8px（缺口本身就是窄区间）⇒ 字号取 8 并给文字描白边，压在色带上仍清晰。
-        o.append('<text x="%g" y="%.1f" font-size="8" fill="#64748b" paint-order="stroke" '
-                 'stroke="#ffffff" stroke-width="2.2">%s %s</text>'
-                 % (_CH_AX + 6, (_y1 + _y2) / 2 + 3,
-                    esc("压力带" if _gb > close else ("支撑带" if _gt < close else "缺口带")),
-                    esc(_gd)))
+        # R542：标签位置改由 ④c 统一落位（带高太薄、装不下文字 ⇒ 候选以带中心为中心上下散开）。
+        anno_r.append({"cands": [(_y1 + _y2) / 2 + 3 + _k * 10.0 for _k in (0, 1, -1, 2, -2, 3, -3)],
+                       "fs": 8, "txt": "%s %s" % (_ro, _gd), "fill": "#64748b", "halo": True})
+
+    # ④c 标注统一落位并绘制（R542）—— 左列以**现价徽章为固定障碍**（徽章位置有语义，
+    #     不能挪；它标记的就是现价那条线）。纯确定性 ⇒ 同一份 plan.json 必得同一张图。
+    _al = _anno_limits()
+    for _it, _y in zip(anno_l, _place_col(anno_l, [(yc - 9.5, yc + 9.5)], _al[0], _al[1])):
+        o.append('<text x="%g" y="%.1f" font-size="%g" fill="%s">%s</text>'
+                 % (_CH_AX + 6, _y, _it["fs"], _it["fill"], esc(_it["txt"])))
+    for _it, _y in zip(anno_r, _place_col(anno_r, [], _al[0], _al[1])):
+        o.append('<text x="%g" y="%.1f" font-size="%g" fill="%s" text-anchor="end" '
+                 'paint-order="stroke" stroke="#ffffff" stroke-width="2.2">%s</text>'
+                 % (_CH_BX1 - 4, _y, _it["fs"], _it["fill"], esc(_it["txt"])))
 
     # ⑤ 关键位（红 = 上方 / 绿 = 下方，沿用全站惯例）
     #    R539：凡「引擎给了明确价位」的买卖点，在同一档名称行右侧挂紫色触发标
@@ -614,19 +818,49 @@ def _chart(p, band):
     # 顺序必须与右侧「图上点位含义」的序号一致 ⇒ 统一走 _lv_items（规则 111）。
     items = [(py(x["price"]), _C_UP if i < len(ups) else _C_DN, x)
              for i, x in enumerate(_lv_items(p))]
-    ymv = [it[0] for it in items]
-    if items:
+    # R542：避让改为「前向展开 + 后向回压 + 间距自适应收缩」，并把可行性判据写成硬容量。
+    #  ★ 原实现（R540/R541）只有一个「贪心下推」+ 一次「整组回夹」，有两个真缺陷：
+    #    ① **下推只会加不会减** ⇒ 最终跨度 = Σ max(理想间距, MK_GAP) ≥ max(理想跨度, 档数×间距)，
+    #       两者都可能超出可用高度。实测（随机 fuzz）理想跨度已 369px 时，8 档下推后到 420px，
+    #       回夹把整组上移 39px，紧接着的「上夹」（避日期行）又把整组下移 21px —— 下夹被上夹
+    #       **抵消**，末档落回 y=402，其名称行压进图例行（重叠 5.9px）。
+    #    ② 无「间距收缩」：档数一多就只能重叠，而不是把间距压到仍可辨的下限。
+    #  现方案：先夹进可用区，再前向保证间距、溢出后后向回压；间距下界取
+    #  `min(MK_GAP, 可用高度/(档数−1))`，其**可行性**由构造保证（后向回压后顶端必 ≥ 上界）。
+    #  硬容量 = (档数−1) × 标签块高（26.6px）—— 低于它任何算法都排不开，由 WARN + 判据 18 兜底。
+    _top_lim, _bot_lim = _label_limits()
+    _avail = _bot_lim - _top_lim
+    _hard = max(0, len(items) - 1) * _MIN_MK_GAP
+    if _hard > _avail:
+        sys.stderr.write("WARN 标签避让容量不足：%d 档至少需 %.0fpx > 可用 %.0fpx ⇒ 图上必然重叠 "
+                         "（请收窄档数 / 加高图）\n" % (len(items), _hard, _avail))
+    ymv = [min(max(it[0], _top_lim), _bot_lim) for it in items]
+    if len(items) > 1:
+        _gap = min(MK_GAP, _avail / (len(items) - 1))
         _ord = sorted(range(len(items)), key=lambda i: ymv[i])
-        for _k in range(1, len(_ord)):
+        for _k in range(1, len(_ord)):                     # 前向：保证相邻间距 ≥ _gap
             _i, _ip = _ord[_k], _ord[_k - 1]
-            if ymv[_i] - ymv[_ip] < MK_GAP:
-                ymv[_i] = ymv[_ip] + MK_GAP
-        _ov = ymv[_ord[-1]] - (_CH_PB + 4)          # 底部越界 ⇒ 整组上移
-        if _ov > 0:
-            ymv = [v - _ov for v in ymv]
-        _dd = 14.0 - ymv[_ord[0]]                   # 上移过头 ⇒ 整组下夹
-        if _dd > 0:
-            ymv = [v + _dd for v in ymv]
+            if ymv[_i] - ymv[_ip] < _gap:
+                ymv[_i] = ymv[_ip] + _gap
+        if ymv[_ord[-1]] > _bot_lim:                       # 底部溢出 ⇒ 后向回压（顶部因此必不越上界）
+            ymv[_ord[-1]] = _bot_lim
+            for _k in range(len(_ord) - 2, -1, -1):
+                _i, _ip = _ord[_k], _ord[_k + 1]
+                if ymv[_ip] - ymv[_i] < _gap:
+                    ymv[_i] = ymv[_ip] - _gap
+    # 自证：落位后必须①在可用区内②相邻档（按 y 序）净间隙 ≥ 一个标签块高 —— 这是「零重叠」
+    # 的充分条件。★ 这两条断言只在**可行**时成立（`_hard <= _avail`），不可行时算法只能
+    # best-effort（已 WARN + verify 判据 18 硬门禁）：既不谎称成立，也不把「图不好看」升级成
+    # 抛异常 —— 那会让整个站点当日停止发布（report/index 的日常刷新也一起挂掉），代价不对等。
+    if _hard <= _avail:
+        _sy = sorted(ymv)
+        for _v in _sy:
+            assert _top_lim - 0.6 <= _v <= _bot_lim + 0.6, \
+                "标签落位越出可用区 [%.1f, %.1f]：y=%.1f" % (_top_lim, _bot_lim, _v)
+        for _k in range(1, len(_sy)):
+            assert _sy[_k] - _sy[_k - 1] >= _LBL_TOP + _LBL_BOT - 0.6, \
+                "相邻标签块净间隙不足：%.2f < %.2f（会叠字）" % (
+                    _sy[_k] - _sy[_k - 1], _LBL_TOP + _LBL_BOT)
 
     for i, (y, col, x) in enumerate(items):
         ym = ymv[i]
@@ -680,8 +914,7 @@ def _chart(p, band):
          if zg is not None else "中枢区间（本次未取到）"),
         ("line", None, None, "现价 %s  ·  红=上方 / 绿=下方" % _money(close)),
         ("trg", None, None, "紫 = 买卖点触发位（%d 个 · 悬停看条件）" % len(trg)),
-        ("gap", _C_GAP_F, _C_GAP_S, "缺口带 %d 处 = 未补跳空区（压力 / 支撑）"
-         % len(p.get("gap_bands") or [])),
+        ("gap", _C_GAP_F, _C_GAP_S, "缺口带 %d 处 = 未补跳空区（压力 / 支撑）" % len(gbs)),
     ]
     for i, (kind, fill, stroke, text) in enumerate(legs):
         yy = ly[i]
@@ -702,7 +935,30 @@ def _chart(p, band):
                  % (_CH_AX + 14, yy, esc(_clip(text, 23.5))))
 
     o.append('</svg>')
-    return "".join(o)
+    svg = "".join(o)
+    _selfcheck_geometry(svg)
+    return svg
+
+
+# R542：图元几何**自证**（永久护栏）。上面那个 bug（缺口带不在量程 ⇒ 画到图外 y=-738）
+# 是「只靠肉眼看图看不出来、只靠截图也不一定截到」的类型；把它做成对**产物本体**的检查：
+# 解析出 SVG 里每个色带矩形，断言 ① 在 viewBox 内 ② 绘图区内的带都落在 [_CH_PT, _CH_PB]。
+# 这样「以后再加一种带却忘了进 vals」会当场炸（CI 门禁 + 探针都会先跑到），而不是静默画飞。
+_RE_RECT = re.compile(r'<rect x="([-\d.]+)" y="([-\d.]+)" width="([-\d.]+)" height="([-\d.]+)"')
+
+
+def _selfcheck_geometry(svg):
+    _W = _CH_BX1 - _CH_AX                 # 带区宽度（中枢 / 九成区间 / 缺口带三者同宽）
+    for x, y, w, h in _RE_RECT.findall(svg):
+        x, y, w, h = float(x), float(y), float(w), float(h)
+        if abs(w - _W) > 0.5:
+            continue                        # 只核「带区矩形」；现价徽章(52px) / 图例小方块(9px)
+            #                                 宽度不同，天然被排除
+        assert -0.6 <= y and y + h <= _CH_H + 0.6, \
+            "图元越出 viewBox：y=%.1f h=%.1f（viewBox 高 %d）" % (y, h, _CH_H)
+        assert _CH_PT - 0.6 <= y and y + h <= _CH_PB + 0.6, \
+            "带区矩形越出绘图区 [%d, %d]：y=%.1f h=%.1f ⇒ 该带的值未进量程（vals）" % (
+                _CH_PT, _CH_PB, y, h)
 
 
 # ===== 关键价位表（折叠保留：结构来源依据不得静默丢失）=====

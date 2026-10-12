@@ -8,6 +8,14 @@
   本侧不重算任何结构量（规则 111：同一事实多出口必须同口径）。
 ★ 已实跑对账：本脚本产出的 ZG/ZD 与 report.html 渲染的 "ZG 3884 / ZD 3768" 一致。
 
+R542（深挖 bug 修复，均为**产物静默失真/崩溃**类，全部由故障注入实测触发）：
+  · 合并组内**成员自身价位**落盘（`seg_prices`）—— 代表价只取首个候选，实测 MA60 真实
+    3,897.68 被展示成 3,892.75（差 4.93 点），与 R541 修的缺口失真同源（规则 169 的推广）。
+  · 缺口带「压力/支撑/跨现价」分类与方向文案**在生成侧判一次**（`side`/`dir_label`/`side_label`）
+    —— 此前渲染层两套判据，带横跨现价时图上与右侧列表给出相反结论（规则 111）。
+  · position 自校验由「单分支 + 严格不等」改为**三态双向 + 闭区间**：原写法在收盘恰等于
+    ZG/ZD 时会让生成器断言崩溃（引擎口径本就是闭区间），且反向不一致静默通过。
+
 纪律（旭总已拍板口径 + 项目铁律）：
   · 不预测方向 —— 只给「到 X 会进入什么状态」，不给涨跌概率
     （R533/R534/R529 已证：日频方向无可用信息）。
@@ -187,6 +195,17 @@ def _dedup(levels):
 
     实测必要性：2026-10-09 末中枢 GG = 3995.18 与顶背驰证伪位同价 ——
     「先到先得」式去重会静默丢掉「判据证伪」这条最强语义。
+
+    ★ R542：合并后**必须同时保留每个成员自己的价位**（`prices`，与 labels 同步 append）。
+      理由＝R541 修缺口失真的同一类缺陷在「点型对象」上同样存在：`prices[0]` 被当作整组的
+      展示价，其余成员的真实价位在产物里消失。实测本轮数据：
+        · 组 3,892.75 = MA20(3,892.75) ＋ MA60(**3,897.68**) ＋ Fib61.8%(**3,890.45**)
+          ⇒ 读者按展示价理解「站上 3,892.75 ＝ MA60 站稳」，实际 MA60 在 3,897.68，差 **4.93 点**；
+        · 组 3,995.18 = GG ＋ 顶背驰证伪位 ＋ MA120(**3,993.00**) ＋ MA250(**3,990.78**)。
+      对以「收盘站上 X」判触发的区块，0.1% 的偏移就足以给出不同结论 ⇒ 与规则 169 同类，
+      故成员价位必须落到产物里、由渲染层逐段标出（本侧不做任何字号/阈值判断）。
+      （代表价仍取**首个候选**——collect 的顺序是「中枢 → 笔 → 背驰 → 均线 → Fib」，
+       结构位天然优先，这一点是有意为之，不是副作用。）
     """
     uniq = []
     for price, label, src, kind in levels:
@@ -196,9 +215,11 @@ def _dedup(levels):
                     u["labels"].append(label)
                     u["srcs"].append(src)
                     u["kinds"].append(kind)
+                    u["prices"].append(price)      # R542：与 labels 同步，段与价一一对应
                 break
         else:
-            uniq.append({"price": price, "labels": [label], "srcs": [src], "kinds": [kind]})
+            uniq.append({"price": price, "labels": [label], "srcs": [src], "kinds": [kind],
+                         "prices": [price]})
     return uniq
 
 
@@ -325,10 +346,27 @@ def main():
     zs = zss[-1] if zss else None
 
     # 自校验：position 语义必须与 close 的实际位置自洽（不硬编码任何数字）
+    # ★ R542 两处修正（原实现有两类缺陷）：
+    #   ① 断言只覆盖「pos == 中枢内部」一个分支 ⇒ **反向不一致静默通过**：若引擎说
+    #      「中枢上方」而 close 实际落在 ZG 下方（口径漂移 / 将来有人换了中枢来源），
+    #      这里什么都不会报。改为**三态双向**（与 chanlun.classify 的判定式逐字同源）。
+    #   ② 原判据用**严格**不等（zd < close < zg），而引擎口径是 zd <= close <= zg
+    #      （`if close > zg … elif close < zd … else 中枢内部`）⇒ 收盘**恰好等于** ZG/ZD 时
+    #      引擎说「中枢内部」而这里断言失败，直接把 CI 打红（生成器崩溃，非产品问题）。
+    #      改为闭区间后，pos_pct = 0.0 / 100.0 也成了**合法边界**而不再是漏网状态。
+    #   前提已实证：classify 的 last_zs 与 analyze 返回的 zhongshu[-1] **同一对象**
+    #   （chanlun.py:1018 `last_zs = zss[-1] if zss else None`，analyze 传的就是 zss）。
     pos = (r.get("classify") or {}).get("position") or ""
-    if zs and pos == "中枢内部":
-        assert zs["zd"] < close < zs["zg"], \
-            "position=中枢内部 但 close 不在 [ZD, ZG] 内 ⇒ 与 analyze() 口径不一致，本轮读数作废"
+    if zs:
+        _exp_pos = ("中枢上方" if close > zs["zg"]
+                    else ("中枢下方" if close < zs["zd"] else "中枢内部"))
+        assert pos == _exp_pos, \
+            "position=%s 与 close=%.2f 相对末中枢 [ZD %.2f, ZG %.2f] 的实际位置（%s）不符 " \
+            "⇒ 与 analyze() 口径不一致，本轮读数作废" % (
+                pos, close, zs["zd"], zs["zg"], _exp_pos)
+    else:
+        assert pos == "无中枢", \
+            "无中枢时 position 应为「无中枢」，实测 %r ⇒ 与 analyze() 口径不一致" % pos
 
     up, dn = pick(collect(r), close)
     assert up and dn, "上方 / 下方价位至少各需 1 个（收集中断或合并过严）"
@@ -339,8 +377,12 @@ def main():
         # labels 与 kinds 由 _dedup 同步 append，semantic 由同一 kinds 逐项映射。
         # 一旦将来新增 kind 却忘了补 _semantic 文案，段数就会错位 ⇒ 让断言在这里炸，
         # 而不是让前端静默把含义配到错误的段上。
+        # R542：`prices`（各成员自身价位）也必须与 labels **同步 append** —— 它是「段名 → 段自己
+        # 真实价位」的映射，错位一位就会把别的成员的价位挂到错误的段上（比缺价更坏）。
         assert len(u["labels"]) == len(u["kinds"]), \
             "label 段数与 kinds 不符（%d vs %d）：%s" % (len(u["labels"]), len(u["kinds"]), u["labels"])
+        assert len(u["labels"]) == len(u["prices"]), \
+            "label 段数与成员价位不符（%d vs %d）：%s" % (len(u["labels"]), len(u["prices"]), u["labels"])
         _no_sem = [k for k in u["kinds"] if not _semantic(k)]
         assert not _no_sem, \
             "kind 无 _semantic 文案 ⇒ 前端按段配对时含义会串位：%s" % _no_sem
@@ -348,7 +390,10 @@ def main():
                 "src": " ｜ ".join(u["srcs"]),
                 "dist_pct": round(_pct(u["price"], close), 2),
                 "state": state_of(u["price"], close, prev_close),
-                "semantic": _sem_of(u)}
+                "semantic": _sem_of(u),
+                # R542：逐段自身价位（与 label 的 ` / ` 分段一一对应）。代表价（price）之外的
+                # 成员常与之相差 0.05%~0.13%（≈2~5 点）⇒ 渲染层据此逐段标出真实价位。
+                "seg_prices": [round(float(p), 2) for p in u["prices"]]}
 
     acts = []
     for u in list(up) + list(dn):
@@ -408,8 +453,28 @@ def main():
     for _g in _unfilled_gaps(r):
         _t, _b = round(float(_g["top"]), 2), round(float(_g["bottom"]), 2)
         _ty = _g.get("type") or "down"
+        # ★ R542：缺口带相对现价的**分类只在这里判一次**，落盘后图上与右侧列表**共用**
+        #   （规则 111：同一事实多出口必须同口径）。此前渲染层有**两套判据**且结论相反：
+        #     · 图上按几何 —— bottom > close ⇒ 压力带；top < close ⇒ 支撑带；否则「跨现价缺口区」；
+        #     · 右侧列表按 `dist_pct`（带**中点**相对现价）符号 ⇒ >0 记「压力」、否则「支撑」。
+        #   两者在「带横跨现价」时必然打架（引擎**可达**：未补缺口的成立条件只看
+        #   `high < top` / `low > bottom`，收盘完全可以落在带内）——实测 带[3800,3830] 跨
+        #   close 3813.79 时图上写「跨现价缺口区」而列表写「压力」，同一条缺口两个结论。
+        #   另外 `dist_pct` 缺失时列表会退化成「支撑」（`(x or 0) > 0`），而图上仍按几何判压力。
+        #   边界取**闭**：bottom >= close（价格贴在带下沿 ⇒ 正要进入缺口区，仍是压力）、
+        #   top <= close（价格贴在带上沿 ⇒ 仍是支撑），与图上原判据同向、只补掉开闭差异。
+        if _b >= close:
+            _side = "res"
+        elif _t <= close:
+            _side = "sup"
+        else:
+            _side = "cross"
         gap_bands.append({
             "date": _g.get("date"), "top": _t, "bottom": _b, "type": _ty,
+            "side": _side,
+            # 方向与位置的**文案**也在生成侧给出（规则 149：渲染层不编写统计/判定文案）
+            "dir_label": "向上跳空" if _ty == "up" else "向下跳空",
+            "side_label": {"res": "压力", "sup": "支撑", "cross": "跨现价"}[_side],
             # 带宽（%）：跳空幅度，越大越难一次回补（供右侧列表如实标出）
             "width_pct": round((_t / _b - 1.0) * 100.0, 3),
             # 带中点相对现价的距离：正值 = 在现价上方（压力），负值 = 下方（支撑）
@@ -454,11 +519,15 @@ def main():
         json.dump(plan, f, ensure_ascii=False, indent=1)
     _sig_rows = sum(len(l["rows"]) for l in sigs["levels"])
     _sig_live = sum(1 for l in sigs["levels"] for x in l["rows"] if x["status"] == "判据成立")
+    # R542：观测「有多少段的自身价位与组代表价不同」—— 这正是此前被静默吞掉的信息量，
+    # 打出来便于每轮盘后一眼看出产品里到底有多少个「真实但未显示」的价位。
+    _seg_off = sum(1 for _x in (up_packed + dn_packed)
+                   for _p in _x["seg_prices"] if _p != _x["price"])
     print("plan.json OK  asof=%s  close=%s  上%d 下%d  动作%d  失效%d  信号%d(判据成立%d)"
-          "  中枢分位=%s  缺口带%d" % (
+          "  中枢分位=%s  缺口带%d  段内异价%d" % (
               plan["asof"], plan["close"], len(plan["up"]), len(plan["dn"]),
               len(plan["actions"]), len(plan["invalidations"]), _sig_rows, _sig_live,
-              ("%.1f%%" % pos_pct) if pos_pct is not None else "—", len(gap_bands)))
+              ("%.1f%%" % pos_pct) if pos_pct is not None else "—", len(gap_bands), _seg_off))
 
 
 if __name__ == "__main__":

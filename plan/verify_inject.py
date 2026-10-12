@@ -23,6 +23,13 @@
  16. （R541）未补缺口带：图上矩形带数 == 右侧条目数 == plan.json gap_bands 条数
      ＋ 判据 5 的 must 中加入缺口上下沿原值（证明真实上沿如 3,888.37 确实落在产物里 ——
      R540 它曾被 ZG 的去重吞掉，这正是本轮修的失真）。
+ 17. （R542）合并组内**每个成员自身价位**都必须在产物里逐段标出
+     （代表价只取首选来源 ⇒ 实测 MA60 真实 3,897.68 曾被展示成 3,892.75，差 4.93 点，
+     与 R541 修的缺口失真同源 ⇒ 逐段核，不能只核组价）。
+ 18. （R542）标签避让容量：档数 × MK_GAP ≤ 可用高度 —— 不足时贪心避让必然重新重叠，
+     而「图上有两档压成一行」是静默错误（规则 163 的必要条件）。
+ 19. （R542）缺口带压力/支撑/跨现价分类**单一来源**：右侧条目类名 == 图上 title 用词 ==
+     plan.json 的 `side`（规则 111：此前图上按几何、右侧按 dist_pct 中点，带横跨现价时相反）。
 
 用法：
   python3 plan/verify_inject.py <基线html> <注入后html>
@@ -261,6 +268,72 @@ def main():
     else:
         fails.append("判据16 缺口带数不符：图上 %d / 右侧 %d / plan.json %d"
                      % (got_gap_r, got_gap_l, n_gap))
+
+    # --- 判据 17：合并组内**每个成员自身的价位**必须逐段出现在产物里（R542）---
+    # 为什么独立成判据：档数与「组代表价」都在（判据 8/14 都会 PASS），缺失的只是**成员自己的
+    # 价位** —— 而它恰恰决定「收盘站上哪个数」。实测 MA60 真实 3,897.68 曾被展示为 3,892.75
+    # （差 4.93 点）、MA120/MA250 差 2.18/4.40 点 ⇒ 属静默失真，必须逐段核。
+    exp_mp = []
+    for _x in (p.get("up") or []) + (p.get("dn") or []):
+        _labs = [s.strip() for s in str(_x.get("label") or "").split(" / ") if s.strip()]
+        _prs = list(_x.get("seg_prices") or [])
+        for _i, _lb in enumerate(_labs):
+            try:
+                _pv = round(float(_prs[_i]), 2)
+            except (IndexError, TypeError, ValueError):
+                continue
+            if _pv != round(float(_x["price"]), 2):
+                exp_mp.append((_lb, "{:,.2f}".format(_pv)))
+    lv_seg2 = inject_plan._lv_meaning(p)
+    got_mp = new.count('<span class="plan-lvl-mp">')
+    miss_mp = [("%s %s" % kv) for kv in exp_mp
+               if ('<span class="plan-lvl-mp">%s</span>' % kv[1]) not in lv_seg2
+               or ('<span class="plan-lvl-mp">%s</span>' % kv[1]) not in new]
+    if exp_mp and got_mp == len(exp_mp) and not miss_mp:
+        print("  [PASS] 判据17 合并组成员自身价位逐段标出（%d 处：%s）"
+              % (len(exp_mp), "、".join("%s %s" % kv for kv in exp_mp)))
+    else:
+        fails.append("判据17 成员自身价位缺失：span %d/%d、缺 %s"
+                     % (got_mp, len(exp_mp), miss_mp or "无"))
+
+    # --- 判据 18：标签避让容量（R542）---
+    # 边界由 inject_plan._label_limits() 单一给出（图上夹/下夹与这里同源 ⇒ 不可能各算一套）；
+    # 容量口径也必须同源：判据用 inject_plan._MIN_MK_GAP（硬容量 27.6px = 两档标签块最小可辨
+    # 间距），与图上那句 `if _hard <= _avail:` 的断言**同一个常量** —— 早先这里写死 34.0
+    # （软容量 MK_GAP）会让「断言已 WARN 但门禁仍绿」漏过去（同一阈值两处各写一份 = 规则 111）。
+    _top_lim, _bot_lim = inject_plan._label_limits()
+    _need = max(0, n_lv - 1) * inject_plan._MIN_MK_GAP
+    _avail = _bot_lim - _top_lim
+    if _need <= _avail:
+        print("  [PASS] 判据18 标签避让容量足够（%d 档需 %.0fpx ≤ 可用 %.0fpx，"
+              "区间 %.1f~%.1f：上避日期行 / 下避图例）" % (n_lv, _need, _avail, _top_lim, _bot_lim))
+    else:
+        fails.append("判据18 避让容量不足：%d 档需 %.0fpx > 可用 %.0fpx ⇒ 图上标签会静默重叠"
+                     % (n_lv, _need, _avail))
+
+    # --- 判据 19：缺口带分类「右侧条目类名 == 图上 title 用词 == plan.json side」（R542）---
+    # 规则 111：同一事实多出口必须同口径。此前图上按几何判、右侧按 dist_pct 中点判，
+    # 带横跨现价（引擎可达）时两者相反；本判据给这条上锁。
+    _close = float(p.get("close") or 0.0)
+    exp_side = [inject_plan._gap_side(g, _close) for g in (p.get("gap_bands") or [])]
+    exp_li = sum(new.count('<li class="plan-gap--%s">' % s) for s in sorted(set(exp_side)))
+    _titles = re.findall(r'title>未补缺口[^<]*<', new)
+    _kw = {"res": "压力带", "sup": "支撑带", "cross": "跨现价"}
+    # ★ 双侧断言（规则 160 同族）：必须**含**本侧关键词**且不含**另一侧关键词。
+    #   只做「含本侧」会被自证不足的锚骗过 —— 正控实测：缺口 title 里「压力带」出现两次
+    #   （`（压力带 · 向下跳空）` 与 `⇒ 现价上方压力带`），只改后一处时该判据仍 PASS。
+    _bad_t = []
+    for _i in range(min(len(_titles), len(exp_side))):
+        _have = _kw[exp_side[_i]]
+        _other = [_v for _k, _v in _kw.items() if _k != exp_side[_i]]
+        if _have not in _titles[_i] or any(_v in _titles[_i] for _v in _other):
+            _bad_t.append((_i, exp_side[_i], _titles[_i][:46]))
+    if exp_side and exp_li == n_gap and len(_titles) == n_gap and not _bad_t:
+        print("  [PASS] 判据19 缺口带分类单一来源（右侧/图上/plan.json 一致：%s）"
+              % "、".join(exp_side))
+    else:
+        fails.append("判据19 缺口带分类不一致：右侧 %d/%d、图上 title %d/%d、不符 %s"
+                     % (exp_li, n_gap, len(_titles), n_gap, _bad_t))
 
     print("")
     if fails:
