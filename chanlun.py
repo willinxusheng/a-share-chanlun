@@ -1106,6 +1106,36 @@ def classify(bis, zss, beichis, close, wcls=None, segments=None, seg_beichi=None
                         max(b["bi_index"] for b in recent_bc if b["type"] == "bottom")))
     else:
         _tie_note = ""
+
+    # R543: ★ 背驰分支的「目标达成度」补充 —— 原实现是无条件模板（顶背驰固定输出
+    #   "回落目标先看最近中枢ZG"，底背驰固定输出"第一压力看最近中枢ZD"），**不读 pos**。
+    #   后果（2026-10-12 实测，上证）：bi#165 顶背驰端点在 2026-09-01 的 3995.18、判定于 09-17，
+    #   而价格早在 09-24 就收在 ZG 3884.44 下方、至 10-12 已在中枢内部停留 24 个交易日
+    #   （收盘 3797.24）——「回落目标先看 ZG」**早已达成**却仍以未达成语气输出，且整段 detail
+    #   **完全不含当前位置信息**。对照同一份报告的非背驰分支（同日沪深300「空头延续」）：
+    #   "当前向下笔运行于最后中枢ZD(4492.1)下方，走势偏弱。反抽不过ZD将构成三类卖点" ——
+    #   同一事实（价格相对中枢的位置）两个分支信息量悬殊 ⇒ 呈现层不一致。
+    #   判据：**只在目标已达成/越界时追加**（有界：中枢上方对顶背驰=未达成 ⇒ 不追加，对称地
+    #   中枢下方对底背驰 ⇒ 不追加），且**追加而非替换**原句 ⇒ 保留判据来源原文、历史可比、
+    #   下游消费方（report.py 卡片/结论列表）与探针期望值不受影响。
+    _pos_note = ""
+    if last_zs and _bc_main in ("top", "bottom"):
+        _zg, _zd = last_zs["zg"], last_zs["zd"]
+        if _bc_main == "top":
+            if pos == "中枢内部":
+                _pos_note = ("　现价已回落至中枢内部（ZG %.1f / ZD %.1f），"
+                             "上述回落目标已达成，转为关注 ZD 是否失守。" % (_zg, _zd))
+            elif pos == "中枢下方":
+                _pos_note = ("　现价已跌破中枢下沿 ZD %.1f，回落目标早于达成且结构进一步转弱，"
+                             "下看中枢最低 DD %.1f。" % (_zd, last_zs.get("dd", _zd)))
+        else:  # bottom
+            if pos == "中枢内部":
+                _pos_note = ("　现价已反弹回中枢内部（ZG %.1f / ZD %.1f），"
+                             "上述反弹目标已达成，转为关注 ZG 能否站稳。" % (_zg, _zd))
+            elif pos == "中枢上方":
+                _pos_note = ("　现价已站上中枢上沿 ZG %.1f，反弹目标已达成且转强，"
+                             "上看中枢最高 GG %.1f。" % (_zg, last_zs.get("gg", _zg)))
+
     if _bc_main == "top":  # R155: 背驰信号优先于 last 笔方向——底/顶背驰后必有反向笔(last 已回调/反弹)，
                 # 若再加 last.dir 约束会把最标准的「底背驰+反弹」「顶背驰+回调」结构错判为多头/空头延续，
                 # 实证 5 指数中 4 个底背驰因此被忽略、看板失真。去掉约束让背驰优先显示。
@@ -1120,7 +1150,7 @@ def classify(bis, zss, beichis, close, wcls=None, segments=None, seg_beichi=None
             detail += "，且走势段级别同步出现顶背驰"
         detail += ("，构成顶背驰%s。短线警惕一类卖点确认，回落目标先看最近中枢ZG(%.1f)。"
                    % (_bc_qual, last_zs["zg"] if last_zs else close))
-        detail += _tie_note
+        detail += _pos_note + _tie_note
     elif _bc_main == "bottom":  # R155: 同上，背驰信号优先于 last 笔方向
         # R513: 同 pick_scenario_bc()（唯一来源）。
         _bc_used = pick_scenario_bc(recent_bc, "bottom")
@@ -1131,7 +1161,7 @@ def classify(bis, zss, beichis, close, wcls=None, segments=None, seg_beichi=None
             detail += "，且走势段级别同步出现底背驰"
         detail += ("，构成底背驰%s。关注一类买点后的反弹，第一压力看最近中枢ZD(%.1f)。"
                    % (_bc_qual, last_zs["zd"] if last_zs else close))
-        detail += _tie_note
+        detail += _pos_note + _tie_note
     elif last["dir"] == 1 and pos == "中枢上方":
         scenario = "多头延续"
         detail = "当前向上笔运行于最后中枢上方，走势处于强势区。只要不跌破中枢上沿ZG(%.1f)，按多头延续对待；若回踩ZG不破，构成三类买点。" % (last_zs["zg"] if last_zs else close)
