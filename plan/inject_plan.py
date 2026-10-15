@@ -132,6 +132,20 @@ PLAN_CSS = """<style>
 .plan-gap--sup .plan-lvl-t { background: #eefaf1; border-color: #a9dcbb; color: #12874b; }
 /* R542：横跨现价的缺口带 —— 既非纯压力亦非纯支撑，用中性色，避免读者按「压力」去用 */
 .plan-gap--cross .plan-lvl-t { background: #f1f5f9; border-color: #cbd5e1; color: #475569; }
+/* R544：结构真空区说明 —— 现价已跌穿 / 站上**全部**已识别关键位时，`up` 或 `dn` 会为空。
+   此前该侧在表里就是「一条都没有」，读者只能猜是数据缺失；实为「所有已知参考位都在另一侧」
+   这一**市场状态本身**（2026-10-15 上证 3707.48 跌穿全表最低 3741.11 ⇒ 下侧为空）。
+   配色沿用本区块的「上方=红 / 下方=绿」约定，与 .plan-lvl--up / --dn 一致。 */
+.plan-vac { margin: 0 0 12px; padding: 9px 12px; border-radius: 8px; font-size: 12.5px;
+  line-height: 1.75; border: 1px solid #e5e9f0; background: #f8fafc; color: #475569; }
+.plan-vac--up { border-color: #f4c6c6; background: #fdf3f3; }
+.plan-vac--dn { border-color: #bfe6cd; background: #f1faf4; }
+.plan-vac-h { display: block; font-weight: 700; font-size: 13px; color: #1f2937; margin-bottom: 3px; }
+.plan-vac--up .plan-vac-h { color: #c22f2f; }
+.plan-vac--dn .plan-vac-h { color: #12874b; }
+.plan-vac-b { display: block; }
+.plan-vac-b b { font-variant-numeric: tabular-nums; color: #1f2937; }
+.plan-vac-n { display: block; margin-top: 3px; font-size: 12px; color: #64748b; }
 /* ===== plan: 买卖点信号（与上方「条件预案」同区块）===== */
 .plan-sec { font-size: 13px; font-weight: 600; color: #1f2937; margin: 16px 0 6px; }
 .plan-sec span { font-weight: 400; color: #64748b; font-size: 12px; }
@@ -597,6 +611,63 @@ def _lv_meaning(p):
   <div class="plan-sec">图上点位含义 <span>（序号与图上标注一一对应 · %d 个：上方 %d / 下方 %d）</span></div>
   <ul class="plan-lvl">%s</ul>%s"""
             % (len(items), n_up, len(items) - n_up, "".join(lis), tip))
+
+
+def _vac_note(p):
+    """结构真空区说明（R544）。
+
+    为什么必须有：`plan.json` 的 `up` / `dn` **允许为空** —— 价格跌穿（或站上）**全部**已识别
+    关键位时，该侧一条候选都不剩。渲染层其余各处都带 `or []` 兜底（空侧不影响水位图量程），
+    所以页面**不会崩**，但也**不会解释** —— 读者看到「下方 0 档」只能理解为数据缺失，
+    而真相恰恰相反：这是「所有已知参考位都在另一侧」这一**市场状态本身**。
+
+    触发背景（故障实证）：2026-10-15 上证收 3707.48（−1.59%），跌破 15 个候选位里最低的
+    中枢最低 DD 3741.11 ⇒ `dn` 为空 ⇒ 旧实现的 `assert up and dn` 把生成器打红 ⇒
+    CI step 7 failure ⇒ 配置 Pages / 上传产物 / 部署 全部 skipped ⇒ **当日整站停发**。
+    生成侧已改为如实落盘 `side_note`（规则 175），本函数负责把它**讲清楚**。
+
+    ★ 规则 149 / 111 / 172：本层只排版 —— 边界价、候选总数、以及「跌破 / 站上 / 恰好等于」
+      这条**判定语**（`state_label`）全部由生成侧给定，此处不自造统计值、不自己比大小。
+    """
+    sn = p.get("side_note") or {}
+    if not sn:
+        return ""
+    close = float(p.get("close") or 0.0)
+    out = []
+    for _k in ("up", "dn"):                      # 固定顺序 ⇒ 产物稳定可比
+        x = sn.get(_k)
+        if not x:
+            continue
+        _dir = esc(x.get("side_dir") or ("上方" if _k == "up" else "下方"))
+        _st = esc(x.get("state_label") or "")
+        _n = x.get("n_candidates")
+        _bp, _bl = x.get("bound_price"), x.get("bound_label")
+        _rel = x.get("close_vs_bound")
+        if _bp is None:
+            _ext = "全部候选位均与现价重合 ⇒ 不编造边界价（该方向同样没有更远的参考位）。"
+        elif _rel == "lt":
+            _ext = ("全表极值 <b>%s</b>（%s）仍高于现价 ⇒ 现价与它之间、以及更%s，"
+                    "均无已识别结构位。" % (_money(_bp), esc(_bl or "—"), _dir))
+        elif _rel == "gt":
+            _ext = ("全表极值 <b>%s</b>（%s）仍低于现价 ⇒ 现价与它之间、以及更%s，"
+                    "均无已识别结构位。" % (_money(_bp), esc(_bl or "—"), _dir))
+        else:
+            _ext = ("现价<b>恰好等于</b>全表极值 <b>%s</b>（%s）⇒ 未发生「跌破 / 站上」位移，"
+                    "但更%s同样没有参考位。" % (_money(_bp), esc(_bl or "—"), _dir))
+        _src = x.get("bound_src")
+        out.append(
+            '<div class="plan-vac plan-vac--%s"%s>'
+            '<span class="plan-vac-h">%s无任何参考位 · 结构真空区</span>'
+            '<span class="plan-vac-b">收盘 <b>%s</b> %s（全表共 <b>%s</b> 档候选）。%s</span>'
+            '<span class="plan-vac-n">这不是数据缺失：本区块的关键位全部来自 '
+            'chanlun.analyze()，当现价走出全部已识别结构的范围后，该方向自然一条都不剩 '
+            '—— 更远的参考位需等新笔 / 新中枢形成后才会产生。</span>'
+            '</div>'
+            % (_k, (' title="边界位来源：%s"' % esc(_src)) if _src else "",
+               _dir, _money(close), _st, _n, _ext))
+    if not out:
+        return ""
+    return "\n  " + "\n  ".join(out)
 
 
 def _gap_list(p):
@@ -1109,6 +1180,45 @@ def build_signals(sg):
                     thead_next, next_rows)
 
 
+def _pos_pct_text(p):
+    """位置徽章里「中枢内分位」的**唯一判据**（R544 从 build() 抽出）。
+
+    为什么必须抽出来：`verify_inject` 的判据 5 此前**自己重写**了一遍渲染条件
+    （`if p.get("pos_pct") is not None` ⇒ 就要求产物里出现 `-51.3%`），而渲染层只在
+    `position == "中枢内部"` 时输出分位 ⇒ 两者口径不一致（规则 168 / 172）。
+    它是**潜伏**的：只要当日 position 恰为「中枢内部」就恒真，一直绿着。
+    直到 2026-10-15 上证收在**中枢下方**（pos_pct = −51.3%）才第一次 FAIL —— 而
+    `verify_inject.py` 是**阻断式门禁**（非零退出 ⇒ 当日停发）⇒ 与本次主 bug 同一后果。
+    故把判据抽成这一个函数：渲染层与门禁**共用**，不再各写一份。
+    """
+    if (p.get("position") or "") != "中枢内部":
+        return ""
+    _pp = p.get("pos_pct")
+    if _pp is None:
+        return ""
+    return "（%.1f%%）" % _pp
+
+
+def _ma_chip(p):
+    """「均线排列」徽章 —— 空值不渲染。同 `_pos_pct_text`：条件在此**只写一份**。"""
+    _ma = p.get("ma") or {}
+    if not _ma.get("alignment"):
+        return ""
+    return ('<span class="plan-chip plan-chip--info" title="均线排列（引擎 classify.ma_alignment）：'
+            '多头 / 空头 / 纠缠">均线 <b>%s</b></span>' % esc(_ma.get("alignment")))
+
+
+def _bias_chip(p):
+    """「BIAS20」徽章 —— 空值不渲染。"""
+    _b = p.get("bias") or {}
+    if _b.get("bias20") is None:
+        return ""
+    return ('<span class="plan-chip" title="BIAS20 = 收盘价相对 MA20 的乖离率；'
+            '引擎判定：%s">BIAS20 <b>%s</b>%s</span>'
+            % (esc(_b.get("state") or "—"), _sign(_b["bias20"]),
+               ("（%s）" % esc(_b["state"])) if _b.get("state") else ""))
+
+
 def build(p, band=None):
     zs = p.get("zhongshu") or {}
     ztxt = ("%.2f ~ %.2f（%s 笔 · %s）" % (zs.get("zd", 0), zs.get("zg", 0),
@@ -1131,25 +1241,18 @@ def build(p, band=None):
     #   · `bias`（乖离率）—— 距均线多远是判断「超买/超卖」的最常用尺子，且它的一手数据
     #     早已落在 plan.json 里（bias20 / bias60 / state）。
     # 两者都是**透传**（规则 149：区块内不写统计值，渲染层不自造数字）。
-    _ma = p.get("ma") or {}
-    ma_txt = ('<span class="plan-chip plan-chip--info" title="均线排列（引擎 classify.ma_alignment）：'
-              '多头 / 空头 / 纠缠">均线 <b>%s</b></span>' % esc(_ma.get("alignment") or "—")
-              ) if _ma.get("alignment") else ""
-    _bias = p.get("bias") or {}
-    bias_txt = ""
-    if _bias.get("bias20") is not None:
-        bias_txt = ('<span class="plan-chip" title="BIAS20 = 收盘价相对 MA20 的乖离率；'
-                    '引擎判定：%s">BIAS20 <b>%s</b>%s</span>'
-                    % (esc(_bias.get("state") or "—"), _sign(_bias["bias20"]),
-                       ("（%s）" % esc(_bias["state"])) if _bias.get("state") else ""))
+    # ★ R544：两段 HTML 与它们的「空值不渲染」条件已抽到 `_ma_chip()` / `_bias_chip()` ——
+    #   `verify_inject` 的判据 12 需要**同一份条件**来算期望徽章数（此前把 6 个写死，
+    #   一旦某一维为空变 5 个就判 FAIL ⇒ 同族停发风险；规则 168 / 172）。
+    ma_txt = _ma_chip(p)
+    bias_txt = _bias_chip(p)
 
     # 位置徽章：R541 加「中枢内分位」——「中枢内部」看不出偏强还是偏弱，分位一眼可判。
     # 只在 position 确为「中枢内部」时显示（其它位置态下该分位无意义）。
+    # ★ R544：该条件抽到 `_pos_pct_text()`，与门禁判据 5 **共用同一份**（此前门禁自己写了
+    #   一份「只要 pos_pct 不为 None 就必须出现」的错口径，在中枢下方/上方时必然 FAIL）。
     _pos = p.get("position") or "—"
-    _pp = p.get("pos_pct")
-    pos_txt = esc(_pos)
-    if _pos == "中枢内部" and _pp is not None:
-        pos_txt += "（%.1f%%）" % _pp
+    pos_txt = esc(_pos) + _pos_pct_text(p)
 
     # R541：原「怎么用」说明块（plan-note · 6 条）已删除（旭总 2026-10-12）。其中 5 条都有
     # 更细的载体（见 gen_plan.py notes 处逐条对照），唯独「所有位与买卖点取自引擎同一函数、
@@ -1176,7 +1279,7 @@ def build(p, band=None):
     <span class="plan-chip plan-chip--warn">情景 <b>%s</b></span>
     <span class="plan-chip plan-chip--info" title="中枢内位置分位：0%% = ZD，100%% = ZG">位置 <b>%s</b></span>
     <span class="plan-chip">中枢 <b>%s</b></span>%s%s
-  </div>
+  </div>%s
   <div class="plan-viz">
   <div class="plan-box">%s</div>
   <div class="plan-side">
@@ -1199,6 +1302,7 @@ def build(p, band=None):
 """ % (MARK, esc(p.get("name") or ""), esc(p.get("asof") or ""),
        chg_cls, _money(p.get("close") or 0), _sign(chg),
        esc(p.get("scenario") or "—"), pos_txt, ztxt, ma_txt, bias_txt,
+       _vac_note(p),
        _chart(p, band), band_txt, _lv_meaning(p), _gap_list(p), _trg_list(p),
        build_details(p), build_signals(p.get("signals")), act_txt, inv_txt, ref)
 

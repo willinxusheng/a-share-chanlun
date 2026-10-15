@@ -8,6 +8,9 @@
   3. 插入位置正确：CSS 在 </head> 之前、区块在 s1 标题之前。
   4. **正控**：人为改动既有字符后，判据 1 必须失败（证明判据真的在工作，规则 119）。
   5. 数据日与全部关键数字可溯源到 plan.json（非手写，规则 149）。
+     ★ R544：`pos_pct` 的**显示条件**改由渲染层单一给出（`inject_plan._pos_pct_text()`）——
+     此前这里自己写了一份「只要 pos_pct 不为 None 就必须出现」的错口径，在中枢下方/上方时
+     必然 FAIL（2026-10-15 首次暴露）。规则 168 / 172。
   6. 信号表行数与 plan.json 对账（防注入漏行/多行）。
   7. **同源自证**：明日九成区间在「基线」与「注入后」两处**提取结果相同**，且区块内可检出该区间两端
      ⇒ 证明带子来自 index.html 内联推演数据本身，未重算（规则 111）。
@@ -16,7 +19,9 @@
      ⇒ 防「漏标」或「把引擎没给价位的类别硬编上去」。
  10. （R539）两张表确实折进 <details>，且表体 + 失效位口径 + R:R 口径文字一字未丢（规则 107）。
  11. （R539）标题层级与全站 panel 对齐（h2），旧 h3.plan-h 已清除。
- 12. （R539）meta 徽章数 == 6（收盘 / 情景 / 位置 / 中枢 / 均线 / BIAS20 —— R541 补齐两项）。
+ 12. （R539）meta 徽章数 == 渲染层实际输出的维度数（收盘 / 情景 / 位置 / 中枢 ＋ 均线? ＋ BIAS20?）。
+     ★ R544：原实现把 6 写死，但「均线排列」「BIAS20」是**条件渲染**，任缺一维即 FAIL ⇒
+     同族停发风险。现向渲染层取同一份条件（规则 168 / 172）。
  14. （R541）右侧「图上点位含义」档数 == 关键位档数，且**每个 label 段**都被写出
      （图上只显缩写 ⇒ 逐段核，避免「列了档但漏了语义段」）。
  15. （R541）图上带圈序号数与右侧列表一一对应（各 == 档数）。
@@ -30,6 +35,8 @@
      而「图上有两档压成一行」是静默错误（规则 163 的必要条件）。
  19. （R542）缺口带压力/支撑/跨现价分类**单一来源**：右侧条目类名 == 图上 title 用词 ==
      plan.json 的 `side`（规则 111：此前图上按几何、右侧按 dist_pct 中点，带横跨现价时相反）。
+ 20. （R544）结构真空区说明**双向**与 plan.json 的 `side_note` 一致：声明 ⇔ 产物实读；
+     每一侧文案须**含本侧、不含另侧**关键词；边界价须落在说明里（规则 160 / 149 / 111）。
 
 用法：
   python3 plan/verify_inject.py <基线html> <注入后html>
@@ -141,8 +148,14 @@ def main():
     # 把它列进 must，等于给「区间不再被点型去重吞掉」上了一道锁。
     for _g in (p.get("gap_bands") or []):
         must += ["{:,.2f}".format(_g["top"]), "{:,.2f}".format(_g["bottom"])]
-    if p.get("pos_pct") is not None:                      # R541 中枢内分位
-        must.append("%.1f%%" % p["pos_pct"])
+    # ★ R544：中枢内分位的**显示条件**必须与渲染层同一份（渲染层只在 position == 「中枢内部」
+    #   时输出分位）。此前这里自己写了一遍 `if pos_pct is not None ⇒ 必须出现`，口径不一致，
+    #   且**只在某一种位置态下才暴露**：2026-10-15 上证收在**中枢下方**（pos_pct = −51.3%）
+    #   时判据 5 第一次 FAIL —— 而本脚本是**阻断式**门禁（非零退出 ⇒ 当日停发），
+    #   与本次主 bug 同一后果。规则 168（阈值口径与调用方一致）/ 172（判据单一来源）。
+    _ppt = inject_plan._pos_pct_text(p)
+    if _ppt:
+        must.append(_ppt)
     _b20 = (p.get("bias") or {}).get("bias20")
     if _b20 is not None:                                  # R541 BIAS 徽章
         must.append(inject_plan._sign(_b20))
@@ -212,15 +225,23 @@ def main():
     else:
         fails.append("判据11 标题层级未与全站对齐（h2 缺失或旧 plan-h 残留）")
 
-    # --- 判据 12：meta 徽章数 == 4（收盘 / 情景 / 位置 / 中枢） ---
+    # --- 判据 12：meta 徽章数 == 渲染层实际会输出的维度数（收盘 / 情景 / 位置 / 中枢 ＋ 均线? ＋ BIAS20?） ---
     # 锚点必须带**词边界**：单纯 class="plan-chip 会前缀匹配到 plan-chip--x 之类（正控实测抓到两次）。
     # 故：先框定 meta 容器，再要求 plan-chip 后紧跟空格或引号。
+    # ★ R544：原实现把 6 写死 —— 但「均线排列」「BIAS20」两枚是**条件渲染**（空值不输出），
+    #   任缺一维就变 5 ⇒ 门禁 FAIL ⇒ 当日停发。与判据 5 同族（把「条件渲染」当「必然渲染」）。
+    #   现改为向渲染层取同一份条件（`_ma_chip` / `_bias_chip` 为空串则不计数），规则 168 / 172。
+    _n_chip_exp = (4 + (1 if inject_plan._ma_chip(p) else 0)
+                     + (1 if inject_plan._bias_chip(p) else 0))
     m_meta = re.search(r'<div class="plan-meta">(.*?)</div>', new, re.S)
     got_chip = len(re.findall(r'<span class="plan-chip(?=[ "])', m_meta.group(1))) if m_meta else -1
-    if got_chip == 6:
-        print("  [PASS] 判据12 meta 徽章数与维度一致（6 个：收盘/情景/位置(含中枢分位)/中枢/均线/BIAS20）")
+    if got_chip == _n_chip_exp:
+        print("  [PASS] 判据12 meta 徽章数与渲染层维度一致（%d 个：收盘/情景/位置/中枢%s%s）"
+              % (got_chip,
+                 "＋均线" if inject_plan._ma_chip(p) else "（均线缺值不显示）",
+                 "＋BIAS20" if inject_plan._bias_chip(p) else "（BIAS20 缺值不显示）"))
     else:
-        fails.append("判据12 meta 徽章数不符：%d/6" % got_chip)
+        fails.append("判据12 meta 徽章数不符：%d/%d" % (got_chip, _n_chip_exp))
 
     # --- 判据 13：图旁「买卖点触发位」速查条目数 == 有价位的条数（R539） ---
     got_tl = new.count('<li><b class="plan-tk">')
@@ -334,6 +355,37 @@ def main():
     else:
         fails.append("判据19 缺口带分类不一致：右侧 %d/%d、图上 title %d/%d、不符 %s"
                      % (exp_li, n_gap, len(_titles), n_gap, _bad_t))
+
+    # --- 判据 20：某侧无参考位时**必须有**说明；未声明时**不得**有说明（R544）---
+    # 背景：`up` / `dn` 允许为空（价格跌穿 / 站上**全部**已识别关键位 ⇒ 结构真空区）。
+    # 渲染层其余各处都带 `or []` 兜底，页面不会崩，但读者会把「该侧 0 档」误读成数据缺失。
+    # ★ 双向断言（规则 160 同族）：
+    #   · 只做「声明 ⇒ 有说明」→ 会被「渲染层无条件输出一句说明」骗过；
+    #   · 只做「有说明 ⇒ 声明」→ 会被「某侧真的空了但页面不说」骗过。
+    #   故：plan.json 声明集合必须**恰好等于**产物实读集合，且每一侧的文案关键词**含本侧、
+    #   不含另侧**（防渲染层把「上方」写成「下方」—— 段内互换位置这种错只核存在性抓不到）。
+    #   另核边界价确实落在产物里（可溯源，规则 149）。
+    _sn = p.get("side_note") or {}
+    _decl = sorted(k for k in ("up", "dn") if _sn.get(k))
+    _got_v = sorted(k for k in ("up", "dn")
+                    if new.count('class="plan-vac plan-vac--%s"' % k))
+    _bad_v = []
+    for _k in _decl:
+        _m = re.search(r'class="plan-vac plan-vac--%s"[^>]*>(.*?)</div>' % _k, new, re.S)
+        _seg = _m.group(1) if _m else ""
+        _have = ("下方" if _k == "dn" else "上方") + "无任何参考位"
+        _other = ("上方" if _k == "dn" else "下方") + "无任何参考位"
+        _bp = (_sn[_k] or {}).get("bound_price")
+        if (not _seg) or _have not in _seg or _other in _seg:
+            _bad_v.append("%s 文案缺/串位（含「%s」=%s）" % (_k, _have, _have in _seg))
+        elif _bp is not None and ("{:,.2f}".format(_bp) not in _seg):
+            _bad_v.append("%s 边界价 %s 未出现在说明里" % (_k, "{:,.2f}".format(_bp)))
+    if _decl == _got_v and not _bad_v:
+        print("  [PASS] 判据20 结构真空区说明与 plan.json 双向一致（声明 %s / 实读 %s，文案与边界价均对账）"
+              % ("、".join(_decl) or "无", "、".join(_got_v) or "无"))
+    else:
+        fails.append("判据20 真空区说明不符：声明 %s、实读 %s、问题 %s"
+                     % (_decl or "无", _got_v or "无", _bad_v))
 
     print("")
     if fails:

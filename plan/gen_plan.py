@@ -369,7 +369,58 @@ def main():
             "无中枢时 position 应为「无中枢」，实测 %r ⇒ 与 analyze() 口径不一致" % pos
 
     up, dn = pick(collect(r), close)
-    assert up and dn, "上方 / 下方价位至少各需 1 个（收集中断或合并过严）"
+
+    # ★★ R544：**单侧为空是合法市场状态，绝不可当作异常中止生成**（原实现在此 `assert up and dn`）。
+    #   故障实证（2026-10-15）：上证收 3707.48（−1.59%），跌破 15 个候选位里**最低**的中枢最低
+    #   DD 3741.11 ⇒ collect 全部候选无一 < close ⇒ `dn` 为空。一行断言把整条链打断：
+    #   CI step 7「抓取行情 + 生成报告」failure ⇒ 其后「配置 Pages」「上传产物」
+    #   「部署到 GitHub Pages」全部 skipped ⇒ **当日两轮（16:00 / 16:30）都没发布，
+    #   线上停在昨日产物**。而此前 fetch_data / schema 校验 / quality_cert / report.html
+    #   **全部成功** —— 被一句与产品正确性无关的断言连坐。
+    #   与规则 175 同族（断言不得让停发发生），但触发条件不是「容量」而是「**状态**」：
+    #   价格跌穿 / 站上**全部**已识别关键位（结构真空区）本身是极重要的信息，
+    #   必须如实呈现，而不是把生成器打红。
+    #   故改为：落盘 `side_note`，供渲染层说明「某侧没有任何参考位 ⇒ 不是数据缺失」。
+    #   ★ 有界：**只在某侧为空时才生成**（双侧都不空 ⇒ `{}`），不改变既有产物的字段语义。
+    #   ★ 单一来源（规则 111/172）：真空区方向、边界价、候选总数**都在这里判一次**并落盘，
+    #     渲染层只负责措辞，不自造任何数字、不自行判断「哪一侧为空」。
+    _uniq = _dedup(collect(r))
+    side_note = {}
+    for _k, _arr in (("up", up), ("dn", dn)):
+        if _arr:
+            continue
+        if _uniq:
+            # 「该侧为空」⇔ 现价与**全部**组的关系同向：
+            #   dn 空 ⇒ 所有组价 > close（真空区位于**最低组之下**，边界取 min）；
+            #   up 空 ⇒ 所有组价 < close（真空区位于**最高组之上**，边界取 max）。
+            _b = (min if _k == "dn" else max)(_uniq, key=lambda u: u["price"])
+            _bp = round(_b["price"], 2)
+            # 现价与边界价的相对关系（含「恰好等于」这一边界情形，不让渲染层自己比大小）
+            _rel = "lt" if close < _bp else ("gt" if close > _bp else "eq")
+            # 状态**文案**也在本侧给定（规则 111 / 149 / 172：同一事实只判一次、只写一处，
+            # 渲染层不得自己比大小再编判定语）。
+            _rel_label = ({"lt": "已跌破全部已识别关键位",
+                           "gt": "全部已识别关键位均在本位之上",
+                           "eq": "恰好贴在该位（全表最低关键位）"}[_rel] if _k == "dn" else
+                          {"gt": "已站上全部已识别关键位",
+                           "lt": "全部已识别关键位均在本位之下",
+                           "eq": "恰好贴在该位（全表最高关键位）"}[_rel])
+            side_note[_k] = {
+                "bound_price": _bp,
+                "bound_label": _label_of(_b),
+                "bound_src": " ｜ ".join(_b["srcs"]),
+                "n_candidates": len(_uniq),
+                "close_vs_bound": _rel,
+                "state_label": _rel_label,
+                # 真空区相对边界的方向（渲染层据此写「下方 / 上方」，不自造）
+                "side_dir": "下方" if _k == "dn" else "上方",
+            }
+        else:
+            # 全部候选位都与现价重合（去重后仅剩 1 组且 price == close）—— 不编造边界价。
+            side_note[_k] = {"bound_price": None, "bound_label": None, "bound_src": None,
+                             "n_candidates": 0, "close_vs_bound": None,
+                             "state_label": "全部候选位均与现价重合",
+                             "side_dir": "下方" if _k == "dn" else "上方"}
 
     def pack(u):
         # R541 自证契约：渲染层要把 `label` 段与 `semantic` 段**按序配对**（图右侧逐段写含义，
@@ -504,6 +555,9 @@ def main():
         "bias": r.get("bias"),
         "pos_pct": pos_pct,
         "gap_bands": gap_bands,
+        # ★ R544：某侧无任何参考位时的**如实说明**（结构真空区）。双侧都不为空 ⇒ `{}`。
+        #   有界字段：只在「现价已跌穿 / 站上全部已识别关键位」时出现，避免产物无谓膨胀。
+        "side_note": side_note,
         "near_pct": NEAR_PCT,
         # R541：原 `notes`（6 条「怎么用」说明）字段**已删除** —— 旭总 2026-10-12 要求删掉
         # 页面底部那段冗长说明。删除前逐条核过承载方（规则 107：披露不得静默丢失）：
@@ -524,10 +578,11 @@ def main():
     _seg_off = sum(1 for _x in (up_packed + dn_packed)
                    for _p in _x["seg_prices"] if _p != _x["price"])
     print("plan.json OK  asof=%s  close=%s  上%d 下%d  动作%d  失效%d  信号%d(判据成立%d)"
-          "  中枢分位=%s  缺口带%d  段内异价%d" % (
+          "  中枢分位=%s  缺口带%d  段内异价%d  侧缺=%s" % (
               plan["asof"], plan["close"], len(plan["up"]), len(plan["dn"]),
               len(plan["actions"]), len(plan["invalidations"]), _sig_rows, _sig_live,
-              ("%.1f%%" % pos_pct) if pos_pct is not None else "—", len(gap_bands), _seg_off))
+              ("%.1f%%" % pos_pct) if pos_pct is not None else "—", len(gap_bands), _seg_off,
+              ",".join(sorted(side_note)) or "无"))
 
 
 if __name__ == "__main__":

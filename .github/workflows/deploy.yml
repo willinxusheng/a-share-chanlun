@@ -223,9 +223,35 @@ jobs:
           # 注入后立刻做**零回归自证**：精确移除新增两段必须逐字节等于注入前 ⇒ 阻断式门禁，
           # 确保「改看板顺手改了别处」这类回归无法静默上线。
           cp index.html /tmp/_idx_pre_plan.html
-          python plan/gen_plan.py
-          python plan/inject_plan.py index.html
-          python plan/verify_inject.py /tmp/_idx_pre_plan.html index.html
+          # ★ R544（规则 175 正式落地）：plan 三步**不得拖垮当日数据上线**。
+          #   故障实证：2026-10-15 上证收 3707.48（−1.59%）跌破全表最低位 3741.11 ⇒ `dn` 为空
+          #   ⇒ gen_plan.py 里一句 `assert up and dn` 抛异常 ⇒ 本 step failure ⇒
+          #   「配置 Pages」「上传产物」「部署到 GitHub Pages」**全部 skipped** ⇒
+          #   **当日两轮（16:00 / 16:30）都没发布，线上停在昨日产物**。
+          #   而当时 fetch_data / schema 校验 / quality_cert / report.html **全部成功** ——
+          #   一个「附加呈现」区块的失败把「当日数据必须上线」这件事一起带走了。
+          #   ⇒ 现改为：
+          #     · 纯数据刷新（schedule / workflow_dispatch，即 cron-job.org 定时）：
+          #       失败则**回退到注入前 index.html** 继续发布（数据照常上线，只少一个区块），
+          #       并以 ::warning:: 可见；
+          #     · 我 push 且改动了 .py（GATE_MODE=block）：**严格阻断**（沿用 R188/R238 强度）
+          #       —— 代码变更必须自证正确，不允许「带着坏的 plan 代码静默上线」。
+          #       ⚠ 此时本 step 红叉，但**下一个定时轮（≤30min）** 会走 warn 分支回退并补发，
+          #         站点不会长期停更。
+          #   ★ 回退是幂等安全的：inject_plan.py 走 `tmp + os.replace`，它自己失败时
+          #     index.html 根本未被触碰；verify_inject 失败时才需要这次回退。
+          if python plan/gen_plan.py \
+             && python plan/inject_plan.py index.html \
+             && python plan/verify_inject.py /tmp/_idx_pre_plan.html index.html; then
+            echo "plan 区块：生成 + 注入 + 零回归门禁（20 条判据）全部通过"
+          else
+            cp /tmp/_idx_pre_plan.html index.html
+            if [ "${GATE_MODE}" = "block" ]; then
+              echo "::error::plan 区块生成/注入/门禁失败 —— 本次为**改动了 .py 的 push**（GATE_MODE=block），按 R188/R238 强度严格阻断；已回退 index.html，本次不发布。下一个定时轮会以 warn 方式回退并补发。"
+              exit 1
+            fi
+            echo "::warning::plan 区块生成/注入/零回归门禁失败 —— 本次为数据刷新（未改代码），已回退到注入前 index.html，**不阻断当日数据上线**（R544 · 规则 175）；请查 plan/gen_plan.py 与 plan/inject_plan.py 的当日日志"
+          fi
           # R330: 接线 audit_report_runtime(R169, 自述「阻断 CI」却从未被任何 workflow 调用)
           # —— 扫描最终 report.html 是否混入 NaN/Infinity/undefined 数据字面量(ECharts 解析
           # 失败或渲染 "NaN" 文本); 产物已含 inject_banner 注入态, report.html 存在故不触发
