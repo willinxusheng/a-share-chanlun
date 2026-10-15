@@ -265,6 +265,33 @@ jobs:
           # 位置刻意放在 report.py 之后：它要用产物自带 OHLC 重建 K 线跑一遍**生产** analyze()。
           python audit_signal_coverage.py
 
+      - name: 推演预测链体检（非阻断护栏 · 每日留痕）
+        # ★ R545 接线：预测审计族此前**从未被任何 workflow 调用** —— 与 R330 接线
+        #   audit_data_schema / audit_report_runtime 之前的状态同型：脚本自述是「监控门禁」，
+        #   却无人运行，预测链（置信带覆盖/方向命中/概率校准/尾部/形态）的准确性只在
+        #   本地手跑时可见。R545 审计实测：本机 /usr/bin/python3(3.9.6) 下 6/6 抛
+        #   `SyntaxError: EOL while scanning string literal`（report.py:1962 的 PEP 701
+        #   多行 replacement field）⇒ **连 import report 都做不到**，整族在系统 Python 上
+        #   静默不可运行。该处已修（现 50/50 个 .py 均可在 3.9 编译），本步把整族接进每日链。
+        #
+        # 分层（规则 185）：主数据 P0 已由上方 audit_data_schema / audit_report_runtime /
+        #   audit_signal_coverage 硬断言把关；本族属**附加体检 P1**，只降级不阻断 ——
+        #   continue-on-error 保证任何失败都不影响当日上线，读数永久留在 CI 日志可回溯。
+        #   ⚠ 本族脚本自身退出码恒 0（设计为监控门禁），故本步的价值在**打印的读数**
+        #     （覆盖率 / 方向命中 / Brier / 带宽 bias / 形态 ρ）而非红绿结论。
+        # timeout-minutes：整族本地实测约 60s；12 分钟上限只防 walk-forward 偶发挂死。
+        continue-on-error: true
+        timeout-minutes: 12
+        run: |
+          for f in audit_forecast_consistency audit_point_in_time audit_regime_direction \
+                   audit_probability_calibration audit_interval_score audit_path_shape \
+                   audit_point_bias audit_forecast_drift audit_tail_coverage \
+                   audit_vol_scaling audit_sentiment_conditioning audit_forecast_calibration; do
+            echo "::group::预测体检 $f"
+            python "$f.py" || echo "WARN: $f 执行异常（仅告警，不影响发布；见 R545 分层）"
+            echo "::endgroup::"
+          done
+
       - name: 标签重叠诊断（非阻塞护栏，仅告警 + 上传 artifact）
         # 实证守卫：R100 日期轴修复(hideOverlap:false + formatter 控显)后，各图表文字
         # 标签应零重叠。每日自动跑一遍，一旦回归即产生重叠对并被记录告警；该步骤

@@ -1954,13 +1954,25 @@ def forecast_svg(klines, r, wcls, conf, sigma, sym, horizon=60, bt=None, bt_path
         _degen_today = False
     if _degen_today:
         _tgt_pct = (main_p[-1][1] / last - 1) * 100
+        # ★ R545: 把「跨行 replacement field」提出为普通变量。原实现写成
+        #   `f'{"…长句A"⏎ if _main_dir == -1 else "…长句B"}，'` —— 这是 **PEP 701**（多行
+        #   replacement field），仅 Python ≥3.12 可解析；3.9~3.11 上直接
+        #   `SyntaxError: EOL while scanning string literal`，**连 import report 都做不到**
+        #   ⇒ 12 个预测审计门禁（audit_forecast_* / audit_point_in_time 等，全部 `from report import`）
+        #   在本机 /usr/bin/python3(3.9.6) 上集体无法运行（实测 6/6 抛 SyntaxError）。
+        #   本文件下方 legend 段已明文写下纪律「不写成 f-string 内嵌引号 —— 那是 PEP 701 语法，
+        #   仅 Python ≥3.12 支持；CI 的 python-version 未必 ≥3.12」，同一文件却在此处用了
+        #   另一处 PEP 701 特性 ⇒ 同一约束两个出口、口径分裂（规则 111/172）。
+        #   本修法即该纪律本身：数值与文案**一字未改**，只把字符串提到 f-string 之外。
+        _degen_why = ("空头情景的回落目标位（中枢中位×0.99）在现价已跌穿中枢中位后反落于现价上方"
+                      if _main_dir == -1
+                      else "多头情景的突破目标位在现价已上破该位后反落于现价下方")
         _degen_note = (
             f'<div style="margin-top:4px;font-size:12px;line-height:1.75;color:#b45309">'
             f'⚠ <b>当前情景处于退化几何</b>：主路径终点 {main_p[-1][1]:.0f} 落在现价'
             f'{"上方" if _main_dir == -1 else "下方"}（{_tgt_pct:+.1f}%），'
             f'与{"空头" if _main_dir == -1 else "多头"}方向<b>相反</b> —— '
-            f'{"空头情景的回落目标位（中枢中位×0.99）在现价已跌穿中枢中位后反落于现价上方"
-              if _main_dir == -1 else "多头情景的突破目标位在现价已上破该位后反落于现价下方"}，'
+            f'{_degen_why}，'
             f'它<b>尚未被触及、也不构成可兑现的落点</b>；但判据「未来价格触及目标位」在此几何下'
             f'<b>恒成立</b>（现价已在目标位的顺判据一侧）⇒ '
             f'主路径概率应按<b>方向口径</b>解读'
