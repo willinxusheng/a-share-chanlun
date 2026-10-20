@@ -141,19 +141,60 @@ jobs:
       - name: 抓取行情 + 生成报告（带重试）
         run: |
           set -euo pipefail
+          # ================= R546：把「部分成功」从发布链上摘掉 =================
+          # 事故实证（2026-10-20）：腾讯 fqkline 上游 outage，返回
+          #   {"code":11,"data":"","msg":"mysql connect failed, host:…:40126"}
+          # 三轮重试里前两轮 0/5 全失败、第三轮只拿到 3/5（缺 sh000001 上证 / sz399006 创业板）。
+          # `fetch_data.py` 的设计意图是「抓到几成算几成，缺失标的标 N/A」，故 3/5 时**退出码 0**
+          # ⇒ 旧代码 `if python fetch_data.py; then ok=1; break` 直接 **break**，
+          #   重试机会就此用完；
+          # ⇒ 紧接着 `audit_data_schema` 要求 5/5，FAIL ⇒ 本 step exit 1
+          # ⇒ 「配置 Pages / 上传产物 / 部署到 GitHub Pages」全部 skipped
+          # ⇒ **整站停更**（线上停在 10-19，16:00 那轮完全没发出去）。
+          #
+          # ★ 反直觉且必须修的地方：**「全部失败」比「部分成功」后果更轻** ——
+          #   0/5 时 `ok` 仍是 0，会走下方 R228 兜底，用缓存恢复的上次成功 data.json
+          #   **照常发布**（行情降级一日，情绪等其余部分更新）；而 3/5 却因为"看起来成功了"
+          #   一路撞上门禁死掉。这与 R228/R238/R544 的「当日数据必须当天上线」直接冲突
+          #   （规则 175 同族：不可行状态不得阻断发布）。
+          #
+          # ★ 为什么「缺失就必须兜底、不能放行 3/5 发布」：
+          #   `fetch_data.py` 承诺的「缺失标的将在看板标 N/A」**不成立** —— 实测（2026-10-20，
+          #   在隔离副本删掉 sh000001/sz399006 后跑 report.py）产物里 `数据缺失` 出现 **0 次**：
+          #   `report.py:4939` 的降级占位卡只在「klines 为空序列」时触发，而 outage 造成的是
+          #   **键彻底不存在**，循环根本走不到该分支 ⇒ 发布出去就是**静默少两个指数**。
+          #   所以 audit_data_schema 的 5/5 是必要护栏，要改的是"重试与兜底"而不是"放宽门禁"。
+          #
+          # 修法三条：
+          #   ① 判据并入循环：`fetch_data.py && audit_data_schema.py` 都过才算成功 ⇒ 部分成功
+          #      会继续重试（今天那种 3/5 状态在第 4/5 轮大概率拿到 5/5，可当场自愈）；
+          #   ② 轮次 3→5、退避 30s→递增（30/60/90/120），把总覆盖从 ~1.5 分钟拉到 ~8 分钟，
+          #      覆盖一次典型的源端抖动窗口；
+          #   ③ 兜底读**循环前备份**的上次成功产物（见下），而不是循环后残留的残缺 data.json。
+          #      旧代码的 `[ -s data.json ]` 在「部分成功」场景下会读到 3/5 的残缺文件，
+          #      `-s` 只测非空 ⇒ 误判为"有可用兜底" ⇒ 后面 audit_data_schema 照样 FAIL。
+          if [ -f data.json ] && [ -s data.json ]; then
+            cp data.json /tmp/_data_prev.json   # 缓存恢复的上次成功产物 = 唯一可信兜底
+            echo "已备份上次成功 data.json 作为兜底（$(wc -c < /tmp/_data_prev.json) 字节）"
+          else
+            echo "无可用兜底 data.json（首次构建或缓存未命中）"
+          fi
           ok=0
-          for i in 1 2 3; do
-            if python fetch_data.py; then ok=1; break; fi
-            echo "fetch attempt $i failed, retry in 30s"; sleep 30
+          _delay=30
+          for i in 1 2 3 4 5; do
+            if python fetch_data.py && python audit_data_schema.py; then ok=1; break; fi
+            echo "fetch attempt $i failed or contract-incomplete(5/5 未齐备), retry in ${_delay}s"
+            sleep "$_delay"
+            _delay=$((_delay + 30))
           done
           if [ "$ok" -ne 1 ]; then
-            # R228: 行情源(东财)在 CI 偶发失败不应阻断发布——否则连只改展示层的提交
-            # (如 R227 改"生成时间"标注)都会被卡住不上线。改用仓库已提交的 data.json
-            # (上次成功抓取产物, 非脏数据) 兜底继续部署, 仅行情降级至上一成功交易日;
-            # 仅当仓库根本无 data.json(首次/损坏)才真正中止, 保留脏数据防护。
-            if [ -s data.json ]; then
-              # R238: 措辞更正 —— data.json 并不入库, 这里用的是上一步缓存恢复的上次成功抓取产物
-              echo "WARN: 行情抓取连续 3 次失败, 用缓存恢复的上次成功 data.json 兜底继续部署(行情降级至上一成功交易日, 情绪等其余部分仍照常更新)"
+            # R228: 行情源偶发失败不应阻断发布——否则连只改展示层的提交都会被卡住不上线。
+            # 改用缓存恢复的上次成功 data.json(非脏数据) 兜底继续部署, 仅行情降级至上一成功交易日;
+            # 仅当根本没有上次成功产物(首次/缓存损坏)才真正中止, 保留脏数据防护。
+            if [ -s /tmp/_data_prev.json ]; then
+              # R238/R546: data.json 并不入库, 这里用的是 actions/cache 恢复的上次成功抓取产物
+              cp /tmp/_data_prev.json data.json
+              echo "::warning::行情抓取 5 轮均未拿到齐备的 5/5 标的（疑似上游 outage），已回退到缓存恢复的上次成功 data.json 兜底发布 —— 行情降级至上一成功交易日，情绪/结构等其余部分照常更新；**当日站点不停更**（R546）。请核对源端恢复情况，watchdog 会在盘后巡检时自动补发。"
             else
               echo "ERROR: 行情抓取失败且无可用 data.json, 中止发布"
               exit 1

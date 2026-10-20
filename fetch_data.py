@@ -1183,7 +1183,20 @@ def main():
               file=sys.stderr)
         sys.exit(1)
     if len(result) < len(SYMBOLS):
-        print("WARN 仅抓到 %d/%d 标的, 仍写入(缺失标的将在看板标 N/A)" % (len(result), len(SYMBOLS)))
+        # ★ R546 更正（规则 107：披露文案本身也是被审计对象）：
+        #   旧文案「缺失标的将在看板标 N/A」是**不成立的承诺**。实测 2026-10-20 上游 outage
+        #   只抓到 3/5（缺 sh000001 上证 / sz399006 创业板）时，在隔离副本跑 report.py 后
+        #   产物里 `数据缺失`（report.py:4939 的降级占位卡文案）出现 **0 次** —— 因为该占位卡
+        #   只在「klines 是空序列」时触发，而 outage 造成的是**键彻底不存在**，
+        #   渲染循环根本走不到那条分支 ⇒ 看板里这两个指数**静默消失**，没有任何 N/A。
+        #   故此处如实告知：缺失标的不会出现在看板，下游 audit_data_schema 会拦截，
+        #   deploy.yml（R546 起）把「5/5 齐备」并入重试判据，仍不齐备则回退上次成功产物继续发布。
+        _miss = [k for k in SYMBOLS if k not in result]
+        print("WARN 仅抓到 %d/%d 标的（缺 %s）; 仍写入 data.json, 但**缺失标的不会出现在看板**"
+              "(键缺失时无占位卡, 会静默少图) ⇒ audit_data_schema 会拦截此产物; "
+              "deploy.yml(R546) 将据此判为未成功并重试/回退上次成功产物"
+              % (len(result), len(SYMBOLS),
+                 ",".join(_miss) if _miss else "?"))
     # 原子写：先写 .tmp 再 os.replace，避免写入途中崩溃留下半截损坏文件
     out_path = os.path.join(_BASE, "data.json")
     tmp_path = out_path + ".tmp"
