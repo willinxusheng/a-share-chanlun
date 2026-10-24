@@ -310,7 +310,24 @@ def main():
     miss_mp = [("%s %s" % kv) for kv in exp_mp
                if ('<span class="plan-lvl-mp">%s</span>' % kv[1]) not in lv_seg2
                or ('<span class="plan-lvl-mp">%s</span>' % kv[1]) not in new]
-    if exp_mp and got_mp == len(exp_mp) and not miss_mp:
+    # ★ R547: 空集（exp_mp 为空）是**合法状态**，不是缺陷 —— 当合并组各成员的价位与
+    #   主价位**相同**时（如「中枢最高 GG / 顶背驰证伪位」两个名字指向同一个 3995.18、
+    #   「中枢最低 DD / 当前笔终点」同指 3674.82），标注一次即可，无需逐成员标价
+    #   ⇒ exp_mp 天然为空。旧判据 `if exp_mp and ...` 把这种情况判成 FAIL。
+    #   ★ 真实后果（已在线上发生，非理论顾虑）：2026-10-21 / 10-22 / 10-23 连续三个交易日，
+    #     CI 走到 `GATE_MODE=warn` 的 else 分支 ⇒ **plan 区块整块被静默回退**，
+    #     线上 index.html 的「明日关键价位 · 条件预案」消失（plan-board / plan-lvl 均 0），
+    #     而 step 仍为 success —— 正是规则 118「『跳过』下游 ⇒ job 仍绿」的形态。
+    #     而 10-20 那轮 exp_mp 有 1 处（MA60 3,880.68 ≠ 主价位）故 PASS，区块正常。
+    #   修法：空集时给**双向**判据 —— 页面也确实不该出现 plan-lvl-mp（出现即索引错位/多标），
+    #   使空集分支同样具备分辨力（非恒真，规则 186）。
+    if not exp_mp:
+        if got_mp == 0:
+            print("  [PASS] 判据17 本日无「成员价位 ≠ 主价位」的合并组 ⇒ 无需逐成员标价（span 0）")
+        else:
+            fails.append("判据17 期望无成员标价但页面出现 %d 处 plan-lvl-mp（索引错位或多标）"
+                         % got_mp)
+    elif got_mp == len(exp_mp) and not miss_mp:
         print("  [PASS] 判据17 合并组成员自身价位逐段标出（%d 处：%s）"
               % (len(exp_mp), "、".join("%s %s" % kv for kv in exp_mp)))
     else:
