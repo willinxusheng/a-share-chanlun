@@ -3221,9 +3221,33 @@ def levels_table(data, results, results_week, results_month, scores):
             zd_txt = f'{zs["zd"]:.0f}（{"+" if d_zd >= 0 else ""}{d_zd:.1f}%）'
         else:
             zg_txt = zd_txt = "—"
+        # ★ R547b（同族第 5 处）：跨级别冲突的**两个出口口径不一**（规则 111/172）。
+        #   出口A `conflict_badge()` 走 `conflict_levels()` —— **日/周/月三级全查**；
+        #   出口B 本列的 ⚠ 只读 `cls["cross_conflict"]`（**日线自身**）。
+        #   语义上「日线分类列只标日线自身冲突」是对的，但**读者在本表里无从得知**
+        #   该指数存在周/月级冲突 —— 实测今日 **沪深300 冲突仅在月线**：分指数区块标题
+        #   显示「跨级别冲突（月）」，而本表该行**毫无痕迹**（sheet 上 ⚠=False）。
+        #   修法（最小侵入：**不改列数/列宽** —— R510 曾因表宽致整页横滚）：
+        #   ① ⚠ 的**显示判据不动**（保持「日线自身」语义，不把别级冲突记到日线头上）；
+        #   ② 把**三级口径写进该单元格的 title**（hover 可见）；
+        #   ③ 表下补一句说明，讲清「本表为什么不加 ⚠」。
+        _clv = conflict_levels(cls, wcls, mcls)
+        _d_note = (cls.get("cross_conflict") or {}).get("note", "")
+        if not _clv:
+            _d_title = ""
+        elif "日" in _clv:
+            _d_title = _d_note          # 日线自身冲突：沿用原作口径，零变化
+        else:
+            _c0 = None
+            for _c in (wcls, mcls):
+                if isinstance(_c, dict) and _c.get("cross_conflict"):
+                    _c0 = _c["cross_conflict"]
+                    break
+            _d_title = (f'本指数跨级别冲突位于「{"/".join(_clv)}」级（日线自身无冲突，'
+                        f'故本列不加 ⚠）：' + ((_c0 or {}).get("note", "")))
         rows.append(f"""<tr data-sym="{sym}" class="linkrow" data-jump>
           <td><b>{d["name"]}</b></td>
-          <td>{badge(cls["scenario"] + ("⚠" if cls.get("cross_conflict") else ""), sc_color, '', (cls.get("cross_conflict") or {}).get("note", ""))}</td>
+          <td>{badge(cls["scenario"] + ("⚠" if cls.get("cross_conflict") else ""), sc_color, '', _d_title)}</td>
           <td>{badge(wcls["scenario"], w_color)}</td>
           <td>{badge(mcls["scenario"], m_color)}</td>
           <td class="tac">{syn}</td>
@@ -3235,7 +3259,8 @@ def levels_table(data, results, results_week, results_month, scores):
       <table class="tbl">
       <colgroup><col style="width:90px"><col style="width:calc((100%% - 90px)/9)"><col style="width:calc((100%% - 90px)/9)"><col style="width:calc((100%% - 90px)/9)"><col style="width:calc((100%% - 90px)/9)"><col style="width:calc((100%% - 90px)/9)"><col style="width:calc((100%% - 90px)/9)"><col style="width:calc((100%% - 90px)/9)"><col style="width:calc((100%% - 90px)/9)"><col style="width:calc((100%% - 90px)/9)"></colgroup>
       <thead><tr><th>指数</th><th>日线分类</th><th>周线分类</th><th>月线背景</th><th class="tac">级别联立</th><th>现价</th><th>压力 ZG（距离）</th><th>支撑 ZD（距离）</th><th class="tac">健康度 / 置信度</th><th>应对策略</th></tr></thead>
-      <tbody>%s</tbody></table>""" % "".join(rows)
+      <tbody>%s</tbody></table>
+      <p style="font-size:12px;color:#64748b;margin-top:8px">本表「日线分类」列的 <b>⚠</b> 只表示<b>日线自身</b>存在跨级别冲突；若冲突只出现在<b>周线或月线</b>（如本次沪深300 仅月线），该列<b>不会</b>加 ⚠ —— 这是刻意的，免得把别的级别的冲突记到日线头上。此类情形请<b>悬停该单元格</b>看提示，或看各指数区块标题的「跨级别冲突（日 / 周 / 月）」徽章。本表不设独立「跨级别冲突」列同样是刻意的：加列会挤压列宽（R510 曾因表宽致整页横滚）。</p>""" % "".join(rows)
 
 
 def backtest_table(backtests):
