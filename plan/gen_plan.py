@@ -55,16 +55,88 @@ def _pct(a, b):
     return (a / b - 1.0) * 100.0
 
 
-def _semantic(kind):
+# ★★ R548：`_semantic()` 的文案必须**读当前状态**（规则 177：模板文案须读判据状态定时态），
+#   否则会拿未然条件句描述已经发生的事实。
+#
+#   取证（2026-10-28 收盘，5 指数全扫，探针 `_dbg/r548/a1_state.py`）：**8 处**位已经处在
+#   「现价在其另一侧」的已实现状态，而文案一律是「收盘跌破 ⇒ …」：
+#     上证 3767.50（ZD）· 沪深300 4492.09（ZD）· 深证 13342.93（ZD）·
+#     中证500 7253.52（ZD）—— 5/5 指数的 ZD 全部已被收盘价跌破；
+#     深证 11667.18 · 创业板 3125.20 · 中证500 6692.83 —— 连「中枢最低 DD / 当前笔终点」
+#       都已失守（即整个中枢区间被跌穿）；
+#     创业板 3227.18（底背驰证伪位）已被跌破 ⇒ 底背驰判据**已经证伪**，文案却还写「跌破 ⇒ 证伪」。
+#   ★ 最要命的是**同一区块内自相矛盾**：页头写着「位置：中枢下方」，而该位文案写着
+#     「收盘跌破 ⇒ 中枢下沿失守，进入中枢下方（结构转弱）」⇒ 读者会以为「现在还在中枢里」。
+#   ★ 与 R547 在 report.py 修的「主路径失效位 5/5 已跌破却 0 次披露」是**同一类缺陷**，
+#     只是落在 plan 模块（另一条生成链、另一批出口）—— 所以必须在这一侧单独修。
+#
+#   判据只有一条几何事实（close 在 price 哪一侧）＋ kind 的语义方向：
+#     跌破型：close < price ⇒ 已跌破 · 站上型：close > price ⇒ 已站上 · 中性型：不判。
+#   ★ close == price 视为**未**实现（既未跌破也未站上），按未实现态出文案。
+DN_KINDS = frozenset({"zd", "dd", "bi_dn", "bi_prev_dn", "inv_bot"})
+UP_KINDS = frozenset({"zg", "gg", "bi_up", "bi_prev_up", "inv_top",
+                      "ma20", "ma60", "ma120", "ma250"})
+
+# 已实现态文案（% 为「现价相对该位的偏离幅度」，取绝对值；semantic 走 esc() 落 HTML ⇒ **不得含标签**）
+_REALIZED_SEM = {
+    "zd": "★ 现价已跌破中枢下沿 ZD（低 %.2f%%）⇒ 已进入中枢下方、结构转弱；收回 ZD 上方才算重回中枢区间",
+    "dd": "★ 现价已跌破中枢最低 DD（低 %.2f%%）⇒ 本中枢区间整体失守、已处在新低结构内；收回 DD 上方才谈得上中枢重建",
+    "bi_dn": "★ 现价已跌破当前向下笔低点（低 %.2f%%）⇒ 该笔已向下延伸（低点已刷新）",
+    "bi_prev_dn": "★ 现价已跌破前一笔低点（低 %.2f%%）⇒ 前低已被破",
+    "inv_bot": "★★ 现价已跌破底背驰证伪位（低 %.2f%%）⇒ 底背驰判据已证伪"
+               "（⚠ 仅作判据参考，不可当止损 —— R489 已证）",
+    "zg": "★ 现价已站上中枢上沿 ZG（高 %.2f%%）⇒ 已回到中枢上半区（中枢内偏强）",
+    "gg": "★ 现价已站上中枢最高 GG（高 %.2f%%）⇒ 已向上突破该中枢、创中枢新高",
+    "bi_up": "★ 现价已站上向上笔高点（高 %.2f%%）⇒ 该笔已向上延伸（高点已刷新）",
+    "bi_prev_up": "★ 现价已站上前一笔高点（高 %.2f%%）⇒ 前高已被收复",
+    "inv_top": "★★ 现价已上破顶背驰证伪位（高 %.2f%%）⇒ 顶背驰判据已证伪（见顶判断作废，需重判）",
+    "ma20": "均线位（MA20）：★ 现价已站上（高 %.2f%%）⇒ 短线已转强（20 日动量修复）",
+    "ma60": "均线位（MA60）：★ 现价已站上（高 %.2f%%）⇒ 中期成本线已收复，趋势修复的前提成立",
+    "ma120": "均线位（MA120 · 半年线）：★ 现价已站上（高 %.2f%%）",
+    "ma250": "均线位（MA250 · 年线）：★ 现价已站上年线（高 %.2f%%）⇒ 已站上牛熊分界",
+}
+
+
+def _base_kind(kind):
+    """`fib@38.2%` → `fib`；其余原样。"""
+    return "fib" if kind.startswith("fib@") else kind
+
+
+def _realized(kind, price, close):
+    """该 kind 的「已实现」状态 ⇒ '已跌破' / '已站上' / None。
+
+    ★ 单一来源（规则 111/172）：semantic 文案、渲染层标记都读这一个函数的结果，
+      渲染层不得自己再比一次大小。
+    """
+    if price is None or close is None:
+        return None
+    base = _base_kind(kind)
+    if base in DN_KINDS and close < price:
+        return "已跌破"
+    if base in UP_KINDS and close > price:
+        return "已站上"
+    return None
+
+
+def _semantic(kind, price=None, close=None):
     """结构位的客观语义（状态描述，非买卖指令）。
 
     R541：Fib 位支持 `fib@38.2%` 形式 —— 此前三段 Fib 的含义文字**一字不差**，
     读者分不清哪档是哪档（实测 38.2% / 50% / 61.8% 三档 semantic 完全相同 ⇒ 等于没说）。
     带上百分比后至少能对上号。★ 至于「38.2% 是浅回调、61.8% 是黄金分割」这类经验判断
     **刻意不加**：无实证支撑，且 R535 已拍板本区块不预测方向、只答「到该位进入什么状态」。
+
+    ★★ R548：`price`/`close` 传入时，先判该位是否**已实现**（现价已在其另一侧）——
+      已实现 ⇒ 用陈述语气（`_REALIZED_SEM`）；未实现或未传参 ⇒ 原条件句**逐字不变**。
+      这是规则 177（模板文案须读判据状态定时态）在本模块的落地：此前 8 处位已跌破，
+      却仍写「收盘跌破 ⇒ …」（实测数据见 `_realized()` 上方注释）。
     """
     if kind.startswith("fib@"):
         return "斐波那契回调位（前一笔摆动的 %s）：常见反抽/回踩目标区" % kind[4:]
+    if _realized(kind, price, close):
+        _t = _REALIZED_SEM.get(_base_kind(kind))
+        if _t:
+            return _t % abs(_pct(close, price))
     return {
         "zg": "收盘站上 ⇒ 回到中枢上半区（中枢内偏强）",
         "zd": "收盘跌破 ⇒ 中枢下沿失守，进入中枢下方（结构转弱）",
@@ -331,8 +403,28 @@ def _label_of(u):
     return " / ".join(u["labels"])
 
 
-def _sem_of(u):
-    return " ｜ ".join([s for s in (_semantic(k) for k in u["kinds"]) if s])
+def _sem_of(u, close=None):
+    """合并组的逐段语义。
+
+    ★ R548：传 `close` ⇒ 按「已实现 / 未实现」出两态文案；**不传 ⇒ 一律未实现态**
+      （`actions` 用这种口径：它描述的是「今日穿越该位后进入什么状态」，是一个瞬间事件的
+      后果说明，不是「当前已在位另一侧」的陈述 —— 若这里也判已实现，文案会拼成
+      「跌破 X 后进入：★ 现价已跌破 X…」，语义重复且读不通）。
+    """
+    return " ｜ ".join([s for s in (_semantic(k, u["price"], close) for k in u["kinds"]) if s])
+
+
+def _realized_of(u, close):
+    """合并组整体的「已实现」状态（组内任一段已实现即取其状态，供渲染层加标记）。
+
+    ★ 组内各段共享同一个代表价 `u["price"]`，而「已跌破 / 已站上」互斥（close 只能在一侧）
+      ⇒ 组级标量即可，不会出现「既是已跌破又是已站上」。
+    """
+    for k in u["kinds"]:
+        r = _realized(k, u["price"], close)
+        if r:
+            return r
+    return None
 
 
 def main():
@@ -441,7 +533,12 @@ def main():
                 "src": " ｜ ".join(u["srcs"]),
                 "dist_pct": round(_pct(u["price"], close), 2),
                 "state": state_of(u["price"], close, prev_close),
-                "semantic": _sem_of(u),
+                # ★ R548：该位是否已实现（现价已在另一侧）。与 `state` **正交**：
+                #   `state` 只答「今天有没有穿越」（up_cross/dn_cross/near/far），
+                #   `realized` 答「现在在哪一侧」—— 前者为 far 时后者完全可能已实现（实测 8 处）。
+                #   渲染层据此加标记，**不得自己比大小**（规则 111/172）。
+                "realized": _realized_of(u, close),
+                "semantic": _sem_of(u, close),
                 # R542：逐段自身价位（与 label 的 ` / ` 分段一一对应）。代表价（price）之外的
                 # 成员常与之相差 0.05%~0.13%（≈2~5 点）⇒ 渲染层据此逐段标出真实价位。
                 "seg_prices": [round(float(p), 2) for p in u["prices"]]}
@@ -455,12 +552,24 @@ def main():
 
     inv = bc_invalidation(r.get("bis") or [], r.get("beichi") or [])
     invalid = []
+    # ★ R548：「判据失效条件」同样必须读状态 —— 这是 inv_top/inv_bot 的**第二出口**
+    #   （第一出口是 up/dn 里的同价组）。实测 2026-10-28：创业板底背驰证伪位 3227.18
+    #   已被收盘价跌破（现价 2634.76，低 18.35%），旧文案却仍写「收盘跌破 ⇒ 底背驰判据作废」
+    #   ⇒ 读者会以为底背驰判据还成立。两出口不同口径正是规则 111 禁止的形态。
     if inv.get("top"):
-        invalid.append({"kind": "top", "price": round(inv["top"]["price"], 2),
-                        "text": "收盘上破 ⇒ 顶背驰判据作废，见顶判断需重判"})
+        _tp = inv["top"]["price"]
+        invalid.append({"kind": "top", "price": round(_tp, 2),
+                        "text": ("★★ 现价已在其上方（高 %.2f%%）⇒ 顶背驰判据已作废，见顶判断需重判"
+                                 % abs(_pct(close, _tp)))
+                        if _realized("inv_top", _tp, close)
+                        else "收盘上破 ⇒ 顶背驰判据作废，见顶判断需重判"})
     if inv.get("bot"):
-        invalid.append({"kind": "bot", "price": round(inv["bot"]["price"], 2),
-                        "text": "收盘跌破 ⇒ 底背驰判据作废（⚠ 不可当止损，仅作判据参考）"})
+        _bp2 = inv["bot"]["price"]
+        invalid.append({"kind": "bot", "price": round(_bp2, 2),
+                        "text": ("★★ 现价已在其下方（低 %.2f%%）⇒ 底背驰判据已作废"
+                                 "（⚠ 不可当止损，仅作判据参考）" % abs(_pct(close, _bp2)))
+                        if _realized("inv_bot", _bp2, close)
+                        else "收盘跌破 ⇒ 底背驰判据作废（⚠ 不可当止损，仅作判据参考）"})
 
     # 买卖点信号：取最近 N 条（笔级 + 段级并列，不混计 —— 引擎本身即分表）+ 前向触发条件
     # ★ 状态列只答「判据还成立吗」，**不等于**「该执行」—— 措辞必须区分，否则会被读成买卖指令。
