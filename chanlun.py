@@ -1222,8 +1222,19 @@ def classify(bis, zss, beichis, close, wcls=None, segments=None, seg_beichi=None
         downs = sum(1 for x in (d_dir, w_dir, m_dir) if x == -1)
         if ups == 3:
             resonance = "三周期共振·多头"
+            # R527: 措辞一致性护栏 —— 本分支只看**最后一笔方向**，而 scenario 看的是**结构位置**
+            #   （背驰优先、其次中枢位置）。二者可同时成立：三级别末笔都向上 ⇏ 走势级别已转多。
+            #   实证(2026-11-06 线上产物)：上证 日/周/月末笔均 ↑ ⇒ 标"三周期共振·多头"，而同卡片
+            #   另三处写"反弹未回中枢"(SC_BEAR) / "空头排列" / "ADX 空头"，四处互相打架；
+            #   根因=用"结果性"词（多头）描述"过程性"事实（末笔方向）。缠论里"多头"指走势类型，
+            #   不是单笔方向 ⇒ 结构仍空时只陈述事实并标注性质，不借用多空结论词。
+            #   与既有 trend_type 一致性护栏(下方 R160)同族：同一张卡片不得自相矛盾。
+            if scenario in SC_BEAR:
+                resonance = "三周期末笔齐升（结构仍空·属反弹）"
         elif downs == 3:
             resonance = "三周期共振·空头"
+            if scenario in SC_BULL:
+                resonance = "三周期末笔齐跌（结构仍多·属回调）"
         elif d_dir == 1 and w_dir == -1 and m_dir == 1:
             resonance = "月多·日反弹·周未确认（反弹非反转）"
         elif d_dir == -1 and w_dir == 1 and m_dir == -1:

@@ -2980,9 +2980,33 @@ def card_html(sym, name, klines, r, wcls, health, conf):
     chg = (last["close"] / prev["close"] - 1) * 100
     color = RED if chg >= 0 else GREEN
     cls = r["classify"]
-    five_yr = (last["close"] / klines[0]["close"] - 1) * 100
+    # R527: 「近5年 / 近1年」涨跌的**口径修正**（标签与计算曾不一致，属数据准确性缺陷）。
+    #   旧实现：five_yr = last/klines[0] ⇒ 数据首根是 2021-01-04，实际跨度 5.84 年，
+    #           却标「近5年」⇒ 系统性夸大窗口（本轮回测：上证 +4.17% 是近 5.8 年口径，
+    #           真 5 年（2021-11-06 起）为另一个数）；
+    #           one_yr = last/klines[-250] ⇒ A股一年约 242~244 个交易日，250 根≈1.03 年
+    #           （实测差 6 个交易日，上证 -8.50% vs 真一年 -8.95%，差 0.45pp）。
+    #   现改为**按日历回溯**到最近交易日（-365d×n），取该日收盘为基准；找不到（数据不足）
+    #   再退回按根数近似，保证任何数据长度下都不崩且标签含义守恒。
+    def _close_years_ago(years):
+        from datetime import datetime, timedelta
+        try:
+            cur = datetime.strptime(last["date"], "%Y-%m-%d")
+        except (ValueError, TypeError):
+            return None
+        tgt = (cur - timedelta(days=365 * years)).strftime("%Y-%m-%d")
+        hit = None
+        for k in klines:                      # klines 已按日期升序（关1 契约）
+            if k["date"] <= tgt:
+                hit = k["close"]
+            else:
+                break
+        return hit
+    _c5 = _close_years_ago(5)
+    five_yr = (last["close"] / (_c5 if _c5 else klines[0]["close"]) - 1) * 100
     fy_color = RED if five_yr >= 0 else GREEN
-    one_yr = (last["close"] / klines[max(0, len(klines) - 250)]["close"] - 1) * 100
+    _c1 = _close_years_ago(1)
+    one_yr = (last["close"] / (_c1 if _c1 else klines[max(0, len(klines) - 244)]["close"]) - 1) * 100
     oy_color = RED if one_yr >= 0 else GREEN
     ann_vol = realized_vol_annualized(closes)
     vol_txt = ("%.1f%%" % (ann_vol * 100)) if ann_vol else "—"
@@ -3014,9 +3038,25 @@ def card_html(sym, name, klines, r, wcls, health, conf):
     _md = "↑" if cls.get("month_dir") == 1 else ("↓" if cls.get("month_dir") == -1 else "—")
     w_color = SCENARIO_COLOR.get(_wsc, "#64748b")
     m_color2 = SCENARIO_COLOR.get(_msc, "#64748b")
-    _res_color = ("#18a058" if ("共振" in _res and "空" not in _res)
-                  else ("#e54545" if ("共振" in _res and "空" in _res)
-                        else ("#d97706" if ("背离" in _res or "未确认" in _res) else "#0891b2")))
+    # R527: 共振标签配色改由**方向事实**推导，不再按标签字符串猜方向。
+    #   旧实现: "#18a058" if "共振" in _res and "空" not in _res else "#e54545" if ...
+    #   ⇒ 与全站涨红跌绿口径(多头=RED #e54545 / 空头=GREEN #18a058)**完全反色**：
+    #     2026-11-06 线上实测(上证卡片)「三周期共振·多头」渲染为 #18a058(跌色)，
+    #     而同卡片「多头排列」为 #e54545 ⇒ 同一张卡两处同义不同色，用户看到"多头"是绿的。
+    #   其次「日周共振·月背景定调」同向多/同向空共用同一颜色（方向无关的猜测）。
+    #   改为直接读 cls 的日/周/月末笔方向：三向皆↑=红、皆↓=绿、背离/未确认=橙、其余=中性青。
+    _dirs = (cls.get("last_bi_dir"), cls.get("week_dir"), cls.get("month_dir"))
+    if "齐升" in _res or "齐跌" in _res:
+        # 三级别末笔同向但结构与方向结论冲突（R527 措辞护栏产物）⇒ 橙色提示，不得用纯多/空色
+        _res_color = "#d97706"
+    elif _dirs[0] == 1 and _dirs[1] == 1 and _dirs[2] == 1:
+        _res_color = RED
+    elif _dirs[0] == -1 and _dirs[1] == -1 and _dirs[2] == -1:
+        _res_color = GREEN
+    elif ("背离" in _res or "未确认" in _res or "回调" in _res or "反弹" in _res):
+        _res_color = "#d97706"
+    else:
+        _res_color = "#0891b2"
     _zs = r["zhongshu"][-1] if r["zhongshu"] else None
     _zs_txt = ("%s · %d笔" % ("延伸" if _zs.get("extension") else "标准", _zs["count"])) if _zs else "—"
     _tt = cls.get("trend_type", "—")
