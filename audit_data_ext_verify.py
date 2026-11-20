@@ -35,10 +35,17 @@ bad = 0
 for sym, node in d.items():
     K = {k["date"]: k for k in node["klines"]}
     t = tx(sym, "day", 40)
+    # ★ R531 盘中运行修正: 上游末根=北京今日 ⇒ 那是未收盘半根(close=现价),
+    # 看板缺它属正常滞后, 披露为 ⏳ 不计错; 真正缺历史根仍 ❌。
+    _today = datetime.now().strftime("%Y-%m-%d")
     checked = 0
     for row in t[-15:]:
         if row["date"] not in K:
-            print(f"  ❌ {node['name']} 看板缺 {row['date']}"); bad += 1; continue
+            if row["date"] == _today:
+                print(f"  ⏳ {node['name']} 上游含今日盘中半根 {row['date']}(close={row['close']}, 未收盘), 看板暂缺属正常")
+            else:
+                print(f"  ❌ {node['name']} 看板缺 {row['date']}"); bad += 1
+            continue
         k = K[row["date"]]
         for f in ("open", "close", "high", "low"):
             if abs(k[f] - row[f]) > 0.011:
@@ -86,16 +93,31 @@ for sym, node in d.items():
         a["high"] = max(a["high"], k["high"]); a["low"] = min(a["low"], k["low"])
         a["volume"] += k["volume"]
     agg = list(agg.values())
+    # ★ R531 盘中运行修正: 原按「倒数第 i 行」对齐 —— 盘中运行时日线已含本周
+    # (周线源端尚未开本周行) ⇒ 错位一行, 全部误报 ❌。改为按 ISO 周键对齐,
+    # 只比对两侧都存在的周; 周键不在周线侧 = 盘中未完结周, 单独披露不计错。
+    wk_by_key = {}
+    for w in wk:
+        y, w_, _ = datetime.strptime(w["date"], "%Y-%m-%d").isocalendar()
+        wk_by_key[f"{y}-W{w_:02d}"] = w
     errs = 0
-    for i in range(1, 4):  # 最近 3 个完整度已知的周
-        if len(agg) - i < 0 or len(wk) - i < 0: break
-        a, w = agg[-i], wk[-i]
+    shown = 0
+    for a in agg[-5:][::-1]:
+        key = None
+        y, w_, _ = datetime.strptime(a["date"], "%Y-%m-%d").isocalendar()
+        key = f"{y}-W{w_:02d}"
+        w = wk_by_key.get(key)
+        if w is None:
+            print(f"  ⏳ {node['name']} 周({a['date']} 盘中未完结) 周线源端暂无本周行, 跳过")
+            continue
         dc = abs(a["close"] - w["close"]) / a["close"] * 100
         dh = abs(a["high"] - w["high"]) / a["high"] * 100
         dl = abs(a["low"] - w["low"]) / a["low"] * 100
         tag = "✅" if max(dc, dh, dl) < 0.02 else "❌"
         if tag == "❌": errs += 1
-        print(f"  {tag} {node['name']} 周{i}({w['date']}) close {w['close']} vs 聚合 {a['close']:.2f} | 高 {w['high']} vs {a['high']:.2f} | 低 {w['low']} vs {a['low']:.2f} | 日数 {a['n']}")
+        shown += 1
+        print(f"  {tag} {node['name']} 周({a['date']}) close {w['close']} vs 聚合 {a['close']:.2f} | 高 {w['high']} vs {a['high']:.2f} | 低 {w['low']} vs {a['low']:.2f} | 日数 {a['n']}")
+        if shown >= 3: break
     if errs: bad += errs
 
 print()

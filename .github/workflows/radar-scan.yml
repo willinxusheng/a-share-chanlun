@@ -153,7 +153,15 @@ jobs:
         # ★ R526: 断言体已抽为 radar/check_artifact.py（**唯一来源**，规则 20）——
         #   因为守卫的「产物性 skip」出口也要复核**将要被沿用的那份产物**。
         #   抽取经 diff 自证与内联版本**逐字节一致**，本步骤行为不变。
+        # ★ R531: n_signal 下限已由绝对 50 改为动态 max(8, 0.15×ema)，
+        #   基线在 radar/baseline.json（单边下跌市况下绝对阈值会误伤，实证见其注释）。
         run: python3 radar/check_artifact.py
+
+      - name: 更新信号基线(R531, 仅自检通过后执行)
+        if: steps.guard.outputs.skip != 'true'
+        # 只采样**通过门禁**的产物 ⇒ 坏数据不会拖低基线（自检失败时 job 中止, 本步骤不执行）。
+        # 同一 asof 幂等；提交步骤会连同 baseline.json 一起入库。
+        run: python3 radar/update_baseline.py
 
       - name: 提交雷达数据(触发 deploy 发布)
         id: commit
@@ -177,7 +185,7 @@ jobs:
           #   ③ rebase 失败立即 abort 退出, 绝不在冲突标记残留状态下继续提交
           # push 被拒(远端前进)时循环 rebase 重试, 不 force。
           ASOF=$(python3 -c 'import json;print(json.load(open("radar/radar.json",encoding="utf-8"))["meta"]["asof"])')
-          git add radar/radar.json radar/marks.json
+          git add radar/radar.json radar/marks.json radar/baseline.json
           git commit -m "chore: 全市场缠论雷达数据刷新 asof=${ASOF}" || { echo "commit 失败(无变更?)"; exit 1; }
           for i in 1 2 3; do
             if git push origin "${GITHUB_REF_NAME}" 2>/tmp/radar_push_err; then

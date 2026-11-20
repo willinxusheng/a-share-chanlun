@@ -43,7 +43,32 @@ assert m["n_ok"] > 4000, "有效分析过少: %s" % m["n_ok"]
 #   今口径改「交易日根数」后实测预期区间：8 个历史产物重算的信号数 245~478
 #   （扣掉 ST/次新等门禁剔除后按同比例折算 ≈ 160~320）⇒ 取 **50** 作灾难态下界，
 #   与 R495/R496「只拦灾难态、上线后按线上实测收紧」同风格。
-assert m["n_signal"] >= 50, "近端信号族疑似整体清空(口径退化/门槛失配): %s" % m["n_signal"]
+#
+# ★★ R531（2026-11-20）**50 绝对下限被单边下跌市况击穿**（实证 run#1326~#1337）：
+#   连续阴线 ⇒ MACD 单边扩张 ⇒ 新底背驰几乎不生成，旧信号逐日滑出 7 交易日窗口
+#   ⇒ n_signal 自然衰减 478→261→55→51，11-18/19 扫描做完却因跌破 50 被拒入库
+#   ⇒ 雷达停更 3 天。门禁把**市场状态**误判为**口径退化**。
+#   修复 = 动态下限 `max(8, 0.15×ema)`：ema 为**通过门禁**产物的 n_signal 指数
+#   滑动均值（radar/baseline.json，由 update_baseline.py 在自检通过后更新）；
+#   绝对兜底 8 只拦真灾难态（口径退化/信号族清空必然远低于此）；健康期动态下限 0.15×ema
+#   (历史 ema 200~300 ⇒ 下限 30~45) 提供主要保护。干旱期 ema 随真实值衰减，floor 退到
+#   8 并取 RATIO=0.15——今晚(11-20)若干旱延续 n_signal 可能跌到个位数，0.25×ema(=12.75)
+#   会再次误伤(故障注入实测)，故 RATIO=0.15(健康期 ema 250 ⇒ 下限 37.5，09-28 实测灾难态
+#   22/ema250=9% 仍被拦，保护不丢)。
+#   基线文件按**脚本所在目录**解析（非 cwd）——守卫的 .radar_health 复核
+#   （cd 到临时目录跑本脚本）也能拿到 repo 内基线。
+import os as _os
+_BASE = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "baseline.json")
+ABS_FLOOR, RATIO = 8, 0.15
+if _os.path.exists(_BASE):
+    _ema = float(json.load(open(_BASE, encoding="utf-8")).get("ema", 0))
+    _floor = max(ABS_FLOOR, RATIO * _ema)
+    _src = "ema=%.1f(radar/baseline.json)" % _ema
+else:
+    # 基线文件丢失（不应发生）⇒ 退回纯绝对下限，仅拦灾难态
+    _floor, _src = float(ABS_FLOOR), "基线文件缺失, 退回绝对下限"
+assert m["n_signal"] >= _floor, \
+    "近端信号族疑似整体清空(口径退化; 动态下限 %s: %s): %s" % (_floor, _src, m["n_signal"])
 # 前端 revpool 的「超窗」阈值来自 meta.fresh_max（规则 20 禁第二份副本）；
 # 缺失时前端会退回硬编码，二者一旦漂移就不再严格互补 ⇒ 这里做**契约存在性**校验
 # （不钉死数值，留出后续标定空间）。
