@@ -5159,6 +5159,18 @@ def main():
     n_week_up = sum(1 for s in data if _wk_dir[s] == 1)
     n_div = len(divergent)
     total = len(data)
+    # R550(2026-11-25): 口径差异披露 —— 上面的背离计数基于**日/周末笔方向**(_day_dir/_wk_dir),
+    #   而下方「推演结论」逐指数列表展示的是**情景**(scenario)极性。两套口径在笔方向与情景
+    #   不同步时必然给出不同计数, 此前只列一套 ⇒ 读者把「2/5 背离」去对「1/5」的列表,
+    #   自相矛盾。实测 2026-11-25: 笔方向 2 背离(上证 日弱周强 / 沪深300 日强周弱) + 3 共振;
+    #   情景极性 1 背离(中证500 日背驰见底·多 / 周空头延续·空) + 4 共振。
+    #   修法: 只**披露**第二套口径与差异指数, 不改任一判定(R514/R516「只披露、不翻转」纪律)。
+    def _sc_pol(_sc):
+        return 1 if _sc in SC_BULL else (-1 if _sc in SC_BEAR else 0)
+    _scdy = {sym: _sc_pol(results[sym]["classify"].get("scenario", "")) for sym in data}
+    _scwk = {sym: _sc_pol(results_week[sym]["classify"].get("scenario", "")) for sym in data}
+    _div_sc = [d["name"] for sym, d in data.items()
+               if _scdy[sym] in (1, -1) and _scwk[sym] in (1, -1) and _scdy[sym] != _scwk[sym]]
     if _n_dir_valid == 0:
         # R365: 全部指数日/周结构笔方向均不可用(数据退化)时, 原逻辑 n_div==0 会误报
         # 「日周共振, 结构方向一致性较高」——无方向说共振=失实, 显式数据不足文案。
@@ -5194,6 +5206,18 @@ def main():
         if _dnup:
             _parts.append(f"{len(_dnup)} 个日弱周强背离")
         pat = f"{n_div}/{total} 个指数日周背离（{'、'.join(_parts)}）、{total - n_div} 个日周共振"
+    # R550: 双口径分歧时如实并列(见上方注释)。无方向可用时不谈口径(上面已降级为数据不足文案)。
+    if _n_dir_valid > 0 and len(_div_sc) != n_div:
+        _only_bi = [n for n in divergent if n not in _div_sc]
+        _only_sc = [n for n in _div_sc if n not in divergent]
+        _bits = []
+        if _only_bi:
+            _bits.append("仅笔方向背离：" + "、".join(_only_bi))
+        if _only_sc:
+            _bits.append("仅情景背离：" + "、".join(_only_sc))
+        pat += ("（口径提示：以上按<b>日/周末笔方向</b>计；按<b>情景</b>口径为 %d/%d 背离%s。"
+                "两套口径在「笔方向已反转、情景未切换」等时点必然分歧，此处并列、不取其一）"
+                % (len(_div_sc), total, ("——" + "；".join(_bits)) if _bits else ""))
     if n_daily_up >= total * 0.6 and n_week_up <= total * 0.4:
         stance = "；仓位与预期应低于\"日周共振多头\"的情形"
     else:
