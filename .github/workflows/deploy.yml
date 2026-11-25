@@ -423,6 +423,17 @@ jobs:
           # keep-alive 非关键(失败不影响站点发布), 失败显式跳过本次提交最安全。
           git pull --rebase --autostash origin "${GITHUB_REF_NAME}" || { echo "WARN: keep-alive rebase 失败, 跳过本次提交(站点照常发布)"; exit 0; }
           git add last_build.txt
+          # R549(2026-11-25): 情绪产物**回写仓库** —— 此前 CI 每次现算 sentiment_v2.json
+          #   却只部署不回写, 仓库快照自 2026-10-09 起静默漂移 6.5 周, 三重后果:
+          #   ① 本地重建 report.py 读到陈旧快照 ⇒ 「情绪联动」显示 asof 2026-10-09
+          #      (线上却是 11-25), 本地审计视图与生产不一致;
+          #   ② R230 回归护栏 guard_sentiment_fresh.py 比对的就是**已提交快照**, 基准过旧
+          #      ⇒ 任何 asof ≥ 10-09 的产物(哪怕东财部分失败)都能过闸, 护栏形同虚设;
+          #   ③ 东财全失败(.em_fresh=0)兜底时会把 6 周前旧值当"快照"发布, 页面仅改日期文案。
+          #   修法: 与 keep-alive 同一次提交回写 v2 产物(约 90KB/日, 可接受)。
+          #   ★ 只提交 v2 **产物**, 不提交 4 个 txt **输入**(每次由 update_sentiment_txts
+          #     重新抓取, 提交会带来 ~500KB/日 churn 且不改善兜底语义)。
+          if [ -f sentiment/sentiment_v2.json ]; then git add sentiment/sentiment_v2.json; fi
           git commit -m "chore: daily build [skip ci]" || echo "no changes"
           git push || echo "push skipped(keep-alive 推送失败不影响本次站点发布)"
 
