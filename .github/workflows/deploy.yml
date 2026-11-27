@@ -449,12 +449,22 @@ jobs:
         id: deploy_pages
         uses: actions/deploy-pages@v5
 
-      - name: 部署重试（Pages 环境瞬时故障自愈，R551）
+      - name: 部署重试等待 90s（跳出同一故障窗，R552）
+        # R552: R551 的立即重试在 2026-11-27 19:00(北京) 实证失效——首次失败后
+        # 数秒内重试撞同一故障窗，两次皆败仍推告警。Pages 瞬时故障(环境锁/API 5xx)
+        # 通常持续数十秒~分钟级，30 分钟后的下一班 cron 必成功。
+        # 修法：重试前等待 90s，跳出故障窗再部署（等待步骤用 continue-on-error
+        # 语义不适用，直接 sleep；总时长可控且远小于 30min 班次间隔）。
+        if: failure() && steps.deploy_pages.conclusion == 'failure'
+        run: sleep 90
+
+      - name: 部署重试（Pages 环境瞬时故障自愈，R551/R552）
         # R551: 2026-11-25~26 实测 deploy-pages 间歇失败 5 次（北京 20:00/21:00/21:30/
         # 02:25/05:10），失败步骤均为「部署到 GitHub Pages」，且每次都被 30 分钟后的下一次
         # cron 触发成功兜底 —— 属 Pages 环境/API 瞬时故障（同 de23b74 11-25 10:00 失败、
         # 10:30 重试成功模式）。密集触发时段（30min×12）一次失败就会向邮箱推告警。
-        # 修法：deploy-pages 失败时立即重试一次（纯官方 action，无第三方依赖）。
+        # 修法：deploy-pages 失败时重试一次（纯官方 action，无第三方依赖）；
+        # R552 在重试前先等待 90s 跳出同一故障窗（11-27 19:00 实证立即重试无效）。
         # 幂等性：deploy-pages 对同 run 重复部署安全（Pages 环境按 run 隔离）。
         if: failure() && steps.deploy_pages.conclusion == 'failure'
         uses: actions/deploy-pages@v5
